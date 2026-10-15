@@ -1,7 +1,7 @@
 import { SearchX } from "lucide-react";
-import Link from "next/link";
 import type { ReactNode } from "react";
 import { RelativeTime } from "@/components/dashboard/relative-time";
+import { RowControl, RowLink } from "@/components/row-link";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -108,14 +108,11 @@ export function WatchersTable({
         <TableBody>
           {data.map((row) => (
             <TableRow
-              className={cn("text-sm", row.deletedAt && "opacity-60")}
+              className={cn("relative text-sm", row.deletedAt && "opacity-60")}
               key={row.id}
             >
               <TableCell>
-                <Link
-                  className="rounded-sm hover:underline focus-visible:underline focus-visible:outline-none"
-                  href={`/watchers/${row.id}`}
-                >
+                <RowLink href={`/watchers/${row.id}`}>
                   {row.instrumentDisplayName ? (
                     row.instrumentDisplayName
                   ) : (
@@ -123,7 +120,7 @@ export function WatchersTable({
                       {row.instrumentId}
                     </span>
                   )}
-                </Link>
+                </RowLink>
               </TableCell>
               <TableCell>
                 {row.hostname ?? (
@@ -136,10 +133,12 @@ export function WatchersTable({
                 )}
               </TableCell>
               <TableCell>
-                <WatcherStatusBadge
-                  className="text-xs"
-                  status={row.effectiveStatus}
-                />
+                <RowControl>
+                  <WatcherStatusBadge
+                    className="text-xs"
+                    status={row.effectiveStatus}
+                  />
+                </RowControl>
               </TableCell>
               <TableCell>
                 {row.lastHeartbeatAt ? (
@@ -149,7 +148,9 @@ export function WatchersTable({
                 )}
               </TableCell>
               {renderRowActions ? (
-                <TableCell>{renderRowActions(row)}</TableCell>
+                <TableCell>
+                  <RowControl>{renderRowActions(row)}</RowControl>
+                </TableCell>
               ) : null}
             </TableRow>
           ))}

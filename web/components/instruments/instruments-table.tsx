@@ -1,10 +1,10 @@
 import { ArrowRight, SearchX } from "lucide-react";
-import Link from "next/link";
 import type { ReactNode } from "react";
 import { RelativeTime } from "@/components/dashboard/relative-time";
 import { FilePatterns } from "@/components/instruments/file-patterns";
 import { InstrumentStatusBadge } from "@/components/instruments/instrument-status-badge";
-import { InstrumentNotificationsCell } from "@/components/notifications/instrument-notifications-cell";
+import { InstrumentNotificationSwitch } from "@/components/notifications/instrument-notification-switch";
+import { RowControl, RowLink } from "@/components/row-link";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -170,30 +170,34 @@ export function InstrumentsTable({
                 ? "deregistered"
                 : getWatcherOnlineStatus(row);
             return (
-              <TableRow className="text-sm" key={row.id}>
+              <TableRow className="relative text-sm" key={row.id}>
                 <TableCell>
-                  <Link
-                    className="rounded-sm font-medium hover:underline focus-visible:underline focus-visible:outline-none"
+                  <RowLink
+                    className="font-medium"
                     href={`/instruments/${row.id}`}
                   >
                     {row.displayName}
-                  </Link>
+                  </RowLink>
                   <span className="mt-0.5 block text-muted-foreground text-xs">
                     {row.runCount} total {row.runCount === 1 ? "run" : "runs"}
                   </span>
                 </TableCell>
                 <TableCell>
-                  {row.status === "active" ? (
-                    <WatcherStatusBadge
-                      lastOnlineAt={row.lastWatcherHeartbeatAt}
-                      status={watcherStatus}
-                    />
-                  ) : (
-                    <InstrumentStatusBadge status={row.status} />
-                  )}
+                  <RowControl>
+                    {row.status === "active" ? (
+                      <WatcherStatusBadge
+                        lastOnlineAt={row.lastWatcherHeartbeatAt}
+                        status={watcherStatus}
+                      />
+                    ) : (
+                      <InstrumentStatusBadge status={row.status} />
+                    )}
+                  </RowControl>
                 </TableCell>
                 <TableCell>
-                  <FilePatterns maxVisible={2} patterns={row.filePatterns} />
+                  <RowControl>
+                    <FilePatterns maxVisible={2} patterns={row.filePatterns} />
+                  </RowControl>
                 </TableCell>
                 <TableCell className="font-mono">{row.runsThisWeek}</TableCell>
                 <TableCell>
@@ -204,16 +208,23 @@ export function InstrumentsTable({
                   )}
                 </TableCell>
                 {notifications ? (
-                  <InstrumentNotificationsCell
-                    initialEnabled={
-                      notifications.subscriptions.get(row.id) ?? false
-                    }
-                    instrumentId={row.id}
-                    masterMuted={notifications.masterMuted}
-                  />
+                  <TableCell>
+                    <RowControl>
+                      <InstrumentNotificationSwitch
+                        initialEnabled={
+                          notifications.subscriptions.get(row.id) ?? false
+                        }
+                        instrumentId={row.id}
+                        masterMuted={notifications.masterMuted}
+                        size="sm"
+                      />
+                    </RowControl>
+                  </TableCell>
                 ) : null}
                 {renderRowActions ? (
-                  <TableCell>{renderRowActions(row)}</TableCell>
+                  <TableCell>
+                    <RowControl>{renderRowActions(row)}</RowControl>
+                  </TableCell>
                 ) : null}
               </TableRow>
             );

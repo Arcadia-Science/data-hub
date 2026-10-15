@@ -14,6 +14,10 @@ describe("isPlainLeftClick", () => {
     expect(isPlainLeftClick(base)).toBe(true);
   });
 
+  it("rejects a click that another handler already took over", () => {
+    expect(isPlainLeftClick({ ...base, defaultPrevented: true })).toBe(false);
+  });
+
   it("rejects modified clicks and non-left buttons", () => {
     expect(isPlainLeftClick({ ...base, metaKey: true })).toBe(false);
     expect(isPlainLeftClick({ ...base, ctrlKey: true })).toBe(false);

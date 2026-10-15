@@ -13,7 +13,7 @@ export function AdminsOnly({ children }: { children: React.ReactNode }) {
       <div className="flex flex-col items-center justify-center rounded-lg border border-dashed bg-background py-16 dark:bg-muted">
         <ShieldOff className="size-10 text-muted-foreground/50" />
         <h1 className="mt-3 font-medium text-muted-foreground text-sm">
-          Admins only
+          Admins Only
         </h1>
         <p className="mt-1 max-w-sm text-center text-muted-foreground/70 text-sm">
           You need workspace admin access to {children}. Ask an existing admin

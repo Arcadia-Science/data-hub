@@ -96,11 +96,13 @@ function ResultItem({
   href,
   value,
   onNavigate,
+  onOpenInNewTab,
   children,
 }: {
   href: string;
   value: string;
   onNavigate: (href: string) => void;
+  onOpenInNewTab: () => void;
   children: React.ReactNode;
 }) {
   return (
@@ -120,6 +122,7 @@ function ResultItem({
             return;
           }
           // Keep the dialog open while the browser opens the new tab.
+          onOpenInNewTab();
           event.stopPropagation();
         }}
         tabIndex={-1}
@@ -221,6 +224,12 @@ export function GlobalSearch({
     [addRecent, trimmed, onOpenChange, router]
   );
 
+  // Opening a result in a new tab is still a search worth remembering.
+  const rememberSearch = useCallback(
+    () => addRecent(trimmed),
+    [addRecent, trimmed]
+  );
+
   const showRecent = !isSearchable;
   const hasResults = result.counts.total > 0;
 
@@ -306,6 +315,7 @@ export function GlobalSearch({
                         href={runHref(run)}
                         key={run.id}
                         onNavigate={navigate}
+                        onOpenInNewTab={rememberSearch}
                         value={`run:${run.id}`}
                       >
                         <SearchRunRow query={trimmed} result={run} />
@@ -321,6 +331,7 @@ export function GlobalSearch({
                         href={fileHref(file)}
                         key={file.id}
                         onNavigate={navigate}
+                        onOpenInNewTab={rememberSearch}
                         value={`file:${file.id}`}
                       >
                         <SearchFileRow query={trimmed} result={file} />
@@ -336,6 +347,7 @@ export function GlobalSearch({
                         href={instrumentHref(instrument)}
                         key={instrument.id}
                         onNavigate={navigate}
+                        onOpenInNewTab={rememberSearch}
                         value={`instrument:${instrument.id}`}
                       >
                         <SearchInstrumentRow
@@ -354,6 +366,7 @@ export function GlobalSearch({
                         href={userHref(user)}
                         key={user.id}
                         onNavigate={navigate}
+                        onOpenInNewTab={rememberSearch}
                         value={`user:${user.id}`}
                       >
                         <SearchUserRow query={trimmed} result={user} />
@@ -369,6 +382,7 @@ export function GlobalSearch({
                         href={commentHref(comment)}
                         key={comment.id}
                         onNavigate={navigate}
+                        onOpenInNewTab={rememberSearch}
                         value={`comment:${comment.id}`}
                       >
                         <SearchCommentRow query={trimmed} result={comment} />

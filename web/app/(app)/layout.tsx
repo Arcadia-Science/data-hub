@@ -22,8 +22,8 @@ import { feedback } from "@/lib/feedback";
 import { SIDEBAR_COOKIE_NAME } from "@/lib/sidebar-persistence";
 import { getViewerTimeZone } from "@/lib/viewer-timezone";
 
-// Target of the skip link. `tabIndex={-1}` on the main pane lets the jump move
-// keyboard focus there instead of leaving it on the link.
+// Target of the skip link. It wraps the page content, below the header, and
+// `tabIndex={-1}` lets the jump move keyboard focus there.
 const MAIN_CONTENT_ID = "main-content";
 
 /**
@@ -100,7 +100,7 @@ export default async function AppLayout({
         <DataHubFeedbackProvider>
           <SidebarProvider defaultOpen={sidebarDefaultOpen}>
             {/* First tab stop, so keyboard users can skip the sidebar and
-                header on every page. */}
+                the header buttons on every page. */}
             <a
               className="sr-only focus-visible:not-sr-only focus-visible:fixed focus-visible:top-2 focus-visible:left-2 focus-visible:z-50 focus-visible:rounded-md focus-visible:bg-background focus-visible:px-3 focus-visible:py-2 focus-visible:font-medium focus-visible:text-sm focus-visible:shadow-md focus-visible:ring-2 focus-visible:ring-ring"
               href={`#${MAIN_CONTENT_ID}`}
@@ -123,11 +123,7 @@ export default async function AppLayout({
             </AppSidebar>
             {/* `min-w-0` lets the main pane shrink beside the sidebar so wide
                 tables scroll inside their container instead of stretching the page. */}
-            <SidebarInset
-              className="min-w-0 pb-12 focus:outline-none"
-              id={MAIN_CONTENT_ID}
-              tabIndex={-1}
-            >
+            <SidebarInset className="min-w-0 pb-12">
               <header className="flex h-14 shrink-0 items-center justify-between gap-2 px-4">
                 <div className="flex h-8 items-center">
                   <SidebarTrigger />
@@ -137,7 +133,13 @@ export default async function AppLayout({
                   <NotificationBell />
                 </div>
               </header>
-              {children}
+              <div
+                className="flex flex-1 flex-col focus:outline-none"
+                id={MAIN_CONTENT_ID}
+                tabIndex={-1}
+              >
+                {children}
+              </div>
             </SidebarInset>
           </SidebarProvider>
         </DataHubFeedbackProvider>
