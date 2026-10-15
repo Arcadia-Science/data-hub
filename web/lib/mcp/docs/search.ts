@@ -7,9 +7,6 @@ const SEARCH_RESULT_LIMIT = 5;
 // Keeps the `SEARCH_RESULT_LIMIT` results from all being sections of one long
 // page.
 const MAX_HITS_PER_PAGE = 2;
-// Changelog entries are short, so they would otherwise outrank the docs page
-// that explains the same thing in more depth.
-const CHANGELOG_WEIGHT = 0.7;
 
 const { normalize: normalizeTerm, queryWords } = createSearchTerms();
 
@@ -17,7 +14,6 @@ interface IndexedPassage {
   description: string;
   heading: string;
   id: string;
-  kind: DocEntry["kind"];
   pageTitle: string;
   text: string;
 }
@@ -33,7 +29,7 @@ interface Passage {
 function passagesOf(
   entry: DocEntry
 ): Array<{ passage: Passage; indexed: IndexedPassage }> {
-  const description = entry.kind === "docs" ? entry.description : "";
+  const { description } = entry;
   const parts: Array<{
     heading: string;
     section: DocSection | null;
@@ -50,7 +46,6 @@ function passagesOf(
     passage: { entry, section, excerptSource: text || description },
     indexed: {
       id: `${entry.page}#${section?.id ?? ""}`,
-      kind: entry.kind,
       pageTitle: entry.title,
       description,
       heading,
@@ -60,7 +55,6 @@ function passagesOf(
 }
 
 interface DocsIndex {
-  bundle: DocEntry[];
   index: MiniSearch<IndexedPassage>;
   passages: Map<string, Passage>;
 }
@@ -68,30 +62,26 @@ interface DocsIndex {
 let cached: DocsIndex | null = null;
 
 function getIndex(): DocsIndex {
-  const bundle = getDocsBundle();
-  // The bundle is the same array on every call in production, so the index is
-  // built once per server instance. Elsewhere it is rebuilt with the bundle.
-  if (cached?.bundle === bundle) {
+  // The bundle is fixed per deployment, so the index is built once per server
+  // instance.
+  if (cached) {
     return cached;
   }
 
   const index = new MiniSearch<IndexedPassage>({
     fields: ["heading", "pageTitle", "description", "text"],
-    storeFields: ["kind"],
     processTerm: normalizeTerm,
     searchOptions: {
       boost: { heading: 3, pageTitle: 2, description: 1.5 },
       // Short terms such as "run" would otherwise prefix-match half the docs.
       prefix: (term) => term.length >= 4,
       fuzzy: (term) => (term.length >= 5 ? 0.2 : false),
-      boostDocument: (_id, _term, stored) =>
-        stored?.kind === "changelog" ? CHANGELOG_WEIGHT : 1,
     },
   });
 
   const passages = new Map<string, Passage>();
   const documents: IndexedPassage[] = [];
-  for (const entry of bundle) {
+  for (const entry of getDocsBundle()) {
     for (const { passage, indexed } of passagesOf(entry)) {
       passages.set(indexed.id, passage);
       documents.push(indexed);
@@ -99,7 +89,7 @@ function getIndex(): DocsIndex {
   }
   index.addAll(documents);
 
-  cached = { bundle, index, passages };
+  cached = { index, passages };
   return cached;
 }
 

@@ -15,6 +15,10 @@ describe("MCP server instructions", () => {
     expect(MCP_SERVER_INSTRUCTIONS).toContain("read_doc");
   });
 
+  it("sends questions about what changed to the changelog tool", () => {
+    expect(MCP_SERVER_INSTRUCTIONS).toContain("search_changelog");
+  });
+
   it("names the feedback tools the server registers", () => {
     expect(MCP_SERVER_INSTRUCTIONS).toContain("send_feedback");
     expect(MCP_SERVER_INSTRUCTIONS).toContain("add_run_comment");

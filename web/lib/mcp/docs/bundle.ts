@@ -1,4 +1,3 @@
-import { listChangelogEntries } from "@/lib/changelog/entries";
 import snapshot from "./docs-bundle.snapshot.json";
 import { type MarkdownSection, splitSections, toPlainText } from "./markdown";
 
@@ -9,30 +8,16 @@ export interface DocSection extends MarkdownSection {
   plainText: string;
 }
 
-interface DocEntryBase {
+export interface DocEntry {
+  description: string;
   /** Plain text before the first `##` heading, or "" when there is none. */
   introText: string;
   markdown: string;
-  /** `manage-tokens` for a docs page, `changelog/<entry id>` for a change. */
+  /** The page's path under `docs/site/content/docs/`, such as `manage-tokens`. */
   page: string;
   sections: DocSection[];
   title: string;
 }
-
-export interface DocsPageEntry extends DocEntryBase {
-  description: string;
-  kind: "docs";
-}
-
-export interface ChangelogDocEntry extends DocEntryBase {
-  /** Day the change shipped, as YYYY-MM-DD. */
-  date: string;
-  /** The entry's own `docs` link, if it has one. */
-  docsUrl: string | null;
-  kind: "changelog";
-}
-
-export type DocEntry = DocsPageEntry | ChangelogDocEntry;
 
 export interface DocPageSummary {
   description: string;
@@ -42,7 +27,7 @@ export interface DocPageSummary {
 
 function splitPage(
   markdown: string
-): Pick<DocEntryBase, "introText" | "sections"> {
+): Pick<DocEntry, "introText" | "sections"> {
   const { intro, sections } = splitSections(markdown);
   return {
     introText: toPlainText(intro),
@@ -54,9 +39,8 @@ function splitPage(
 }
 
 function buildBundle(): DocEntry[] {
-  const pages = snapshot.pages.map(
-    (page): DocsPageEntry => ({
-      kind: "docs",
+  return snapshot.pages.map(
+    (page): DocEntry => ({
       page: page.page,
       title: page.title,
       description: page.description,
@@ -64,44 +48,22 @@ function buildBundle(): DocEntry[] {
       ...splitPage(page.markdown),
     })
   );
-
-  const changes = listChangelogEntries().map((entry): ChangelogDocEntry => {
-    const markdown = `# ${entry.title} (${entry.date})\n\n${entry.body}${
-      entry.docs ? `\n\nRelated docs: ${entry.docs}` : ""
-    }`;
-    return {
-      kind: "changelog",
-      page: `${CHANGELOG_PREFIX}${entry.id}`,
-      title: entry.title,
-      date: entry.date,
-      docsUrl: entry.docs ?? null,
-      markdown,
-      ...splitPage(markdown),
-    };
-  });
-
-  return [...pages, ...changes];
 }
 
-// Docs are fixed per deployment, and so is the changelog; dev skips the cache
-// so a new changelog file shows up without a restart.
+// The snapshot is fixed per deployment, so the bundle is built once.
 let cached: DocEntry[] | null = null;
 
 export function getDocsBundle(): DocEntry[] {
-  if (process.env.NODE_ENV === "production" && cached) {
-    return cached;
-  }
-  const bundle = buildBundle();
-  if (process.env.NODE_ENV === "production") {
-    cached = bundle;
-  }
-  return bundle;
+  cached ??= buildBundle();
+  return cached;
 }
 
 export function listDocPages(): DocPageSummary[] {
-  return getDocsBundle()
-    .filter((entry): entry is DocsPageEntry => entry.kind === "docs")
-    .map(({ page, title, description }) => ({ page, title, description }));
+  return getDocsBundle().map(({ page, title, description }) => ({
+    page,
+    title,
+    description,
+  }));
 }
 
 export function findDoc(page: string): DocEntry | undefined {
@@ -110,13 +72,16 @@ export function findDoc(page: string): DocEntry | undefined {
 
 /** Error text that lets an agent correct a wrong page ID in one more call. */
 export function unknownPageMessage(page: string): string {
+  const lower = page.toLowerCase();
+  if (lower === "changelog" || lower.startsWith(CHANGELOG_PREFIX)) {
+    return "Changelog entries are not docs pages. Use search_changelog to read them; leave out query and set dateFrom and dateTo to list changes by date.";
+  }
   const pages = listDocPages().map((doc) => doc.page);
   const close = closestPages(page.toLowerCase(), pages);
   return [
     `Page '${page}' not found.`,
     close.length > 0 ? `Closest: ${close.join(", ")}.` : null,
     `Docs pages: ${pages.join(", ")}.`,
-    "Changelog entries are named changelog/<entry id>; find them with search_docs.",
   ]
     .filter(Boolean)
     .join(" ");

@@ -12,9 +12,10 @@ into runs. This server covers instruments, runs, files, watchers (the program
 on each instrument PC that uploads files), who ran what, and Data Hub's own
 documentation.
 
-How-to questions about Data Hub itself (setup, watchers, tokens, permissions,
-recent changes): call search_docs, then read_doc on the best match, and link
-the page in your answer.
+How-to questions about Data Hub itself (setup, watchers, tokens, permissions):
+call search_docs, then read_doc on the best match, and link the page in your
+answer. Questions about what changed, or when: call search_changelog and link
+the entries. Leave out its query to list changes by date.
 
 Writes need the write scope and otherwise fail with "Token is missing required
 scope: write"; ask the user to re-authorize instead of retrying. Confirm before
