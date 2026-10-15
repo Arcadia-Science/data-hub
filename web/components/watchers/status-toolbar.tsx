@@ -5,6 +5,7 @@ import { useQueryStates } from "nuqs";
 import { useTablePending } from "@/components/table-pending";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useViewerTimeZone } from "@/components/viewer-time-zone-provider";
 import { todayDateString } from "@/lib/date";
 import { watcherDetailSearchParams } from "@/lib/search-params";
 
@@ -20,7 +21,8 @@ export function StatusToolbar() {
     startTransition,
   });
 
-  const today = todayDateString();
+  const timeZone = useViewerTimeZone();
+  const today = todayDateString(timeZone);
   const isNonDefault = filters.since !== null && filters.since !== today;
 
   return (

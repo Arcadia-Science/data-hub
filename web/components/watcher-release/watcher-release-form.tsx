@@ -1,6 +1,6 @@
 "use client";
 
-import { useForm } from "@tanstack/react-form";
+import { useForm, useStore } from "@tanstack/react-form";
 import { Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -15,8 +15,11 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Switch } from "@/components/ui/switch";
+import { useViewerTimeZone } from "@/components/viewer-time-zone-provider";
 import { VersionField } from "@/components/watcher-release/version-field";
+import { useUnsavedChangesWarning } from "@/hooks/use-unsaved-changes-warning";
 import { VERSION_MESSAGE, VERSION_REGEX } from "@/lib/api/watcher-versions";
+import { formatDateTime } from "@/lib/date";
 import type { WatcherVersionOption } from "@/lib/pypi";
 import { formatRelativeTime } from "@/lib/utils";
 
@@ -59,6 +62,7 @@ export function WatcherReleaseForm({
   pypiReachable,
 }: WatcherReleaseFormProps) {
   const router = useRouter();
+  const timeZone = useViewerTimeZone();
 
   // TanStack Form owns field values, validation, and isSubmitting tracking,
   // so we no longer need parallel useState/useTransition state. The schema
@@ -73,7 +77,7 @@ export function WatcherReleaseForm({
     },
     onSubmit: async ({ value }) => {
       // Trim before the wire and before reset so free-text whitespace
-      // doesn't leave isDirty=false with a value that differs from the
+      // doesn't leave a form that looks unchanged but differs from the
       // server-persisted row after refresh.
       const latestVersion = value.latestVersion.trim();
       const minSupportedVersion = value.minSupportedVersion.trim();
@@ -100,8 +104,8 @@ export function WatcherReleaseForm({
       }
 
       toast.success("Watcher release saved");
-      // Re-baseline to the saved values so `isDirty` resets and the Save
-      // button disables until the next edit. router.refresh() still re-runs
+      // Re-baseline to the saved values so the form counts as unchanged and
+      // the Save button disables until the next edit. router.refresh() re-runs
       // the server component so the "last updated by" line re-renders.
       form.reset({
         latestVersion,
@@ -111,6 +115,10 @@ export function WatcherReleaseForm({
       router.refresh();
     },
   });
+
+  useUnsavedChangesWarning(
+    useStore(form.store, (state) => !state.isDefaultValue)
+  );
 
   return (
     // The form renders as a content-only Card (body + footer separated
@@ -260,7 +268,9 @@ export function WatcherReleaseForm({
                 suppressHydrationWarning
               >
                 Last updated{" "}
-                <span title={new Date(lastUpdated.at).toLocaleString()}>
+                <span
+                  title={formatDateTime(new Date(lastUpdated.at), timeZone)}
+                >
                   {formatRelativeTime(lastUpdated.at)}
                 </span>
                 {lastUpdated.byName || lastUpdated.byEmail ? (
@@ -285,7 +295,7 @@ export function WatcherReleaseForm({
               selector={(state) => ({
                 canSubmit: state.canSubmit,
                 isSubmitting: state.isSubmitting,
-                isDirty: state.isDirty,
+                isDirty: !state.isDefaultValue,
               })}
             >
               {({ canSubmit, isSubmitting, isDirty }) => (

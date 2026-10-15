@@ -248,6 +248,29 @@ describe("Instrument Runs API", () => {
     runDetail.parse(data);
   });
 
+  // Route handlers get the run ID already decoded, so a percent sign in the ID
+  // must not be decoded a second time.
+  it.each([
+    "100% pure",
+    "a#b?c",
+    "with space",
+    "%41",
+  ])("GET finds a run whose ID is %j", async (specialRunId) => {
+    const created = await api(`/api/v1/instruments/${instrumentId}/runs`, {
+      method: "POST",
+      token,
+      body: { run_id: specialRunId, source: "lambda" },
+    });
+    expect(created.status).toBe(201);
+
+    const res = await api(
+      `/api/v1/instruments/${instrumentId}/runs/${encodeURIComponent(specialRunId)}`,
+      { token }
+    );
+    expect(res.status).toBe(200);
+    expect((await res.json()).run_id).toBe(specialRunId);
+  });
+
   it("GET returns 404 for nonexistent run", async () => {
     const res = await api(
       `/api/v1/instruments/${instrumentId}/runs/nonexistent-run`,

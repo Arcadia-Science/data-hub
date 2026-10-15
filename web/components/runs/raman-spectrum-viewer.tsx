@@ -3,6 +3,7 @@
 import { AlertTriangle } from "lucide-react";
 import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
+import { LoadingSkeleton } from "@/components/loading-skeleton";
 import { useReportDataSource } from "@/components/runs/report-data-source-provider";
 import { useReportItemsContext } from "@/components/runs/report-items-provider";
 import { Button } from "@/components/ui/button";
@@ -12,8 +13,8 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from "@/components/ui/chart";
-import { Skeleton } from "@/components/ui/skeleton";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { describeCurve } from "@/lib/runs/chart-summary";
 import type { ReportDataSource } from "@/lib/runs/view-data-source";
 
 interface SpectrumPoint {
@@ -124,76 +125,95 @@ function SpectrumChart({
   const showIntensity = visible.includes("intensity");
   const showDark = visible.includes("intensityDarkSubtracted");
 
+  // The chart is a picture, so this is its text version: each plotted series
+  // with its range and where its peak sits.
+  const summary = useMemo(
+    () =>
+      visible
+        .map((series) =>
+          describeCurve({
+            label: chartConfig[series].label,
+            points: points.map((p) => ({ x: p.wavenumber, y: p[series] })),
+            xLabel: "Wavenumber (cm\u207B\u00B9)",
+          })
+        )
+        .join(" "),
+    [points, visible]
+  );
+
   return (
-    <ChartContainer className="aspect-auto h-80 w-full" config={chartConfig}>
-      <LineChart
-        data={data}
-        // Bottom margin makes room for the X-axis title sitting below the
-        // tick labels; the legend lives outside the chart now, so the chart
-        // owns only the axes.
-        margin={{ top: 8, right: 16, bottom: 28, left: 0 }}
-      >
-        <CartesianGrid strokeDasharray="3 3" vertical={false} />
-        <XAxis
-          axisLine={false}
-          dataKey="wavenumber"
-          domain={["dataMin", "dataMax"]}
-          label={{
-            value: "Wavenumber (cm\u207B\u00B9)",
-            position: "insideBottom",
-            offset: -16,
-            style: {
-              fontSize: 11,
-              fill: "var(--color-muted-foreground)",
-            },
-          }}
-          tickFormatter={(v: number) => v.toFixed(0)}
-          tickLine={false}
-          tickMargin={8}
-          type="number"
-        />
-        <YAxis
-          axisLine={false}
-          tickFormatter={(v: number) =>
-            Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(0)
-          }
-          tickLine={false}
-          tickMargin={8}
-          width={64}
-        />
-        <ChartTooltip
-          content={
-            <ChartTooltipContent
-              labelFormatter={(label) =>
-                typeof label === "number"
-                  ? `${label.toFixed(2)} cm\u207B\u00B9`
-                  : String(label)
-              }
+    <figure className="w-full">
+      <figcaption className="sr-only">{summary}</figcaption>
+      <ChartContainer className="aspect-auto h-80 w-full" config={chartConfig}>
+        <LineChart
+          data={data}
+          // Bottom margin makes room for the X-axis title sitting below the
+          // tick labels; the legend lives outside the chart now, so the chart
+          // owns only the axes.
+          margin={{ top: 8, right: 16, bottom: 28, left: 0 }}
+        >
+          <CartesianGrid strokeDasharray="3 3" vertical={false} />
+          <XAxis
+            axisLine={false}
+            dataKey="wavenumber"
+            domain={["dataMin", "dataMax"]}
+            label={{
+              value: "Wavenumber (cm\u207B\u00B9)",
+              position: "insideBottom",
+              offset: -16,
+              style: {
+                fontSize: 11,
+                fill: "var(--color-muted-foreground)",
+              },
+            }}
+            tickFormatter={(v: number) => v.toFixed(0)}
+            tickLine={false}
+            tickMargin={8}
+            type="number"
+          />
+          <YAxis
+            axisLine={false}
+            tickFormatter={(v: number) =>
+              Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(0)
+            }
+            tickLine={false}
+            tickMargin={8}
+            width={64}
+          />
+          <ChartTooltip
+            content={
+              <ChartTooltipContent
+                labelFormatter={(label) =>
+                  typeof label === "number"
+                    ? `${label.toFixed(2)} cm\u207B\u00B9`
+                    : String(label)
+                }
+              />
+            }
+          />
+          {showIntensity && (
+            <Line
+              dataKey="intensity"
+              dot={false}
+              isAnimationActive={false}
+              name={chartConfig.intensity.label as string}
+              stroke={chartConfig.intensity.color}
+              strokeWidth={1.25}
             />
-          }
-        />
-        {showIntensity && (
-          <Line
-            dataKey="intensity"
-            dot={false}
-            isAnimationActive={false}
-            name={chartConfig.intensity.label as string}
-            stroke={chartConfig.intensity.color}
-            strokeWidth={1.25}
-          />
-        )}
-        {showDark && (
-          <Line
-            dataKey="intensityDarkSubtracted"
-            dot={false}
-            isAnimationActive={false}
-            name={chartConfig.intensityDarkSubtracted.label as string}
-            stroke={chartConfig.intensityDarkSubtracted.color}
-            strokeWidth={1.25}
-          />
-        )}
-      </LineChart>
-    </ChartContainer>
+          )}
+          {showDark && (
+            <Line
+              dataKey="intensityDarkSubtracted"
+              dot={false}
+              isAnimationActive={false}
+              name={chartConfig.intensityDarkSubtracted.label as string}
+              stroke={chartConfig.intensityDarkSubtracted.color}
+              strokeWidth={1.25}
+            />
+          )}
+        </LineChart>
+      </ChartContainer>
+    </figure>
   );
 }
 
@@ -301,10 +321,13 @@ export function RamanSpectrumViewer() {
         </div>
       )}
       {state.status === "loading" && (
-        <Skeleton aria-label="Loading spectrum" className="h-80 w-full" />
+        <LoadingSkeleton className="h-80 w-full" label="Loading spectrum…" />
       )}
       {state.status === "error" && (
-        <div className="flex h-80 flex-col items-center justify-center gap-3 rounded-md border border-dashed bg-muted/20 p-6 text-center">
+        <div
+          className="flex h-80 flex-col items-center justify-center gap-3 rounded-md border border-dashed bg-muted/20 p-6 text-center"
+          role="alert"
+        >
           <AlertTriangle aria-hidden className="size-6 text-muted-foreground" />
           <p className="text-muted-foreground text-sm">{state.message}</p>
           <Button onClick={handleRetry} size="sm" variant="outline">

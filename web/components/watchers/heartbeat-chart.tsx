@@ -1,8 +1,15 @@
 "use client";
 
 import { HeartPulse } from "lucide-react";
-import { useEffect, useMemo, useRef } from "react";
+import {
+  type KeyboardEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
+import { EmptyState } from "@/components/empty-state";
 import { useTablePending } from "@/components/table-pending";
 import {
   type ChartConfig,
@@ -10,14 +17,17 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from "@/components/ui/chart";
-import { Skeleton } from "@/components/ui/skeleton";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { useViewerTimeZone } from "@/components/viewer-time-zone-provider";
+import { HeartbeatChartSkeleton } from "@/components/watchers/heartbeat-chart-skeleton";
 import type { WatcherHeartbeatRow } from "@/lib/api/watchers";
-import { formatDateTime, formatTime } from "@/lib/date";
+import { dayWindow, formatDate, formatDateTime, formatTime } from "@/lib/date";
+import { isGridKey, nextGridCell } from "@/lib/grid-keyboard";
+
 import { cn } from "@/lib/utils";
 
 const chartConfig = {
@@ -35,16 +45,18 @@ const BUCKET_COUNT = 48;
 
 const FIVE_MIN = 5 * 60 * 1000;
 
-function computeWindow(since: string): {
+// The day runs in the viewer's zone, the same zone the labels use, so the axis
+// starts at local midnight on the server and in the browser.
+function computeWindow(
+  since: string,
+  timeZone: string
+): {
   windowStart: Date;
   windowEnd: Date;
 } {
-  const now = Math.floor(Date.now() / FIVE_MIN) * FIVE_MIN;
-  const windowStart = new Date(`${since}T00:00:00`);
-  const endOfDay = new Date(`${since}T00:00:00`);
-  endOfDay.setDate(endOfDay.getDate() + 1);
-  const windowEnd = endOfDay.getTime() > now ? new Date(now) : endOfDay;
-  return { windowStart, windowEnd };
+  const now = new Date(Math.floor(Date.now() / FIVE_MIN) * FIVE_MIN);
+  const { start, end } = dayWindow(since, timeZone, now);
+  return { windowStart: start, windowEnd: end };
 }
 
 interface Bucket {
@@ -112,24 +124,87 @@ function StatusStrip({
   windowStart: Date;
   windowEnd: Date;
 }) {
+  const timeZone = useViewerTimeZone();
   const buckets = useMemo(
     () => buildBuckets(heartbeats, windowStart, windowEnd),
     [heartbeats, windowStart, windowEnd]
   );
+  const stripRef = useRef<HTMLDivElement>(null);
+  // The strip is one tab stop, starting on the newest bucket. Arrow keys move
+  // along it, and the stop follows focus.
+  const [activeIndex, setActiveIndex] = useState<number | null>(null);
+  const tabStop = Math.min(
+    activeIndex ?? buckets.length - 1,
+    buckets.length - 1
+  );
+
+  function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    // One row, so Up and Down keep scrolling the page.
+    if (
+      !isGridKey(event) ||
+      event.key === "ArrowUp" ||
+      event.key === "ArrowDown"
+    ) {
+      return;
+    }
+    const current = Number(
+      (event.target as HTMLElement).closest<HTMLElement>("[data-bucket]")
+        ?.dataset.bucket
+    );
+    if (Number.isNaN(current)) {
+      return;
+    }
+    // Always handled, so an arrow key at either end never scrolls the strip.
+    event.preventDefault();
+    const next = nextGridCell(
+      { rows: 1, cols: buckets.length, has: () => true },
+      { row: 0, col: current },
+      event.key,
+      event.ctrlKey
+    );
+    if (next) {
+      setActiveIndex(next.col);
+      stripRef.current
+        ?.querySelector<HTMLElement>(`[data-bucket="${next.col}"]`)
+        ?.focus();
+    }
+  }
 
   return (
     <div className="mt-3 flex flex-col gap-1.5">
       <span className="text-muted-foreground text-xs">Connectivity</span>
-      <div className="flex h-6 w-full items-stretch gap-0.5">
-        {buckets.map((bucket) => (
+      <div
+        aria-label="Connectivity over the selected day. Use the left and right arrow keys to step through it."
+        className="flex h-6 w-full items-stretch gap-0.5"
+        onFocus={(event) => {
+          const index = (event.target as HTMLElement).dataset.bucket;
+          if (index !== undefined) {
+            setActiveIndex(Number(index));
+          }
+        }}
+        onKeyDown={onKeyDown}
+        ref={stripRef}
+        role="group"
+      >
+        {buckets.map((bucket, index) => (
           <Tooltip delayDuration={0} key={bucket.key}>
             <TooltipTrigger asChild>
-              <div className={cn("flex-1 rounded-sm", bucket.className)} />
+              <div
+                aria-label={`${bucket.label}, ${formatTime(bucket.startTime, timeZone)} to ${formatTime(bucket.endTime, timeZone)}, ${bucket.heartbeatCount} ${bucket.heartbeatCount === 1 ? "heartbeat" : "heartbeats"}`}
+                className={cn(
+                  "flex-1 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  bucket.className
+                )}
+                data-bucket={index}
+                role="img"
+                tabIndex={index === tabStop ? 0 : -1}
+              />
             </TooltipTrigger>
             <TooltipContent className="text-xs" side="top">
               <p className="font-medium">{bucket.label}</p>
               <p className="text-muted-foreground">
-                {formatTime(bucket.startTime)} – {formatTime(bucket.endTime)}
+                {formatTime(bucket.startTime, timeZone)} –{" "}
+                {formatTime(bucket.endTime, timeZone)}
               </p>
               <p className="text-muted-foreground">
                 {bucket.heartbeatCount} heartbeat
@@ -140,19 +215,9 @@ function StatusStrip({
         ))}
       </div>
       <div className="flex justify-between text-[10px] text-muted-foreground">
-        <span>{formatTime(windowStart)}</span>
-        <span>{formatTime(windowEnd)}</span>
+        <span>{formatTime(windowStart, timeZone)}</span>
+        <span>{formatTime(windowEnd, timeZone)}</span>
       </div>
-    </div>
-  );
-}
-
-export function HeartbeatChartSkeleton() {
-  return (
-    <div className="flex flex-col gap-3 rounded-lg border bg-background p-4 dark:bg-muted">
-      <Skeleton className="h-64 w-full" />
-      <Skeleton className="mx-auto h-3 w-48" />
-      <Skeleton className="mt-2 h-6 w-full" />
     </div>
   );
 }
@@ -170,10 +235,11 @@ export function HeartbeatChart({
   // already been applied client-side, so the previously loaded heartbeats fall
   // outside the window and `data` would otherwise be empty.
   const { isPending } = useTablePending();
+  const timeZone = useViewerTimeZone();
 
   const { windowStart, windowEnd } = useMemo(
-    () => computeWindow(since),
-    [since]
+    () => computeWindow(since, timeZone),
+    [since, timeZone]
   );
 
   const startMs = windowStart.getTime();
@@ -194,6 +260,13 @@ export function HeartbeatChart({
         })),
     [heartbeats, startMs, endMs]
   );
+
+  // The chart is a picture, so this is its text version.
+  const summary = useMemo(() => {
+    const total = (key: "files" | "runs" | "errors") =>
+      data.reduce((sum, point) => sum + point[key], 0);
+    return `${data.length} ${data.length === 1 ? "heartbeat" : "heartbeats"} on ${formatDate(windowStart, timeZone)}. Files uploaded: ${total("files")}. Runs reported: ${total("runs")}. Errors: ${total("errors")}.`;
+  }, [data, windowStart, timeZone]);
 
   const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
   const windowMs = endMs - startMs;
@@ -216,17 +289,15 @@ export function HeartbeatChart({
 
   if (data.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed bg-background py-8 dark:bg-muted">
-        <HeartPulse className="size-6 text-muted-foreground" />
-        <p className="text-muted-foreground text-sm">
-          No heartbeats in this time range.
-        </p>
-      </div>
+      <EmptyState icon={HeartPulse} size="compact">
+        No heartbeats in this time range.
+      </EmptyState>
     );
   }
 
   return (
     <div className="rounded-lg border bg-background p-4 dark:bg-muted">
+      <p className="sr-only">{summary}</p>
       <div className={cn(needsScroll && "overflow-x-auto")} ref={scrollRef}>
         <div
           style={
@@ -286,7 +357,7 @@ export function HeartbeatChart({
                 domain={[startMs, endMs]}
                 minTickGap={40}
                 scale="time"
-                tickFormatter={(v: number) => formatTime(new Date(v))}
+                tickFormatter={(v: number) => formatTime(new Date(v), timeZone)}
                 tickLine={false}
                 tickMargin={8}
                 type="number"
@@ -303,7 +374,7 @@ export function HeartbeatChart({
                   <ChartTooltipContent
                     labelFormatter={(_, payload) => {
                       const ts = payload?.[0]?.payload?.timestamp;
-                      return ts ? formatDateTime(new Date(ts)) : "";
+                      return ts ? formatDateTime(new Date(ts), timeZone) : "";
                     }}
                   />
                 }

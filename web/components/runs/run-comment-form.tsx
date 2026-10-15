@@ -4,6 +4,7 @@ import { type FormEvent, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { useUnsavedChangesWarning } from "@/hooks/use-unsaved-changes-warning";
 
 const MAX_BODY_LENGTH = 10_000;
 
@@ -25,6 +26,9 @@ export function RunCommentForm({
   const [isPending, startTransition] = useTransition();
 
   const trimmed = body.trim();
+
+  // A half-written comment is lost on reload, so the browser asks first.
+  useUnsavedChangesWarning(trimmed.length > 0);
   const tooLong = body.length > MAX_BODY_LENGTH;
   const canSubmit = trimmed.length > 0 && !tooLong && !isPending;
 
@@ -52,10 +56,12 @@ export function RunCommentForm({
       <Textarea
         aria-invalid={tooLong || undefined}
         aria-label="Comment body"
-        className="resize-none border-0 bg-transparent px-0 shadow-none focus-visible:ring-0 dark:bg-transparent"
+        // The box looks borderless at rest. The negative margin and matching
+        // padding keep the text aligned while leaving room for the focus ring.
+        className="-mx-2 w-[calc(100%+1rem)] resize-none border-0 bg-transparent px-2 shadow-none dark:bg-transparent"
         disabled={isPending}
         onChange={(e) => setBody(e.target.value)}
-        placeholder="Add a comment"
+        placeholder="Add a comment…"
         rows={3}
         value={body}
       />

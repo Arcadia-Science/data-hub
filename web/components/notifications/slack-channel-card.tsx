@@ -5,11 +5,12 @@
 // exports because the page is a server component, and a server component
 // cannot dot into a client module (`SlackChannelCard.Form` throws on render).
 
-import { useForm } from "@tanstack/react-form";
+import { useForm, useStore } from "@tanstack/react-form";
 import { Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -26,6 +27,9 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { useViewerTimeZone } from "@/components/viewer-time-zone-provider";
+import { useUnsavedChangesWarning } from "@/hooks/use-unsaved-changes-warning";
+import { formatDateTime } from "@/lib/date";
 import type { LastUpdated } from "@/lib/integrations/last-updated";
 import {
   slackChannelWebhookFormSchema,
@@ -69,7 +73,8 @@ export function SlackChannelForm({
   lastUpdated: LastUpdated | null;
 }) {
   const router = useRouter();
-  const [removing, setRemoving] = useState(false);
+  const timeZone = useViewerTimeZone();
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
   const [isReplacing, setIsReplacing] = useState(false);
   const [maskedLength, setMaskedLength] = useState(MASKED_LENGTH_MIN);
 
@@ -119,8 +124,11 @@ export function SlackChannelForm({
     },
   });
 
-  async function handleRemove() {
-    setRemoving(true);
+  useUnsavedChangesWarning(
+    useStore(form.store, (state) => !state.isDefaultValue)
+  );
+
+  async function handleRemove(): Promise<boolean> {
     try {
       const res = await fetch("/api/v1/settings/slack-channel", {
         method: "PUT",
@@ -128,16 +136,18 @@ export function SlackChannelForm({
         body: JSON.stringify({ webhook_url: null }),
       });
       if (!res.ok) {
-        toast.error("Couldn't remove Slack channel webhook");
-        return;
+        toast.error("Couldn't remove the Slack channel webhook. Try again.");
+        return false;
       }
-      toast.success("Slack channel webhook removed");
-      router.refresh();
     } catch {
-      toast.error("Couldn't remove Slack channel webhook");
-    } finally {
-      setRemoving(false);
+      toast.error(
+        "Couldn't remove the Slack channel webhook. Check your connection and try again."
+      );
+      return false;
     }
+    toast.success("Slack channel webhook removed");
+    router.refresh();
+    return true;
   }
 
   return (
@@ -228,29 +238,33 @@ export function SlackChannelForm({
         <div className="flex items-center justify-between gap-4 border-t pt-4">
           <div className="flex items-center gap-4">
             {configured ? (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    disabled={removing}
-                    onClick={handleRemove}
-                    size="sm"
-                    type="button"
-                    variant="outline"
-                  >
-                    {removing ? (
-                      <Loader2
-                        className="animate-spin"
-                        data-icon="inline-start"
-                      />
-                    ) : null}
-                    Remove webhook
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  Disable channel notifications and clear the stored webhook
-                  URL.
-                </TooltipContent>
-              </Tooltip>
+              <>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      onClick={() => setConfirmingRemove(true)}
+                      size="sm"
+                      type="button"
+                      variant="outline"
+                    >
+                      Remove webhook
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    Disable channel notifications and clear the stored webhook
+                    URL.
+                  </TooltipContent>
+                </Tooltip>
+                <ConfirmDialog
+                  confirmLabel="Remove Webhook"
+                  description="Data Hub will stop posting new runs to the Slack channel and delete the stored webhook URL. To post again, paste a webhook URL here."
+                  onConfirm={handleRemove}
+                  onOpenChange={setConfirmingRemove}
+                  open={confirmingRemove}
+                  title="Remove the Slack channel webhook?"
+                  variant="destructive"
+                />
+              </>
             ) : null}
             {lastUpdated ? (
               <p
@@ -258,7 +272,9 @@ export function SlackChannelForm({
                 suppressHydrationWarning
               >
                 Last updated{" "}
-                <span title={new Date(lastUpdated.at).toLocaleString()}>
+                <span
+                  title={formatDateTime(new Date(lastUpdated.at), timeZone)}
+                >
                   {formatRelativeTime(lastUpdated.at)}
                 </span>
                 {lastUpdated.byName || lastUpdated.byEmail ? (
@@ -284,7 +300,7 @@ export function SlackChannelForm({
               return {
                 canSubmit: state.canSubmit,
                 isSubmitting: state.isSubmitting,
-                isDirty: state.isDirty,
+                isDirty: !state.isDefaultValue,
                 isValidUrl: slackWebhookUrlSchema.safeParse(trimmed).success,
               };
             }}

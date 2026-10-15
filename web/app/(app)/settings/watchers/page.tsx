@@ -48,9 +48,9 @@ export default async function WatchersSettingsPage() {
     <SettingsPageContent>
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="font-semibold text-lg tracking-tight">
+          <h1 className="font-semibold text-lg tracking-tight">
             Watcher Version
-          </h2>
+          </h1>
           <p className="text-muted-foreground text-sm">
             Configure the release advertised by{" "}
             <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs dark:bg-background/40">

@@ -1,6 +1,7 @@
 import { ArrowRight, SearchX } from "lucide-react";
 import Link from "next/link";
 import { CommentRow } from "@/components/comments/comment-row";
+import { EmptyState } from "@/components/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TabsContent } from "@/components/ui/tabs";
 import type { CommentFeedItem } from "@/lib/api/run-comments";
@@ -22,12 +23,7 @@ export function CommentList({ comments }: { comments: CommentRowModel[] }) {
 }
 
 export function CommentEmpty({ label }: { label: string }) {
-  return (
-    <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed bg-background py-16 dark:bg-muted">
-      <SearchX className="size-8 text-muted-foreground" />
-      <p className="text-muted-foreground text-sm">{label}</p>
-    </div>
-  );
+  return <EmptyState icon={SearchX}>{label}</EmptyState>;
 }
 
 export function CommentRowsSkeleton({ rows = 4 }: { rows?: number }) {

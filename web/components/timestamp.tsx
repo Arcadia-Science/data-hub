@@ -27,6 +27,9 @@ export function Timestamp({
             className
           )}
           dateTime={dateTime}
+          // The label is relative to "now", which differs between the server
+          // render and hydration.
+          suppressHydrationWarning
         >
           {label}
         </time>

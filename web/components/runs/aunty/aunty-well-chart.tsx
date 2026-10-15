@@ -23,6 +23,7 @@ import {
   TM_MARKER_COLOR,
   tmMarkerValue,
 } from "@/lib/runs/aunty";
+import { describeCurve } from "@/lib/runs/chart-summary";
 
 function formatTick(value: number): string {
   const abs = Math.abs(value);
@@ -58,78 +59,92 @@ export function AuntyWellChart({
     y: { label: meta.label, color: meta.color },
   } satisfies ChartConfig;
 
+  // The chart is a picture, so this is its text version.
+  const summary = [
+    describeCurve({ label: meta.label, points, xLabel: meta.xLabel }),
+    marker === null ? null : `Tm1 is ${marker.toFixed(1)} °C.`,
+  ]
+    .filter(Boolean)
+    .join(" ");
+
   return (
     <div className="flex flex-col gap-3">
-      <ChartContainer className="aspect-auto h-80 w-full" config={chartConfig}>
-        <LineChart
-          data={points}
-          margin={{ top: 20, right: 16, bottom: 28, left: 8 }}
+      <figure className="w-full">
+        <figcaption className="sr-only">{summary}</figcaption>
+        <ChartContainer
+          className="aspect-auto h-80 w-full"
+          config={chartConfig}
         >
-          <CartesianGrid strokeDasharray="3 3" vertical={false} />
-          <XAxis
-            axisLine={false}
-            dataKey="x"
-            domain={["dataMin", "dataMax"]}
-            label={{
-              value: meta.xLabel,
-              position: "insideBottom",
-              offset: -16,
-              style: {
-                fontSize: 11,
-                fill: "var(--color-muted-foreground)",
-              },
-            }}
-            tickFormatter={formatTick}
-            tickLine={false}
-            tickMargin={8}
-            type="number"
-          />
-          {/* Fit to the series; Recharts otherwise pins the floor at 0. */}
-          <YAxis
-            axisLine={false}
-            dataKey="y"
-            domain={["dataMin", "dataMax"]}
-            tickFormatter={formatTick}
-            tickLine={false}
-            tickMargin={8}
-            type="number"
-            width={64}
-          />
-          <ChartTooltip
-            content={
-              <ChartTooltipContent
-                labelFormatter={(label) =>
-                  typeof label === "number"
-                    ? `${meta.xLabel}: ${formatTick(label)}`
-                    : String(label)
-                }
-              />
-            }
-          />
-          {marker != null && (
-            <ReferenceLine
-              ifOverflow="extendDomain"
+          <LineChart
+            data={points}
+            margin={{ top: 20, right: 16, bottom: 28, left: 8 }}
+          >
+            <CartesianGrid strokeDasharray="3 3" vertical={false} />
+            <XAxis
+              axisLine={false}
+              dataKey="x"
+              domain={["dataMin", "dataMax"]}
               label={{
-                value: `Tm1: ${marker.toFixed(1)}`,
-                fill: TM_MARKER_COLOR,
-                fontSize: 11,
-                position: "top",
+                value: meta.xLabel,
+                position: "insideBottom",
+                offset: -16,
+                style: {
+                  fontSize: 11,
+                  fill: "var(--color-muted-foreground)",
+                },
               }}
-              stroke={TM_MARKER_COLOR}
-              strokeDasharray="4 4"
-              x={marker}
+              tickFormatter={formatTick}
+              tickLine={false}
+              tickMargin={8}
+              type="number"
             />
-          )}
-          <Line
-            dataKey="y"
-            dot={false}
-            isAnimationActive={false}
-            name={meta.label}
-            stroke={meta.color}
-            strokeWidth={1.75}
-          />
-        </LineChart>
-      </ChartContainer>
+            {/* Fit to the series; Recharts otherwise pins the floor at 0. */}
+            <YAxis
+              axisLine={false}
+              dataKey="y"
+              domain={["dataMin", "dataMax"]}
+              tickFormatter={formatTick}
+              tickLine={false}
+              tickMargin={8}
+              type="number"
+              width={64}
+            />
+            <ChartTooltip
+              content={
+                <ChartTooltipContent
+                  labelFormatter={(label) =>
+                    typeof label === "number"
+                      ? `${meta.xLabel}: ${formatTick(label)}`
+                      : String(label)
+                  }
+                />
+              }
+            />
+            {marker != null && (
+              <ReferenceLine
+                ifOverflow="extendDomain"
+                label={{
+                  value: `Tm1: ${marker.toFixed(1)}`,
+                  fill: TM_MARKER_COLOR,
+                  fontSize: 11,
+                  position: "top",
+                }}
+                stroke={TM_MARKER_COLOR}
+                strokeDasharray="4 4"
+                x={marker}
+              />
+            )}
+            <Line
+              dataKey="y"
+              dot={false}
+              isAnimationActive={false}
+              name={meta.label}
+              stroke={meta.color}
+              strokeWidth={1.75}
+            />
+          </LineChart>
+        </ChartContainer>
+      </figure>
       <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm">
         {marker != null && (
           <LegendItem

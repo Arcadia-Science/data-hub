@@ -21,6 +21,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import { useViewerTimeZone } from "@/components/viewer-time-zone-provider";
 import { formatTime } from "@/lib/date";
 import type { InstrumentType } from "@/lib/db/schema";
 import {
@@ -307,6 +308,7 @@ function RunDetail({ children }: { children: ReactNode }) {
 }
 
 function GroupedRun({ run }: { run: AnchoredRun }) {
+  const timeZone = useViewerTimeZone();
   const unread = run.readAt === null;
   const fileLine = formatRunFileLine(run.fileCount ?? 0, 0);
 
@@ -320,7 +322,7 @@ function GroupedRun({ run }: { run: AnchoredRun }) {
           <ReadRunName>{run.runDisplayId}</ReadRunName>
         )}
         <RunDetail>
-          {fileLine} · {formatTime(occurredAt(run))}
+          {fileLine} · {formatTime(occurredAt(run), timeZone)}
         </RunDetail>
       </span>
     </GroupedRunLink>
@@ -328,6 +330,7 @@ function GroupedRun({ run }: { run: AnchoredRun }) {
 }
 
 function FailedGroupedRun({ run }: { run: AnchoredRun }) {
+  const timeZone = useViewerTimeZone();
   const unread = run.readAt === null;
   const fileCount = run.fileCount ?? 0;
   const filesFailed = run.filesFailed ?? 0;
@@ -343,14 +346,14 @@ function FailedGroupedRun({ run }: { run: AnchoredRun }) {
           <ReadRunName>{run.runDisplayId}</ReadRunName>
         )}
         <RunDetail>
-          {fileLine} · {formatTime(occurredAt(run))}
+          {fileLine} · {formatTime(occurredAt(run), timeZone)}
         </RunDetail>
         <span className="mt-1 flex items-start gap-1 text-[11.5px] text-destructive leading-snug">
           <TriangleAlert aria-hidden className="mt-px size-3 shrink-0" />
           <span>
             {formatRunFailureLine(fileCount, filesFailed)}{" "}
             <span className="font-medium underline underline-offset-2">
-              Retry
+              View Run
             </span>
           </span>
         </span>

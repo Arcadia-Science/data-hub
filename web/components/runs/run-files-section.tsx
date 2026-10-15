@@ -3,7 +3,6 @@
 import { Download, Search } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { debounce, useQueryStates } from "nuqs";
-import { useTransition } from "react";
 import { toast } from "sonner";
 import { PaginationNav } from "@/components/pagination-nav";
 import {
@@ -35,6 +34,7 @@ import type {
   RunFilesPage,
 } from "@/lib/api/instrument-runs";
 import type { InstrumentType } from "@/lib/db/schema";
+import { buildArchiveHref } from "@/lib/runs/archive-href";
 import { runDetailSearchParams } from "@/lib/search-params";
 import { FileBulkActionBar } from "./file-bulk-action-bar";
 import {
@@ -50,6 +50,7 @@ import {
   EditableRunFilesTable,
   ReadOnlyRunFilesTable,
 } from "./run-files-table";
+import { type TrackFiles, usePendingFiles } from "./use-pending-files";
 
 // Wait this long after the last search keystroke before writing the query to
 // the URL and refetching the page.
@@ -98,21 +99,17 @@ interface RunFilesSectionProps {
   stats: RunFileStats;
 }
 
-// Synchronously trigger one anchor-click per file so the browser treats
-// them all as the same user gesture (Chrome silently drops downloads
-// scheduled via setTimeout). The `download` attribute prompts a save —
-// the server's Content-Disposition still wins for the actual filename.
-function fanOutFileDownload(refs: FileRef[]) {
-  for (const ref of refs) {
-    const a = document.createElement("a");
-    a.href = `/api/v1/files/${ref.id}/download`;
-    a.download = ref.filename;
-    a.rel = "noopener";
-    a.style.display = "none";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-  }
+// Downloads one file through a temporary link. The `download` attribute prompts
+// a save; the server's Content-Disposition still decides the filename.
+function downloadSingleFile(ref: FileRef) {
+  const a = document.createElement("a");
+  a.href = `/api/v1/files/${ref.id}/download`;
+  a.download = ref.filename;
+  a.rel = "noopener";
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
 }
 
 export function RunFilesSection(props: RunFilesSectionProps) {
@@ -130,7 +127,10 @@ export function RunFilesSection(props: RunFilesSectionProps) {
         {props.isDeleted ? (
           <RunFilesSectionContent {...props} />
         ) : (
-          <FileSelectionProvider>
+          <FileSelectionProvider
+            files={props.files}
+            instrumentType={props.instrumentType}
+          >
             <RunFilesSectionContent {...props} />
           </FileSelectionProvider>
         )}
@@ -152,9 +152,10 @@ function RunFilesSectionContent({
   const router = useRouter();
   const { actions: autoRefreshActions } = useRunAutoRefresh();
   const { actions: archiveActions } = useArchiveDownload();
-  // Mutation transition (upload/dismiss/reprocess) — distinct from the table's
-  // navigation transition below.
-  const [isPending, startTransition] = useTransition();
+  // Mutation transition (upload/dismiss/reprocess), distinct from the table's
+  // navigation transition below. `track` also records which files an action
+  // covers, so only their rows lock while it runs.
+  const { isFilePending, isPending, track } = usePendingFiles();
 
   // All search / filter / sort / page state lives in the URL. `shallow:false`
   // triggers the RSC refetch and `startTransition` ties it to the table's
@@ -180,24 +181,12 @@ function RunFilesSectionContent({
     filters.files_category.length > 0 ||
     filters.files_status.length > 0 ||
     filters.files_dismissed;
-  const archiveBaseHref = `/api/v1/instruments/${instrumentId}/runs/${encodeURIComponent(runId)}/download-archive`;
-  let downloadHref = archiveBaseHref;
-  if (isFilterActive) {
-    const params = new URLSearchParams();
-    if (filters.files_search.trim()) {
-      params.set("search", filters.files_search.trim());
-    }
-    if (filters.files_category.length > 0) {
-      params.set("category", filters.files_category.join(","));
-    }
-    if (filters.files_status.length > 0) {
-      params.set("status", filters.files_status.join(","));
-    }
-    if (filters.files_dismissed) {
-      params.set("dismissed", "true");
-    }
-    downloadHref = `${archiveBaseHref}?${params.toString()}`;
-  }
+  const downloadHref = buildArchiveHref(instrumentId, runId, {
+    search: filters.files_search,
+    categories: filters.files_category,
+    statuses: filters.files_status,
+    dismissed: filters.files_dismissed,
+  });
 
   // Count of downloadable active files in the whole run (uploaded/processing/
   // completed/failed). `stats.uploaded` already folds completed+failed in, so
@@ -223,6 +212,7 @@ function RunFilesSectionContent({
             <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
               className="h-8 pl-8 text-xs"
+              name="files_search"
               onChange={(e) =>
                 setFilters(
                   { files_search: e.target.value, files_page: 1 },
@@ -232,7 +222,9 @@ function RunFilesSectionContent({
                   { limitUrlUpdates: debounce(SEARCH_DEBOUNCE_MS) }
                 )
               }
-              placeholder="Search files..."
+              placeholder="Search files…"
+              spellCheck={false}
+              type="search"
               value={filters.files_search}
             />
           </div>
@@ -302,25 +294,26 @@ function RunFilesSectionContent({
               {filters.files_dismissed ? "Hide dismissed" : "Show dismissed"}
             </Button>
           )}
-          {downloadableCount > 0 && (
-            <Button
-              className="h-8 gap-1 text-sm"
-              onClick={() =>
-                archiveActions.start({
-                  archiveUrl: downloadHref,
-                  runId,
-                  defaultFilename: `${runId}.zip`,
-                })
-              }
-              size="sm"
-              variant="outline"
-            >
-              <Download className="size-3" />
-              {isFilterActive
-                ? `Download filtered (${filteredDownloadableCount})`
-                : `Download all (${downloadableCount})`}
-            </Button>
-          )}
+          {downloadableCount > 0 &&
+            !(isFilterActive && filteredDownloadableCount === 0) && (
+              <Button
+                className="h-8 gap-1 text-sm"
+                onClick={() =>
+                  archiveActions.start({
+                    archiveUrl: downloadHref,
+                    runId,
+                    defaultFilename: `${runId}.zip`,
+                  })
+                }
+                size="sm"
+                variant="outline"
+              >
+                <Download className="size-3" />
+                {isFilterActive
+                  ? `Download filtered (${filteredDownloadableCount})`
+                  : `Download all (${downloadableCount})`}
+              </Button>
+            )}
         </div>
 
         {/* Bulk action bar — provider-driven, only renders when something
@@ -330,7 +323,7 @@ function RunFilesSectionContent({
             instrumentId={instrumentId}
             isPending={isPending}
             runId={runId}
-            startTransition={startTransition}
+            track={track}
           />
         )}
 
@@ -345,11 +338,11 @@ function RunFilesSectionContent({
             <ReadOnlyRunFilesTable
               files={files}
               instrumentType={instrumentType}
-              isPending={isPending}
+              isFilePending={isFilePending}
               onReprocess={(id) =>
                 handleSingleReprocess(
                   id,
-                  startTransition,
+                  track,
                   router,
                   autoRefreshActions.restart
                 )
@@ -359,14 +352,12 @@ function RunFilesSectionContent({
             <EditableRunFilesTable
               files={files}
               instrumentType={instrumentType}
-              isPending={isPending}
-              onDismiss={(id) =>
-                handleSingleDismiss(id, startTransition, router)
-              }
+              isFilePending={isFilePending}
+              onDismiss={(id) => handleSingleDismiss(id, track, router)}
               onReprocess={(id) =>
                 handleSingleReprocess(
                   id,
-                  startTransition,
+                  track,
                   router,
                   autoRefreshActions.restart
                 )
@@ -376,7 +367,7 @@ function RunFilesSectionContent({
                   id,
                   instrumentId,
                   runId,
-                  startTransition,
+                  track,
                   router,
                   autoRefreshActions.restart
                 )
@@ -386,7 +377,7 @@ function RunFilesSectionContent({
         </TablePendingBoundary>
 
         {/* Summary footer */}
-        <div className="flex items-center justify-between gap-2 border-t px-3 py-2 text-muted-foreground text-sm">
+        <div className="flex items-center justify-between gap-2 border-t px-3 py-2 text-muted-foreground text-sm tabular-nums">
           <span>
             {pagination.total === 0
               ? `Showing 0 of ${stats.active}`
@@ -420,14 +411,15 @@ function BulkActionBarHost({
   instrumentId,
   runId,
   isPending,
-  startTransition,
+  track,
 }: {
   instrumentId: string;
   runId: string;
   isPending: boolean;
-  startTransition: React.TransitionStartFunction;
+  track: TrackFiles;
 }) {
   const router = useRouter();
+  const { actions: archiveActions } = useArchiveDownload();
   const { actions } = useFileSelection();
   const { actions: autoRefreshActions } = useRunAutoRefresh();
 
@@ -435,9 +427,9 @@ function BulkActionBarHost({
     if (ids.length === 0) {
       return;
     }
-    startTransition(async () => {
+    track(ids, async () => {
       const res = await fetch(
-        `/api/v1/instruments/${instrumentId}/runs/${runId}/request-upload`,
+        `/api/v1/instruments/${instrumentId}/runs/${encodeURIComponent(runId)}/request-upload`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -460,7 +452,7 @@ function BulkActionBarHost({
     if (ids.length === 0) {
       return;
     }
-    startTransition(async () => {
+    track(ids, async () => {
       const results = await Promise.allSettled(
         ids.map((fid) => fetch(`/api/v1/files/${fid}`, { method: "DELETE" }))
       );
@@ -482,7 +474,7 @@ function BulkActionBarHost({
     if (ids.length === 0) {
       return;
     }
-    startTransition(async () => {
+    track(ids, async () => {
       const results = await Promise.allSettled(
         ids.map((fid) =>
           fetch(`/api/v1/files/${fid}/reprocess`, { method: "POST" })
@@ -510,14 +502,24 @@ function BulkActionBarHost({
     });
   }
 
+  // Browsers allow roughly one download per click and block the rest, so a
+  // single file downloads directly and several come as one zip that the
+  // archive dialog tracks.
   function handleBulkDownload(refs: FileRef[]) {
     if (refs.length === 0) {
       return;
     }
-    fanOutFileDownload(refs);
-    toast.success(
-      `Downloading ${refs.length} file${refs.length === 1 ? "" : "s"}`
-    );
+    if (refs.length === 1) {
+      downloadSingleFile(refs[0]);
+      toast.success(`Downloading ${refs[0].filename}`);
+      return;
+    }
+    archiveActions.start({
+      archiveUrl: buildArchiveHref(instrumentId, runId, {
+        fileIds: refs.map((ref) => ref.id),
+      }),
+      runId,
+    });
   }
 
   return (
@@ -541,13 +543,13 @@ function handleSingleUpload(
   fileId: number,
   instrumentId: string,
   runId: string,
-  startTransition: React.TransitionStartFunction,
+  track: TrackFiles,
   router: ReturnType<typeof useRouter>,
   onWorkStarted: () => void
 ) {
-  startTransition(async () => {
+  track([fileId], async () => {
     const res = await fetch(
-      `/api/v1/instruments/${instrumentId}/runs/${runId}/request-upload`,
+      `/api/v1/instruments/${instrumentId}/runs/${encodeURIComponent(runId)}/request-upload`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -567,10 +569,10 @@ function handleSingleUpload(
 
 function handleSingleDismiss(
   fileId: number,
-  startTransition: React.TransitionStartFunction,
+  track: TrackFiles,
   router: ReturnType<typeof useRouter>
 ) {
-  startTransition(async () => {
+  track([fileId], async () => {
     const res = await fetch(`/api/v1/files/${fileId}`, {
       method: "DELETE",
     });
@@ -586,11 +588,11 @@ function handleSingleDismiss(
 
 function handleSingleReprocess(
   fileId: number,
-  startTransition: React.TransitionStartFunction,
+  track: TrackFiles,
   router: ReturnType<typeof useRouter>,
   onWorkStarted: () => void
 ) {
-  startTransition(async () => {
+  track([fileId], async () => {
     const res = await fetch(`/api/v1/files/${fileId}/reprocess`, {
       method: "POST",
     });

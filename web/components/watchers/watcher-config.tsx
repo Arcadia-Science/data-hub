@@ -1,14 +1,14 @@
 import { FileText } from "lucide-react";
 import { CodeBlock } from "@/components/code-block";
 import { CopyButton } from "@/components/copy-button";
+import { EmptyState } from "@/components/empty-state";
 
 export function WatcherConfig({ configYaml }: { configYaml: string | null }) {
   if (!configYaml) {
     return (
-      <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed bg-background py-8 dark:bg-muted">
-        <FileText className="size-6 text-muted-foreground" />
-        <p className="text-muted-foreground text-sm">No config pushed yet.</p>
-      </div>
+      <EmptyState icon={FileText} size="compact">
+        No config pushed yet.
+      </EmptyState>
     );
   }
 

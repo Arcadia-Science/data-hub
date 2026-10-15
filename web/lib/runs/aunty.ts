@@ -83,7 +83,7 @@ export const AUNTY_SERIES_META: Record<AuntySeriesId, AuntySeriesMeta> = {
   fluorescence: {
     id: "fluorescence",
     label: "Fluorescence",
-    xLabel: "Temperature",
+    xLabel: "Temperature (°C)",
     yLabel: "Fluorescence",
     color: TEAL,
     markerKey: "tm1",
@@ -91,7 +91,7 @@ export const AUNTY_SERIES_META: Record<AuntySeriesId, AuntySeriesMeta> = {
   differential: {
     id: "differential",
     label: "Derivative",
-    xLabel: "Temperature",
+    xLabel: "Temperature (°C)",
     yLabel: "dF/dT",
     color: BLUE,
     markerKey: "tm1",
@@ -99,14 +99,14 @@ export const AUNTY_SERIES_META: Record<AuntySeriesId, AuntySeriesMeta> = {
   z_average_diameter: {
     id: "z_average_diameter",
     label: "Z-average diameter",
-    xLabel: "Temperature",
+    xLabel: "Temperature (°C)",
     yLabel: "Diameter (nm)",
     color: VIOLET,
   },
   sls: {
     id: "sls",
     label: "SLS",
-    xLabel: "Temperature",
+    xLabel: "Temperature (°C)",
     yLabel: "SLS",
     color: PINK,
   },

@@ -1,28 +1,27 @@
 "use client";
 
-import { Fragment, useMemo, useState } from "react";
+import {
+  Fragment,
+  type KeyboardEvent,
+  memo,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Slider } from "@/components/ui/slider";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { isGridKey, nextGridCell } from "@/lib/grid-keyboard";
+import { parseWellPosition } from "@/lib/runs/plate-wells";
 import { cn } from "@/lib/utils";
 
 export interface PlateWellData {
   value: unknown;
   well: string;
-}
-
-function parseWell(well: string): { row: number; col: number } | null {
-  const match = well.match(/^([A-P])(\d{1,2})$/i);
-  if (!match) {
-    return null;
-  }
-  return {
-    row: match[1].toUpperCase().charCodeAt(0) - 65,
-    col: Number.parseInt(match[2], 10) - 1,
-  };
 }
 
 /** 96-well is 8×12. Denser formats (384-well) use a full-width scrollport. */
@@ -99,6 +98,78 @@ function heatmapColor(
   return [`rgb(${r},${g},${b})`, fg];
 }
 
+// One well. Every prop is a string, number, or boolean, so the memo skips the
+// cells that did not change when focus moves and a 384-well plate does not
+// re-render 384 tooltips on each key press.
+const PlateMapCell = memo(function PlateMapCell({
+  background,
+  col,
+  display,
+  foreground,
+  full,
+  isTabStop,
+  row,
+  rowLabel,
+  useHeatmap,
+}: {
+  background: string;
+  col: number;
+  display: string;
+  foreground: string;
+  full: string;
+  isTabStop: boolean;
+  row: number;
+  rowLabel: string;
+  useHeatmap: boolean;
+}) {
+  const hasValue = display !== "";
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div
+          // Wells with a value read as "A1: 0.532" and take focus, so keyboard
+          // and screen reader users get the full value that sighted users get
+          // from the tooltip.
+          {...(hasValue
+            ? {
+                "aria-label": `${rowLabel}${col + 1}: ${full}`,
+                role: "img",
+                tabIndex: isTabStop ? 0 : -1,
+              }
+            : { "aria-hidden": true })}
+          className={cn(
+            "flex aspect-square w-full min-w-0 items-center justify-center overflow-hidden rounded font-mono tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            WELL_VALUE_TEXT,
+            useHeatmap
+              ? "transition-colors"
+              : hasValue
+                ? "border border-border bg-muted/50"
+                : "border border-transparent"
+          )}
+          data-cell={`${row}-${col}`}
+          style={{
+            gridRow: row + 2,
+            gridColumn: col + 2,
+            ...(useHeatmap
+              ? { backgroundColor: background, color: foreground }
+              : {}),
+          }}
+        >
+          {display || "·"}
+        </div>
+      </TooltipTrigger>
+      {hasValue && (
+        <TooltipContent>
+          <span className="font-mono">
+            {rowLabel}
+            {col + 1}: {full}
+          </span>
+        </TooltipContent>
+      )}
+    </Tooltip>
+  );
+});
+
 interface PlateMapGridProps {
   className?: string;
   data: unknown;
@@ -109,29 +180,34 @@ interface PlateMapGridProps {
   wavelength?: string;
 }
 
-export function PlateMapGrid({
+export function PlateMapGrid(props: PlateMapGridProps) {
+  const { data } = props;
+  if (!Array.isArray(data) || data.length === 0) {
+    return null;
+  }
+  return <PlateMapGridView {...props} wells={data as PlateWellData[]} />;
+}
+
+function PlateMapGridView({
   className,
-  data,
   heatmap = false,
   heatmapRange,
   plateName,
   wavelength,
-}: PlateMapGridProps) {
-  if (!Array.isArray(data)) {
-    return null;
-  }
-
-  const wells = data as PlateWellData[];
-  if (wells.length === 0) {
-    return null;
-  }
+  wells,
+}: PlateMapGridProps & { wells: PlateWellData[] }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const hintId = useId();
+  // The cell that Tab lands on. It follows focus, so leaving the plate and
+  // coming back returns to the last cell used.
+  const [activeCell, setActiveCell] = useState<string | null>(null);
 
   let maxRow = 0;
   let maxCol = 0;
   const cellMap = new Map<string, unknown>();
 
   for (const w of wells) {
-    const pos = parseWell(w.well);
+    const pos = parseWellPosition(w.well);
     if (!pos) {
       continue;
     }
@@ -168,6 +244,63 @@ export function PlateMapGrid({
   }
   const hasRange = Number.isFinite(vMin) && Number.isFinite(vMax);
 
+  // Only wells with a value take focus: they are the ones with something to
+  // read. The whole plate is one tab stop and arrow keys move between them.
+  const hasValueAt = (row: number, col: number) =>
+    formatCellValue(cellMap.get(`${row}-${col}`)) !== "";
+  let firstValueCell: string | null = null;
+  for (let row = 0; row <= maxRow && firstValueCell === null; row++) {
+    for (let col = 0; col <= maxCol; col++) {
+      if (hasValueAt(row, col)) {
+        firstValueCell = `${row}-${col}`;
+        break;
+      }
+    }
+  }
+  const tabStopCell =
+    activeCell !== null &&
+    hasValueAt(...(activeCell.split("-").map(Number) as [number, number]))
+      ? activeCell
+      : firstValueCell;
+
+  function focusCell(key: string) {
+    setActiveCell(key);
+    containerRef.current
+      ?.querySelector<HTMLElement>(`[data-cell="${key}"]`)
+      ?.focus();
+  }
+
+  function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (!isGridKey(event)) {
+      return;
+    }
+    const key = (event.target as HTMLElement).closest<HTMLElement>(
+      "[data-cell]"
+    )?.dataset.cell;
+    if (!key) {
+      return;
+    }
+    // Always handled, so an arrow key at the edge never scrolls the page.
+    event.preventDefault();
+    const [row, col] = key.split("-").map(Number);
+    const next = nextGridCell(
+      { rows, cols, has: hasValueAt },
+      { row, col },
+      event.key,
+      event.ctrlKey
+    );
+    if (next) {
+      focusCell(`${next.row}-${next.col}`);
+    }
+  }
+
+  function onFocus(event: React.FocusEvent<HTMLDivElement>) {
+    const key = (event.target as HTMLElement).dataset.cell;
+    if (key) {
+      setActiveCell(key);
+    }
+  }
+
   const rowLabels = Array.from({ length: rows }, (_, i) =>
     String.fromCharCode(65 + i)
   );
@@ -201,15 +334,18 @@ export function PlateMapGrid({
           )}
         </div>
       )}
+      {/* `hidden` keeps it out of browsing; it still describes the plate. */}
+      <p hidden id={hintId}>
+        Use the arrow keys to move between wells.
+      </p>
       <div
+        aria-describedby={hintId}
         aria-label={plateName ? `${plateName} plate map` : "Plate map"}
-        className={cn(
-          "w-full min-w-0 overflow-x-auto overscroll-x-contain",
-          wide &&
-            "rounded-md outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
-        )}
-        role="region"
-        tabIndex={wide ? 0 : undefined}
+        className="w-full min-w-0 overflow-x-auto overscroll-x-contain"
+        onFocus={onFocus}
+        onKeyDown={onKeyDown}
+        ref={containerRef}
+        role="group"
       >
         <div
           className={cn(
@@ -227,6 +363,7 @@ export function PlateMapGrid({
           {/* Column headers */}
           {colLabels.map((c, ci) => (
             <div
+              aria-hidden="true"
               className={cn(
                 "py-1 font-medium text-muted-foreground",
                 PLATE_AXIS_TEXT
@@ -242,6 +379,7 @@ export function PlateMapGrid({
           {rowLabels.map((rowLabel, ri) => (
             <Fragment key={rowLabel}>
               <div
+                aria-hidden="true"
                 className={cn(
                   "flex items-center justify-center font-medium text-muted-foreground",
                   PLATE_AXIS_TEXT
@@ -255,7 +393,6 @@ export function PlateMapGrid({
                 const display = formatCellValue(value);
                 const full =
                   value !== null && value !== undefined ? String(value) : "";
-                const hasValue = display !== "";
 
                 const useHeatmap =
                   heatmap && hasRange && typeof value === "number";
@@ -264,38 +401,18 @@ export function PlateMapGrid({
                   : ["", ""];
 
                 return (
-                  <Tooltip key={`${ri}-${ci}`}>
-                    <TooltipTrigger asChild>
-                      <div
-                        className={cn(
-                          "flex aspect-square w-full min-w-0 items-center justify-center overflow-hidden rounded font-mono tabular-nums",
-                          WELL_VALUE_TEXT,
-                          useHeatmap
-                            ? "transition-colors"
-                            : hasValue
-                              ? "border border-border bg-muted/50"
-                              : "border border-transparent"
-                        )}
-                        style={{
-                          gridRow: ri + 2,
-                          gridColumn: ci + 2,
-                          ...(useHeatmap
-                            ? { backgroundColor: bg, color: fg }
-                            : {}),
-                        }}
-                      >
-                        {display || "·"}
-                      </div>
-                    </TooltipTrigger>
-                    {hasValue && (
-                      <TooltipContent>
-                        <span className="font-mono">
-                          {rowLabel}
-                          {ci + 1}: {full}
-                        </span>
-                      </TooltipContent>
-                    )}
-                  </Tooltip>
+                  <PlateMapCell
+                    background={useHeatmap ? bg : ""}
+                    col={ci}
+                    display={display}
+                    foreground={useHeatmap ? fg : ""}
+                    full={full}
+                    isTabStop={`${ri}-${ci}` === tabStopCell}
+                    key={`${ri}-${ci}`}
+                    row={ri}
+                    rowLabel={rowLabel}
+                    useHeatmap={useHeatmap}
+                  />
                 );
               })}
             </Fragment>

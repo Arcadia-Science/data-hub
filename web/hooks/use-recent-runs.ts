@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { parseVersioned, serializeVersioned } from "@/lib/versioned-storage";
 
 export interface RecentRun {
   instrumentDisplayName: string;
@@ -18,11 +19,7 @@ function readRecentRuns(): RecentRun[] {
   }
 
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      return [];
-    }
-    const parsed: unknown = JSON.parse(raw);
+    const parsed = parseVersioned(localStorage.getItem(STORAGE_KEY));
     if (!Array.isArray(parsed)) {
       return [];
     }
@@ -42,7 +39,7 @@ function readRecentRuns(): RecentRun[] {
 
 function writeRecentRuns(runs: RecentRun[]): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(runs));
+    localStorage.setItem(STORAGE_KEY, serializeVersioned(runs));
   } catch {
     // Private browsing or quota exceeded — ignore.
   }

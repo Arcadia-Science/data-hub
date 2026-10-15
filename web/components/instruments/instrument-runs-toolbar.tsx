@@ -7,7 +7,11 @@ import { RunsDateFilter } from "@/components/runs/runs-date-filter";
 import { useTablePending } from "@/components/table-pending";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { instrumentDetailSearchParams } from "@/lib/search-params";
+import {
+  clearedInstrumentFilters,
+  hasActiveInstrumentFilters,
+  instrumentDetailSearchParams,
+} from "@/lib/search-params";
 
 export function InstrumentRunsToolbar() {
   // shallow: false triggers a server-side re-fetch on every URL change so the
@@ -20,56 +24,10 @@ export function InstrumentRunsToolbar() {
     startTransition,
   });
 
-  const hasFilters =
-    filters.search !== "" ||
-    filters.date_from !== null ||
-    filters.date_to !== null ||
-    filters.include_deleted ||
-    filters.status.length > 0 ||
-    filters.wavelength !== null ||
-    filters.measurement_mode !== null ||
-    filters.measurement_type !== null ||
-    filters.capture_type !== null ||
-    filters.imaging_mode !== null ||
-    filters.gel_wavelength !== null ||
-    filters.gel_color !== null ||
-    filters.dye_channel !== null ||
-    filters.hina_channel !== null ||
-    filters.hina_dimension !== null ||
-    filters.hina_size !== null ||
-    filters.dpi !== null ||
-    filters.color_mode !== null ||
-    filters.aunty_experiment_type !== null ||
-    filters.aunty_analysis_mode !== null ||
-    filters.aunty_temperature !== null ||
-    filters.aunty_ramp_rate !== null;
+  const hasFilters = hasActiveInstrumentFilters(filters);
 
   function clearFilters() {
-    setFilters({
-      search: "",
-      date_from: null,
-      date_to: null,
-      include_deleted: false,
-      status: [],
-      wavelength: null,
-      measurement_mode: null,
-      measurement_type: null,
-      capture_type: null,
-      imaging_mode: null,
-      gel_wavelength: null,
-      gel_color: null,
-      dye_channel: null,
-      hina_channel: null,
-      hina_dimension: null,
-      hina_size: null,
-      dpi: null,
-      color_mode: null,
-      aunty_experiment_type: null,
-      aunty_analysis_mode: null,
-      aunty_temperature: null,
-      aunty_ramp_rate: null,
-      page: 1,
-    });
+    setFilters(clearedInstrumentFilters());
   }
 
   return (
@@ -78,9 +36,10 @@ export function InstrumentRunsToolbar() {
         <div className="relative w-64">
           <Search className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
+            aria-label="Search runs"
             className="pl-9"
             onChange={(e) => setFilters({ search: e.target.value, page: 1 })}
-            placeholder="Search runs..."
+            placeholder="Search runs…"
             value={filters.search}
           />
         </div>
