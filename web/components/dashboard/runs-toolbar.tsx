@@ -1,6 +1,7 @@
 "use client";
 
-import { Check, ChevronsUpDown, Search, X } from "lucide-react";
+import { ChevronsUpDown, Search, X } from "lucide-react";
+import dynamic from "next/dynamic";
 import { useQueryStates } from "nuqs";
 import { useState } from "react";
 import { RunFiltersCombobox } from "@/components/runs/run-filters-combobox";
@@ -11,27 +12,38 @@ import {
 import { useTablePending } from "@/components/table-pending";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command";
 import { Input } from "@/components/ui/input";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { Skeleton } from "@/components/ui/skeleton";
 import { dashboardSearchParams, hasActiveFilters } from "@/lib/search-params";
-import { cn } from "@/lib/utils";
 
 interface Instrument {
   displayName: string;
   id: string;
 }
+
+// The list uses the command palette library, which the dashboard doesn't
+// otherwise need. It loads when the popover first opens.
+const InstrumentFilterList = dynamic(
+  () =>
+    import("@/components/dashboard/instrument-filter-list").then(
+      (m) => m.InstrumentFilterList
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <div aria-hidden className="flex flex-col gap-2 p-2">
+        <Skeleton className="h-8 w-full" />
+        <Skeleton className="h-6 w-full" />
+        <Skeleton className="h-6 w-full" />
+      </div>
+    ),
+  }
+);
 
 export function RunsToolbar({
   instruments,
@@ -113,32 +125,11 @@ export function RunsToolbar({
               </Button>
             </PopoverTrigger>
             <PopoverContent align="start" className="w-72 p-0">
-              <Command>
-                <CommandInput placeholder="Filter instruments..." />
-                <CommandList>
-                  <CommandEmpty>No instruments found.</CommandEmpty>
-                  <CommandGroup>
-                    {instruments.map((inst) => {
-                      const selected = filters.instrument_id.includes(inst.id);
-                      return (
-                        <CommandItem
-                          key={inst.id}
-                          onSelect={() => toggleInstrument(inst.id)}
-                          value={inst.displayName}
-                        >
-                          <Check
-                            className={cn(
-                              "mr-2 size-4",
-                              selected ? "opacity-100" : "opacity-0"
-                            )}
-                          />
-                          {inst.displayName}
-                        </CommandItem>
-                      );
-                    })}
-                  </CommandGroup>
-                </CommandList>
-              </Command>
+              <InstrumentFilterList
+                instruments={instruments}
+                onToggle={toggleInstrument}
+                selectedIds={filters.instrument_id}
+              />
             </PopoverContent>
           </Popover>
         </div>

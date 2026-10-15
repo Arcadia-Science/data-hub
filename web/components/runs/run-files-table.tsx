@@ -1,6 +1,7 @@
 "use client";
 
 import { Loader2, RotateCw, Upload, X } from "lucide-react";
+import dynamic from "next/dynamic";
 import { type ComponentProps, useEffect, useMemo, useState } from "react";
 import {
   AlertDialog,
@@ -30,7 +31,7 @@ import type { InstrumentType } from "@/lib/db/schema";
 import { canReprocessFile } from "@/lib/runs/reprocessable-statuses";
 import { filePreviewKind } from "@/lib/runs/run-file-types";
 import { cn, formatBytes } from "@/lib/utils";
-import { FilePreviewDialog, type PreviewableFile } from "./file-preview-dialog";
+import type { PreviewableFile } from "./file-preview-dialog";
 import {
   FileSelectAllCheckbox,
   FileSelectCheckbox,
@@ -81,10 +82,19 @@ function previewableFileOf(file: RunFileRow): PreviewableFile | null {
     : null;
 }
 
+// The dialog pulls in the CSV parser and the colony table. Most visits never
+// open a preview, so that code loads on the first open instead of with the page.
+const FilePreviewDialog = dynamic(
+  () => import("./file-preview-dialog").then((m) => m.FilePreviewDialog),
+  { ssr: false }
+);
+
 // Shared by both table variants. Navigation covers only the files on the
 // current page, in table order.
 function useFilePreview(files: RunFileRow[]) {
   const [openFileId, setOpenFileId] = useState<number | null>(null);
+  // Stays mounted after the first open so closing still plays its animation.
+  const [hasOpened, setHasOpened] = useState(false);
   const previewable = useMemo(
     () =>
       files
@@ -102,7 +112,7 @@ function useFilePreview(files: RunFileRow[]) {
     }
   }, [openFileId, isOpenFileListed]);
 
-  const dialog = (
+  const dialog = hasOpened ? (
     <FilePreviewDialog
       files={previewable}
       onOpenChange={(open) => {
@@ -113,8 +123,14 @@ function useFilePreview(files: RunFileRow[]) {
       onSelect={setOpenFileId}
       openFileId={openFileId}
     />
-  );
-  return { dialog, openPreview: setOpenFileId };
+  ) : null;
+
+  function openPreview(fileId: number) {
+    setHasOpened(true);
+    setOpenFileId(fileId);
+  }
+
+  return { dialog, openPreview };
 }
 
 // Checkboxes and row actions are buttons inside the row. A click on those

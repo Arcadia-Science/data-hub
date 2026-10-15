@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { parseAsString, useQueryState, useQueryStates } from "nuqs";
 import { TablePendingProvider } from "@/components/table-pending";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -7,14 +8,20 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useViewerTimeZone } from "@/components/viewer-time-zone-provider";
 import { EventLog } from "@/components/watchers/event-log";
 import { EventLogToolbar } from "@/components/watchers/event-log-toolbar";
-import {
-  HeartbeatChart,
-  HeartbeatChartSkeleton,
-} from "@/components/watchers/heartbeat-chart";
+import { HeartbeatChartSkeleton } from "@/components/watchers/heartbeat-chart-skeleton";
 import { StatusToolbar } from "@/components/watchers/status-toolbar";
 import type { WatcherEventRow, WatcherHeartbeatRow } from "@/lib/api/watchers";
 import { todayDateString } from "@/lib/date";
 import { watcherDetailSearchParams } from "@/lib/search-params";
+
+// The chart brings in the charting library, which only the Status tab needs.
+const HeartbeatChart = dynamic(
+  () =>
+    import("@/components/watchers/heartbeat-chart").then(
+      (m) => m.HeartbeatChart
+    ),
+  { ssr: false, loading: () => <HeartbeatChartSkeleton /> }
+);
 
 export function WatcherDetailTabsSkeleton() {
   return (
@@ -85,7 +92,9 @@ export function WatcherDetailTabs({
   eventsTotalPages,
 }: {
   configTab: React.ReactNode;
-  heartbeats: WatcherHeartbeatRow[];
+  // `null` while the server has not loaded them: heartbeats are only fetched
+  // when the Status tab is the one in the URL.
+  heartbeats: WatcherHeartbeatRow[] | null;
   events: WatcherEventRow[];
   eventsTotal: number;
   eventsPage: number;
@@ -136,7 +145,11 @@ export function WatcherDetailTabs({
             <h3 className="font-medium text-sm">Status</h3>
             <StatusToolbar />
           </div>
-          <HeartbeatChart heartbeats={heartbeats} since={effectiveSince} />
+          {heartbeats === null ? (
+            <HeartbeatChartSkeleton />
+          ) : (
+            <HeartbeatChart heartbeats={heartbeats} since={effectiveSince} />
+          )}
         </TablePendingProvider>
       </TabsContent>
 

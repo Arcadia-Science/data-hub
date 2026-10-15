@@ -10,13 +10,13 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from "@/components/ui/chart";
-import { Skeleton } from "@/components/ui/skeleton";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useViewerTimeZone } from "@/components/viewer-time-zone-provider";
+import { HeartbeatChartSkeleton } from "@/components/watchers/heartbeat-chart-skeleton";
 import type { WatcherHeartbeatRow } from "@/lib/api/watchers";
 import { dayWindow, formatDateTime, formatTime } from "@/lib/date";
 import { cn } from "@/lib/utils";
@@ -148,16 +148,6 @@ function StatusStrip({
         <span>{formatTime(windowStart, timeZone)}</span>
         <span>{formatTime(windowEnd, timeZone)}</span>
       </div>
-    </div>
-  );
-}
-
-export function HeartbeatChartSkeleton() {
-  return (
-    <div className="flex flex-col gap-3 rounded-lg border bg-background p-4 dark:bg-muted">
-      <Skeleton className="h-64 w-full" />
-      <Skeleton className="mx-auto h-3 w-48" />
-      <Skeleton className="mt-2 h-6 w-full" />
     </div>
   );
 }

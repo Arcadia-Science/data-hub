@@ -170,6 +170,7 @@ async function RunDetailContentBody({
   // CSV processing overlaps the other queries rather than tacking latency on.
   const reportFilesPromise = getRunReportFiles(run.id);
   const isAunty = run.instrumentType === "aunty";
+  const isPlateReader = run.instrumentType === "plate_reader";
   const isQpcr = run.instrumentType === "qpcr";
   const [
     filesPage,
@@ -202,8 +203,11 @@ async function RunDetailContentBody({
       : Promise.resolve(emptyReportItemsPage()),
     getInstrumentById(instrumentId),
     getAdjacentRunIds(run),
+    // Only the plate reader view renders these rows. The other instruments
+    // read their processed files client-side, so parsing every CSV here would
+    // add S3 reads and CPU time to every run page for nothing.
     reportFilesPromise.then((rf) =>
-      isAunty ? Promise.resolve([]) : getProcessedCsvData(rf)
+      isPlateReader ? getProcessedCsvData(rf) : Promise.resolve([])
     ),
     reportFilesPromise.then((rf) =>
       isAunty ? getAuntyPlateData(rf) : Promise.resolve(null)

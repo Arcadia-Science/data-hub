@@ -1,36 +1,37 @@
 "use client";
 
-import { ListFilter, Trash2 } from "lucide-react";
-import { type ComponentType, useState } from "react";
+import { ListFilter } from "lucide-react";
+import dynamic from "next/dynamic";
+import { useState } from "react";
+import {
+  RUN_FILTERS,
+  type RunFilterValues,
+} from "@/components/runs/run-filters";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Command,
-  CommandGroup,
-  CommandItem,
-  CommandList,
-  CommandSeparator,
-} from "@/components/ui/command";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { RUN_STATUS_OPTIONS, type RunStatus } from "@/lib/runs/run-status";
+import { Skeleton } from "@/components/ui/skeleton";
+import type { RunStatus } from "@/lib/runs/run-status";
 
-interface FilterValues {
-  includeDeleted: boolean;
-}
-
-interface FilterDef {
-  icon: ComponentType<{ className?: string }>;
-  key: keyof FilterValues;
-  label: string;
-}
-
-const FILTERS: readonly FilterDef[] = [
-  { key: "includeDeleted", label: "Show deleted runs", icon: Trash2 },
-] as const;
+// The menu uses the command palette library, which most page visits never
+// need. It loads when the popover first opens.
+const RunFiltersList = dynamic(
+  () =>
+    import("@/components/runs/run-filters-list").then((m) => m.RunFiltersList),
+  {
+    ssr: false,
+    loading: () => (
+      <div aria-hidden className="flex flex-col gap-2 p-2">
+        <Skeleton className="h-6 w-full" />
+        <Skeleton className="h-6 w-full" />
+      </div>
+    ),
+  }
+);
 
 export function RunFiltersCombobox({
   values,
@@ -38,26 +39,16 @@ export function RunFiltersCombobox({
   selectedStatuses,
   onStatusChange,
 }: {
-  values: FilterValues;
-  onChange: (next: FilterValues) => void;
+  values: RunFilterValues;
+  onChange: (next: RunFilterValues) => void;
   // When both are provided, a multi-select STATUS group is rendered.
   selectedStatuses?: RunStatus[];
   onStatusChange?: (next: RunStatus[]) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const showStatus =
-    selectedStatuses !== undefined && onStatusChange !== undefined;
   const activeCount =
-    FILTERS.reduce((count, f) => (values[f.key] ? count + 1 : count), 0) +
+    RUN_FILTERS.reduce((count, f) => (values[f.key] ? count + 1 : count), 0) +
     (selectedStatuses?.length ?? 0);
-
-  function toggleStatus(status: RunStatus) {
-    const current = selectedStatuses ?? [];
-    const next = current.includes(status)
-      ? current.filter((s) => s !== status)
-      : [...current, status];
-    onStatusChange?.(next);
-  }
 
   return (
     <Popover onOpenChange={setOpen} open={open}>
@@ -79,51 +70,12 @@ export function RunFiltersCombobox({
         </Button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-64 p-0">
-        <Command>
-          <CommandList>
-            <CommandGroup>
-              {FILTERS.map((filter) => {
-                const Icon = filter.icon;
-                const active = values[filter.key];
-                return (
-                  <CommandItem
-                    data-checked={active}
-                    key={filter.key}
-                    onSelect={() =>
-                      onChange({ ...values, [filter.key]: !active })
-                    }
-                    value={filter.label}
-                  >
-                    <Icon className="size-3.5 text-muted-foreground" />
-                    {filter.label}
-                  </CommandItem>
-                );
-              })}
-            </CommandGroup>
-            {showStatus && (
-              <>
-                <CommandSeparator />
-                <CommandGroup heading="Status">
-                  {RUN_STATUS_OPTIONS.map((status) => {
-                    const Icon = status.Icon;
-                    const active = selectedStatuses?.includes(status.value);
-                    return (
-                      <CommandItem
-                        data-checked={active}
-                        key={status.value}
-                        onSelect={() => toggleStatus(status.value)}
-                        value={status.label}
-                      >
-                        <Icon className={status.colorClassName} />
-                        {status.label}
-                      </CommandItem>
-                    );
-                  })}
-                </CommandGroup>
-              </>
-            )}
-          </CommandList>
-        </Command>
+        <RunFiltersList
+          onChange={onChange}
+          onStatusChange={onStatusChange}
+          selectedStatuses={selectedStatuses}
+          values={values}
+        />
       </PopoverContent>
     </Popover>
   );

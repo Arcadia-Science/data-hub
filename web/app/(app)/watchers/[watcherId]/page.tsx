@@ -115,7 +115,11 @@ async function WatcherTabsSection({
   // fetch rather than issuing a second query for `configYaml`.
   const [watcher, heartbeats, eventResult] = await Promise.all([
     getWatcherById(watcherId),
-    getAllWatcherHeartbeats(watcherId, { since: heartbeatSince }),
+    // Up to 5000 rows, and only the Status tab draws them. The tab lives in the
+    // URL, so the other tabs skip the query and the payload.
+    filters.tab === "status"
+      ? getAllWatcherHeartbeats(watcherId, { since: heartbeatSince })
+      : Promise.resolve(null),
     getWatcherEvents(watcherId, {
       since: eventsSince,
       eventTypes:
