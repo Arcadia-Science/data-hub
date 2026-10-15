@@ -10,7 +10,11 @@ import {
 } from "@/components/runs/run-metadata-badges";
 import { RunSectionCard } from "@/components/runs/run-section-card";
 import type { RawWellRow } from "@/lib/api/instrument-runs";
-import { extractPlateMaps } from "@/lib/runs/extract-plate-maps";
+import {
+  extractPlateMaps,
+  type PlateMapLayout,
+  plateMapLayoutFor,
+} from "@/lib/runs/extract-plate-maps";
 
 /** Measurement types whose well values are numeric and benefit from color-coded heatmaps. */
 const HEATMAP_MEASUREMENT_TYPES = new Set([
@@ -20,17 +24,6 @@ const HEATMAP_MEASUREMENT_TYPES = new Set([
   "Spectrum",
 ]);
 
-// How a measurement type lays out its wells. Kinetic and Spectrum runs hold a
-// series of frames behind a slider, and everything else is one plate.
-type PlateLayout = "single" | "kinetic" | "spectrum";
-
-function plateLayoutFor(measurementType: string): PlateLayout {
-  if (measurementType === "Kinetic") {
-    return "kinetic";
-  }
-  return measurementType === "Spectrum" ? "spectrum" : "single";
-}
-
 function PlateMapSection({
   rows,
   heatmap,
@@ -38,12 +31,9 @@ function PlateMapSection({
 }: {
   rows: RawWellRow[];
   heatmap: boolean;
-  layout: PlateLayout;
+  layout: PlateMapLayout;
 }) {
-  const groups = extractPlateMaps(rows, {
-    kinetic: layout === "kinetic",
-    spectrum: layout === "spectrum",
-  });
+  const groups = extractPlateMaps(rows, layout);
 
   if (groups.length === 0) {
     return null;
@@ -108,7 +98,7 @@ export function PlateReaderRunDetail(props: RunDetailProps) {
     >
       <PlateMapSection
         heatmap={heatmap}
-        layout={plateLayoutFor(measurementType)}
+        layout={plateMapLayoutFor(measurementType)}
         rows={wellData}
       />
     </RunDetailLayout>

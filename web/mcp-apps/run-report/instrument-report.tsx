@@ -21,7 +21,10 @@ import { VideoCarouselReport } from "@/components/runs/video-carousel-report";
 import type { RawWellRow } from "@/lib/api/instrument-runs";
 import type { InstrumentType } from "@/lib/db/schema";
 import { type AuntyPlateData, parseAuntyPlateJson } from "@/lib/runs/aunty";
-import { extractPlateMaps } from "@/lib/runs/extract-plate-maps";
+import {
+  extractPlateMaps,
+  plateMapLayoutFor,
+} from "@/lib/runs/extract-plate-maps";
 import {
   parseQpcrMeltingPlateJson,
   QPCR_MELTING_DERIVATIVES_SUFFIX,
@@ -344,11 +347,7 @@ function PlateReaderReport({ result }: { result: RunReportToolResult }) {
     [measurementType, rows]
   );
   const groups = useMemo(
-    () =>
-      extractPlateMaps(rows ?? [], {
-        kinetic: measurementType === "Kinetic",
-        spectrum: measurementType === "Spectrum",
-      }),
+    () => extractPlateMaps(rows ?? [], plateMapLayoutFor(measurementType)),
     [measurementType, rows]
   );
 

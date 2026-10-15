@@ -180,6 +180,21 @@ export function rowsLookLikeSpectrumScan(rows: RawWellRow[]): boolean {
 }
 
 /**
+ * How a measurement type lays out its wells. Kinetic and Spectrum runs hold a
+ * series of frames behind a slider. For any other type, `"auto"` lets the rows
+ * decide: wells that span several wavelengths with no times still get a
+ * wavelength slider.
+ */
+export type PlateMapLayout = "auto" | "kinetic" | "spectrum";
+
+export function plateMapLayoutFor(measurementType: string): PlateMapLayout {
+  if (measurementType === "Kinetic") {
+    return "kinetic";
+  }
+  return measurementType === "Spectrum" ? "spectrum" : "auto";
+}
+
+/**
  * Converts flat CSV rows into renderable plate map groups.
  *
  * Strategy:
@@ -193,7 +208,7 @@ export function rowsLookLikeSpectrumScan(rows: RawWellRow[]): boolean {
  */
 export function extractPlateMaps(
   rows: RawWellRow[],
-  options: { kinetic: boolean; spectrum: boolean }
+  layout: PlateMapLayout = "auto"
 ): PlateMapGroup[] {
   if (rows.length === 0) {
     return [];
@@ -208,14 +223,14 @@ export function extractPlateMaps(
   const uniqueTimes = new Set(rows.map((r) => String(r.time ?? "")));
   const hasTimeVariation = uniqueTimes.size > 1;
 
-  if (options.kinetic && hasTimeVariation) {
+  if (layout === "kinetic" && hasTimeVariation) {
     return extractKineticPlateMapGroups(
       rows,
       wellKey as "well_position" | "well"
     );
   }
 
-  if (options.spectrum || rowsLookLikeSpectrumScan(rows)) {
+  if (layout === "spectrum" || rowsLookLikeSpectrumScan(rows)) {
     return extractSpectrumPlateMapGroups(
       rows,
       wellKey as "well_position" | "well"
