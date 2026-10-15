@@ -114,9 +114,18 @@ export function ArchiveDownloadDialog({
                 <div className="min-w-0 flex-1">
                   <div className="truncate font-medium">{job.runId}</div>
                   <div className="text-muted-foreground text-xs">
-                    {job.status === "building"
-                      ? `Building zip archive... ${formatElapsed(job.startedAt, now)}`
-                      : (job.errorMessage ?? "Failed")}
+                    {job.status === "building" ? (
+                      <>
+                        {/* Only the fixed text is announced. The timer would
+                            speak every second. */}
+                        <span role="status">Building zip archive…</span>{" "}
+                        <span aria-hidden="true">
+                          {formatElapsed(job.startedAt, now)}
+                        </span>
+                      </>
+                    ) : (
+                      <span role="alert">{job.errorMessage ?? "Failed"}</span>
+                    )}
                   </div>
                 </div>
               </div>

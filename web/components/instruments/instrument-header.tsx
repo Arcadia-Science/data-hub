@@ -87,14 +87,14 @@ function WatchDirectory({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span
-          className="flex min-w-0 cursor-default items-center gap-1.5"
-          tabIndex={0}
+        <button
+          className="flex min-w-0 cursor-default items-center gap-1.5 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          type="button"
         >
           <FolderOpen aria-hidden="true" className="size-4 shrink-0" />
           <span className="sr-only">Watched folder: </span>
           <span className="break-all font-mono text-[13px]">{path}</span>
-        </span>
+        </button>
       </TooltipTrigger>
       <TooltipContent className="flex-col items-start" side="bottom">
         <p className="font-medium">

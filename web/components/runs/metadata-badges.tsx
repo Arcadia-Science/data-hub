@@ -196,7 +196,10 @@ export function TruncatedBadges({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <div className="flex flex-wrap gap-1">
+        <button
+          className="flex cursor-default flex-wrap gap-1 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          type="button"
+        >
           {visible.map((v) => (
             <Badge
               className={cn("font-mono", badgeClassName, colorMap?.[v])}
@@ -213,7 +216,7 @@ export function TruncatedBadges({
           >
             +{hiddenCount}
           </Badge>
-        </div>
+        </button>
       </TooltipTrigger>
       <TooltipContent className="max-w-none">
         <BadgeRow

@@ -26,26 +26,37 @@ export function FileStatusIndicator({ file }: { file: RunFileRow }) {
   }
   const tooltip = showErrorTooltip ? file.errorMessage : stalledTooltip;
 
-  const indicator = (
-    <span
-      className={cn(
-        "inline-flex h-6 items-center gap-1.5 text-sm leading-none",
-        className
-      )}
-      tabIndex={tooltip ? 0 : undefined}
-    >
-      <Icon className={cn("size-4 shrink-0", spin && "animate-spin")} />
+  const indicatorClass = cn(
+    "inline-flex h-6 items-center gap-1.5 text-sm leading-none",
+    className
+  );
+  const content = (
+    <>
+      <Icon
+        aria-hidden="true"
+        className={cn("size-4 shrink-0", spin && "animate-spin")}
+      />
       {label}
-    </span>
+    </>
   );
 
   if (!tooltip) {
-    return indicator;
+    return <span className={indicatorClass}>{content}</span>;
   }
 
   return (
     <Tooltip>
-      <TooltipTrigger asChild>{indicator}</TooltipTrigger>
+      <TooltipTrigger asChild>
+        <button
+          className={cn(
+            indicatorClass,
+            "rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          )}
+          type="button"
+        >
+          {content}
+        </button>
+      </TooltipTrigger>
       <TooltipContent align="center" className="max-w-sm" side="top">
         {tooltip}
       </TooltipContent>

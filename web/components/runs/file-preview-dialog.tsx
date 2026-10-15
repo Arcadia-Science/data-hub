@@ -193,10 +193,17 @@ export function FilePreviewDialog({
         </DialogHeader>
         <div className="flex min-w-0 flex-col gap-2">
           {state === null && (
-            <Skeleton aria-label="Loading preview" className="h-72 w-full" />
+            <Skeleton
+              aria-label="Loading preview"
+              className="h-72 w-full"
+              role="status"
+            />
           )}
           {state?.status === "error" && (
-            <div className="flex h-72 flex-col items-center justify-center gap-3 rounded-md border border-dashed bg-muted/20 p-6 text-center">
+            <div
+              className="flex h-72 flex-col items-center justify-center gap-3 rounded-md border border-dashed bg-muted/20 p-6 text-center"
+              role="alert"
+            >
               <AlertTriangle
                 aria-hidden
                 className="size-6 text-muted-foreground"

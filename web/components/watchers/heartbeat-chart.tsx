@@ -1,7 +1,13 @@
 "use client";
 
 import { HeartPulse } from "lucide-react";
-import { useEffect, useMemo, useRef } from "react";
+import {
+  type KeyboardEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
 import { useTablePending } from "@/components/table-pending";
 import {
@@ -19,6 +25,7 @@ import { useViewerTimeZone } from "@/components/viewer-time-zone-provider";
 import { HeartbeatChartSkeleton } from "@/components/watchers/heartbeat-chart-skeleton";
 import type { WatcherHeartbeatRow } from "@/lib/api/watchers";
 import { dayWindow, formatDateTime, formatTime } from "@/lib/date";
+import { nextPlateCell } from "@/lib/runs/plate-wells";
 import { cn } from "@/lib/utils";
 
 const chartConfig = {
@@ -120,15 +127,67 @@ function StatusStrip({
     () => buildBuckets(heartbeats, windowStart, windowEnd),
     [heartbeats, windowStart, windowEnd]
   );
+  const stripRef = useRef<HTMLDivElement>(null);
+  // The strip is one tab stop, starting on the newest bucket. Arrow keys move
+  // along it, and the stop follows focus.
+  const [activeIndex, setActiveIndex] = useState<number | null>(null);
+  const tabStop = Math.min(
+    activeIndex ?? buckets.length - 1,
+    buckets.length - 1
+  );
+
+  function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    const current = Number(
+      (event.target as HTMLElement).closest<HTMLElement>("[data-bucket]")
+        ?.dataset.bucket
+    );
+    if (Number.isNaN(current)) {
+      return;
+    }
+    const next = nextPlateCell(
+      { rows: 1, cols: buckets.length, has: () => true },
+      { row: 0, col: current },
+      event.key,
+      event.ctrlKey
+    );
+    if (next) {
+      event.preventDefault();
+      setActiveIndex(next.col);
+      stripRef.current
+        ?.querySelector<HTMLElement>(`[data-bucket="${next.col}"]`)
+        ?.focus();
+    }
+  }
 
   return (
     <div className="mt-3 flex flex-col gap-1.5">
       <span className="text-muted-foreground text-xs">Connectivity</span>
-      <div className="flex h-6 w-full items-stretch gap-0.5">
-        {buckets.map((bucket) => (
+      <div
+        aria-label="Connectivity over the selected day. Use the left and right arrow keys to step through it."
+        className="flex h-6 w-full items-stretch gap-0.5"
+        onFocus={(event) => {
+          const index = (event.target as HTMLElement).dataset.bucket;
+          if (index !== undefined) {
+            setActiveIndex(Number(index));
+          }
+        }}
+        onKeyDown={onKeyDown}
+        ref={stripRef}
+        role="group"
+      >
+        {buckets.map((bucket, index) => (
           <Tooltip delayDuration={0} key={bucket.key}>
             <TooltipTrigger asChild>
-              <div className={cn("flex-1 rounded-sm", bucket.className)} />
+              <div
+                aria-label={`${bucket.label}, ${formatTime(bucket.startTime, timeZone)} to ${formatTime(bucket.endTime, timeZone)}, ${bucket.heartbeatCount} ${bucket.heartbeatCount === 1 ? "heartbeat" : "heartbeats"}`}
+                className={cn(
+                  "flex-1 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  bucket.className
+                )}
+                data-bucket={index}
+                role="img"
+                tabIndex={index === tabStop ? 0 : -1}
+              />
             </TooltipTrigger>
             <TooltipContent className="text-xs" side="top">
               <p className="font-medium">{bucket.label}</p>
@@ -191,6 +250,13 @@ export function HeartbeatChart({
     [heartbeats, startMs, endMs]
   );
 
+  // The chart is a picture, so this is its text version.
+  const summary = useMemo(() => {
+    const total = (key: "files" | "runs" | "errors") =>
+      data.reduce((sum, point) => sum + point[key], 0);
+    return `${data.length} ${data.length === 1 ? "heartbeat" : "heartbeats"} on ${since}. Files uploaded: ${total("files")}. Runs reported: ${total("runs")}. Errors: ${total("errors")}.`;
+  }, [data, since]);
+
   const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
   const windowMs = endMs - startMs;
   const widthMultiplier = Math.max(1, windowMs / SIX_HOURS_MS);
@@ -223,6 +289,7 @@ export function HeartbeatChart({
 
   return (
     <div className="rounded-lg border bg-background p-4 dark:bg-muted">
+      <p className="sr-only">{summary}</p>
       <div className={cn(needsScroll && "overflow-x-auto")} ref={scrollRef}>
         <div
           style={
