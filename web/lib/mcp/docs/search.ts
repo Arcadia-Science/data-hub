@@ -1,4 +1,5 @@
 import MiniSearch from "minisearch";
+import { createSearchTerms, wordsNeeded } from "@/lib/mcp/search-terms";
 import { type DocEntry, type DocSection, getDocsBundle } from "./bundle";
 import { makeExcerpt } from "./markdown";
 
@@ -10,113 +11,7 @@ const MAX_HITS_PER_PAGE = 2;
 // that explains the same thing in more depth.
 const CHANGELOG_WEIGHT = 0.7;
 
-// Questions arrive as sentences. Without this, "how do I" matches every page.
-// `data` and `hub` are here because every page names the product.
-const STOP_WORDS = new Set([
-  "a",
-  "about",
-  "am",
-  "an",
-  "and",
-  "are",
-  "as",
-  "at",
-  "be",
-  "been",
-  "but",
-  "by",
-  "can",
-  "could",
-  "data",
-  "did",
-  "do",
-  "does",
-  "for",
-  "from",
-  "get",
-  "had",
-  "has",
-  "have",
-  "how",
-  "hub",
-  "i",
-  "if",
-  "in",
-  "into",
-  "is",
-  "it",
-  "its",
-  "me",
-  "much",
-  "my",
-  "myself",
-  "of",
-  "on",
-  "or",
-  "our",
-  "should",
-  "so",
-  "that",
-  "the",
-  "their",
-  "then",
-  "there",
-  "this",
-  "to",
-  "up",
-  "us",
-  "was",
-  "we",
-  "were",
-  "what",
-  "when",
-  "where",
-  "which",
-  "who",
-  "why",
-  "will",
-  "with",
-  "would",
-  "you",
-  "your",
-]);
-
-// Strips plurals only, applied to the index and the query alike, so "tokens"
-// finds "token" without a stemming library.
-function normalizeTerm(term: string): string | null {
-  const lower = term.toLowerCase();
-  if (STOP_WORDS.has(lower)) {
-    return null;
-  }
-  if (lower.length > 4 && lower.endsWith("ies")) {
-    return `${lower.slice(0, -3)}y`;
-  }
-  if (lower.length > 3 && lower.endsWith("s") && !lower.endsWith("ss")) {
-    return lower.slice(0, -1);
-  }
-  return lower;
-}
-
-const tokenize: (text: string) => string[] = MiniSearch.getDefault("tokenize");
-
-/** The question's words as the index stores them, mapped to how they were typed. */
-function queryWords(query: string): Map<string, string> {
-  const words = new Map<string, string>();
-  for (const token of tokenize(query)) {
-    const term = normalizeTerm(token);
-    if (term && !words.has(term)) {
-      words.set(term, token);
-    }
-  }
-  return words;
-}
-
-// Search matches any one word, so a result alone says little. A section that
-// holds two thirds of the question's words, rounded up, counts as an answer.
-// The golden questions in `tests/unit/mcp-docs-search.test.ts` check the bar.
-function wordsNeeded(wordCount: number): number {
-  return Math.ceil((wordCount * 2) / 3);
-}
+const { normalize: normalizeTerm, queryWords } = createSearchTerms();
 
 interface IndexedPassage {
   description: string;
