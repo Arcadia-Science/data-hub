@@ -4,7 +4,7 @@ import { RelativeTime } from "@/components/dashboard/relative-time";
 import { EmptyState } from "@/components/empty-state";
 import { FilePatterns } from "@/components/instruments/file-patterns";
 import { InstrumentStatusBadge } from "@/components/instruments/instrument-status-badge";
-import { InstrumentNotificationSwitch } from "@/components/notifications/instrument-notification-switch";
+import { InstrumentNotificationSwitch } from "@/components/notifications/instrument-notification-toggle";
 import { RowControl, RowLink } from "@/components/row-link";
 import { TruncatedTooltip } from "@/components/truncated-tooltip";
 import { Skeleton } from "@/components/ui/skeleton";

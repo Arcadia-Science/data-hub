@@ -5,7 +5,7 @@ import Link from "next/link";
 import { FilePatterns } from "@/components/instruments/file-patterns";
 import { InstrumentActions } from "@/components/instruments/instrument-actions";
 import { InstrumentStatusBadge } from "@/components/instruments/instrument-status-badge";
-import { InstrumentNotificationPill } from "@/components/notifications/instrument-notification-switch";
+import { InstrumentNotificationPill } from "@/components/notifications/instrument-notification-toggle";
 import { RecordInstrumentVisit } from "@/components/recent-instrument-visit";
 import { ActorLabel } from "@/components/token-actor";
 import {

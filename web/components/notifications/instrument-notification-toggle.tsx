@@ -125,13 +125,14 @@ export function InstrumentNotificationSwitch({
 
 /**
  * A labelled pill for the instrument header: a bell icon, "Notifications", and
- * the toggle. The whole pill is clickable, and hover shows the tooltip.
+ * the toggle. The whole pill is clickable, and hover shows the tooltip. The
+ * visible word names the switch, so its accessible name contains what sighted
+ * users read, which an `aria-label` would replace.
  */
 export function InstrumentNotificationPill({
-  ariaLabel = DEFAULT_ARIA_LABEL,
   size = "default",
   ...props
-}: InstrumentNotificationProps) {
+}: Omit<InstrumentNotificationProps, "ariaLabel">) {
   const switchId = useId();
   const { checked, disabled, handleChange, tooltip } =
     useInstrumentNotification(props);
@@ -154,7 +155,6 @@ export function InstrumentNotificationPill({
           <Bell className="size-3.5" />
           <span className="text-sm">Notifications</span>
           <Switch
-            aria-label={ariaLabel}
             checked={checked}
             disabled={disabled}
             id={switchId}

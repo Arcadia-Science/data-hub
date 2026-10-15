@@ -90,7 +90,7 @@ export function EventLog({
   if (events.length === 0) {
     return (
       <TablePendingBoundary>
-        <EmptyState icon={Inbox} size="compact">
+        <EmptyState className="rounded-md" icon={Inbox} size="compact">
           No events in this time range.
         </EmptyState>
       </TablePendingBoundary>
