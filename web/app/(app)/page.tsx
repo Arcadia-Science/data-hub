@@ -74,6 +74,7 @@ export default async function DashboardPage({
   // independently — a slow runs query no longer holds up the stats cards.
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 p-6 2xl:w-6xl">
+      <h1 className="sr-only">Dashboard</h1>
       <Suspense fallback={<StatCardsSkeleton />}>
         <DashboardStatsSection />
       </Suspense>

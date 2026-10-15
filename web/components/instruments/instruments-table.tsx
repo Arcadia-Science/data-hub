@@ -1,10 +1,9 @@
 import { ArrowRight, SearchX } from "lucide-react";
+import Link from "next/link";
 import type { ReactNode } from "react";
 import { RelativeTime } from "@/components/dashboard/relative-time";
 import { FilePatterns } from "@/components/instruments/file-patterns";
 import { InstrumentStatusBadge } from "@/components/instruments/instrument-status-badge";
-import { RowActionsCell } from "@/components/instruments/row-actions-cell";
-import { ClickableRow } from "@/components/instruments/runs-table/clickable-row";
 import { InstrumentNotificationsCell } from "@/components/notifications/instrument-notifications-cell";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -171,13 +170,14 @@ export function InstrumentsTable({
                 ? "deregistered"
                 : getWatcherOnlineStatus(row);
             return (
-              <ClickableRow
-                className="text-sm"
-                href={`/instruments/${row.id}`}
-                key={row.id}
-              >
+              <TableRow className="text-sm" key={row.id}>
                 <TableCell>
-                  <span className="font-medium">{row.displayName}</span>
+                  <Link
+                    className="rounded-sm font-medium hover:underline focus-visible:underline focus-visible:outline-none"
+                    href={`/instruments/${row.id}`}
+                  >
+                    {row.displayName}
+                  </Link>
                   <span className="mt-0.5 block text-muted-foreground text-xs">
                     {row.runCount} total {row.runCount === 1 ? "run" : "runs"}
                   </span>
@@ -213,9 +213,9 @@ export function InstrumentsTable({
                   />
                 ) : null}
                 {renderRowActions ? (
-                  <RowActionsCell>{renderRowActions(row)}</RowActionsCell>
+                  <TableCell>{renderRowActions(row)}</TableCell>
                 ) : null}
-              </ClickableRow>
+              </TableRow>
             );
           })}
         </TableBody>

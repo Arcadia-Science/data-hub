@@ -47,9 +47,9 @@ export default async function IntegrationsSettingsPage() {
   return (
     <SettingsPageContent>
       <div>
-        <h2 className="text-pretty font-semibold text-lg tracking-tight">
+        <h1 className="text-pretty font-semibold text-lg tracking-tight">
           Integrations
-        </h2>
+        </h1>
         <p className="text-muted-foreground text-sm">{description}</p>
       </div>
       <div className="mt-6 flex flex-col gap-6">

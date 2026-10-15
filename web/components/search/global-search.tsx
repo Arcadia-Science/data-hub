@@ -34,6 +34,7 @@ import type {
 } from "@/lib/api/search";
 import { runCommentHref } from "@/lib/comment-hash";
 import { applySamePageCommentHash } from "@/lib/comment-hash-nav";
+import { isPlainLeftClick } from "@/lib/plain-click";
 import { MIN_QUERY_LENGTH } from "@/lib/search-constants";
 import { cn } from "@/lib/utils";
 
@@ -86,6 +87,47 @@ function userHref(user: SearchUserResult): string {
 
 function commentHref(comment: SearchCommentResult): string {
   return runCommentHref(comment.instrumentId, comment.runId, comment.id);
+}
+
+// A result is a real link so Cmd/Ctrl-click and middle-click open it in a new
+// tab, and the browser's link menu works. The link fills the whole item, and
+// keyboard focus stays on the search input, so the link is not a tab stop.
+function ResultItem({
+  href,
+  value,
+  onNavigate,
+  children,
+}: {
+  href: string;
+  value: string;
+  onNavigate: (href: string) => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <CommandItem
+      className="p-0"
+      onSelect={() => onNavigate(href)}
+      value={value}
+    >
+      <a
+        className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5"
+        href={href}
+        onClick={(event) => {
+          if (isPlainLeftClick(event)) {
+            // cmdk's own item click handler runs `onSelect`, which navigates
+            // inside the app and closes the dialog.
+            event.preventDefault();
+            return;
+          }
+          // Keep the dialog open while the browser opens the new tab.
+          event.stopPropagation();
+        }}
+        tabIndex={-1}
+      >
+        {children}
+      </a>
+    </CommandItem>
+  );
 }
 
 function Kbd({ children }: { children: React.ReactNode }) {
@@ -260,13 +302,14 @@ export function GlobalSearch({
                 {result.runs.length > 0 ? (
                   <CommandGroup heading="Runs">
                     {result.runs.map((run) => (
-                      <CommandItem
+                      <ResultItem
+                        href={runHref(run)}
                         key={run.id}
-                        onSelect={() => navigate(runHref(run))}
+                        onNavigate={navigate}
                         value={`run:${run.id}`}
                       >
                         <SearchRunRow query={trimmed} result={run} />
-                      </CommandItem>
+                      </ResultItem>
                     ))}
                   </CommandGroup>
                 ) : null}
@@ -274,13 +317,14 @@ export function GlobalSearch({
                 {result.files.length > 0 ? (
                   <CommandGroup heading="Files">
                     {result.files.map((file) => (
-                      <CommandItem
+                      <ResultItem
+                        href={fileHref(file)}
                         key={file.id}
-                        onSelect={() => navigate(fileHref(file))}
+                        onNavigate={navigate}
                         value={`file:${file.id}`}
                       >
                         <SearchFileRow query={trimmed} result={file} />
-                      </CommandItem>
+                      </ResultItem>
                     ))}
                   </CommandGroup>
                 ) : null}
@@ -288,16 +332,17 @@ export function GlobalSearch({
                 {result.instruments.length > 0 ? (
                   <CommandGroup heading="Instruments">
                     {result.instruments.map((instrument) => (
-                      <CommandItem
+                      <ResultItem
+                        href={instrumentHref(instrument)}
                         key={instrument.id}
-                        onSelect={() => navigate(instrumentHref(instrument))}
+                        onNavigate={navigate}
                         value={`instrument:${instrument.id}`}
                       >
                         <SearchInstrumentRow
                           query={trimmed}
                           result={instrument}
                         />
-                      </CommandItem>
+                      </ResultItem>
                     ))}
                   </CommandGroup>
                 ) : null}
@@ -305,13 +350,14 @@ export function GlobalSearch({
                 {result.users.length > 0 ? (
                   <CommandGroup heading="Users">
                     {result.users.map((user) => (
-                      <CommandItem
+                      <ResultItem
+                        href={userHref(user)}
                         key={user.id}
-                        onSelect={() => navigate(userHref(user))}
+                        onNavigate={navigate}
                         value={`user:${user.id}`}
                       >
                         <SearchUserRow query={trimmed} result={user} />
-                      </CommandItem>
+                      </ResultItem>
                     ))}
                   </CommandGroup>
                 ) : null}
@@ -319,13 +365,14 @@ export function GlobalSearch({
                 {result.comments.length > 0 ? (
                   <CommandGroup heading="Comments">
                     {result.comments.map((comment) => (
-                      <CommandItem
+                      <ResultItem
+                        href={commentHref(comment)}
                         key={comment.id}
-                        onSelect={() => navigate(commentHref(comment))}
+                        onNavigate={navigate}
                         value={`comment:${comment.id}`}
                       >
                         <SearchCommentRow query={trimmed} result={comment} />
-                      </CommandItem>
+                      </ResultItem>
                     ))}
                   </CommandGroup>
                 ) : null}

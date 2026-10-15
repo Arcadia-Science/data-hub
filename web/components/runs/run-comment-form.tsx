@@ -52,7 +52,9 @@ export function RunCommentForm({
       <Textarea
         aria-invalid={tooLong || undefined}
         aria-label="Comment body"
-        className="resize-none border-0 bg-transparent px-0 shadow-none focus-visible:ring-0 dark:bg-transparent"
+        // The box looks borderless at rest. The negative margin and matching
+        // padding keep the text aligned while leaving room for the focus ring.
+        className="-mx-2 w-[calc(100%+1rem)] resize-none border-0 bg-transparent px-2 shadow-none dark:bg-transparent"
         disabled={isPending}
         onChange={(e) => setBody(e.target.value)}
         placeholder="Add a comment"

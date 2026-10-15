@@ -5,10 +5,8 @@ import { TableCell } from "@/components/ui/table";
 
 /**
  * Thin client wrapper around `<InstrumentNotificationSwitch>` for the
- * `<InstrumentsTable>` row. Lives in its own component because the table
- * is a Server Component and can't directly attach `onClick` handlers
- * across the boundary — the wrapping `<TableCell>` stops click bubbling
- * so toggling the switch doesn't navigate the parent `<ClickableRow>`.
+ * `<InstrumentsTable>` row. It stays a separate client component because the
+ * switch keeps its own state and the table is a Server Component.
  */
 export function InstrumentNotificationsCell({
   instrumentId,
@@ -20,7 +18,7 @@ export function InstrumentNotificationsCell({
   masterMuted: boolean;
 }) {
   return (
-    <TableCell onClick={(e) => e.stopPropagation()}>
+    <TableCell>
       <InstrumentNotificationSwitch
         initialEnabled={initialEnabled}
         instrumentId={instrumentId}

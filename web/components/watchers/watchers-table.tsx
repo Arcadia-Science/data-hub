@@ -1,8 +1,7 @@
 import { SearchX } from "lucide-react";
+import Link from "next/link";
 import type { ReactNode } from "react";
 import { RelativeTime } from "@/components/dashboard/relative-time";
-import { RowActionsCell } from "@/components/instruments/row-actions-cell";
-import { ClickableRow } from "@/components/instruments/runs-table/clickable-row";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -108,19 +107,23 @@ export function WatchersTable({
         </TableHeader>
         <TableBody>
           {data.map((row) => (
-            <ClickableRow
+            <TableRow
               className={cn("text-sm", row.deletedAt && "opacity-60")}
-              href={`/watchers/${row.id}`}
               key={row.id}
             >
               <TableCell>
-                {row.instrumentDisplayName ? (
-                  row.instrumentDisplayName
-                ) : (
-                  <span className="font-mono text-muted-foreground">
-                    {row.instrumentId}
-                  </span>
-                )}
+                <Link
+                  className="rounded-sm hover:underline focus-visible:underline focus-visible:outline-none"
+                  href={`/watchers/${row.id}`}
+                >
+                  {row.instrumentDisplayName ? (
+                    row.instrumentDisplayName
+                  ) : (
+                    <span className="font-mono text-muted-foreground">
+                      {row.instrumentId}
+                    </span>
+                  )}
+                </Link>
               </TableCell>
               <TableCell>
                 {row.hostname ?? (
@@ -146,9 +149,9 @@ export function WatchersTable({
                 )}
               </TableCell>
               {renderRowActions ? (
-                <RowActionsCell>{renderRowActions(row)}</RowActionsCell>
+                <TableCell>{renderRowActions(row)}</TableCell>
               ) : null}
-            </ClickableRow>
+            </TableRow>
           ))}
         </TableBody>
       </Table>

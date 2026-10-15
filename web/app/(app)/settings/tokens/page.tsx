@@ -61,9 +61,9 @@ export default async function TokensPage() {
     <div>
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="font-semibold text-lg tracking-tight">
+          <h1 className="font-semibold text-lg tracking-tight">
             Access Tokens
-          </h2>
+          </h1>
           <p className="text-muted-foreground text-sm">
             {isAdmin
               ? "Manage personal access tokens for API authentication."

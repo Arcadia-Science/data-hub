@@ -35,7 +35,7 @@ export default async function NotificationsSettingsPage() {
   return (
     <SettingsPageContent>
       <div>
-        <h2 className="font-semibold text-lg tracking-tight">Notifications</h2>
+        <h1 className="font-semibold text-lg tracking-tight">Notifications</h1>
         <p className="text-muted-foreground text-sm">
           Choose which Data Hub events to be notified about, and whether to
           receive them in-app, via Slack DM, or both. In-app and Slack are
