@@ -65,24 +65,18 @@ export function FileBulkActionBar({
       </div>
       <div className="flex items-center gap-2">
         {meta.allCanUpload && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <WatcherGatedUploadButton
-                className="h-7 gap-1.5 text-xs"
-                disabled={isPending}
-                onClick={() => onUpload(ids)}
-                size="sm"
-                type="button"
-                variant="default"
-              >
-                <Upload className="size-3.5" />
-                Upload
-              </WatcherGatedUploadButton>
-            </TooltipTrigger>
-            <TooltipContent>
-              Request upload for {count} {noun}
-            </TooltipContent>
-          </Tooltip>
+          <WatcherGatedUploadButton
+            className="h-7 gap-1.5 text-xs"
+            disabled={isPending}
+            onClick={() => onUpload(ids)}
+            onlineTooltip={`Request upload for ${count} ${noun}`}
+            size="sm"
+            type="button"
+            variant="default"
+          >
+            <Upload className="size-3.5" />
+            Upload
+          </WatcherGatedUploadButton>
         )}
 
         {meta.allCanDismiss && (

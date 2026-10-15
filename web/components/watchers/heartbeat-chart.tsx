@@ -24,8 +24,9 @@ import {
 import { useViewerTimeZone } from "@/components/viewer-time-zone-provider";
 import { HeartbeatChartSkeleton } from "@/components/watchers/heartbeat-chart-skeleton";
 import type { WatcherHeartbeatRow } from "@/lib/api/watchers";
-import { dayWindow, formatDateTime, formatTime } from "@/lib/date";
-import { nextPlateCell } from "@/lib/runs/plate-wells";
+import { dayWindow, formatDate, formatDateTime, formatTime } from "@/lib/date";
+import { isGridKey, nextGridCell } from "@/lib/grid-keyboard";
+
 import { cn } from "@/lib/utils";
 
 const chartConfig = {
@@ -137,6 +138,14 @@ function StatusStrip({
   );
 
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    // One row, so Up and Down keep scrolling the page.
+    if (
+      !isGridKey(event) ||
+      event.key === "ArrowUp" ||
+      event.key === "ArrowDown"
+    ) {
+      return;
+    }
     const current = Number(
       (event.target as HTMLElement).closest<HTMLElement>("[data-bucket]")
         ?.dataset.bucket
@@ -144,14 +153,15 @@ function StatusStrip({
     if (Number.isNaN(current)) {
       return;
     }
-    const next = nextPlateCell(
+    // Always handled, so an arrow key at either end never scrolls the strip.
+    event.preventDefault();
+    const next = nextGridCell(
       { rows: 1, cols: buckets.length, has: () => true },
       { row: 0, col: current },
       event.key,
       event.ctrlKey
     );
     if (next) {
-      event.preventDefault();
       setActiveIndex(next.col);
       stripRef.current
         ?.querySelector<HTMLElement>(`[data-bucket="${next.col}"]`)
@@ -254,8 +264,8 @@ export function HeartbeatChart({
   const summary = useMemo(() => {
     const total = (key: "files" | "runs" | "errors") =>
       data.reduce((sum, point) => sum + point[key], 0);
-    return `${data.length} ${data.length === 1 ? "heartbeat" : "heartbeats"} on ${since}. Files uploaded: ${total("files")}. Runs reported: ${total("runs")}. Errors: ${total("errors")}.`;
-  }, [data, since]);
+    return `${data.length} ${data.length === 1 ? "heartbeat" : "heartbeats"} on ${formatDate(windowStart, timeZone)}. Files uploaded: ${total("files")}. Runs reported: ${total("runs")}. Errors: ${total("errors")}.`;
+  }, [data, windowStart, timeZone]);
 
   const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
   const windowMs = endMs - startMs;

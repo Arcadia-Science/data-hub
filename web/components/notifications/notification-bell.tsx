@@ -27,7 +27,9 @@ export function NotificationBell() {
       {/* Announces new notifications to screen readers. The visible badge is
           hidden from them, and a changed `aria-label` is not announced. */}
       <span aria-live="polite" className="sr-only" role="status">
-        {unreadCount > 0 ? `${unreadCount} unread notifications` : ""}
+        {unreadCount > 0
+          ? `${unreadCount} unread ${unreadCount === 1 ? "notification" : "notifications"}`
+          : ""}
       </span>
       <Popover
         onOpenChange={(next) => {

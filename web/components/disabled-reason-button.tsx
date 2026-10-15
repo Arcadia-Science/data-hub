@@ -32,7 +32,7 @@ export function DisabledReasonButton({
         <Button
           {...buttonProps}
           aria-disabled="true"
-          className={cn("cursor-not-allowed opacity-50", className)}
+          className={className}
           // `disabled` would take the button out of the tab order again.
           disabled={undefined}
           onClick={(event) => event.preventDefault()}

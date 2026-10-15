@@ -3,6 +3,7 @@
 import { AlertTriangle } from "lucide-react";
 import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
+import { LoadingSkeleton } from "@/components/loading-skeleton";
 import { useReportDataSource } from "@/components/runs/report-data-source-provider";
 import { useReportItemsContext } from "@/components/runs/report-items-provider";
 import { Button } from "@/components/ui/button";
@@ -12,7 +13,6 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from "@/components/ui/chart";
-import { Skeleton } from "@/components/ui/skeleton";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { describeCurve } from "@/lib/runs/chart-summary";
 import type { ReportDataSource } from "@/lib/runs/view-data-source";
@@ -321,11 +321,7 @@ export function RamanSpectrumViewer() {
         </div>
       )}
       {state.status === "loading" && (
-        <Skeleton
-          aria-label="Loading spectrum"
-          className="h-80 w-full"
-          role="status"
-        />
+        <LoadingSkeleton className="h-80 w-full" label="Loading spectrum…" />
       )}
       {state.status === "error" && (
         <div

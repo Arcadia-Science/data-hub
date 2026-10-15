@@ -30,15 +30,20 @@ export function describeCurve({
   points: readonly CurvePoint[];
   xLabel: string;
 }): string {
-  if (points.length === 0) {
+  // A missing column parses to NaN, which would poison every minimum and
+  // maximum, so only points with real numbers describe the curve.
+  const finite = points.filter(
+    (point) => Number.isFinite(point.x) && Number.isFinite(point.y)
+  );
+  if (finite.length === 0) {
     return `${label}: no data.`;
   }
-  let minX = points[0].x;
-  let maxX = points[0].x;
-  let minY = points[0].y;
-  let maxY = points[0].y;
-  let xAtMax = points[0].x;
-  for (const point of points) {
+  let minX = finite[0].x;
+  let maxX = finite[0].x;
+  let minY = finite[0].y;
+  let maxY = finite[0].y;
+  let xAtMax = finite[0].x;
+  for (const point of finite) {
     minX = Math.min(minX, point.x);
     maxX = Math.max(maxX, point.x);
     minY = Math.min(minY, point.y);
@@ -47,6 +52,6 @@ export function describeCurve({
       xAtMax = point.x;
     }
   }
-  const count = points.length;
+  const count = finite.length;
   return `${label}: ${count.toLocaleString("en-US")} ${count === 1 ? "point" : "points"}. ${xLabel} runs from ${formatSummaryNumber(minX)} to ${formatSummaryNumber(maxX)}. Values range from ${formatSummaryNumber(minY)} to ${formatSummaryNumber(maxY)}, highest at ${formatSummaryNumber(xAtMax)}.`;
 }

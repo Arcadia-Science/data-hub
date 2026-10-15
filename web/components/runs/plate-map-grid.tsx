@@ -3,6 +3,7 @@
 import {
   Fragment,
   type KeyboardEvent,
+  memo,
   useId,
   useMemo,
   useRef,
@@ -14,7 +15,8 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { nextPlateCell, parseWellPosition } from "@/lib/runs/plate-wells";
+import { isGridKey, nextGridCell } from "@/lib/grid-keyboard";
+import { parseWellPosition } from "@/lib/runs/plate-wells";
 import { cn } from "@/lib/utils";
 
 export interface PlateWellData {
@@ -95,6 +97,78 @@ function heatmapColor(
   const fg = lum < 140 ? "#fff" : "hsl(330 30% 15%)";
   return [`rgb(${r},${g},${b})`, fg];
 }
+
+// One well. Every prop is a string, number, or boolean, so the memo skips the
+// cells that did not change when focus moves and a 384-well plate does not
+// re-render 384 tooltips on each key press.
+const PlateMapCell = memo(function PlateMapCell({
+  background,
+  col,
+  display,
+  foreground,
+  full,
+  isTabStop,
+  row,
+  rowLabel,
+  useHeatmap,
+}: {
+  background: string;
+  col: number;
+  display: string;
+  foreground: string;
+  full: string;
+  isTabStop: boolean;
+  row: number;
+  rowLabel: string;
+  useHeatmap: boolean;
+}) {
+  const hasValue = display !== "";
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div
+          // Wells with a value read as "A1: 0.532" and take focus, so keyboard
+          // and screen reader users get the full value that sighted users get
+          // from the tooltip.
+          {...(hasValue
+            ? {
+                "aria-label": `${rowLabel}${col + 1}: ${full}`,
+                role: "img",
+                tabIndex: isTabStop ? 0 : -1,
+              }
+            : { "aria-hidden": true })}
+          className={cn(
+            "flex aspect-square w-full min-w-0 items-center justify-center overflow-hidden rounded font-mono tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            WELL_VALUE_TEXT,
+            useHeatmap
+              ? "transition-colors"
+              : hasValue
+                ? "border border-border bg-muted/50"
+                : "border border-transparent"
+          )}
+          data-cell={`${row}-${col}`}
+          style={{
+            gridRow: row + 2,
+            gridColumn: col + 2,
+            ...(useHeatmap
+              ? { backgroundColor: background, color: foreground }
+              : {}),
+          }}
+        >
+          {display || "·"}
+        </div>
+      </TooltipTrigger>
+      {hasValue && (
+        <TooltipContent>
+          <span className="font-mono">
+            {rowLabel}
+            {col + 1}: {full}
+          </span>
+        </TooltipContent>
+      )}
+    </Tooltip>
+  );
+});
 
 interface PlateMapGridProps {
   className?: string;
@@ -197,21 +271,25 @@ function PlateMapGridView({
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (!isGridKey(event)) {
+      return;
+    }
     const key = (event.target as HTMLElement).closest<HTMLElement>(
       "[data-cell]"
     )?.dataset.cell;
     if (!key) {
       return;
     }
+    // Always handled, so an arrow key at the edge never scrolls the page.
+    event.preventDefault();
     const [row, col] = key.split("-").map(Number);
-    const next = nextPlateCell(
+    const next = nextGridCell(
       { rows, cols, has: hasValueAt },
       { row, col },
       event.key,
       event.ctrlKey
     );
     if (next) {
-      event.preventDefault();
       focusCell(`${next.row}-${next.col}`);
     }
   }
@@ -256,7 +334,8 @@ function PlateMapGridView({
           )}
         </div>
       )}
-      <p className="sr-only" id={hintId}>
+      {/* `hidden` keeps it out of browsing; it still describes the plate. */}
+      <p hidden id={hintId}>
         Use the arrow keys to move between wells.
       </p>
       <div
@@ -314,7 +393,6 @@ function PlateMapGridView({
                 const display = formatCellValue(value);
                 const full =
                   value !== null && value !== undefined ? String(value) : "";
-                const hasValue = display !== "";
 
                 const useHeatmap =
                   heatmap && hasRange && typeof value === "number";
@@ -323,49 +401,18 @@ function PlateMapGridView({
                   : ["", ""];
 
                 return (
-                  <Tooltip key={`${ri}-${ci}`}>
-                    <TooltipTrigger asChild>
-                      <div
-                        // Wells with a value read as "A1: 0.532" and take
-                        // focus, so keyboard and screen reader users get the
-                        // full value that sighted users get from the tooltip.
-                        {...(hasValue
-                          ? {
-                              "aria-label": `${rowLabel}${ci + 1}: ${full}`,
-                              role: "img",
-                              tabIndex: `${ri}-${ci}` === tabStopCell ? 0 : -1,
-                            }
-                          : { "aria-hidden": true })}
-                        className={cn(
-                          "flex aspect-square w-full min-w-0 items-center justify-center overflow-hidden rounded font-mono tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                          WELL_VALUE_TEXT,
-                          useHeatmap
-                            ? "transition-colors"
-                            : hasValue
-                              ? "border border-border bg-muted/50"
-                              : "border border-transparent"
-                        )}
-                        data-cell={`${ri}-${ci}`}
-                        style={{
-                          gridRow: ri + 2,
-                          gridColumn: ci + 2,
-                          ...(useHeatmap
-                            ? { backgroundColor: bg, color: fg }
-                            : {}),
-                        }}
-                      >
-                        {display || "·"}
-                      </div>
-                    </TooltipTrigger>
-                    {hasValue && (
-                      <TooltipContent>
-                        <span className="font-mono">
-                          {rowLabel}
-                          {ci + 1}: {full}
-                        </span>
-                      </TooltipContent>
-                    )}
-                  </Tooltip>
+                  <PlateMapCell
+                    background={useHeatmap ? bg : ""}
+                    col={ci}
+                    display={display}
+                    foreground={useHeatmap ? fg : ""}
+                    full={full}
+                    isTabStop={`${ri}-${ci}` === tabStopCell}
+                    key={`${ri}-${ci}`}
+                    row={ri}
+                    rowLabel={rowLabel}
+                    useHeatmap={useHeatmap}
+                  />
                 );
               })}
             </Fragment>

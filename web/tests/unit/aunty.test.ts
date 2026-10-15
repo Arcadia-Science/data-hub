@@ -172,7 +172,7 @@ describe("seriesMetaFor", () => {
   it("uses time on the x-axis for isothermal fluorescence", () => {
     expect(seriesMetaFor("isothermal", "fluorescence").xLabel).toBe("Time (s)");
     expect(seriesMetaFor("thermal_ramp", "fluorescence").xLabel).toBe(
-      "Temperature"
+      "Temperature (°C)"
     );
   });
 });

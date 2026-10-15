@@ -62,7 +62,7 @@ export function AuntyWellChart({
   // The chart is a picture, so this is its text version.
   const summary = [
     describeCurve({ label: meta.label, points, xLabel: meta.xLabel }),
-    marker === null ? null : `Tm1 is ${marker.toFixed(1)}.`,
+    marker === null ? null : `Tm1 is ${marker.toFixed(1)} °C.`,
   ]
     .filter(Boolean)
     .join(" ");

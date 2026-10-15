@@ -36,6 +36,32 @@ describe("describeCurve", () => {
     );
   });
 
+  it("skips points that are not real numbers", () => {
+    const text = describeCurve({
+      label: "Intensity",
+      xLabel: "x",
+      points: [
+        { x: 1, y: 4 },
+        { x: 2, y: Number.NaN },
+        { x: Number.NaN, y: 99 },
+        { x: 3, y: 8 },
+      ],
+    });
+    expect(text).toBe(
+      "Intensity: 2 points. x runs from 1 to 3. Values range from 4 to 8, highest at 3."
+    );
+  });
+
+  it("reports no data when every point is unusable", () => {
+    expect(
+      describeCurve({
+        label: "Dark",
+        xLabel: "x",
+        points: [{ x: 1, y: Number.NaN }],
+      })
+    ).toBe("Dark: no data.");
+  });
+
   it("uses the singular for one point", () => {
     expect(
       describeCurve({ label: "A", xLabel: "x", points: [{ x: 1, y: 2 }] })

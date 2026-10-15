@@ -2,6 +2,7 @@
 
 import { AlertTriangle } from "lucide-react";
 import type { ReactNode } from "react";
+import { LoadingSkeleton } from "@/components/loading-skeleton";
 import {
   usePlateWellsActions,
   usePlateWellsState,
@@ -15,7 +16,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Skeleton } from "@/components/ui/skeleton";
+import { useReturnFocus } from "@/hooks/use-return-focus";
 
 const WELL_SEEKER_LABELS = {
   empty: "No wells found.",
@@ -48,10 +49,23 @@ export function WellDialogShell({
 }) {
   const state = usePlateWellsState();
   const actions = usePlateWellsActions();
+  const selectedWell = state.selectedItem?.filename ?? null;
+  // The seeker can step to another well while the dialog is open, so focus
+  // lands on the tile for the well last shown, in the plate that opened it.
+  // A run can hold several plates that repeat well labels, hence the scope.
+  const returnFocus = useReturnFocus((opener) =>
+    selectedWell === null
+      ? null
+      : (opener
+          .closest("[data-plate]")
+          ?.querySelector<HTMLElement>(
+            `[data-well="${CSS.escape(selectedWell)}"]`
+          ) ?? null)
+  );
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent className="sm:max-w-3xl" showCloseButton>
+      <DialogContent className="sm:max-w-3xl" showCloseButton {...returnFocus}>
         <DialogHeader>
           <DialogTitle className="font-mono text-2xl">{title}</DialogTitle>
           <DialogDescription className="sr-only">
@@ -96,11 +110,5 @@ export function CurveLoadError({
 
 /** Placeholder while a curve downloads. */
 export function CurveLoading() {
-  return (
-    <Skeleton
-      aria-label="Loading curve"
-      className="h-80 w-full"
-      role="status"
-    />
-  );
+  return <LoadingSkeleton className="h-80 w-full" label="Loading curve…" />;
 }

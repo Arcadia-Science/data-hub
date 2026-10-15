@@ -11,11 +11,8 @@ import {
   useRef,
   useState,
 } from "react";
-import {
-  buildPlateLayout,
-  nextPlateCell,
-  plateCellKey,
-} from "@/lib/runs/plate-wells";
+import { isGridKey, nextGridCell } from "@/lib/grid-keyboard";
+import { buildPlateLayout, plateCellKey } from "@/lib/runs/plate-wells";
 import { cn } from "@/lib/utils";
 
 const COMPACT_PLATE_MAX_COLS = 12;
@@ -25,19 +22,23 @@ const TILE_CLASS =
 
 // Memoized so opening or closing the well dialog does not re-render up to 384
 // tiles behind it. Only the two tiles that gain or lose the tab stop update.
+// The grid position goes in as two numbers, not a style object, so a tile's
+// props stay equal between renders and the memo holds.
 const WellTile = memo(function WellTile<W extends { well: string }>({
   className,
+  gridColumn,
+  gridRow,
   isTabStop,
   onSelect,
   renderTile,
   well,
-  style,
 }: {
   className?: string;
+  gridColumn?: number;
+  gridRow?: number;
   isTabStop: boolean;
   onSelect: (well: string) => void;
   renderTile: (well: W) => ReactNode;
-  style?: React.CSSProperties;
   well: W;
 }) {
   return (
@@ -46,7 +47,7 @@ const WellTile = memo(function WellTile<W extends { well: string }>({
       className={cn(TILE_CLASS, className)}
       data-well={well.well}
       onClick={() => onSelect(well.well)}
-      style={style}
+      style={gridRow === undefined ? undefined : { gridRow, gridColumn }}
       tabIndex={isTabStop ? 0 : -1}
       type="button"
     >
@@ -55,10 +56,11 @@ const WellTile = memo(function WellTile<W extends { well: string }>({
   );
 }) as <W extends { well: string }>(props: {
   className?: string;
+  gridColumn?: number;
+  gridRow?: number;
   isTabStop: boolean;
   onSelect: (well: string) => void;
   renderTile: (well: W) => ReactNode;
-  style?: React.CSSProperties;
   well: W;
 }) => ReactNode;
 
@@ -121,6 +123,9 @@ export function PlateGrid<W extends { well: string }>({
 
   const onKeyDown = useCallback(
     (event: KeyboardEvent<HTMLDivElement>) => {
+      if (!isGridKey(event)) {
+        return;
+      }
       const current = (event.target as HTMLElement).closest<HTMLElement>(
         "[data-well]"
       )?.dataset.well;
@@ -128,7 +133,9 @@ export function PlateGrid<W extends { well: string }>({
       if (!from) {
         return;
       }
-      const next = nextPlateCell(
+      // Always handled, so an arrow key at the edge never scrolls the page.
+      event.preventDefault();
+      const next = nextGridCell(
         {
           rows: layout.rows,
           cols: layout.cols,
@@ -144,7 +151,6 @@ export function PlateGrid<W extends { well: string }>({
       if (!label) {
         return;
       }
-      event.preventDefault();
       setActiveWell(label);
       containerRef.current
         ?.querySelector<HTMLElement>(`[data-well="${CSS.escape(label)}"]`)
@@ -176,7 +182,8 @@ export function PlateGrid<W extends { well: string }>({
 
   return (
     <div className="flex w-full min-w-0 flex-col gap-3">
-      <p className="sr-only" id={hintId}>
+      {/* `hidden` keeps it out of browsing; it still describes the plate. */}
+      <p hidden id={hintId}>
         Use the arrow keys to move between wells and Enter to open one.
       </p>
       {layout.byPos.size > 0 && (
@@ -184,6 +191,7 @@ export function PlateGrid<W extends { well: string }>({
           aria-describedby={hintId}
           aria-label={ariaLabel}
           className="w-full min-w-0 overflow-x-auto overscroll-x-contain"
+          data-plate=""
           onFocus={onFocus}
           onKeyDown={onKeyDown}
           ref={containerRef}
@@ -229,11 +237,12 @@ export function PlateGrid<W extends { well: string }>({
                   }
                   return (
                     <WellTile
+                      gridColumn={ci + 2}
+                      gridRow={ri + 2}
                       isTabStop={well.well === tabStop}
                       key={label}
                       onSelect={onSelectWell}
                       renderTile={renderTile}
-                      style={style}
                       well={well}
                     />
                   );

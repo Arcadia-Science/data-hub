@@ -114,7 +114,7 @@ export function NotificationBellContent({
       {isEmpty ? (
         EMPTY_STATE
       ) : (
-        <div className="max-h-[60vh] overflow-y-auto">
+        <div className="max-h-[60vh] overflow-y-auto overscroll-contain">
           {sections.map((section) => (
             <NotificationSection key={section.dayKey} label={section.label}>
               {section.entries.map((entry) => {

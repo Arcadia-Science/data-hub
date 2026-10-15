@@ -7,6 +7,7 @@ import {
   Download,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { LoadingSkeleton } from "@/components/loading-skeleton";
 import { ColonyDataTableView } from "@/components/runs/colony-data-table";
 import { Button } from "@/components/ui/button";
 import {
@@ -16,7 +17,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Skeleton } from "@/components/ui/skeleton";
 import { trackClientEvent } from "@/lib/analytics/track-client";
 import { type FilePreview, loadFilePreview } from "@/lib/runs/file-preview";
 import type { FilePreviewKind } from "@/lib/runs/run-file-types";
@@ -193,11 +193,7 @@ export function FilePreviewDialog({
         </DialogHeader>
         <div className="flex min-w-0 flex-col gap-2">
           {state === null && (
-            <Skeleton
-              aria-label="Loading preview"
-              className="h-72 w-full"
-              role="status"
-            />
+            <LoadingSkeleton className="h-72 w-full" label="Loading preview…" />
           )}
           {state?.status === "error" && (
             <div
