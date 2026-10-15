@@ -95,10 +95,10 @@ describe("changelog search", () => {
 
   it("still searches for a real word inside a filler question", () => {
     const outcome = searchChangelog({
-      query: "what's new this week",
+      query: "what changed recently in Benchling",
       limit: LIMIT,
     });
-    expect(outcome.missingWords).toEqual(["week"]);
+    expect(outcome.missingWords).toEqual(["Benchling"]);
     expect(outcome.goodMatches).toBe(0);
   });
 
