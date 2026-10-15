@@ -25,7 +25,7 @@ export function InstrumentsViewSkeleton() {
         <TabsContent className="mt-2" value="active">
           {/* Actions column omitted: it's admin-only and renders instantly,
               so a placeholder just adds flicker. */}
-          <InstrumentsTableSkeleton withNotifications />
+          <InstrumentsTableSkeleton />
         </TabsContent>
       </Tabs>
     </div>

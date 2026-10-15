@@ -5,7 +5,7 @@ import Link from "next/link";
 import { FilePatterns } from "@/components/instruments/file-patterns";
 import { InstrumentActions } from "@/components/instruments/instrument-actions";
 import { InstrumentStatusBadge } from "@/components/instruments/instrument-status-badge";
-import { InstrumentNotificationSwitch } from "@/components/notifications/instrument-notification-switch";
+import { InstrumentNotificationPill } from "@/components/notifications/instrument-notification-switch";
 import { RecordInstrumentVisit } from "@/components/recent-instrument-visit";
 import { ActorLabel } from "@/components/token-actor";
 import {
@@ -207,12 +207,11 @@ export function InstrumentHeader({
               pill would be a dead control — hide it outside the active state
               (matches `/settings/notifications`, which lists active only). */}
           {notifications && instrument.status === "active" ? (
-            <InstrumentNotificationSwitch
+            <InstrumentNotificationPill
               initialEnabled={notifications.enabled}
               instrumentId={instrument.id}
               masterMuted={notifications.masterMuted}
               size="sm"
-              variant="button"
             />
           ) : null}
           {isAdmin ? (

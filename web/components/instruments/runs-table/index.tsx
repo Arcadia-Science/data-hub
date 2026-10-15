@@ -1,7 +1,7 @@
 import { SearchX } from "lucide-react";
+import { EmptyState } from "@/components/empty-state";
 import type { RunListRow } from "@/lib/api/instrument-runs";
 import { cn } from "@/lib/utils";
-
 import { RunsTableFooter } from "./runs-table-footer";
 
 // Re-export under the historical name so imports like
@@ -54,14 +54,9 @@ export function InstrumentRunsTableShell({
 }) {
   if (isEmpty) {
     return (
-      <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed bg-background py-16 dark:bg-muted">
-        <SearchX className="size-8 text-muted-foreground" />
-        <p className="text-muted-foreground text-sm">
-          {hasFilters
-            ? "No runs match your filters."
-            : "No instrument runs yet."}
-        </p>
-      </div>
+      <EmptyState icon={SearchX}>
+        {hasFilters ? "No runs match your filters." : "No instrument runs yet."}
+      </EmptyState>
     );
   }
 

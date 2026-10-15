@@ -3,6 +3,7 @@
 import { Inbox } from "lucide-react";
 import { CopyButton } from "@/components/copy-button";
 import { RelativeTime } from "@/components/dashboard/relative-time";
+import { EmptyState } from "@/components/empty-state";
 import { PaginationNav } from "@/components/pagination-nav";
 import { TablePendingBoundary } from "@/components/table-pending";
 import {
@@ -89,12 +90,9 @@ export function EventLog({
   if (events.length === 0) {
     return (
       <TablePendingBoundary>
-        <div className="flex flex-col items-center justify-center gap-2 rounded-md border border-dashed bg-background py-8 dark:bg-muted">
-          <Inbox className="size-6 text-muted-foreground" />
-          <p className="text-muted-foreground text-sm">
-            No events in this time range.
-          </p>
-        </div>
+        <EmptyState icon={Inbox} size="compact">
+          No events in this time range.
+        </EmptyState>
       </TablePendingBoundary>
     );
   }

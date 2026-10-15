@@ -1,6 +1,7 @@
 import { SearchX } from "lucide-react";
 import type { ReactNode } from "react";
 import { RelativeTime } from "@/components/dashboard/relative-time";
+import { EmptyState } from "@/components/empty-state";
 import { RowControl, RowLink } from "@/components/row-link";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -84,12 +85,7 @@ export function WatchersTable({
   renderRowActions?: (row: WatcherListItem) => ReactNode;
 }) {
   if (data.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed bg-background py-16 dark:bg-muted">
-        <SearchX className="size-8 text-muted-foreground" />
-        <p className="text-muted-foreground text-sm">{emptyMessage}</p>
-      </div>
-    );
+    return <EmptyState icon={SearchX}>{emptyMessage}</EmptyState>;
   }
 
   return (

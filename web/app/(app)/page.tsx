@@ -17,8 +17,8 @@ import {
 } from "@/components/dashboard/runs-table";
 import { RunsToolbar } from "@/components/dashboard/runs-toolbar";
 import {
+  DashboardInstrumentsTableSkeleton,
   InstrumentsTable,
-  InstrumentsTableSkeleton,
 } from "@/components/instruments/instruments-table";
 import { RunBulkActionBar } from "@/components/instruments/runs-table/run-bulk-action-bar";
 import { RunSelectionProvider } from "@/components/instruments/runs-table/run-selection-provider";
@@ -83,12 +83,7 @@ export default async function DashboardPage({
         <h2 className="font-medium text-lg tracking-tight">Instruments</h2>
         <Suspense
           fallback={
-            <InstrumentsTableSkeleton
-              footerLabel="View all instruments"
-              rows={3}
-              withFooter
-              withNotifications={false}
-            />
+            <DashboardInstrumentsTableSkeleton footerLabel="View all instruments" />
           }
         >
           <DashboardInstrumentsSection />

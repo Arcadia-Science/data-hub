@@ -1,6 +1,7 @@
 import { ArrowRight, SearchX } from "lucide-react";
 import type { ReactNode } from "react";
 import { RelativeTime } from "@/components/dashboard/relative-time";
+import { EmptyState } from "@/components/empty-state";
 import { FilePatterns } from "@/components/instruments/file-patterns";
 import { InstrumentStatusBadge } from "@/components/instruments/instrument-status-badge";
 import { InstrumentNotificationSwitch } from "@/components/notifications/instrument-notification-switch";
@@ -21,23 +22,19 @@ import type { InstrumentListItem } from "@/lib/api/instruments";
 
 /**
  * Placeholder that mirrors `InstrumentsTable` column layout and row height
- * (two-line instrument cell, badge-sized status/patterns, notify switch,
- * optional actions) so streamed content swaps in without layout shift.
+ * (two-line instrument cell, badge-sized status/patterns, optional notify
+ * switch) so streamed content swaps in without layout shift.
  */
-export function InstrumentsTableSkeleton({
-  rows = 8,
-  withNotifications = true,
-  withRowActions = false,
-  withFooter = false,
-  footerLabel,
-  ariaLabel = "Loading instruments",
+function InstrumentsTableSkeletonFrame({
+  ariaLabel,
+  footer,
+  notifyColumn,
+  rows,
 }: {
-  rows?: number;
-  withNotifications?: boolean;
-  withRowActions?: boolean;
-  withFooter?: boolean;
-  footerLabel?: string;
-  ariaLabel?: string;
+  ariaLabel: string;
+  footer?: ReactNode;
+  notifyColumn: boolean;
+  rows: number;
 }) {
   return (
     <div
@@ -54,10 +51,9 @@ export function InstrumentsTableSkeleton({
             <TableHead>File Patterns</TableHead>
             <TableHead>Runs This Week</TableHead>
             <TableHead>Last Run</TableHead>
-            {withNotifications ? (
+            {notifyColumn ? (
               <TableHead className="w-[80px]">Notify</TableHead>
             ) : null}
-            {withRowActions ? <TableHead className="w-[100px]" /> : null}
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -79,29 +75,57 @@ export function InstrumentsTableSkeleton({
               <TableCell>
                 <Skeleton className="h-4 w-20" />
               </TableCell>
-              {withNotifications ? (
+              {notifyColumn ? (
                 <TableCell>
                   <Skeleton className="h-3.5 w-6 rounded-full" />
-                </TableCell>
-              ) : null}
-              {withRowActions ? (
-                <TableCell>
-                  <Skeleton className="h-8 w-16" />
                 </TableCell>
               ) : null}
             </TableRow>
           ))}
         </TableBody>
       </Table>
-      {withFooter ? (
-        <div className="border-t">
-          <div className="flex items-center justify-center gap-1.5 px-4 py-2.5 text-muted-foreground text-sm">
-            {footerLabel ?? <Skeleton className="h-4 w-44" />}
-            {footerLabel ? <ArrowRight className="size-3.5" /> : null}
-          </div>
-        </div>
-      ) : null}
+      {footer ? <div className="border-t">{footer}</div> : null}
     </div>
+  );
+}
+
+/** The full instruments list: every column, including Notify. */
+export function InstrumentsTableSkeleton({
+  rows = 8,
+  ariaLabel = "Loading instruments",
+}: {
+  rows?: number;
+  ariaLabel?: string;
+}) {
+  return (
+    <InstrumentsTableSkeletonFrame
+      ariaLabel={ariaLabel}
+      notifyColumn
+      rows={rows}
+    />
+  );
+}
+
+/** The short list on the dashboard: no Notify column, a "View all" footer. */
+export function DashboardInstrumentsTableSkeleton({
+  rows = 3,
+  footerLabel,
+}: {
+  rows?: number;
+  footerLabel: string;
+}) {
+  return (
+    <InstrumentsTableSkeletonFrame
+      ariaLabel="Loading instruments"
+      footer={
+        <div className="flex items-center justify-center gap-1.5 px-4 py-2.5 text-muted-foreground text-sm">
+          {footerLabel}
+          <ArrowRight className="size-3.5" />
+        </div>
+      }
+      notifyColumn={false}
+      rows={rows}
+    />
   );
 }
 
@@ -138,12 +162,7 @@ export function InstrumentsTable({
   };
 }) {
   if (data.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed bg-background py-16 dark:bg-muted">
-        <SearchX className="size-8 text-muted-foreground" />
-        <p className="text-muted-foreground text-sm">{emptyMessage}</p>
-      </div>
-    );
+    return <EmptyState icon={SearchX}>{emptyMessage}</EmptyState>;
   }
 
   return (

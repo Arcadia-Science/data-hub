@@ -9,6 +9,7 @@ import {
   useState,
 } from "react";
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
+import { EmptyState } from "@/components/empty-state";
 import { useTablePending } from "@/components/table-pending";
 import {
   type ChartConfig,
@@ -288,12 +289,9 @@ export function HeartbeatChart({
 
   if (data.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed bg-background py-8 dark:bg-muted">
-        <HeartPulse className="size-6 text-muted-foreground" />
-        <p className="text-muted-foreground text-sm">
-          No heartbeats in this time range.
-        </p>
-      </div>
+      <EmptyState icon={HeartPulse} size="compact">
+        No heartbeats in this time range.
+      </EmptyState>
     );
   }
 
