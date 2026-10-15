@@ -1,6 +1,7 @@
 import type { App, McpUiHostContext } from "@modelcontextprotocol/ext-apps";
 import { useDocumentTheme } from "@modelcontextprotocol/ext-apps/react";
 import { useEffect } from "react";
+import { parsePersistedFileId } from "@/lib/runs/persisted-file-id";
 
 export type HostContainerDimensions = NonNullable<
   McpUiHostContext["containerDimensions"]
@@ -201,12 +202,7 @@ export function persistKey(instrumentId: string, runId: string): string {
 
 export function readPersistedFileId(key: string): number | undefined {
   try {
-    const raw = window.localStorage.getItem(key);
-    if (!raw) {
-      return;
-    }
-    const parsed = JSON.parse(raw) as { fileId?: number };
-    return typeof parsed.fileId === "number" ? parsed.fileId : undefined;
+    return parsePersistedFileId(window.localStorage.getItem(key));
   } catch {
     return;
   }

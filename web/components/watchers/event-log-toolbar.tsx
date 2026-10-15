@@ -12,6 +12,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { useViewerTimeZone } from "@/components/viewer-time-zone-provider";
 import { todayDateString } from "@/lib/date";
 import { watcherDetailSearchParams } from "@/lib/search-params";
 
@@ -36,7 +37,8 @@ export function EventLogToolbar() {
     startTransition,
   });
 
-  const today = todayDateString();
+  const timeZone = useViewerTimeZone();
+  const today = todayDateString(timeZone);
   const hasFilters =
     filters.event_type.length > 0 ||
     (filters.events_since !== null && filters.events_since !== today);

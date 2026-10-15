@@ -1,5 +1,6 @@
 "use client";
 
+import { usePathname, useSearchParams } from "next/navigation";
 import { parseAsInteger, useQueryState } from "nuqs";
 import type { MouseEvent } from "react";
 import { useTablePending } from "@/components/table-pending";
@@ -12,6 +13,8 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from "@/components/ui/pagination";
+import { buildPageHref } from "@/lib/pagination";
+import { isPlainLeftClick } from "@/lib/plain-click";
 import { cn } from "@/lib/utils";
 
 function getVisiblePages(
@@ -58,6 +61,8 @@ export function PaginationNav({
   // React transition so the sibling table can render a "stale" treatment
   // until the new RSC payload streams in.
   const { isPending, isPendingVisible, startTransition } = useTablePending();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [, setPage] = useQueryState(
     pageParam,
     parseAsInteger
@@ -71,8 +76,17 @@ export function PaginationNav({
 
   const visible = getVisiblePages(page, totalPages);
 
+  const hrefFor = (target: number) =>
+    buildPageHref(pathname, searchParams, pageParam, target);
+
+  // Only plain left clicks update the URL in place (inside the table's
+  // transition). Cmd/Ctrl/middle clicks fall through to the real `href` so the
+  // browser can open that page in a new tab.
   function go(target: number) {
-    return (e: MouseEvent) => {
+    return (e: MouseEvent<HTMLAnchorElement>) => {
+      if (!isPlainLeftClick(e)) {
+        return;
+      }
       e.preventDefault();
       setPage(target === 1 ? null : target);
     };
@@ -80,6 +94,14 @@ export function PaginationNav({
 
   const atPrev = page <= 1;
   const atNext = page >= totalPages;
+
+  // At either end the arrow has no `href`, so it is not a link: it leaves the
+  // tab order and Enter does nothing. `aria-disabled` keeps it announced.
+  const disabledArrow = {
+    "aria-disabled": true,
+    className: "pointer-events-none opacity-50",
+    role: "link",
+  } as const;
 
   return (
     <Pagination
@@ -92,12 +114,14 @@ export function PaginationNav({
     >
       <PaginationContent>
         <PaginationItem>
-          <PaginationPrevious
-            aria-disabled={atPrev}
-            className={atPrev ? "pointer-events-none opacity-50" : undefined}
-            href="#"
-            onClick={go(page - 1)}
-          />
+          {atPrev ? (
+            <PaginationPrevious {...disabledArrow} />
+          ) : (
+            <PaginationPrevious
+              href={hrefFor(page - 1)}
+              onClick={go(page - 1)}
+            />
+          )}
         </PaginationItem>
 
         {visible.map((p, i) =>
@@ -109,7 +133,11 @@ export function PaginationNav({
             </PaginationItem>
           ) : (
             <PaginationItem key={p}>
-              <PaginationLink href="#" isActive={p === page} onClick={go(p)}>
+              <PaginationLink
+                href={hrefFor(p)}
+                isActive={p === page}
+                onClick={go(p)}
+              >
                 {p}
               </PaginationLink>
             </PaginationItem>
@@ -117,12 +145,11 @@ export function PaginationNav({
         )}
 
         <PaginationItem>
-          <PaginationNext
-            aria-disabled={atNext}
-            className={atNext ? "pointer-events-none opacity-50" : undefined}
-            href="#"
-            onClick={go(page + 1)}
-          />
+          {atNext ? (
+            <PaginationNext {...disabledArrow} />
+          ) : (
+            <PaginationNext href={hrefFor(page + 1)} onClick={go(page + 1)} />
+          )}
         </PaginationItem>
       </PaginationContent>
     </Pagination>

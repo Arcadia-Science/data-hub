@@ -126,11 +126,13 @@ export async function getAttributionsByRunIds(
 // component share a single DB hit per request (the page calls this once for
 // the head and once for the body). Mirrors the same treatment applied to
 // `getInstrumentById`.
+//
+// `runId` is the real run ID. Route handlers already receive it decoded, and
+// pages decode it first with `decodePageParam`.
 export const lookupRunByNaturalKey = cache(async function lookupRunByNaturalKey(
   instrumentId: string,
   runId: string
 ) {
-  const decodedRunId = decodeURIComponent(runId);
   const [row] = await db
     .select({
       id: instrumentRuns.id,
@@ -165,7 +167,7 @@ export const lookupRunByNaturalKey = cache(async function lookupRunByNaturalKey(
     .where(
       and(
         eq(instrumentRuns.instrumentId, instrumentId),
-        eq(instrumentRuns.runId, decodedRunId)
+        eq(instrumentRuns.runId, runId)
       )
     )
     .limit(1);
@@ -210,7 +212,7 @@ export async function lookupRunUuidsByNaturalKeys(
   instrumentId: string,
   runIds: string[]
 ): Promise<Map<string, string>> {
-  const unique = [...new Set(runIds.map((runId) => decodeURIComponent(runId)))];
+  const unique = [...new Set(runIds)];
   if (unique.length === 0) {
     return new Map();
   }

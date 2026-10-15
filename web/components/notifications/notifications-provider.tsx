@@ -6,6 +6,8 @@ import {
   use,
   useCallback,
   useEffect,
+  useMemo,
+  useRef,
   useState,
 } from "react";
 import { toast } from "sonner";
@@ -16,22 +18,31 @@ export type { NotificationItem } from "@/lib/notifications/types";
 
 // ---------------------------------------------------------------------------
 // Notifications provider — single source of truth for the bell badge and
-// popover content. Decouples the rest of the UI from the API shape: the
-// only surface consumers see is `{ unreadCount, recent, markAllRead,
-// refresh }`. Subcomponents that don't need `recent` (the bell badge)
-// re-render only when other state slices change because the popover
-// content is mounted lazily.
+// popover content. Decouples the rest of the UI from the API shape.
+//
+// The value is split in two contexts so the bell button, which sits in every
+// page header, re-renders when the unread count changes but not each time the
+// list of recent notifications does. `useNotifications` joins both for the
+// popover content, and `useNotificationsSummary` reads only the badge half.
 // ---------------------------------------------------------------------------
 
-interface NotificationsValue {
+interface NotificationsSummary {
   markAllRead: () => Promise<void>;
   markOneRead: (id: string) => Promise<void>;
-  recent: NotificationItem[];
   refresh: () => Promise<void>;
   unreadCount: number;
 }
 
-const NotificationsContext = createContext<NotificationsValue | null>(null);
+interface NotificationsList {
+  recent: NotificationItem[];
+}
+
+type NotificationsValue = NotificationsSummary & NotificationsList;
+
+const NotificationsSummaryContext = createContext<NotificationsSummary | null>(
+  null
+);
+const NotificationsListContext = createContext<NotificationsList | null>(null);
 
 // Re-poll cadence for the bell badge + popover list while the tab is
 // visible. Hidden tabs don't poll at all — the visibilitychange listener
@@ -120,6 +131,10 @@ export function NotificationsProvider({
 }) {
   const [unreadCount, setUnreadCount] = useState(initialUnreadCount);
   const [recent, setRecent] = useState<NotificationItem[]>([]);
+  // The last list that came from the server, as text. A poll that returns the
+  // same list leaves `recent` alone, so nothing downstream re-renders. Local
+  // edits clear it, so the next poll always replaces what the user sees.
+  const lastServerList = useRef("");
 
   // Functional setState in the fetcher means `refresh` doesn't depend on
   // the latest `unreadCount` / `recent` — its identity stays stable across
@@ -136,7 +151,11 @@ export function NotificationsProvider({
         notifications: ApiNotification[];
       };
       setUnreadCount(body.unreadCount);
-      setRecent(body.notifications.map(fromApi));
+      const serialized = JSON.stringify(body.notifications);
+      if (serialized !== lastServerList.current) {
+        lastServerList.current = serialized;
+        setRecent(body.notifications.map(fromApi));
+      }
     } catch {
       // Network blips during polling are silently ignored — the next tick
       // will retry. Failures on user-initiated refresh (popover open) are
@@ -148,6 +167,7 @@ export function NotificationsProvider({
     // Optimistically clear the badge + flag every recent row read.
     // Failure recovers truth via a follow-up refresh.
     const stampedAt = new Date().toISOString();
+    lastServerList.current = "";
     setUnreadCount(() => 0);
     setRecent((prev) =>
       prev.map((n) => (n.readAt ? n : { ...n, readAt: stampedAt }))
@@ -177,6 +197,7 @@ export function NotificationsProvider({
   const markOneRead = useCallback(
     async (id: string) => {
       const stampedAt = new Date().toISOString();
+      lastServerList.current = "";
       setRecent((prev) =>
         prev.map((n) =>
           n.id === id && !n.readAt ? { ...n, readAt: stampedAt } : n
@@ -249,21 +270,39 @@ export function NotificationsProvider({
     };
   }, [refresh]);
 
+  const summary = useMemo(
+    () => ({ unreadCount, refresh, markAllRead, markOneRead }),
+    [unreadCount, refresh, markAllRead, markOneRead]
+  );
+  const list = useMemo(() => ({ recent }), [recent]);
+
   return (
-    <NotificationsContext
-      value={{ unreadCount, recent, refresh, markAllRead, markOneRead }}
-    >
-      {children}
-    </NotificationsContext>
+    <NotificationsSummaryContext value={summary}>
+      <NotificationsListContext value={list}>
+        {children}
+      </NotificationsListContext>
+    </NotificationsSummaryContext>
   );
 }
 
-export function useNotifications(): NotificationsValue {
-  const ctx = use(NotificationsContext);
-  if (!ctx) {
-    throw new Error(
-      "useNotifications must be used within a <NotificationsProvider>"
-    );
+const MISSING_PROVIDER =
+  "useNotifications must be used within a <NotificationsProvider>";
+
+/** The unread count and the actions, for the bell button. */
+export function useNotificationsSummary(): NotificationsSummary {
+  const summary = use(NotificationsSummaryContext);
+  if (!summary) {
+    throw new Error(MISSING_PROVIDER);
   }
-  return ctx;
+  return summary;
+}
+
+/** Everything, including the recent list, for the popover content. */
+export function useNotifications(): NotificationsValue {
+  const summary = useNotificationsSummary();
+  const list = use(NotificationsListContext);
+  if (!list) {
+    throw new Error(MISSING_PROVIDER);
+  }
+  return useMemo(() => ({ ...summary, ...list }), [summary, list]);
 }

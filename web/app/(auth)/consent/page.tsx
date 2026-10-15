@@ -1,7 +1,9 @@
 import { eq } from "drizzle-orm";
+import { redirect } from "next/navigation";
 import type { Metadata } from "next/types";
 import { cache } from "react";
 import { ConsentForm } from "@/components/auth/consent-form";
+import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { oauthClients } from "@/lib/db/schema";
 
@@ -79,6 +81,13 @@ export default async function ConsentPage({
     }
   }
   const oauthQuery = oauthQueryParams.toString();
+
+  // Signed-out visitors go to sign-in from the server. Deciding in the browser
+  // would flash the form's loading text before the redirect.
+  const session = await auth();
+  if (!session?.user) {
+    redirect(oauthQuery ? `/login?${oauthQuery}` : "/login");
+  }
 
   // `/oauth2/public-client` omits redirect_uris; read them from the DB.
   const client = await lookupConsentClient(clientId);

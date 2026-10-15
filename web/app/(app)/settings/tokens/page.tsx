@@ -61,9 +61,9 @@ export default async function TokensPage() {
     <div>
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="font-semibold text-lg tracking-tight">
+          <h1 className="font-semibold text-lg tracking-tight">
             Access Tokens
-          </h2>
+          </h1>
           <p className="text-muted-foreground text-sm">
             {isAdmin
               ? "Manage personal access tokens for API authentication."
@@ -152,7 +152,11 @@ async function TokensSection({ isAdmin }: { isAdmin: boolean }) {
                   : null;
                 return (
                   <TableRow key={token.id}>
-                    <TableCell className="font-medium">{token.name}</TableCell>
+                    <TableCell className="max-w-64 font-medium">
+                      <span className="block truncate" title={token.name}>
+                        {token.name}
+                      </span>
+                    </TableCell>
                     <TableCell>
                       {avatarUser ? (
                         <span className="inline-flex items-center gap-2">

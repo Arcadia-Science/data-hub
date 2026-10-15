@@ -43,7 +43,7 @@ export default async function MembersPage() {
     <SettingsPageContent className="w-3/4">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="font-semibold text-lg tracking-tight">Members</h2>
+          <h1 className="font-semibold text-lg tracking-tight">Members</h1>
           <p className="text-muted-foreground text-sm">
             Grant or revoke admin access for teammates signed in to Data Hub.
           </p>

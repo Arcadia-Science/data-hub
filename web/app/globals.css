@@ -139,6 +139,14 @@ html.dark .shiki span {
 }
 
 @layer base {
+  /* Tells the browser which theme the page uses, so native scrollbars, form
+     controls, and the autofill colors match it. */
+  :root {
+    color-scheme: light;
+  }
+  .dark {
+    color-scheme: dark;
+  }
   * {
     @apply border-border outline-ring/50;
   }
@@ -162,4 +170,23 @@ html[data-preview-deployment] body {
 
 html[data-preview-deployment] [data-slot="sidebar-container"] {
   top: var(--banner-height);
+}
+
+/* People who ask their system for less motion get dialogs, menus, and tooltips
+   without the zoom and slide, and loading placeholders without the pulse.
+   Spinners stay because they show that work is in progress. The primitives set
+   these through classes such as `data-open:animate-in`, so a plain class
+   selector would miss them. */
+@media (prefers-reduced-motion: reduce) {
+  [class*="animate-in"],
+  [class*="animate-out"],
+  .animate-pulse {
+    animation: none !important;
+  }
+}
+
+/* Comment links scroll to the comment, which should not land under the top of
+   the page. */
+[id^="comment-"] {
+  scroll-margin-top: 4.5rem;
 }

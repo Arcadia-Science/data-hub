@@ -9,25 +9,9 @@ import {
   HinaChannelBadges,
 } from "@/components/runs/run-metadata-badges";
 import { Badge } from "@/components/ui/badge";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import type { HinaFilterOptions } from "@/lib/api/instrument-runs";
-import { runRowToRef } from "@/lib/runs/row-actions";
-import { cn, formatBytes } from "@/lib/utils";
 import type { RunRow } from ".";
-import { FilterableColumnHeader } from "./filterable-column-header";
-import { RanByCell } from "./ran-by-cell";
-import { RawFileColumnHeader } from "./raw-file-column-header";
-import { RunIdCell } from "./run-id-cell";
-import { RunSelectAllCheckbox, RunSelectCheckbox } from "./run-select-checkbox";
-import type { RunRef } from "./run-selection-provider";
-import { RunTimeCells, RunTimeHeads } from "./run-time-columns";
+import { type MetadataColumn, RunRowsTable } from "./run-rows-table";
 
 export function HinaRunsTable({
   data,
@@ -40,104 +24,58 @@ export function HinaRunsTable({
   filterOptions: HinaFilterOptions;
   ranByOptions: { value: string; label: string }[];
 }) {
-  const runRefs: RunRef[] = data.map(runRowToRef);
+  const columns: MetadataColumn[] = [
+    {
+      filter: {
+        label: "Channels",
+        options: filterOptions.channels,
+        paramKey: "hina_channel",
+      },
+      cell: (row) => (
+        <HinaChannelBadges
+          channels={extractHinaChannels(row.metadata)}
+          maxVisible={1}
+        />
+      ),
+    },
+    {
+      filter: {
+        label: "Dimensions",
+        options: filterOptions.dimensions,
+        paramKey: "hina_dimension",
+      },
+      cell: (row) => (
+        <MetadataArrayBadges
+          values={getMetadataArray(row.metadata, "dimensions")}
+        />
+      ),
+    },
+    {
+      filter: {
+        label: "Sizes",
+        options: filterOptions.sizes,
+        paramKey: "hina_size",
+      },
+      cell: (row) => {
+        const sizes = getMetadataRecord(row.metadata, "sizes");
+        const sizesLabel = sizes ? formatHinaSizes(sizes) : "";
+        return sizesLabel ? (
+          <Badge className="font-mono" variant="outline">
+            {sizesLabel}
+          </Badge>
+        ) : (
+          <span className="text-muted-foreground">&mdash;</span>
+        );
+      },
+    },
+  ];
 
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead className="w-10">
-            <RunSelectAllCheckbox refs={runRefs} />
-          </TableHead>
-          <TableHead>Run ID</TableHead>
-          <TableHead>
-            <RawFileColumnHeader label="Files" />
-          </TableHead>
-          <TableHead className="text-right">
-            <RawFileColumnHeader label="Size" />
-          </TableHead>
-          <TableHead>
-            <FilterableColumnHeader
-              label="Channels"
-              options={filterOptions.channels}
-              paramKey="hina_channel"
-            />
-          </TableHead>
-          <TableHead>
-            <FilterableColumnHeader
-              label="Dimensions"
-              options={filterOptions.dimensions}
-              paramKey="hina_dimension"
-            />
-          </TableHead>
-          <TableHead>
-            <FilterableColumnHeader
-              label="Sizes"
-              options={filterOptions.sizes}
-              paramKey="hina_size"
-            />
-          </TableHead>
-          <TableHead>
-            <FilterableColumnHeader
-              label="Ran By"
-              options={ranByOptions}
-              paramKey="ran_by"
-            />
-          </TableHead>
-          <RunTimeHeads />
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {data.map((row) => {
-          const isDeleted = row.deleted_at !== null;
-          const channels = extractHinaChannels(row.metadata);
-          const dimensions = getMetadataArray(row.metadata, "dimensions");
-          const sizes = getMetadataRecord(row.metadata, "sizes");
-          const sizesLabel = sizes ? formatHinaSizes(sizes) : "";
-          return (
-            <TableRow className={cn(isDeleted && "opacity-50")} key={row.id}>
-              <TableCell>
-                <RunSelectCheckbox runRef={runRowToRef(row)} />
-              </TableCell>
-              <TableCell>
-                <RunIdCell
-                  href={`/instruments/${instrumentId}/runs/${encodeURIComponent(row.run_id)}`}
-                  run={row}
-                />
-              </TableCell>
-              <TableCell className="text-sm tabular-nums">
-                {row.file_count}
-              </TableCell>
-              <TableCell className="text-right text-sm tabular-nums">
-                {formatBytes(row.total_size_bytes)}
-              </TableCell>
-              <TableCell>
-                <HinaChannelBadges channels={channels} maxVisible={1} />
-              </TableCell>
-              <TableCell>
-                <MetadataArrayBadges values={dimensions} />
-              </TableCell>
-              <TableCell>
-                {sizesLabel ? (
-                  <Badge className="font-mono" variant="outline">
-                    {sizesLabel}
-                  </Badge>
-                ) : (
-                  <span className="text-muted-foreground">&mdash;</span>
-                )}
-              </TableCell>
-              <TableCell>
-                <RanByCell
-                  attributions={row.attributions}
-                  instrumentId={row.instrument_id}
-                  runId={row.run_id}
-                />
-              </TableCell>
-              <RunTimeCells row={row} />
-            </TableRow>
-          );
-        })}
-      </TableBody>
-    </Table>
+    <RunRowsTable
+      columns={columns}
+      data={data}
+      instrumentId={instrumentId}
+      ranByOptions={ranByOptions}
+    />
   );
 }

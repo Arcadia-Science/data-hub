@@ -8,6 +8,7 @@ import { IntegrationField } from "@/components/integrations/integration-field";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { FieldGroup } from "@/components/ui/field";
+import { useUnsavedChangesWarning } from "@/hooks/use-unsaved-changes-warning";
 import type { PlainFieldStatus } from "@/lib/integrations/field-status";
 import type {
   SlackAppConfigForAdmin,
@@ -85,6 +86,8 @@ export function SlackAppCard({
 
   const patch = buildPatch();
   const dirty = Object.keys(patch).length > 0;
+
+  useUnsavedChangesWarning(dirty && !saving);
 
   async function handleSave() {
     if (!dirty) {
@@ -179,7 +182,7 @@ export function SlackAppCard({
               label="Client secret"
               onChange={setClientSecretDraft}
               onClear={() => clearSaved("client_secret")}
-              placeholder="Paste a client secret"
+              placeholder="Paste a client secret…"
               status={clientSecret}
               type="password"
               value={clientSecretDraft}

@@ -1,18 +1,20 @@
-import { DeleteRunDialog } from "@/components/runs/delete-run-dialog";
 import {
   PlateMapGrid,
   PlateMapWithIndexSlider,
 } from "@/components/runs/plate-map-grid";
-import { RestoreRunButton } from "@/components/runs/restore-run-button";
 import type { RunDetailProps } from "@/components/runs/run-detail";
-import { RunDetail } from "@/components/runs/run-detail";
+import { RunDetailLayout } from "@/components/runs/run-detail-layout";
 import {
   hasPlateReaderMetadata,
   PlateReaderRunBadges,
 } from "@/components/runs/run-metadata-badges";
 import { RunSectionCard } from "@/components/runs/run-section-card";
 import type { RawWellRow } from "@/lib/api/instrument-runs";
-import { extractPlateMaps } from "@/lib/runs/extract-plate-maps";
+import {
+  extractPlateMaps,
+  type PlateMapLayout,
+  plateMapLayoutFor,
+} from "@/lib/runs/extract-plate-maps";
 
 /** Measurement types whose well values are numeric and benefit from color-coded heatmaps. */
 const HEATMAP_MEASUREMENT_TYPES = new Set([
@@ -25,18 +27,13 @@ const HEATMAP_MEASUREMENT_TYPES = new Set([
 function PlateMapSection({
   rows,
   heatmap,
-  kineticLayout,
-  spectrumLayout,
+  layout,
 }: {
   rows: RawWellRow[];
   heatmap: boolean;
-  kineticLayout: boolean;
-  spectrumLayout: boolean;
+  layout: PlateMapLayout;
 }) {
-  const groups = extractPlateMaps(rows, {
-    kinetic: kineticLayout,
-    spectrum: spectrumLayout,
-  });
+  const groups = extractPlateMaps(rows, layout);
 
   if (groups.length === 0) {
     return null;
@@ -76,23 +73,9 @@ function PlateMapSection({
   );
 }
 
-export function PlateReaderRunDetail({
-  run,
-  files,
-  filesDownloadableCount,
-  filesPagination,
-  fileStats,
-  wellData,
-  instrumentId,
-  runId,
-  attributionsSlot,
-  runNavSlot,
-}: RunDetailProps) {
-  const isDeleted = run.deletedAt !== null;
-  const activeFileCount = fileStats.active;
-  const hasProcessedFiles = fileStats.processedActive > 0;
-
-  const metadata = run.metadata as Record<string, unknown>;
+export function PlateReaderRunDetail(props: RunDetailProps) {
+  const { wellData } = props;
+  const metadata = props.run.metadata as Record<string, unknown>;
   const measurementType =
     typeof metadata.measurement_type === "string"
       ? metadata.measurement_type
@@ -105,51 +88,19 @@ export function PlateReaderRunDetail({
     wellData.some((r) => Number.isFinite(Number(r.value)));
 
   return (
-    <>
-      <RunDetail.Header run={run} runNavSlot={runNavSlot}>
-        {!isDeleted && (
-          <DeleteRunDialog
-            fileCount={activeFileCount}
-            hasProcessedFiles={hasProcessedFiles}
-            instrumentId={instrumentId}
-            runId={runId}
-          />
-        )}
-        {isDeleted && (
-          <RestoreRunButton instrumentId={instrumentId} runId={runId} />
-        )}
-      </RunDetail.Header>
-
-      <RunDetail.FilesMetadataLayout>
-        <RunDetail.Metadata
-          attributionsSlot={attributionsSlot}
-          fileStats={fileStats}
-          run={run}
-        >
-          {hasPlateReaderMetadata(run.metadata as Record<string, unknown>) && (
-            <PlateReaderRunBadges
-              metadata={run.metadata as Record<string, unknown>}
-            />
-          )}
-        </RunDetail.Metadata>
-        <RunDetail.Files
-          files={files}
-          filteredDownloadableCount={filesDownloadableCount}
-          instrumentId={instrumentId}
-          instrumentType={run.instrumentType}
-          isDeleted={isDeleted}
-          pagination={filesPagination}
-          runId={runId}
-          stats={fileStats}
-        />
-      </RunDetail.FilesMetadataLayout>
-
+    <RunDetailLayout
+      {...props}
+      badges={
+        hasPlateReaderMetadata(metadata) ? (
+          <PlateReaderRunBadges metadata={metadata} />
+        ) : null
+      }
+    >
       <PlateMapSection
         heatmap={heatmap}
-        kineticLayout={measurementType === "Kinetic"}
+        layout={plateMapLayoutFor(measurementType)}
         rows={wellData}
-        spectrumLayout={measurementType === "Spectrum"}
       />
-    </>
+    </RunDetailLayout>
   );
 }

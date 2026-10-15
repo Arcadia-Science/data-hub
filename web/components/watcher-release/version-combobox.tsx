@@ -17,6 +17,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { useViewerTimeZone } from "@/components/viewer-time-zone-provider";
 import { formatDate } from "@/lib/date";
 import type { WatcherVersionOption } from "@/lib/pypi";
 import { cn } from "@/lib/utils";
@@ -47,6 +48,7 @@ export function VersionCombobox({
   versions,
 }: VersionComboboxProps) {
   const [open, setOpen] = useState(false);
+  const timeZone = useViewerTimeZone();
   const listId = useId();
   // Keep a saved value that isn't on PyPI selectable (test pins like
   // `9.9.9`, yanked releases, or a version published after our cache).
@@ -93,7 +95,7 @@ export function VersionCombobox({
         className="w-[var(--radix-popover-trigger-width)] p-0"
       >
         <Command>
-          <CommandInput placeholder="Search versions..." />
+          <CommandInput placeholder="Search versions…" />
           <CommandList id={listId}>
             <CommandEmpty>No versions found.</CommandEmpty>
             <CommandGroup>
@@ -135,7 +137,7 @@ export function VersionCombobox({
                     <span className="font-mono">{entry.version}</span>
                     {entry.uploadedAt ? (
                       <span className="shrink-0 text-muted-foreground text-xs tabular-nums">
-                        {formatDate(new Date(entry.uploadedAt))}
+                        {formatDate(new Date(entry.uploadedAt), timeZone)}
                       </span>
                     ) : null}
                   </span>

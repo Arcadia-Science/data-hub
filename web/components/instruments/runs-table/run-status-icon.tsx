@@ -36,7 +36,7 @@ export function RunStatusIcon({ run }: { run: RunStatusRow }) {
     filesStalled: run.files_stalled,
     filesUploaded: run.files_uploaded,
   });
-  const { Icon, colorClassName, spin } = RUN_STATUS_META[status];
+  const { Icon, colorClassName, label, spin } = RUN_STATUS_META[status];
 
   // Tooltip lists every non-empty bucket in priority order, so a run reveals
   // its lower-priority states on hover even though the icon shows only the top.
@@ -80,8 +80,11 @@ export function RunStatusIcon({ run }: { run: RunStatusRow }) {
       <TooltipTrigger asChild>
         <span className="relative z-10 flex shrink-0">
           <Icon
+            aria-hidden="true"
             className={cn("size-4", colorClassName, spin && "animate-spin")}
           />
+          {/* The tooltip only opens on hover, so the status needs its own text. */}
+          <span className="sr-only">Status: {label}</span>
         </span>
       </TooltipTrigger>
       <TooltipContent className={cn(needsWrapping && "max-w-sm")} side="top">

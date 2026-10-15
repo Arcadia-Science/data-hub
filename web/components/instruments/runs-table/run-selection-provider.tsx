@@ -1,6 +1,9 @@
 "use client";
 
+import { useSearchParams } from "next/navigation";
 import { createContext, use, useCallback, useMemo, useState } from "react";
+import { SelectionNotice } from "@/components/selection-notice";
+import { isRunListScopeParam, selectionScopeKey } from "@/lib/selection-scope";
 
 export interface RunCaps {
   delete: boolean;
@@ -51,6 +54,9 @@ interface RunSelectionContextValue {
   state: { selected: ReadonlyMap<string, RunRef> };
 }
 
+const SELECTION_CLEARED_NOTICE =
+  "Selection cleared because the list of runs changed.";
+
 const RunSelectionContext = createContext<RunSelectionContextValue | null>(
   null
 );
@@ -60,42 +66,75 @@ export function RunSelectionProvider({
 }: {
   children: React.ReactNode;
 }) {
-  const [selected, setSelected] = useState<Map<string, RunRef>>(
-    () => new Map()
+  const searchParams = useSearchParams();
+  const scopeKey = selectionScopeKey(searchParams, isRunListScopeParam);
+  const [store, setStore] = useState(() => ({
+    scopeKey,
+    selected: new Map<string, RunRef>(),
+    notice: "",
+  }));
+
+  // A new search, filter, or sort lists different runs, so picks made on the old
+  // list could be off screen. Dropping them keeps Delete and Reprocess away from
+  // runs the user is not looking at. Another page of the same results keeps them.
+  if (store.scopeKey !== scopeKey) {
+    setStore({
+      scopeKey,
+      selected: new Map(),
+      notice: store.selected.size > 0 ? SELECTION_CLEARED_NOTICE : "",
+    });
+  }
+  const selected = store.selected;
+
+  const setSelected = useCallback(
+    (update: (prev: Map<string, RunRef>) => Map<string, RunRef>) => {
+      setStore((prev) => ({
+        ...prev,
+        selected: update(prev.selected),
+        notice: "",
+      }));
+    },
+    []
   );
 
-  const toggle = useCallback((ref: RunRef) => {
-    setSelected((prev) => {
-      const next = new Map(prev);
-      if (next.has(ref.id)) {
-        next.delete(ref.id);
-      } else {
-        next.set(ref.id, ref);
-      }
-      return next;
-    });
-  }, []);
+  const toggle = useCallback(
+    (ref: RunRef) => {
+      setSelected((prev) => {
+        const next = new Map(prev);
+        if (next.has(ref.id)) {
+          next.delete(ref.id);
+        } else {
+          next.set(ref.id, ref);
+        }
+        return next;
+      });
+    },
+    [setSelected]
+  );
 
-  const selectMany = useCallback((refs: RunRef[]) => {
-    setSelected((prev) => {
-      const next = new Map(prev);
-      const alreadyAll = refs.every((r) => next.has(r.id));
-      if (alreadyAll) {
-        for (const r of refs) {
-          next.delete(r.id);
+  const selectMany = useCallback(
+    (refs: RunRef[]) => {
+      setSelected((prev) => {
+        const next = new Map(prev);
+        const alreadyAll = refs.every((r) => next.has(r.id));
+        if (alreadyAll) {
+          for (const r of refs) {
+            next.delete(r.id);
+          }
+        } else {
+          for (const r of refs) {
+            next.set(r.id, r);
+          }
         }
-      } else {
-        for (const r of refs) {
-          next.set(r.id, r);
-        }
-      }
-      return next;
-    });
-  }, []);
+        return next;
+      });
+    },
+    [setSelected]
+  );
 
   const clear = useCallback(() => {
-    setSelected(new Map());
-  }, []);
+    setSelected(() => new Map());
+  }, [setSelected]);
 
   const value = useMemo<RunSelectionContextValue>(() => {
     const refs = Array.from(selected.values());
@@ -119,6 +158,7 @@ export function RunSelectionProvider({
   return (
     <RunSelectionContext.Provider value={value}>
       {children}
+      <SelectionNotice message={store.notice} />
     </RunSelectionContext.Provider>
   );
 }

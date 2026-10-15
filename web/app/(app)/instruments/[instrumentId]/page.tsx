@@ -39,7 +39,10 @@ import {
   listInstrumentSubscriptions,
 } from "@/lib/api/notifications";
 import { auth } from "@/lib/auth";
-import { instrumentDetailParamsCache } from "@/lib/search-params";
+import {
+  hasActiveInstrumentFilters,
+  instrumentDetailParamsCache,
+} from "@/lib/search-params";
 
 type InstrumentDetailFilters = Awaited<
   ReturnType<typeof instrumentDetailParamsCache.parse>
@@ -293,30 +296,7 @@ async function InstrumentRunsSection({
     getRanByFilterOptions(instrumentId),
   ]);
 
-  const hasFilters =
-    filters.search !== "" ||
-    filters.date_from !== null ||
-    filters.date_to !== null ||
-    filters.include_deleted ||
-    filters.wavelength !== null ||
-    filters.measurement_mode !== null ||
-    filters.measurement_type !== null ||
-    filters.capture_type !== null ||
-    filters.imaging_mode !== null ||
-    filters.gel_wavelength !== null ||
-    filters.gel_color !== null ||
-    filters.dye_channel !== null ||
-    filters.hina_channel !== null ||
-    filters.hina_dimension !== null ||
-    filters.hina_size !== null ||
-    filters.dpi !== null ||
-    filters.color_mode !== null ||
-    filters.aunty_experiment_type !== null ||
-    filters.aunty_analysis_mode !== null ||
-    filters.aunty_temperature !== null ||
-    filters.aunty_ramp_rate !== null ||
-    filters.ran_by !== null ||
-    filters.status.length > 0;
+  const hasFilters = hasActiveInstrumentFilters(filters);
 
   // Build the "Ran By" dropdown options: the current user (labelled "You"),
   // pinned to the top if they've attributed anything here, followed by other

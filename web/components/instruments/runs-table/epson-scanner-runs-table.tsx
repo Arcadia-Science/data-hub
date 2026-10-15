@@ -2,30 +2,14 @@ import {
   getMetadataField,
   MetadataFieldBadge,
 } from "@/components/runs/metadata-badges";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import type { EpsonScannerFilterOptions } from "@/lib/api/instrument-runs";
 import {
   COLOR_MODE_COLORS,
   DPI_COLORS,
   formatColorMode,
 } from "@/lib/instrument-colors";
-import { runRowToRef } from "@/lib/runs/row-actions";
-import { cn, formatBytes } from "@/lib/utils";
 import type { RunRow } from ".";
-import { FilterableColumnHeader } from "./filterable-column-header";
-import { RanByCell } from "./ran-by-cell";
-import { RawFileColumnHeader } from "./raw-file-column-header";
-import { RunIdCell } from "./run-id-cell";
-import { RunSelectAllCheckbox, RunSelectCheckbox } from "./run-select-checkbox";
-import type { RunRef } from "./run-selection-provider";
-import { RunTimeCells, RunTimeHeads } from "./run-time-columns";
+import { type MetadataColumn, RunRowsTable } from "./run-rows-table";
 
 // DPI is a numeric scalar; sort ascending so "300" < "600" rather than
 // lexicographic order.
@@ -48,96 +32,47 @@ export function EpsonScannerRunsTable({
   filterOptions: EpsonScannerFilterOptions;
   ranByOptions: { value: string; label: string }[];
 }) {
-  const runRefs: RunRef[] = data.map(runRowToRef);
-  const dpiOptions = sortDpiOptions(filterOptions.dpis);
-  const colorModeOptions = filterOptions.colorModes.map(colorModeOption);
+  const columns: MetadataColumn[] = [
+    {
+      filter: {
+        label: "DPI",
+        options: sortDpiOptions(filterOptions.dpis),
+        paramKey: "dpi",
+      },
+      cell: (row) => {
+        const dpi = getMetadataField(row.metadata, "dpi");
+        return (
+          <MetadataFieldBadge
+            colorClass={dpi ? DPI_COLORS[dpi] : undefined}
+            value={dpi}
+          />
+        );
+      },
+    },
+    {
+      filter: {
+        label: "Color Mode",
+        options: filterOptions.colorModes.map(colorModeOption),
+        paramKey: "color_mode",
+      },
+      cell: (row) => {
+        const colorMode = getMetadataField(row.metadata, "color_mode");
+        return (
+          <MetadataFieldBadge
+            colorClass={colorMode ? COLOR_MODE_COLORS[colorMode] : undefined}
+            value={colorMode ? formatColorMode(colorMode) : null}
+          />
+        );
+      },
+    },
+  ];
 
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead className="w-10">
-            <RunSelectAllCheckbox refs={runRefs} />
-          </TableHead>
-          <TableHead>Run ID</TableHead>
-          <TableHead>
-            <RawFileColumnHeader label="Files" />
-          </TableHead>
-          <TableHead className="text-right">
-            <RawFileColumnHeader label="Size" />
-          </TableHead>
-          <TableHead>
-            <FilterableColumnHeader
-              label="DPI"
-              options={dpiOptions}
-              paramKey="dpi"
-            />
-          </TableHead>
-          <TableHead>
-            <FilterableColumnHeader
-              label="Color Mode"
-              options={colorModeOptions}
-              paramKey="color_mode"
-            />
-          </TableHead>
-          <TableHead>
-            <FilterableColumnHeader
-              label="Ran By"
-              options={ranByOptions}
-              paramKey="ran_by"
-            />
-          </TableHead>
-          <RunTimeHeads />
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {data.map((row) => {
-          const isDeleted = row.deleted_at !== null;
-          const dpi = getMetadataField(row.metadata, "dpi");
-          const colorMode = getMetadataField(row.metadata, "color_mode");
-          return (
-            <TableRow className={cn(isDeleted && "opacity-50")} key={row.id}>
-              <TableCell>
-                <RunSelectCheckbox runRef={runRowToRef(row)} />
-              </TableCell>
-              <TableCell>
-                <RunIdCell
-                  href={`/instruments/${instrumentId}/runs/${encodeURIComponent(row.run_id)}`}
-                  run={row}
-                />
-              </TableCell>
-              <TableCell className="text-sm tabular-nums">
-                {row.file_count}
-              </TableCell>
-              <TableCell className="text-right text-sm tabular-nums">
-                {formatBytes(row.total_size_bytes)}
-              </TableCell>
-              <TableCell>
-                <MetadataFieldBadge
-                  colorClass={dpi ? DPI_COLORS[dpi] : undefined}
-                  value={dpi}
-                />
-              </TableCell>
-              <TableCell>
-                <MetadataFieldBadge
-                  colorClass={
-                    colorMode ? COLOR_MODE_COLORS[colorMode] : undefined
-                  }
-                  value={colorMode ? formatColorMode(colorMode) : null}
-                />
-              </TableCell>
-              <TableCell>
-                <RanByCell
-                  attributions={row.attributions}
-                  instrumentId={row.instrument_id}
-                  runId={row.run_id}
-                />
-              </TableCell>
-              <RunTimeCells row={row} />
-            </TableRow>
-          );
-        })}
-      </TableBody>
-    </Table>
+    <RunRowsTable
+      columns={columns}
+      data={data}
+      instrumentId={instrumentId}
+      ranByOptions={ranByOptions}
+    />
   );
 }

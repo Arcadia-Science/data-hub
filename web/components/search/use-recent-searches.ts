@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { parseVersioned, serializeVersioned } from "@/lib/versioned-storage";
 
 const STORAGE_KEY = "data-hub:recent-searches";
 const MAX_RECENT = 8;
@@ -10,11 +11,7 @@ function read(): string[] {
     return [];
   }
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      return [];
-    }
-    const parsed = JSON.parse(raw);
+    const parsed = parseVersioned(window.localStorage.getItem(STORAGE_KEY));
     return Array.isArray(parsed)
       ? parsed.filter((v): v is string => typeof v === "string")
       : [];
@@ -41,7 +38,7 @@ export function useRecentSearches() {
   const persist = useCallback((next: string[]) => {
     setRecent(next);
     try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+      window.localStorage.setItem(STORAGE_KEY, serializeVersioned(next));
     } catch {
       // Storage full or blocked — the in-memory list still works this session.
     }
@@ -59,7 +56,7 @@ export function useRecentSearches() {
         );
         const next = [trimmed, ...deduped].slice(0, MAX_RECENT);
         try {
-          window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+          window.localStorage.setItem(STORAGE_KEY, serializeVersioned(next));
         } catch {
           // ignore — see persist()
         }

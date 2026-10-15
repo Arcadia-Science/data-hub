@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { parseVersioned, serializeVersioned } from "@/lib/versioned-storage";
 
 const STORAGE_KEY = "data-hub:changelog-seen";
 const UPDATE_EVENT = "data-hub:changelog-seen-updated";
@@ -77,11 +78,7 @@ export function readChangelogSeenIds(): string[] {
     return [];
   }
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      return [];
-    }
-    const parsed: unknown = JSON.parse(raw);
+    const parsed = parseVersioned(localStorage.getItem(STORAGE_KEY));
     if (!Array.isArray(parsed)) {
       return [];
     }
@@ -93,7 +90,7 @@ export function readChangelogSeenIds(): string[] {
 
 function writeSeenIds(ids: readonly string[]): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(ids));
+    localStorage.setItem(STORAGE_KEY, serializeVersioned(ids));
     queueMicrotask(() => {
       window.dispatchEvent(new Event(UPDATE_EVENT));
     });

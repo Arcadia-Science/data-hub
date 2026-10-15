@@ -35,8 +35,9 @@ export default async function SettingsLayout({
   }
 
   // No layout-level "Settings" title: the SettingsNav sidebar already
-  // labels this section, so rendering an H1 here was duplicative chrome
-  // on every settings page. Pages render their own H2 instead.
+  // labels this section, so a title here was duplicative chrome on every
+  // settings page. Each page renders its own H1 instead, so screen readers
+  // still get one page title; section headings inside a page are H2.
   return (
     <div className="mx-auto w-full max-w-6xl px-4 pt-4 pb-10 sm:px-6 lg:px-8 2xl:w-6xl">
       {children}

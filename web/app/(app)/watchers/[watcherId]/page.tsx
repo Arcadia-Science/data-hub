@@ -19,6 +19,7 @@ import {
 import { auth } from "@/lib/auth";
 import { todayDateString } from "@/lib/date";
 import { watcherDetailParamsCache } from "@/lib/search-params";
+import { getViewerTimeZone } from "@/lib/viewer-timezone";
 
 type WatcherDetailFilters = Awaited<
   ReturnType<typeof watcherDetailParamsCache.parse>
@@ -29,12 +30,9 @@ interface Props {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }
 
-// The server and browser may be in different timezones, so the local-midnight
-// moment of a "yyyy-MM-dd" date can differ by up to ~14 hours from the
-// server's interpretation. Parse date filters as UTC and step back one day so
-// the DB query is guaranteed to cover the user's full local day;
-// `<HeartbeatChart>` clips the chart precisely on the client, and the event log
-// already orders by timestamp so a slightly wider window is harmless.
+// The viewer's zone is a guess on a first visit, so query from a day early to
+// cover their whole local day. `<HeartbeatChart>` clips to the exact day, and
+// the event log orders by timestamp, so a wider window is harmless.
 function toTzSafeSince(dateString: string): Date {
   const d = new Date(`${dateString}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() - 1);
@@ -105,17 +103,23 @@ async function WatcherTabsSection({
   watcherId: string;
   filters: WatcherDetailFilters;
 }) {
-  const effectiveSince = filters.since ?? todayDateString();
+  const timeZone = await getViewerTimeZone();
+  const effectiveSince = filters.since ?? todayDateString(timeZone);
   const heartbeatSince = toTzSafeSince(effectiveSince);
 
-  const effectiveEventsSince = filters.events_since ?? todayDateString();
+  const effectiveEventsSince =
+    filters.events_since ?? todayDateString(timeZone);
   const eventsSince = toTzSafeSince(effectiveEventsSince);
 
   // `getWatcherById` is `cache()`-deduped, so this shares the header section's
   // fetch rather than issuing a second query for `configYaml`.
   const [watcher, heartbeats, eventResult] = await Promise.all([
     getWatcherById(watcherId),
-    getAllWatcherHeartbeats(watcherId, { since: heartbeatSince }),
+    // Up to 5000 rows, and only the Status tab draws them. The tab lives in the
+    // URL, so the other tabs skip the query and the payload.
+    filters.tab === "status"
+      ? getAllWatcherHeartbeats(watcherId, { since: heartbeatSince })
+      : Promise.resolve(null),
     getWatcherEvents(watcherId, {
       since: eventsSince,
       eventTypes:

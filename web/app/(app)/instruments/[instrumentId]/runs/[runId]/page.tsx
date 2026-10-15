@@ -28,12 +28,14 @@ import { getReportItemsPage } from "@/lib/api/report-items";
 import { listCommentsForRun } from "@/lib/api/run-comments";
 import { auth } from "@/lib/auth";
 import { formatDateLong } from "@/lib/date";
+import { decodePageParam } from "@/lib/runs/page-param";
 import {
   emptyReportItemsPage,
   REPORT_ITEMS_WINDOW,
   reportItemKindForInstrument,
 } from "@/lib/runs/report-items";
 import { runDetailParamsCache } from "@/lib/search-params";
+import { getViewerTimeZone } from "@/lib/viewer-timezone";
 
 const FILES_PER_PAGE = 10;
 
@@ -45,7 +47,8 @@ interface Props {
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  const { instrumentId, runId } = await params;
+  const { instrumentId, runId: runIdParam } = await params;
+  const runId = decodePageParam(runIdParam);
   const run = await lookupRunByNaturalKey(instrumentId, runId);
   if (!run) {
     return { title: "Run not found" };
@@ -71,7 +74,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
         ? "1 raw data file."
         : `${rawFileCount} raw data files.`;
 
-  const description = `${dateLabel} ${formatDateLong(effectiveDate)}. ${fileLabel}`;
+  const timeZone = await getViewerTimeZone();
+  const description = `${dateLabel} ${formatDateLong(effectiveDate, timeZone)}. ${fileLabel}`;
   return {
     title,
     description,
@@ -82,7 +86,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
 export default async function RunDetailPage({ params, searchParams }: Props) {
   const session = await auth();
-  const { instrumentId, runId } = await params;
+  const { instrumentId, runId: runIdParam } = await params;
+  const runId = decodePageParam(runIdParam);
   const filters = runDetailParamsCache.parse(await searchParams);
 
   // The route is publicly reachable so Slack/Notion unfurlers can read the
@@ -91,7 +96,7 @@ export default async function RunDetailPage({ params, searchParams }: Props) {
   if (!session) {
     return (
       <SignInRequired
-        callbackUrl={`/instruments/${instrumentId}/runs/${runId}`}
+        callbackUrl={`/instruments/${instrumentId}/runs/${encodeURIComponent(runId)}`}
       >
         Sign in to view this run.
       </SignInRequired>
@@ -168,6 +173,7 @@ async function RunDetailContentBody({
   // CSV processing overlaps the other queries rather than tacking latency on.
   const reportFilesPromise = getRunReportFiles(run.id);
   const isAunty = run.instrumentType === "aunty";
+  const isPlateReader = run.instrumentType === "plate_reader";
   const isQpcr = run.instrumentType === "qpcr";
   const [
     filesPage,
@@ -200,8 +206,10 @@ async function RunDetailContentBody({
       : Promise.resolve(emptyReportItemsPage()),
     getInstrumentById(instrumentId),
     getAdjacentRunIds(run),
+    // Only the plate reader view reads `wellData`, so parsing every CSV here
+    // would add S3 reads and CPU time to every other run page for nothing.
     reportFilesPromise.then((rf) =>
-      isAunty ? Promise.resolve([]) : getProcessedCsvData(rf)
+      isPlateReader ? getProcessedCsvData(rf) : Promise.resolve([])
     ),
     reportFilesPromise.then((rf) =>
       isAunty ? getAuntyPlateData(rf) : Promise.resolve(null)

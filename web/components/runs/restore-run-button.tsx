@@ -19,7 +19,7 @@ export function RestoreRunButton({
   function handleRestore() {
     startTransition(async () => {
       const res = await fetch(
-        `/api/v1/instruments/${instrumentId}/runs/${runId}/restore`,
+        `/api/v1/instruments/${instrumentId}/runs/${encodeURIComponent(runId)}/restore`,
         { method: "POST" }
       );
 

@@ -5,30 +5,14 @@ import {
   sortWavelengths,
   TruncatedBadges,
 } from "@/components/runs/metadata-badges";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import type { PlateReaderFilterOptions } from "@/lib/api/instrument-runs";
 import {
   buildWavelengthColorMap,
   MEASUREMENT_MODE_COLORS,
   MEASUREMENT_TYPE_COLORS,
 } from "@/lib/instrument-colors";
-import { runRowToRef } from "@/lib/runs/row-actions";
-import { cn, formatBytes } from "@/lib/utils";
 import type { RunRow } from ".";
-import { FilterableColumnHeader } from "./filterable-column-header";
-import { RanByCell } from "./ran-by-cell";
-import { RawFileColumnHeader } from "./raw-file-column-header";
-import { RunIdCell } from "./run-id-cell";
-import { RunSelectAllCheckbox, RunSelectCheckbox } from "./run-select-checkbox";
-import type { RunRef } from "./run-selection-provider";
-import { RunTimeCells, RunTimeHeads } from "./run-time-columns";
+import { type MetadataColumn, RunRowsTable } from "./run-rows-table";
 
 export function PlateReaderRunsTable({
   data,
@@ -42,110 +26,64 @@ export function PlateReaderRunsTable({
   ranByOptions: { value: string; label: string }[];
 }) {
   const wavelengthColors = buildWavelengthColorMap(filterOptions.wavelengths);
-  const sortedWavelengthOptions = sortWavelengths(filterOptions.wavelengths);
-  const runRefs: RunRef[] = data.map(runRowToRef);
+
+  const columns: MetadataColumn[] = [
+    {
+      filter: {
+        label: "Wavelengths",
+        options: sortWavelengths(filterOptions.wavelengths),
+        paramKey: "wavelength",
+      },
+      cell: (row) => (
+        <TruncatedBadges
+          colorMap={wavelengthColors}
+          maxVisible={1}
+          values={sortWavelengths(
+            getMetadataArray(row.metadata, "wavelengths")
+          )}
+        />
+      ),
+    },
+    {
+      filter: {
+        label: "Measurement Mode",
+        options: filterOptions.measurementModes,
+        paramKey: "measurement_mode",
+      },
+      cell: (row) => {
+        const mode = getMetadataField(row.metadata, "measurement_mode");
+        return (
+          <MetadataFieldBadge
+            colorClass={mode ? MEASUREMENT_MODE_COLORS[mode] : undefined}
+            value={mode}
+          />
+        );
+      },
+    },
+    {
+      filter: {
+        label: "Measurement Type",
+        options: filterOptions.measurementTypes,
+        paramKey: "measurement_type",
+      },
+      cell: (row) => {
+        const type = getMetadataField(row.metadata, "measurement_type");
+        return (
+          <MetadataFieldBadge
+            colorClass={type ? MEASUREMENT_TYPE_COLORS[type] : undefined}
+            value={type}
+          />
+        );
+      },
+    },
+  ];
 
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead className="w-10">
-            <RunSelectAllCheckbox refs={runRefs} />
-          </TableHead>
-          <TableHead>Run ID</TableHead>
-          <TableHead>
-            <RawFileColumnHeader label="Files" />
-          </TableHead>
-          <TableHead className="text-right">
-            <RawFileColumnHeader label="Size" />
-          </TableHead>
-          <TableHead>
-            <FilterableColumnHeader
-              label="Wavelengths"
-              options={sortedWavelengthOptions}
-              paramKey="wavelength"
-            />
-          </TableHead>
-          <TableHead>
-            <FilterableColumnHeader
-              label="Measurement Mode"
-              options={filterOptions.measurementModes}
-              paramKey="measurement_mode"
-            />
-          </TableHead>
-          <TableHead>
-            <FilterableColumnHeader
-              label="Measurement Type"
-              options={filterOptions.measurementTypes}
-              paramKey="measurement_type"
-            />
-          </TableHead>
-          <TableHead>
-            <FilterableColumnHeader
-              label="Ran By"
-              options={ranByOptions}
-              paramKey="ran_by"
-            />
-          </TableHead>
-          <RunTimeHeads />
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {data.map((row) => {
-          const isDeleted = row.deleted_at !== null;
-          const wavelengths = sortWavelengths(
-            getMetadataArray(row.metadata, "wavelengths")
-          );
-          const mode = getMetadataField(row.metadata, "measurement_mode");
-          const type = getMetadataField(row.metadata, "measurement_type");
-          return (
-            <TableRow className={cn(isDeleted && "opacity-50")} key={row.id}>
-              <TableCell>
-                <RunSelectCheckbox runRef={runRowToRef(row)} />
-              </TableCell>
-              <TableCell>
-                <RunIdCell
-                  href={`/instruments/${instrumentId}/runs/${encodeURIComponent(row.run_id)}`}
-                  run={row}
-                />
-              </TableCell>
-              <TableCell className="text-sm tabular-nums">
-                {row.file_count}
-              </TableCell>
-              <TableCell className="text-right text-sm tabular-nums">
-                {formatBytes(row.total_size_bytes)}
-              </TableCell>
-              <TableCell>
-                <TruncatedBadges
-                  colorMap={wavelengthColors}
-                  maxVisible={1}
-                  values={wavelengths}
-                />
-              </TableCell>
-              <TableCell>
-                <MetadataFieldBadge
-                  colorClass={mode ? MEASUREMENT_MODE_COLORS[mode] : undefined}
-                  value={mode}
-                />
-              </TableCell>
-              <TableCell>
-                <MetadataFieldBadge
-                  colorClass={type ? MEASUREMENT_TYPE_COLORS[type] : undefined}
-                  value={type}
-                />
-              </TableCell>
-              <TableCell>
-                <RanByCell
-                  attributions={row.attributions}
-                  instrumentId={row.instrument_id}
-                  runId={row.run_id}
-                />
-              </TableCell>
-              <RunTimeCells row={row} />
-            </TableRow>
-          );
-        })}
-      </TableBody>
-    </Table>
+    <RunRowsTable
+      columns={columns}
+      data={data}
+      instrumentId={instrumentId}
+      ranByOptions={ranByOptions}
+    />
   );
 }

@@ -54,7 +54,7 @@ export function VersionField({
           noneLabel={noneLabel}
           onBlur={onBlur}
           onChange={onChange}
-          placeholder="Select a version"
+          placeholder="Select a version…"
           value={value}
           versions={availableVersions}
         />
