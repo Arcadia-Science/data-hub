@@ -47,6 +47,11 @@ type FilterParamKey<KeyMap extends UseQueryStatesKeysMap> = {
 }[keyof Values<KeyMap>] &
   string;
 
+/** The URL params an instrument runs table can filter on. */
+export type InstrumentFilterParamKey = FilterParamKey<
+  typeof instrumentDetailSearchParams
+>;
+
 // Options accept either plain strings (value == label) or { value, label }
 // pairs for cases where the URL-stable value and the display label differ
 // (e.g., `ran_by` stores a userId but renders the user's display name).

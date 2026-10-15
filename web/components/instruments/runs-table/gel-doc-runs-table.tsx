@@ -5,14 +5,6 @@ import {
   sortWavelengths,
   TruncatedBadges,
 } from "@/components/runs/metadata-badges";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import type { GelDocFilterOptions } from "@/lib/api/instrument-runs";
 import {
   buildWavelengthColorMap,
@@ -20,16 +12,8 @@ import {
   CHANNEL_COLOR_STYLES,
   IMAGING_MODE_COLORS,
 } from "@/lib/instrument-colors";
-import { runRowToRef } from "@/lib/runs/row-actions";
-import { cn, formatBytes } from "@/lib/utils";
 import type { RunRow } from ".";
-import { FilterableColumnHeader } from "./filterable-column-header";
-import { RanByCell } from "./ran-by-cell";
-import { RawFileColumnHeader } from "./raw-file-column-header";
-import { RunIdCell } from "./run-id-cell";
-import { RunSelectAllCheckbox, RunSelectCheckbox } from "./run-select-checkbox";
-import type { RunRef } from "./run-selection-provider";
-import { RunTimeCells, RunTimeHeads } from "./run-time-columns";
+import { type MetadataColumn, RunRowsTable } from "./run-rows-table";
 
 export function GelDocRunsTable({
   data,
@@ -46,132 +30,82 @@ export function GelDocRunsTable({
     getMetadataArray(row.metadata, "wavelengths")
   );
   const wavelengthColors = buildWavelengthColorMap(allWavelengths);
-  const sortedWavelengthOptions = sortWavelengths(filterOptions.wavelengths);
-  const runRefs: RunRef[] = data.map(runRowToRef);
+
+  const columns: MetadataColumn[] = [
+    {
+      filter: {
+        label: "Capture Type",
+        options: filterOptions.captureTypes,
+        paramKey: "capture_type",
+      },
+      cell: (row) => {
+        const captureType = getMetadataField(row.metadata, "capture_type");
+        return (
+          <MetadataFieldBadge
+            colorClass={
+              captureType ? CAPTURE_TYPE_COLORS[captureType] : undefined
+            }
+            value={captureType}
+          />
+        );
+      },
+    },
+    {
+      filter: {
+        label: "Imaging Mode",
+        options: filterOptions.imagingModes,
+        paramKey: "imaging_mode",
+      },
+      cell: (row) => {
+        const imagingMode = getMetadataField(row.metadata, "imaging_mode");
+        return (
+          <MetadataFieldBadge
+            colorClass={
+              imagingMode ? IMAGING_MODE_COLORS[imagingMode] : undefined
+            }
+            value={imagingMode}
+          />
+        );
+      },
+    },
+    {
+      filter: {
+        label: "Wavelengths",
+        options: sortWavelengths(filterOptions.wavelengths),
+        paramKey: "gel_wavelength",
+      },
+      cell: (row) => (
+        <TruncatedBadges
+          colorMap={wavelengthColors}
+          maxVisible={1}
+          values={sortWavelengths(
+            getMetadataArray(row.metadata, "wavelengths")
+          )}
+        />
+      ),
+    },
+    {
+      filter: {
+        label: "Wavelength Colors",
+        options: filterOptions.colors,
+        paramKey: "gel_color",
+      },
+      cell: (row) => (
+        <TruncatedBadges
+          colorMap={CHANNEL_COLOR_STYLES}
+          maxVisible={1}
+          values={getMetadataArray(row.metadata, "colors")}
+        />
+      ),
+    },
+  ];
 
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead className="w-10">
-            <RunSelectAllCheckbox refs={runRefs} />
-          </TableHead>
-          <TableHead>Run ID</TableHead>
-          <TableHead>
-            <RawFileColumnHeader label="Files" />
-          </TableHead>
-          <TableHead className="text-right">
-            <RawFileColumnHeader label="Size" />
-          </TableHead>
-          <TableHead>
-            <FilterableColumnHeader
-              label="Capture Type"
-              options={filterOptions.captureTypes}
-              paramKey="capture_type"
-            />
-          </TableHead>
-          <TableHead>
-            <FilterableColumnHeader
-              label="Imaging Mode"
-              options={filterOptions.imagingModes}
-              paramKey="imaging_mode"
-            />
-          </TableHead>
-          <TableHead>
-            <FilterableColumnHeader
-              label="Wavelengths"
-              options={sortedWavelengthOptions}
-              paramKey="gel_wavelength"
-            />
-          </TableHead>
-          <TableHead>
-            <FilterableColumnHeader
-              label="Wavelength Colors"
-              options={filterOptions.colors}
-              paramKey="gel_color"
-            />
-          </TableHead>
-          <TableHead>
-            <FilterableColumnHeader
-              label="Ran By"
-              options={ranByOptions}
-              paramKey="ran_by"
-            />
-          </TableHead>
-          <RunTimeHeads />
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {data.map((row) => {
-          const isDeleted = row.deleted_at !== null;
-          const captureType = getMetadataField(row.metadata, "capture_type");
-          const imagingMode = getMetadataField(row.metadata, "imaging_mode");
-          const wavelengths = sortWavelengths(
-            getMetadataArray(row.metadata, "wavelengths")
-          );
-          const wavelengthColorLabels = getMetadataArray(
-            row.metadata,
-            "colors"
-          );
-          return (
-            <TableRow className={cn(isDeleted && "opacity-50")} key={row.id}>
-              <TableCell>
-                <RunSelectCheckbox runRef={runRowToRef(row)} />
-              </TableCell>
-              <TableCell>
-                <RunIdCell
-                  href={`/instruments/${instrumentId}/runs/${encodeURIComponent(row.run_id)}`}
-                  run={row}
-                />
-              </TableCell>
-              <TableCell className="text-sm tabular-nums">
-                {row.file_count}
-              </TableCell>
-              <TableCell className="text-right text-sm tabular-nums">
-                {formatBytes(row.total_size_bytes)}
-              </TableCell>
-              <TableCell>
-                <MetadataFieldBadge
-                  colorClass={
-                    captureType ? CAPTURE_TYPE_COLORS[captureType] : undefined
-                  }
-                  value={captureType}
-                />
-              </TableCell>
-              <TableCell>
-                <MetadataFieldBadge
-                  colorClass={
-                    imagingMode ? IMAGING_MODE_COLORS[imagingMode] : undefined
-                  }
-                  value={imagingMode}
-                />
-              </TableCell>
-              <TableCell>
-                <TruncatedBadges
-                  colorMap={wavelengthColors}
-                  maxVisible={1}
-                  values={wavelengths}
-                />
-              </TableCell>
-              <TableCell>
-                <TruncatedBadges
-                  colorMap={CHANNEL_COLOR_STYLES}
-                  maxVisible={1}
-                  values={wavelengthColorLabels}
-                />
-              </TableCell>
-              <TableCell>
-                <RanByCell
-                  attributions={row.attributions}
-                  instrumentId={row.instrument_id}
-                  runId={row.run_id}
-                />
-              </TableCell>
-              <RunTimeCells row={row} />
-            </TableRow>
-          );
-        })}
-      </TableBody>
-    </Table>
+    <RunRowsTable
+      columns={columns}
+      data={data}
+      instrumentId={instrumentId}
+      ranByOptions={ranByOptions}
+    />
   );
 }
