@@ -159,6 +159,7 @@ export function FileBulkActionBar({
             <TooltipTrigger asChild>
               <Button
                 className="h-7 gap-1.5 text-xs"
+                disabled={isPending}
                 onClick={() => onDownload(refs)}
                 size="sm"
                 type="button"
@@ -169,7 +170,9 @@ export function FileBulkActionBar({
               </Button>
             </TooltipTrigger>
             <TooltipContent>
-              Download {count} {noun}
+              {count === 1
+                ? "Download this file"
+                : `Download ${count} files as one zip`}
             </TooltipContent>
           </Tooltip>
         )}

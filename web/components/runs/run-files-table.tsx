@@ -372,14 +372,14 @@ function UploadDismissActions({
 export interface ReadOnlyRunFilesTableProps {
   files: RunFileRow[];
   instrumentType: InstrumentType;
-  isPending: boolean;
+  isFilePending: (id: number) => boolean;
   onReprocess: (id: number) => void;
 }
 
 export function ReadOnlyRunFilesTable({
   files,
   instrumentType,
-  isPending,
+  isFilePending,
   onReprocess,
 }: ReadOnlyRunFilesTableProps) {
   const { dialog, openPreview } = useFilePreview(files);
@@ -408,7 +408,7 @@ export function ReadOnlyRunFilesTable({
                     <div className="flex items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
                       <ReprocessAction
                         file={file}
-                        isPending={isPending}
+                        isPending={isFilePending(file.id)}
                         onReprocess={onReprocess}
                       />
                     </div>
@@ -435,7 +435,7 @@ export function ReadOnlyRunFilesTable({
 export interface EditableRunFilesTableProps {
   files: RunFileRow[];
   instrumentType: InstrumentType;
-  isPending: boolean;
+  isFilePending: (id: number) => boolean;
   onDismiss: (id: number) => void;
   onReprocess: (id: number) => void;
   onUpload: (id: number) => void;
@@ -444,7 +444,7 @@ export interface EditableRunFilesTableProps {
 export function EditableRunFilesTable({
   files,
   instrumentType,
-  isPending,
+  isFilePending,
   onUpload,
   onDismiss,
   onReprocess,
@@ -528,7 +528,7 @@ export function EditableRunFilesTable({
                     <div className={`flex items-center gap-1 ${revealClass}`}>
                       <UploadDismissActions
                         file={file}
-                        isPending={isPending}
+                        isPending={isFilePending(file.id)}
                         onDismiss={onDismiss}
                         onUpload={onUpload}
                       />
@@ -537,7 +537,7 @@ export function EditableRunFilesTable({
                     <div className={`flex items-center gap-1 ${revealClass}`}>
                       <ReprocessAction
                         file={file}
-                        isPending={isPending}
+                        isPending={isFilePending(file.id)}
                         onReprocess={onReprocess}
                       />
                     </div>

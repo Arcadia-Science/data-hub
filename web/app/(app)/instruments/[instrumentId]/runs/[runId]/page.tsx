@@ -93,7 +93,7 @@ export default async function RunDetailPage({ params, searchParams }: Props) {
   if (!session) {
     return (
       <SignInRequired
-        callbackUrl={`/instruments/${instrumentId}/runs/${runId}`}
+        callbackUrl={`/instruments/${instrumentId}/runs/${encodeURIComponent(runId)}`}
       >
         Sign in to view this run.
       </SignInRequired>

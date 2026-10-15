@@ -44,7 +44,7 @@ export function DeleteRunDialog({
     e.preventDefault();
     startTransition(async () => {
       const res = await fetch(
-        `/api/v1/instruments/${instrumentId}/runs/${runId}`,
+        `/api/v1/instruments/${instrumentId}/runs/${encodeURIComponent(runId)}`,
         { method: "DELETE" }
       );
 

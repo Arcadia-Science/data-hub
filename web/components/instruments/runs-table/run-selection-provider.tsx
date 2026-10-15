@@ -1,6 +1,8 @@
 "use client";
 
+import { useSearchParams } from "next/navigation";
 import { createContext, use, useCallback, useMemo, useState } from "react";
+import { isRunListScopeParam, selectionScopeKey } from "@/lib/selection-scope";
 
 export interface RunCaps {
   delete: boolean;
@@ -60,42 +62,67 @@ export function RunSelectionProvider({
 }: {
   children: React.ReactNode;
 }) {
-  const [selected, setSelected] = useState<Map<string, RunRef>>(
-    () => new Map()
+  const searchParams = useSearchParams();
+  const scopeKey = selectionScopeKey(searchParams, isRunListScopeParam);
+  const [store, setStore] = useState(() => ({
+    scopeKey,
+    selected: new Map<string, RunRef>(),
+  }));
+
+  // A new search, filter, or sort lists different runs, so picks made on the
+  // old list could be off screen. Dropping them here keeps Delete and
+  // Reprocess from reaching runs the user can no longer see. Moving to another
+  // page of the same results keeps the selection.
+  if (store.scopeKey !== scopeKey) {
+    setStore({ scopeKey, selected: new Map() });
+  }
+  const selected = store.selected;
+
+  const setSelected = useCallback(
+    (update: (prev: Map<string, RunRef>) => Map<string, RunRef>) => {
+      setStore((prev) => ({ ...prev, selected: update(prev.selected) }));
+    },
+    []
   );
 
-  const toggle = useCallback((ref: RunRef) => {
-    setSelected((prev) => {
-      const next = new Map(prev);
-      if (next.has(ref.id)) {
-        next.delete(ref.id);
-      } else {
-        next.set(ref.id, ref);
-      }
-      return next;
-    });
-  }, []);
+  const toggle = useCallback(
+    (ref: RunRef) => {
+      setSelected((prev) => {
+        const next = new Map(prev);
+        if (next.has(ref.id)) {
+          next.delete(ref.id);
+        } else {
+          next.set(ref.id, ref);
+        }
+        return next;
+      });
+    },
+    [setSelected]
+  );
 
-  const selectMany = useCallback((refs: RunRef[]) => {
-    setSelected((prev) => {
-      const next = new Map(prev);
-      const alreadyAll = refs.every((r) => next.has(r.id));
-      if (alreadyAll) {
-        for (const r of refs) {
-          next.delete(r.id);
+  const selectMany = useCallback(
+    (refs: RunRef[]) => {
+      setSelected((prev) => {
+        const next = new Map(prev);
+        const alreadyAll = refs.every((r) => next.has(r.id));
+        if (alreadyAll) {
+          for (const r of refs) {
+            next.delete(r.id);
+          }
+        } else {
+          for (const r of refs) {
+            next.set(r.id, r);
+          }
         }
-      } else {
-        for (const r of refs) {
-          next.set(r.id, r);
-        }
-      }
-      return next;
-    });
-  }, []);
+        return next;
+      });
+    },
+    [setSelected]
+  );
 
   const clear = useCallback(() => {
-    setSelected(new Map());
-  }, []);
+    setSelected(() => new Map());
+  }, [setSelected]);
 
   const value = useMemo<RunSelectionContextValue>(() => {
     const refs = Array.from(selected.values());
