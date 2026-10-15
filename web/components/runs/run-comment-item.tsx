@@ -25,6 +25,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Textarea } from "@/components/ui/textarea";
+import { useUnsavedChangesWarning } from "@/hooks/use-unsaved-changes-warning";
 import { actorDisplayName } from "@/lib/api/actor";
 import type { RunCommentDto } from "@/lib/api/run-comments";
 import { commentAnchorId } from "@/lib/comment-hash";
@@ -87,6 +88,9 @@ export function RunCommentItem({
   // trimmed comparison so re-spacing alone doesn't enable Save.
   const isUnchanged = trimmed === comment.body.trim();
   const canSave = trimmed.length > 0 && !tooLong && !isUnchanged && !isSaving;
+
+  // An edit in progress is lost on reload, so the browser asks first.
+  useUnsavedChangesWarning(isEditing && !isUnchanged);
 
   function handleSave() {
     if (!canSave) {

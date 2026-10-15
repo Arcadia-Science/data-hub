@@ -1,6 +1,6 @@
 "use client";
 
-import { useForm } from "@tanstack/react-form";
+import { useForm, useStore } from "@tanstack/react-form";
 import { Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -17,6 +17,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { useViewerTimeZone } from "@/components/viewer-time-zone-provider";
 import { VersionField } from "@/components/watcher-release/version-field";
+import { useUnsavedChangesWarning } from "@/hooks/use-unsaved-changes-warning";
 import { VERSION_MESSAGE, VERSION_REGEX } from "@/lib/api/watcher-versions";
 import { formatDateTime } from "@/lib/date";
 import type { WatcherVersionOption } from "@/lib/pypi";
@@ -114,6 +115,9 @@ export function WatcherReleaseForm({
       router.refresh();
     },
   });
+
+  // Warn before a reload or tab close discards edits that are not saved yet.
+  useUnsavedChangesWarning(useStore(form.store, (state) => state.isDirty));
 
   return (
     // The form renders as a content-only Card (body + footer separated

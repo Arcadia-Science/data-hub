@@ -4,6 +4,7 @@ import { type FormEvent, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { useUnsavedChangesWarning } from "@/hooks/use-unsaved-changes-warning";
 
 const MAX_BODY_LENGTH = 10_000;
 
@@ -25,6 +26,9 @@ export function RunCommentForm({
   const [isPending, startTransition] = useTransition();
 
   const trimmed = body.trim();
+
+  // A half-written comment is lost on reload, so the browser asks first.
+  useUnsavedChangesWarning(trimmed.length > 0);
   const tooLong = body.length > MAX_BODY_LENGTH;
   const canSubmit = trimmed.length > 0 && !tooLong && !isPending;
 

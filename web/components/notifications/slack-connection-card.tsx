@@ -8,12 +8,13 @@
 //   <SlackConnectionCard.Connected .../>   — shows status + Slack switches
 //   <SlackConnectionCard.Disconnected />   — shows "Connect to Slack" CTA
 
-import { useForm } from "@tanstack/react-form";
+import { useForm, useStore } from "@tanstack/react-form";
 import { Loader2, TriangleAlert } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -30,6 +31,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { useUnsavedChangesWarning } from "@/hooks/use-unsaved-changes-warning";
 
 // ---------------------------------------------------------------------------
 // Section header — lives above the card, matching the page-level
@@ -125,7 +127,7 @@ function Connected({
   revoked: boolean;
 }) {
   const router = useRouter();
-  const [disconnecting, setDisconnecting] = useState(false);
+  const [confirmingDisconnect, setConfirmingDisconnect] = useState(false);
 
   const form = useForm({
     defaultValues: initialPreferences,
@@ -173,23 +175,27 @@ function Connected({
     },
   });
 
-  async function handleDisconnect() {
-    setDisconnecting(true);
+  // Warn before a reload or tab close discards edits that are not saved yet.
+  useUnsavedChangesWarning(useStore(form.store, (state) => state.isDirty));
+
+  async function handleDisconnect(): Promise<boolean> {
     try {
       const res = await fetch("/api/v1/settings/slack/disconnect", {
         method: "POST",
       });
       if (!res.ok) {
-        toast.error("Couldn't disconnect Slack");
-        return;
+        toast.error("Couldn't disconnect Slack. Try again.");
+        return false;
       }
-      toast.success("Slack disconnected");
-      router.refresh();
     } catch {
-      toast.error("Couldn't disconnect Slack");
-    } finally {
-      setDisconnecting(false);
+      toast.error(
+        "Couldn't disconnect Slack. Check your connection and try again."
+      );
+      return false;
     }
+    toast.success("Slack disconnected");
+    router.refresh();
+    return true;
   }
 
   return (
@@ -355,15 +361,11 @@ function Connected({
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
-                disabled={disconnecting}
-                onClick={handleDisconnect}
+                onClick={() => setConfirmingDisconnect(true)}
                 size="sm"
                 type="button"
                 variant="outline"
               >
-                {disconnecting ? (
-                  <Loader2 className="animate-spin" data-icon="inline-start" />
-                ) : null}
                 Disconnect Slack
               </Button>
             </TooltipTrigger>
@@ -371,6 +373,15 @@ function Connected({
               Remove the Slack connection and disable all Slack DMs.
             </TooltipContent>
           </Tooltip>
+          <ConfirmDialog
+            confirmLabel="Disconnect Slack"
+            description="Data Hub will stop sending you Slack direct messages. You can connect Slack again from this page."
+            destructive
+            onConfirm={handleDisconnect}
+            onOpenChange={setConfirmingDisconnect}
+            open={confirmingDisconnect}
+            title="Disconnect Slack?"
+          />
           {/* Hidden while revoked: the toggles are replaced by the Reconnect
             CTA above, so there's nothing here to save. */}
           {revoked ? null : (

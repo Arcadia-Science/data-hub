@@ -1,6 +1,6 @@
 "use client";
 
-import { useForm } from "@tanstack/react-form";
+import { useForm, useStore } from "@tanstack/react-form";
 import { Loader2 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect } from "react";
@@ -26,6 +26,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { useUnsavedChangesWarning } from "@/hooks/use-unsaved-changes-warning";
 
 // In-app delivery toggles only. Slack delivery is a separate form owned by
 // `SlackConnectionCard` so the two have independent dirty state; this schema
@@ -196,6 +197,9 @@ export function NotificationsSettingsForm({
       router.refresh();
     },
   });
+
+  // Warn before a reload or tab close discards edits that are not saved yet.
+  useUnsavedChangesWarning(useStore(prefsForm.store, (state) => state.isDirty));
 
   return (
     <div className="flex flex-col gap-6">

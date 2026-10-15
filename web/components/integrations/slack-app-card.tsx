@@ -8,6 +8,7 @@ import { IntegrationField } from "@/components/integrations/integration-field";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { FieldGroup } from "@/components/ui/field";
+import { useUnsavedChangesWarning } from "@/hooks/use-unsaved-changes-warning";
 import type { PlainFieldStatus } from "@/lib/integrations/field-status";
 import type {
   SlackAppConfigForAdmin,
@@ -85,6 +86,9 @@ export function SlackAppCard({
 
   const patch = buildPatch();
   const dirty = Object.keys(patch).length > 0;
+
+  // Warn before a reload or tab close discards credentials that are not saved yet.
+  useUnsavedChangesWarning(dirty && !saving);
 
   async function handleSave() {
     if (!dirty) {
