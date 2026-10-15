@@ -516,7 +516,6 @@ function BulkActionBarHost({
         fileIds: refs.map((ref) => ref.id),
       }),
       runId,
-      defaultFilename: `${runId}-${refs.length}-files.zip`,
     });
   }
 

@@ -1,3 +1,8 @@
+import {
+  dashboardSearchParams,
+  instrumentDetailSearchParams,
+} from "@/lib/search-params";
+
 /**
  * Identifies which list a selection was made on. Two URLs give the same key
  * when the same rows would be listed, so moving to another page of the results
@@ -16,18 +21,27 @@ export function selectionScopeKey(
   return new URLSearchParams(entries).toString();
 }
 
-// Params on the dashboard, instrument, and member run lists that do not change
-// which runs are listed. `comments_*` belong to the comments preview on the
-// dashboard.
-const RUN_LIST_UNRELATED_PARAMS = new Set([
+// Params that sit beside a run list without changing which runs it lists.
+// `comments_*` drive the comments preview on the dashboard.
+const NOT_RUN_LIST_PARAMS = new Set([
   "page",
   "per_page",
   "comments_from",
   "comments_to",
 ]);
 
+// An allow-list built from the list pages' own param definitions, so an
+// unrelated param such as the member page's `?comments=` tab never clears the
+// selection, and a filter added to those definitions is covered automatically.
+const RUN_LIST_PARAMS = new Set(
+  [
+    ...Object.keys(dashboardSearchParams),
+    ...Object.keys(instrumentDetailSearchParams),
+  ].filter((key) => !NOT_RUN_LIST_PARAMS.has(key))
+);
+
 export function isRunListScopeParam(key: string): boolean {
-  return !RUN_LIST_UNRELATED_PARAMS.has(key);
+  return RUN_LIST_PARAMS.has(key);
 }
 
 // The run page's files table keeps its search, filters, and sort in `files_*`

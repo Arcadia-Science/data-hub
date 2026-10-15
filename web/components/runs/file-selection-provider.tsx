@@ -2,6 +2,7 @@
 
 import { useSearchParams } from "next/navigation";
 import { createContext, use, useCallback, useMemo, useState } from "react";
+import { SelectionNotice } from "@/components/selection-notice";
 import type { RunFileRow } from "@/lib/api/instrument-runs";
 import type { InstrumentType } from "@/lib/db/schema";
 import { canReprocessFile } from "@/lib/runs/reprocessable-statuses";
@@ -63,30 +64,51 @@ export function buildFileRef(
   };
 }
 
+// A selected file and the page of results it was picked on.
+export interface PickedFile {
+  page: number;
+  ref: FileRef;
+}
+
 // Files on the current page take their actions from the live row. A file whose
-// status moved on (it finished uploading, or was dismissed elsewhere) gets new
-// actions or drops out of the selection. Files picked on other pages keep the
-// actions they had when picked, because their rows are not loaded.
+// status moved on gets new actions, or drops out when it can no longer be
+// selected. A file picked on this page whose row is gone has left the results
+// (it finished uploading under a "Pending" filter, or was dismissed elsewhere),
+// so it drops out too. Files picked on other pages keep the actions they had
+// when picked, because their rows are not loaded.
 export function refreshFileRefs(
-  picked: ReadonlyMap<number, FileRef>,
+  picked: ReadonlyMap<number, PickedFile>,
   files: RunFileRow[],
-  instrumentType: InstrumentType
-): Map<number, FileRef> {
+  instrumentType: InstrumentType,
+  currentPage: number
+): Map<number, PickedFile> {
   const live = new Map(files.map((f) => [f.id, f]));
-  const next = new Map<number, FileRef>();
-  for (const [id, ref] of picked) {
+  const next = new Map<number, PickedFile>();
+  for (const [id, pick] of picked) {
     const row = live.get(id);
     if (row === undefined) {
-      next.set(id, ref);
+      if (pick.page !== currentPage) {
+        next.set(id, pick);
+      }
       continue;
     }
-    const current = buildFileRef(row, instrumentType);
-    if (current !== null) {
-      next.set(id, current);
+    const ref = buildFileRef(row, instrumentType);
+    if (ref !== null) {
+      next.set(id, { page: currentPage, ref });
     }
   }
   return next;
 }
+
+// The files table's current page, from `files_page`. Anything unreadable is
+// page 1, the table's default.
+function filesPageOf(searchParams: URLSearchParams): number {
+  const page = Number.parseInt(searchParams.get("files_page") ?? "", 10);
+  return Number.isInteger(page) && page > 0 ? page : 1;
+}
+
+const SELECTION_CLEARED_NOTICE =
+  "Selection cleared because the list of files changed.";
 
 interface FileSelectionContextValue {
   actions: {
@@ -124,27 +146,52 @@ export function FileSelectionProvider({
 }) {
   const searchParams = useSearchParams();
   const scopeKey = selectionScopeKey(searchParams, isFilesScopeParam);
+  const currentPage = filesPageOf(searchParams);
   const [store, setStore] = useState(() => ({
     scopeKey,
-    picked: new Map<number, FileRef>(),
+    picked: new Map<number, PickedFile>(),
+    notice: "",
   }));
 
-  // A new search, filter, or sort lists different files, so picks made on the
-  // old list could be off screen. Clear them so Dismiss and Reprocess never
-  // reach files the user can no longer see. Another page of the same results
-  // keeps the selection.
+  // A new search, filter, or sort lists different files, so picks made on the old
+  // list could be off screen. Dropping them keeps Dismiss and Reprocess away from
+  // files the user is not looking at. Another page of the same results keeps them.
   if (store.scopeKey !== scopeKey) {
-    setStore({ scopeKey, picked: new Map() });
+    setStore({
+      scopeKey,
+      picked: new Map(),
+      notice: store.picked.size > 0 ? SELECTION_CLEARED_NOTICE : "",
+    });
+  }
+
+  const refreshed = useMemo(
+    () => refreshFileRefs(store.picked, files, instrumentType, currentPage),
+    [store.picked, files, instrumentType, currentPage]
+  );
+
+  // Picks that left this page's results are removed from the stored state too,
+  // so a file cannot come back selected if it later returns to the list.
+  if (store.scopeKey === scopeKey && refreshed.size < store.picked.size) {
+    const dropped = store.picked.size - refreshed.size;
+    setStore({
+      scopeKey,
+      picked: refreshed,
+      notice: `${dropped} selected ${dropped === 1 ? "file" : "files"} changed and ${dropped === 1 ? "was" : "were"} deselected.`,
+    });
   }
 
   const selected = useMemo(
-    () => refreshFileRefs(store.picked, files, instrumentType),
-    [store.picked, files, instrumentType]
+    () => new Map([...refreshed].map(([id, pick]) => [id, pick.ref])),
+    [refreshed]
   );
 
   const setPicked = useCallback(
-    (update: (prev: Map<number, FileRef>) => Map<number, FileRef>) => {
-      setStore((prev) => ({ ...prev, picked: update(prev.picked) }));
+    (update: (prev: Map<number, PickedFile>) => Map<number, PickedFile>) => {
+      setStore((prev) => ({
+        ...prev,
+        picked: update(prev.picked),
+        notice: "",
+      }));
     },
     []
   );
@@ -156,12 +203,12 @@ export function FileSelectionProvider({
         if (next.has(ref.id)) {
           next.delete(ref.id);
         } else {
-          next.set(ref.id, ref);
+          next.set(ref.id, { page: currentPage, ref });
         }
         return next;
       });
     },
-    [setPicked]
+    [setPicked, currentPage]
   );
 
   // Toggle a page's worth of refs as a unit — if every ref is already
@@ -178,13 +225,13 @@ export function FileSelectionProvider({
           }
         } else {
           for (const r of refs) {
-            next.set(r.id, r);
+            next.set(r.id, { page: currentPage, ref: r });
           }
         }
         return next;
       });
     },
-    [setPicked]
+    [setPicked, currentPage]
   );
 
   const clear = useCallback(() => {
@@ -216,6 +263,7 @@ export function FileSelectionProvider({
   return (
     <FileSelectionContext.Provider value={value}>
       {children}
+      <SelectionNotice message={store.notice} />
     </FileSelectionContext.Provider>
   );
 }

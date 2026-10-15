@@ -4,6 +4,7 @@ import {
   hasActiveFilters,
   hasActiveInstrumentFilters,
   INSTRUMENT_NULLABLE_FILTER_KEYS,
+  instrumentDetailSearchParams,
 } from "@/lib/search-params";
 
 const noDashboardFilters = {
@@ -54,6 +55,27 @@ function noInstrumentFilters() {
     ) as Record<(typeof INSTRUMENT_NULLABLE_FILTER_KEYS)[number], null>),
   };
 }
+
+describe("INSTRUMENT_NULLABLE_FILTER_KEYS", () => {
+  // Keys of `instrumentDetailSearchParams` that are not nullable filters. A new
+  // filter added there must also be added to the list, or this test fails.
+  const NOT_NULLABLE_FILTERS = new Set([
+    "search",
+    "include_deleted",
+    "status",
+    "page",
+    "per_page",
+    "sort",
+    "order",
+  ]);
+
+  it("lists every nullable filter the instrument page can set", () => {
+    const filters = Object.keys(instrumentDetailSearchParams)
+      .filter((key) => !NOT_NULLABLE_FILTERS.has(key))
+      .sort();
+    expect([...INSTRUMENT_NULLABLE_FILTER_KEYS].sort()).toEqual(filters);
+  });
+});
 
 describe("hasActiveInstrumentFilters", () => {
   it("is false when nothing is set", () => {

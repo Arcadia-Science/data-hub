@@ -2,6 +2,7 @@
 
 import { useSearchParams } from "next/navigation";
 import { createContext, use, useCallback, useMemo, useState } from "react";
+import { SelectionNotice } from "@/components/selection-notice";
 import { isRunListScopeParam, selectionScopeKey } from "@/lib/selection-scope";
 
 export interface RunCaps {
@@ -53,6 +54,9 @@ interface RunSelectionContextValue {
   state: { selected: ReadonlyMap<string, RunRef> };
 }
 
+const SELECTION_CLEARED_NOTICE =
+  "Selection cleared because the list of runs changed.";
+
 const RunSelectionContext = createContext<RunSelectionContextValue | null>(
   null
 );
@@ -67,20 +71,28 @@ export function RunSelectionProvider({
   const [store, setStore] = useState(() => ({
     scopeKey,
     selected: new Map<string, RunRef>(),
+    notice: "",
   }));
 
-  // A new search, filter, or sort lists different runs, so picks made on the
-  // old list could be off screen. Dropping them here keeps Delete and
-  // Reprocess from reaching runs the user can no longer see. Moving to another
-  // page of the same results keeps the selection.
+  // A new search, filter, or sort lists different runs, so picks made on the old
+  // list could be off screen. Dropping them keeps Delete and Reprocess away from
+  // runs the user is not looking at. Another page of the same results keeps them.
   if (store.scopeKey !== scopeKey) {
-    setStore({ scopeKey, selected: new Map() });
+    setStore({
+      scopeKey,
+      selected: new Map(),
+      notice: store.selected.size > 0 ? SELECTION_CLEARED_NOTICE : "",
+    });
   }
   const selected = store.selected;
 
   const setSelected = useCallback(
     (update: (prev: Map<string, RunRef>) => Map<string, RunRef>) => {
-      setStore((prev) => ({ ...prev, selected: update(prev.selected) }));
+      setStore((prev) => ({
+        ...prev,
+        selected: update(prev.selected),
+        notice: "",
+      }));
     },
     []
   );
@@ -146,6 +158,7 @@ export function RunSelectionProvider({
   return (
     <RunSelectionContext.Provider value={value}>
       {children}
+      <SelectionNotice message={store.notice} />
     </RunSelectionContext.Provider>
   );
 }

@@ -28,6 +28,7 @@ import { getReportItemsPage } from "@/lib/api/report-items";
 import { listCommentsForRun } from "@/lib/api/run-comments";
 import { auth } from "@/lib/auth";
 import { formatDateLong } from "@/lib/date";
+import { decodePageParam } from "@/lib/runs/page-param";
 import {
   emptyReportItemsPage,
   REPORT_ITEMS_WINDOW,
@@ -46,7 +47,8 @@ interface Props {
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  const { instrumentId, runId } = await params;
+  const { instrumentId, runId: runIdParam } = await params;
+  const runId = decodePageParam(runIdParam);
   const run = await lookupRunByNaturalKey(instrumentId, runId);
   if (!run) {
     return { title: "Run not found" };
@@ -84,7 +86,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
 export default async function RunDetailPage({ params, searchParams }: Props) {
   const session = await auth();
-  const { instrumentId, runId } = await params;
+  const { instrumentId, runId: runIdParam } = await params;
+  const runId = decodePageParam(runIdParam);
   const filters = runDetailParamsCache.parse(await searchParams);
 
   // The route is publicly reachable so Slack/Notion unfurlers can read the

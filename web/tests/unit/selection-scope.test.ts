@@ -30,8 +30,22 @@ describe("run list selection scope", () => {
   });
 
   it("does not depend on the order of params", () => {
-    expect(key("a=1&b=2")).toBe(key("b=2&a=1"));
-    expect(key("a=1&a=2")).toBe(key("a=2&a=1"));
+    expect(key("search=abc&status=failed")).toBe(
+      key("status=failed&search=abc")
+    );
+    expect(key("search=a&search=b")).toBe(key("search=b&search=a"));
+  });
+
+  it("ignores params that are not part of the run list", () => {
+    // The member page's comments tab lives beside the run list.
+    expect(key("search=abc")).toBe(key("search=abc&comments=on_runs"));
+    expect(key("")).toBe(key("tab=status&unknown=1"));
+  });
+
+  it("covers the instrument page's metadata filters", () => {
+    expect(key("")).not.toBe(key("wavelength=450"));
+    expect(key("")).not.toBe(key("aunty_temperature=25%7C95"));
+    expect(key("")).not.toBe(key("instrument_id=gel-1"));
   });
 });
 
