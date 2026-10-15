@@ -15,8 +15,10 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Switch } from "@/components/ui/switch";
+import { useViewerTimeZone } from "@/components/viewer-time-zone-provider";
 import { VersionField } from "@/components/watcher-release/version-field";
 import { VERSION_MESSAGE, VERSION_REGEX } from "@/lib/api/watcher-versions";
+import { formatDateTime } from "@/lib/date";
 import type { WatcherVersionOption } from "@/lib/pypi";
 import { formatRelativeTime } from "@/lib/utils";
 
@@ -59,6 +61,7 @@ export function WatcherReleaseForm({
   pypiReachable,
 }: WatcherReleaseFormProps) {
   const router = useRouter();
+  const timeZone = useViewerTimeZone();
 
   // TanStack Form owns field values, validation, and isSubmitting tracking,
   // so we no longer need parallel useState/useTransition state. The schema
@@ -260,7 +263,9 @@ export function WatcherReleaseForm({
                 suppressHydrationWarning
               >
                 Last updated{" "}
-                <span title={new Date(lastUpdated.at).toLocaleString()}>
+                <span
+                  title={formatDateTime(new Date(lastUpdated.at), timeZone)}
+                >
                   {formatRelativeTime(lastUpdated.at)}
                 </span>
                 {lastUpdated.byName || lastUpdated.byEmail ? (

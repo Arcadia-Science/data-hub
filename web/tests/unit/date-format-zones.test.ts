@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  dayWindow,
   formatDate,
   formatDateLong,
   formatDateRange,
@@ -41,5 +42,44 @@ describe("date formatters use the zone they are given", () => {
       "Sep 30 – Oct 14, 2026"
     );
     expect(formatDateRange(from, instant, "UTC")).toBe("Oct 1 – Oct 15, 2026");
+  });
+});
+
+describe("dayWindow", () => {
+  const later = new Date("2030-01-01T00:00:00Z");
+
+  it("runs from local midnight to the next local midnight", () => {
+    const { start, end } = dayWindow(
+      "2026-10-14",
+      "America/Los_Angeles",
+      later
+    );
+    expect(start.toISOString()).toBe("2026-10-14T07:00:00.000Z");
+    expect(end.toISOString()).toBe("2026-10-15T07:00:00.000Z");
+  });
+
+  it("starts at a different instant in each zone", () => {
+    expect(dayWindow("2026-10-14", "UTC", later).start.toISOString()).toBe(
+      "2026-10-14T00:00:00.000Z"
+    );
+    expect(
+      dayWindow("2026-10-14", "Asia/Tokyo", later).start.toISOString()
+    ).toBe("2026-10-13T15:00:00.000Z");
+  });
+
+  it("covers 25 hours on the day clocks go back", () => {
+    const { start, end } = dayWindow(
+      "2026-11-01",
+      "America/Los_Angeles",
+      later
+    );
+    expect((end.getTime() - start.getTime()) / 3_600_000).toBe(25);
+  });
+
+  it("ends at now while the day is still in progress", () => {
+    const now = new Date("2026-10-14T20:00:00Z");
+    expect(dayWindow("2026-10-14", "America/Los_Angeles", now).end).toEqual(
+      now
+    );
   });
 });

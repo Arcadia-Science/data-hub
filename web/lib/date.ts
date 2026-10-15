@@ -119,6 +119,26 @@ export function startOfMonthISO(
   return fromZonedTime(startOfMonth(zoned), timeZone).toISOString();
 }
 
+/**
+ * The calendar day `dateStr` (`"yyyy-MM-dd"`) in `timeZone`, from its first
+ * moment to the start of the next day. A day still in progress ends at `now`
+ * instead, so the window never reaches into the future.
+ */
+export function dayWindow(
+  dateStr: string,
+  timeZone: string,
+  now: Date = new Date()
+): { start: Date; end: Date } {
+  const start = fromZonedTime(`${dateStr}T00:00:00.000`, timeZone);
+  // Add the day to the date string, not the instant, so a 23 or 25 hour day
+  // around a clock change still ends at the next local midnight.
+  const next = new Date(`${dateStr}T00:00:00.000Z`);
+  next.setUTCDate(next.getUTCDate() + 1);
+  const nextDay = next.toISOString().slice(0, 10);
+  const endOfDay = fromZonedTime(`${nextDay}T00:00:00.000`, timeZone);
+  return { start, end: endOfDay.getTime() > now.getTime() ? now : endOfDay };
+}
+
 /** Calendar day of `date` in `timeZone` as `"yyyy-MM-dd"`. */
 export function calendarDayKey(date: Date, timeZone: string): string {
   return formatInTimeZone(date, timeZone, "yyyy-MM-dd");
@@ -154,11 +174,9 @@ export function formatDayHeading(
   return formatInTimeZone(midday, timeZone, pattern);
 }
 
-// Every formatter below takes the zone explicitly. Reading the zone from the
-// runtime would give UTC on the server and the local zone in the browser, so a
-// component that renders on both would mismatch while hydrating. Callers pass
-// the viewer's zone: `useViewerTimeZone()` in client components and
-// `getViewerTimeZone()` in server code.
+// Formatters take the zone explicitly: the runtime zone is UTC on the server
+// and local in the browser, so a component rendering on both would mismatch.
+// Pass `useViewerTimeZone()` in client code, `getViewerTimeZone()` on the server.
 
 /** Formats a date as a 12-hour time string, e.g. `"2:30 PM"`. */
 export function formatTime(date: Date, timeZone: string): string {

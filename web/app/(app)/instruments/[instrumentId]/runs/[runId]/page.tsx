@@ -72,7 +72,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
         ? "1 raw data file."
         : `${rawFileCount} raw data files.`;
 
-  const description = `${dateLabel} ${formatDateLong(effectiveDate, await getViewerTimeZone())}. ${fileLabel}`;
+  const timeZone = await getViewerTimeZone();
+  const description = `${dateLabel} ${formatDateLong(effectiveDate, timeZone)}. ${fileLabel}`;
   return {
     title,
     description,

@@ -26,6 +26,8 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { useViewerTimeZone } from "@/components/viewer-time-zone-provider";
+import { formatDateTime } from "@/lib/date";
 import type { LastUpdated } from "@/lib/integrations/last-updated";
 import {
   slackChannelWebhookFormSchema,
@@ -69,6 +71,7 @@ export function SlackChannelForm({
   lastUpdated: LastUpdated | null;
 }) {
   const router = useRouter();
+  const timeZone = useViewerTimeZone();
   const [removing, setRemoving] = useState(false);
   const [isReplacing, setIsReplacing] = useState(false);
   const [maskedLength, setMaskedLength] = useState(MASKED_LENGTH_MIN);
@@ -258,7 +261,9 @@ export function SlackChannelForm({
                 suppressHydrationWarning
               >
                 Last updated{" "}
-                <span title={new Date(lastUpdated.at).toLocaleString()}>
+                <span
+                  title={formatDateTime(new Date(lastUpdated.at), timeZone)}
+                >
                   {formatRelativeTime(lastUpdated.at)}
                 </span>
                 {lastUpdated.byName || lastUpdated.byEmail ? (

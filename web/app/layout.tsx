@@ -9,6 +9,7 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { TimezoneCookieSync } from "@/components/timezone-cookie-sync";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { ViewerTimeZoneProvider } from "@/components/viewer-time-zone-provider";
 import { cn } from "@/lib/utils";
 import { getViewerTimeZone } from "@/lib/viewer-timezone";
 
@@ -99,13 +100,17 @@ export default async function RootLayout({
       <body suppressHydrationWarning>
         <ThemeProvider>
           <TimezoneCookieSync serverTimeZone={serverTimeZone} />
-          <NuqsAdapter>
-            <TooltipProvider>
-              <PreviewDeploymentBanner />
-              {children}
-              <Toaster />
-            </TooltipProvider>
-          </NuqsAdapter>
+          {/* At the root so every page, signed in or not, formats dates in the
+              same zone on the server and in the browser. */}
+          <ViewerTimeZoneProvider timeZone={serverTimeZone}>
+            <NuqsAdapter>
+              <TooltipProvider>
+                <PreviewDeploymentBanner />
+                {children}
+                <Toaster />
+              </TooltipProvider>
+            </NuqsAdapter>
+          </ViewerTimeZoneProvider>
         </ThemeProvider>
         <Analytics />
       </body>

@@ -12,7 +12,6 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
-import { ViewerTimeZoneProvider } from "@/components/viewer-time-zone-provider";
 import { trackEvent } from "@/lib/analytics/track";
 import { countUnread } from "@/lib/api/notifications";
 import { getSidebarInstruments } from "@/lib/api/sidebar";
@@ -94,59 +93,57 @@ export default async function AppLayout({
   }
 
   return (
-    <ViewerTimeZoneProvider timeZone={timeZone}>
-      <NotificationsProvider initialUnreadCount={initialUnreadCount}>
-        <ArchiveDownloadProvider>
-          {/* Wraps the whole shell, not just the sidebar: the review page and the
+    <NotificationsProvider initialUnreadCount={initialUnreadCount}>
+      <ArchiveDownloadProvider>
+        {/* Wraps the whole shell, not just the sidebar: the review page and the
             Linear setup read their settings from it too. */}
-          <DataHubFeedbackProvider>
-            <SidebarProvider defaultOpen={sidebarDefaultOpen}>
-              {/* First tab stop, so keyboard users can skip the sidebar and
-                  the header buttons on every page. */}
-              <a
-                className="sr-only focus-visible:not-sr-only focus-visible:fixed focus-visible:top-2 focus-visible:left-2 focus-visible:z-50 focus-visible:rounded-md focus-visible:bg-background focus-visible:px-3 focus-visible:py-2 focus-visible:font-medium focus-visible:text-sm focus-visible:shadow-md focus-visible:ring-2 focus-visible:ring-ring"
-                href={`#${MAIN_CONTENT_ID}`}
-              >
-                Skip to Main Content
-              </a>
-              <AppSidebar
-                changelogSections={changelogSections}
-                instruments={instruments}
-                session={session}
-                signOutAction={async () => {
-                  "use server";
-                  await authInstance.api.signOut({
-                    headers: await headers(),
-                  });
-                  redirect("/login");
-                }}
-              >
-                {feedbackEnabled ? <FeedbackMenuItem /> : null}
-              </AppSidebar>
-              {/* `min-w-0` lets the main pane shrink beside the sidebar so wide
+        <DataHubFeedbackProvider>
+          <SidebarProvider defaultOpen={sidebarDefaultOpen}>
+            {/* First tab stop, so keyboard users can skip the sidebar and
+                the header buttons on every page. */}
+            <a
+              className="sr-only focus-visible:not-sr-only focus-visible:fixed focus-visible:top-2 focus-visible:left-2 focus-visible:z-50 focus-visible:rounded-md focus-visible:bg-background focus-visible:px-3 focus-visible:py-2 focus-visible:font-medium focus-visible:text-sm focus-visible:shadow-md focus-visible:ring-2 focus-visible:ring-ring"
+              href={`#${MAIN_CONTENT_ID}`}
+            >
+              Skip to Main Content
+            </a>
+            <AppSidebar
+              changelogSections={changelogSections}
+              instruments={instruments}
+              session={session}
+              signOutAction={async () => {
+                "use server";
+                await authInstance.api.signOut({
+                  headers: await headers(),
+                });
+                redirect("/login");
+              }}
+            >
+              {feedbackEnabled ? <FeedbackMenuItem /> : null}
+            </AppSidebar>
+            {/* `min-w-0` lets the main pane shrink beside the sidebar so wide
                 tables scroll inside their container instead of stretching the page. */}
-              <SidebarInset className="min-w-0 pb-12">
-                <header className="flex h-14 shrink-0 items-center justify-between gap-2 px-4">
-                  <div className="flex h-8 items-center">
-                    <SidebarTrigger />
-                  </div>
-                  <div className="flex h-8 items-center gap-2">
-                    <SearchTrigger />
-                    <NotificationBell />
-                  </div>
-                </header>
-                <div
-                  className="flex flex-1 flex-col focus:outline-none"
-                  id={MAIN_CONTENT_ID}
-                  tabIndex={-1}
-                >
-                  {children}
+            <SidebarInset className="min-w-0 pb-12">
+              <header className="flex h-14 shrink-0 items-center justify-between gap-2 px-4">
+                <div className="flex h-8 items-center">
+                  <SidebarTrigger />
                 </div>
-              </SidebarInset>
-            </SidebarProvider>
-          </DataHubFeedbackProvider>
-        </ArchiveDownloadProvider>
-      </NotificationsProvider>
-    </ViewerTimeZoneProvider>
+                <div className="flex h-8 items-center gap-2">
+                  <SearchTrigger />
+                  <NotificationBell />
+                </div>
+              </header>
+              <div
+                className="flex flex-1 flex-col focus:outline-none"
+                id={MAIN_CONTENT_ID}
+                tabIndex={-1}
+              >
+                {children}
+              </div>
+            </SidebarInset>
+          </SidebarProvider>
+        </DataHubFeedbackProvider>
+      </ArchiveDownloadProvider>
+    </NotificationsProvider>
   );
 }

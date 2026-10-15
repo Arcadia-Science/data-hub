@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/tooltip";
 import { useViewerTimeZone } from "@/components/viewer-time-zone-provider";
 import type { WatcherHeartbeatRow } from "@/lib/api/watchers";
-import { formatDateTime, formatTime } from "@/lib/date";
+import { dayWindow, formatDateTime, formatTime } from "@/lib/date";
 import { cn } from "@/lib/utils";
 
 const chartConfig = {
@@ -36,16 +36,18 @@ const BUCKET_COUNT = 48;
 
 const FIVE_MIN = 5 * 60 * 1000;
 
-function computeWindow(since: string): {
+// The day runs in the viewer's zone, the same zone the labels use, so the axis
+// starts at local midnight on the server and in the browser.
+function computeWindow(
+  since: string,
+  timeZone: string
+): {
   windowStart: Date;
   windowEnd: Date;
 } {
-  const now = Math.floor(Date.now() / FIVE_MIN) * FIVE_MIN;
-  const windowStart = new Date(`${since}T00:00:00`);
-  const endOfDay = new Date(`${since}T00:00:00`);
-  endOfDay.setDate(endOfDay.getDate() + 1);
-  const windowEnd = endOfDay.getTime() > now ? new Date(now) : endOfDay;
-  return { windowStart, windowEnd };
+  const now = new Date(Math.floor(Date.now() / FIVE_MIN) * FIVE_MIN);
+  const { start, end } = dayWindow(since, timeZone, now);
+  return { windowStart: start, windowEnd: end };
 }
 
 interface Bucket {
@@ -176,8 +178,8 @@ export function HeartbeatChart({
   const timeZone = useViewerTimeZone();
 
   const { windowStart, windowEnd } = useMemo(
-    () => computeWindow(since),
-    [since]
+    () => computeWindow(since, timeZone),
+    [since, timeZone]
   );
 
   const startMs = windowStart.getTime();

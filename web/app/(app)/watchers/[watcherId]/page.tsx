@@ -30,12 +30,9 @@ interface Props {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }
 
-// The server and browser may be in different timezones, so the local-midnight
-// moment of a "yyyy-MM-dd" date can differ by up to ~14 hours from the
-// server's interpretation. Parse date filters as UTC and step back one day so
-// the DB query is guaranteed to cover the user's full local day;
-// `<HeartbeatChart>` clips the chart precisely on the client, and the event log
-// already orders by timestamp so a slightly wider window is harmless.
+// The viewer's zone is a guess on a first visit, so query from a day early to
+// cover their whole local day. `<HeartbeatChart>` clips to the exact day, and
+// the event log orders by timestamp, so a wider window is harmless.
 function toTzSafeSince(dateString: string): Date {
   const d = new Date(`${dateString}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() - 1);
