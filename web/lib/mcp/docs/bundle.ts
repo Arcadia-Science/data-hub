@@ -25,9 +25,7 @@ export interface DocPageSummary {
   title: string;
 }
 
-function splitPage(
-  markdown: string
-): Pick<DocEntry, "introText" | "sections"> {
+function splitPage(markdown: string): Pick<DocEntry, "introText" | "sections"> {
   const { intro, sections } = splitSections(markdown);
   return {
     introText: toPlainText(intro),

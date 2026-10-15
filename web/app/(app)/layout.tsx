@@ -1,6 +1,7 @@
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { AppSidebar } from "@/components/app-sidebar";
+import { ChangelogProvider } from "@/components/changelog/changelog-provider";
 import { FeedbackMenuItem } from "@/components/feedback/feedback-menu-item";
 import { DataHubFeedbackProvider } from "@/components/feedback/feedback-provider";
 import { NotificationBell } from "@/components/notifications/notification-bell";
@@ -47,9 +48,9 @@ export default async function AppLayout({
   // the partial `idx_notifications_user_id_unread` index keeps the
   // count cheap regardless of total notification volume.
   //
-  // The changelog window opens from the account menu on every page. Grouping
-  // here avoids a second request, and the files are small enough to send
-  // with the sidebar.
+  // The changelog window opens from the account menu, or from a link, on every
+  // page. Grouping here avoids a second request, and the files are small
+  // enough to send with the sidebar.
   //
   // A failed feedback check only hides the Feedback menu item. It reads
   // columns that a new feedback package version can add, and the app can
@@ -94,36 +95,37 @@ export default async function AppLayout({
         {/* Wraps the whole shell, not just the sidebar: the review page and the
             Linear setup read their settings from it too. */}
         <DataHubFeedbackProvider>
-          <SidebarProvider defaultOpen={sidebarDefaultOpen}>
-            <AppSidebar
-              changelogSections={changelogSections}
-              instruments={instruments}
-              session={session}
-              signOutAction={async () => {
-                "use server";
-                await authInstance.api.signOut({
-                  headers: await headers(),
-                });
-                redirect("/login");
-              }}
-            >
-              {feedbackEnabled ? <FeedbackMenuItem /> : null}
-            </AppSidebar>
-            {/* `min-w-0` lets the main pane shrink beside the sidebar so wide
+          <ChangelogProvider sections={changelogSections}>
+            <SidebarProvider defaultOpen={sidebarDefaultOpen}>
+              <AppSidebar
+                instruments={instruments}
+                session={session}
+                signOutAction={async () => {
+                  "use server";
+                  await authInstance.api.signOut({
+                    headers: await headers(),
+                  });
+                  redirect("/login");
+                }}
+              >
+                {feedbackEnabled ? <FeedbackMenuItem /> : null}
+              </AppSidebar>
+              {/* `min-w-0` lets the main pane shrink beside the sidebar so wide
                 tables scroll inside their container instead of stretching the page. */}
-            <SidebarInset className="min-w-0 pb-12">
-              <header className="flex h-14 shrink-0 items-center justify-between gap-2 px-4">
-                <div className="flex h-8 items-center">
-                  <SidebarTrigger />
-                </div>
-                <div className="flex h-8 items-center gap-2">
-                  <SearchTrigger />
-                  <NotificationBell />
-                </div>
-              </header>
-              {children}
-            </SidebarInset>
-          </SidebarProvider>
+              <SidebarInset className="min-w-0 pb-12">
+                <header className="flex h-14 shrink-0 items-center justify-between gap-2 px-4">
+                  <div className="flex h-8 items-center">
+                    <SidebarTrigger />
+                  </div>
+                  <div className="flex h-8 items-center gap-2">
+                    <SearchTrigger />
+                    <NotificationBell />
+                  </div>
+                </header>
+                {children}
+              </SidebarInset>
+            </SidebarProvider>
+          </ChangelogProvider>
         </DataHubFeedbackProvider>
       </ArchiveDownloadProvider>
     </NotificationsProvider>

@@ -16,11 +16,14 @@ import type { ChangelogDaySection } from "@/lib/changelog/group";
 
 export function ChangelogDialog({
   ids,
+  linkedId,
   onOpenChange,
   open,
   sections,
 }: {
   ids: readonly string[];
+  /** The entry a link asked for, or null when the menu opened the window. */
+  linkedId: string | null;
   onOpenChange: (open: boolean) => void;
   open: boolean;
   sections: readonly ChangelogDaySection[];
@@ -51,9 +54,10 @@ export function ChangelogDialog({
               </Button>
             </DialogClose>
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+          {/* Positioned so a linked entry can measure its offset from here. */}
+          <div className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain">
             <ChangelogSeenProvider ids={ids}>
-              <ChangelogFeed sections={sections} />
+              <ChangelogFeed linkedId={linkedId} sections={sections} />
             </ChangelogSeenProvider>
           </div>
         </DialogPrimitive.Content>

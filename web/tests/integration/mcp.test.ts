@@ -270,7 +270,9 @@ describe("MCP Server (HTTP)", () => {
     const hina = parsed.entries.find(
       (entry) => entry.id === "2026-10-08-hina-large-image-previews"
     );
-    expect(hina?.url).toContain("/?changelog=2026-10-08-hina-large-image-previews");
+    expect(hina?.url).toContain(
+      "/?changelog=2026-10-08-hina-large-image-previews"
+    );
   });
 
   // ---- Attribution tools (end-to-end) --------------------------------------

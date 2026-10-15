@@ -46,6 +46,11 @@ function useChangelogSeenState(): ChangelogSeenContextValue {
   return value;
 }
 
+/** Entries that were new when the page loaded; null until storage is read. */
+export function useChangelogUnseenIds(): ReadonlySet<string> | null {
+  return useChangelogSeenState().state.unseenIds;
+}
+
 export function ChangelogSeenProvider({
   children,
   ids,

@@ -1231,7 +1231,10 @@ describe("MCP Protocol (in-memory)", () => {
         name: "search_changelog",
         arguments: args,
       });
-      return { result, text: (result.content as Array<{ text: string }>)[0]?.text ?? "" };
+      return {
+        result,
+        text: (result.content as Array<{ text: string }>)[0]?.text ?? "",
+      };
     }
 
     async function listEntries(args: Record<string, unknown>) {
@@ -1275,7 +1278,11 @@ describe("MCP Protocol (in-memory)", () => {
       const days = [...new Set(all.entries.map((entry) => entry.date))];
       const to = days[1] ?? "";
       const from = days[3] ?? "";
-      const parsed = await listEntries({ dateFrom: from, dateTo: to, limit: 50 });
+      const parsed = await listEntries({
+        dateFrom: from,
+        dateTo: to,
+        limit: 50,
+      });
 
       const expected = all.entries.filter(
         (entry) => entry.date >= from && entry.date <= to
@@ -1290,7 +1297,10 @@ describe("MCP Protocol (in-memory)", () => {
     });
 
     it("applies the dates to a query too", async () => {
-      const everywhere = await listEntries({ query: "Linear feedback", limit: 50 });
+      const everywhere = await listEntries({
+        query: "Linear feedback",
+        limit: 50,
+      });
       const day = everywhere.entries[0]?.date ?? "";
       const parsed = await listEntries({
         query: "Linear feedback",
@@ -1337,7 +1347,9 @@ describe("MCP Protocol (in-memory)", () => {
       expect(parsed.entries).toEqual([]);
       expect(parsed.total).toBe(0);
       expect(parsed.hint).toContain("on or after 2099-01-01");
-      expect(parsed.hint).toMatch(/runs from \d{4}-\d{2}-\d{2} to \d{4}-\d{2}-\d{2}/);
+      expect(parsed.hint).toMatch(
+        /runs from \d{4}-\d{2}-\d{2} to \d{4}-\d{2}-\d{2}/
+      );
     });
 
     it("flags a question no entry clearly answers, without offering feedback", async () => {

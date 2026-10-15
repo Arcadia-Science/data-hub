@@ -58,7 +58,9 @@ export function registerChangelogTools(server: McpServer) {
         return errorResult(invalid);
       }
       if (dateFrom && dateTo && dateFrom > dateTo) {
-        return errorResult(`dateFrom (${dateFrom}) is after dateTo (${dateTo}).`);
+        return errorResult(
+          `dateFrom (${dateFrom}) is after dateTo (${dateTo}).`
+        );
       }
 
       const { entries, goodMatches, missingWords, total } = searchChangelog({

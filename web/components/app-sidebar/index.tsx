@@ -14,10 +14,8 @@ import {
 } from "@/components/ui/sidebar";
 import type { SidebarInstrument } from "@/lib/api/sidebar";
 import type { Session } from "@/lib/auth";
-import type { ChangelogDaySection } from "@/lib/changelog/group";
 
 interface AppSidebarProps {
-  changelogSections: readonly ChangelogDaySection[];
   // Extra items for the account menu, such as the Feedback entry.
   children?: ReactNode;
   instruments: SidebarInstrument[];
@@ -26,7 +24,6 @@ interface AppSidebarProps {
 }
 
 export function AppSidebar({
-  changelogSections,
   children,
   session,
   instruments,
@@ -68,11 +65,7 @@ export function AppSidebar({
         isAdmin={session.user.isAdmin === true}
       />
       <SidebarFooter>
-        <UserMenuFooter
-          changelogSections={changelogSections}
-          signOutAction={signOutAction}
-          user={session.user}
-        >
+        <UserMenuFooter signOutAction={signOutAction} user={session.user}>
           {children}
         </UserMenuFooter>
       </SidebarFooter>

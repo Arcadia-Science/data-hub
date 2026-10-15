@@ -151,9 +151,9 @@ describe("changelog search", () => {
   });
 
   it("returns nothing for words the changelog never uses", () => {
-    expect(searchChangelog({ query: "zxqv plorgnak", limit: LIMIT }).total).toBe(
-      0
-    );
+    expect(
+      searchChangelog({ query: "zxqv plorgnak", limit: LIMIT }).total
+    ).toBe(0);
   });
 
   // Claude Code caps one tool result at 25,000 tokens. Three characters per
