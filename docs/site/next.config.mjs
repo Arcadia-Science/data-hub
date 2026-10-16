@@ -16,6 +16,9 @@ const withMDX = createMDX();
 /** @type {import('next').NextConfig} */
 const config = {
   reactStrictMode: true,
+  // `docs/site/AGENTS.md` carries its own Next.js guidance. Without this,
+  // every `next dev` writes its managed block back into that file.
+  agentRules: false,
 };
 
 export default withMicrofrontends(withMDX(config));

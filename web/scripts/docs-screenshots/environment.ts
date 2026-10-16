@@ -43,7 +43,7 @@ const DEFAULT_PG_URL = "postgres://postgres:postgres@127.0.0.1:5432";
 export const DATABASE_NAME = "data_hub_screenshots";
 
 // Files in `web/` that `next dev` edits when it starts.
-const REWRITTEN_BY_NEXT = ["next-env.d.ts", "tsconfig.json", "AGENTS.md"];
+const REWRITTEN_BY_NEXT = ["next-env.d.ts", "tsconfig.json"];
 
 // Fixed so repeat runs show the same dates and times regardless of the
 // machine's own time zone. The browser context uses the same one.

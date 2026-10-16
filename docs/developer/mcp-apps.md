@@ -2,7 +2,7 @@
 
 Data Hub's MCP server serves the run report as an interactive HTML page, so a chat client that supports the MCP Apps extension renders the same report the website renders instead of rebuilding it from JSON.
 
-MCP Apps ([SEP-1865](https://modelcontextprotocol.io/specification/2026-01-26/apps)) is an extension to the Model Context Protocol. The server publishes an HTML page at a `ui://` address, the client fetches that page and runs it inside a locked-down iframe, and the page asks the client to make tool calls on its behalf. Throughout this page, "host" means the chat client doing that work, and "View" means the HTML page.
+MCP Apps ([SEP-1865](https://modelcontextprotocol.io/seps/1865-mcp-apps-interactive-user-interfaces-for-mcp)) is an extension to the Model Context Protocol. The server publishes an HTML page at a `ui://` address, the client fetches that page and runs it inside a locked-down iframe, and the page asks the client to make tool calls on its behalf. Throughout this page, "host" means the chat client doing that work, and "View" means the HTML page.
 
 The same React components render both surfaces. The web app feeds them over REST and the View feeds them over MCP tool calls.
 
