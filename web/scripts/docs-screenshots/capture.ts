@@ -6,7 +6,11 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { type Browser, chromium, type Page } from "playwright";
-import { DEFAULT_VIEWPORT, DEVICE_SCALE_FACTOR } from "./constants";
+import {
+  CLOSEUP_VIEWPORT,
+  DEVICE_SCALE_FACTOR,
+  WINDOW_VIEWPORT,
+} from "./constants";
 import { TIME_ZONE, WORK_DIR } from "./environment";
 import type { World } from "./setup";
 import type { Shot, Theme } from "./types";
@@ -106,9 +110,10 @@ export async function captureShot(
   theme: Theme,
   world: World
 ): Promise<Buffer> {
+  const base = shot.closeup ? CLOSEUP_VIEWPORT : WINDOW_VIEWPORT;
   const viewport = {
-    width: shot.viewport?.width ?? DEFAULT_VIEWPORT.width,
-    height: shot.viewport?.height ?? DEFAULT_VIEWPORT.height,
+    width: shot.viewport?.width ?? base.width,
+    height: shot.viewport?.height ?? base.height,
   };
   const context = await browser.newContext({
     viewport,

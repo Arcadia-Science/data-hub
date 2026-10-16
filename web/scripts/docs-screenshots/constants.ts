@@ -27,7 +27,10 @@ export const MANIFEST_FILE = path.join(
 // host for a deployment.
 export const PLACEHOLDER_HOST = "datahub.example.com";
 
-export const DEFAULT_VIEWPORT = { width: 1440, height: 900 } as const;
+export const WINDOW_VIEWPORT = { width: 1440, height: 800 } as const;
+// A close-up is cropped to one element, so this only sets how much page there
+// is around it. Popovers and dialogs size themselves to it.
+export const CLOSEUP_VIEWPORT = { width: 1440, height: 900 } as const;
 // Twice the pixels keeps text sharp on high-density screens.
 export const DEVICE_SCALE_FACTOR = 2;
 export const WEBP_QUALITY = 82;

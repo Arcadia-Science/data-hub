@@ -23,7 +23,7 @@ import type { ManualShot, Shot } from "./types";
 const EXAMPLE_ID = "3f2a9c1e-7b4d-4e0a-9c55-1d2e8f6a7b90";
 
 // Run pages are long, so they get a taller window than the default.
-const RUN_PAGE = { height: 1100 } as const;
+const RUN_PAGE = { height: 1000 } as const;
 
 const GEL_DOC_RUN = "/instruments/azure-600-gel-doc/runs/26.02.02_10.45.05";
 const PLATE_READER_RUN =
@@ -298,7 +298,7 @@ export const SHOTS: Shot[] = [
     name: "qpcr-run-detail",
     pages: ["instrument-preprocessing"],
     path: "/instruments/azure-cielo-qpcr/runs/Experiment_20260129",
-    viewport: { height: 1250 },
+    viewport: { height: 900 },
     ready: (page) => waitFor(page, "Melting Curves"),
     steps: async ({ page }) => {
       // Channel 1 of the sample file is flat. Channel 2 has real curves.
@@ -313,7 +313,7 @@ export const SHOTS: Shot[] = [
     name: "aunty-run-detail",
     pages: ["instrument-preprocessing"],
     path: "/instruments/unchained-labs-aunty/runs/2026-03-15T09-18-44",
-    viewport: { height: 1250 },
+    viewport: { height: 900 },
     ready: (page) => waitFor(page, "Report Data"),
   },
 
@@ -380,7 +380,7 @@ export const SHOTS: Shot[] = [
     name: "integrations",
     pages: ["integrations"],
     path: "/settings/integrations",
-    viewport: { height: 1100 },
+    viewport: { height: 1000 },
     prepare: (world) => world.disconnectLinear(),
     ready: (page) => waitFor(page, "Connect your Linear app"),
   },
@@ -429,7 +429,7 @@ export const SHOTS: Shot[] = [
     pages: ["mcp"],
     path: "/consent?client_id=docs-claude&scope=openid%20read%20write",
     address: "/consent",
-    viewport: { height: 600 },
+    viewport: { height: 550 },
     prepare: (world) => insertConsentClient(world, "docs-claude"),
     ready: (page) => waitFor(page, "Authorize application"),
   },
@@ -439,7 +439,6 @@ export const SHOTS: Shot[] = [
     name: "manual-upload",
     pages: ["manage-watchers", "browse-runs"],
     path: pendingUploadRunPath(),
-    viewport: { height: 900 },
     prepare: addPendingUploadRun,
     cleanup: removePendingUploadRun,
     ready: (page) => waitFor(page, /Files \(6 raw/),

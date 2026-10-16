@@ -48,13 +48,13 @@ export function BrowserFrame({
         className
       )}
     >
-      <span className="flex items-center gap-3 border-fd-border border-b bg-fd-muted/60 px-3 py-2">
+      <span className="flex items-center gap-3 border-fd-border border-b bg-fd-muted/60 px-3 py-1.5">
         <span aria-hidden="true" className="flex shrink-0 items-center gap-1.5">
           <span className="size-2.5 rounded-full bg-[#ff5f57]" />
           <span className="size-2.5 rounded-full bg-[#febc2e]" />
           <span className="size-2.5 rounded-full bg-[#28c840]" />
         </span>
-        <span className="mx-auto min-w-0 max-w-md flex-1 truncate rounded-md bg-fd-background px-3 py-1 text-center text-fd-muted-foreground text-xs">
+        <span className="mx-auto min-w-0 max-w-md flex-1 truncate rounded-md bg-fd-background px-3 py-[3px] text-center text-fd-muted-foreground text-xs">
           {address}
         </span>
         {/* Balances the three dots so the address stays centered. */}
