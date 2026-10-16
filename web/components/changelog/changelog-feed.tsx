@@ -169,7 +169,7 @@ export function ChangelogFeed({
         return (
           <section
             aria-labelledby={headingId}
-            className="border-border border-t pb-5 first:border-t-0 last:pb-0"
+            className="pb-5 last:pb-0"
             key={section.date}
           >
             <h3
@@ -192,7 +192,11 @@ export function ChangelogFeed({
                     <span className="min-w-0 flex-1">{entry.title}</span>
                     <ChangelogNewBadge id={entry.id} />
                   </AccordionTrigger>
-                  <AccordionContent className="flex flex-col gap-3 pb-5 [&_p:not(:last-child)]:mb-0">
+                  {/* `h-auto` drops the height the accordion pins from a
+                      measurement. Entries that start open are measured while
+                      the window is still zooming in at 95% scale, which
+                      leaves them about 5% short and clips the last row. */}
+                  <AccordionContent className="flex h-auto flex-col gap-3 pb-5 [&_p:not(:last-child)]:mb-0">
                     <ChangelogMarkdown body={entry.body} />
                     <div className="flex flex-wrap items-center gap-x-5 gap-y-1">
                       {entry.docs ? (
