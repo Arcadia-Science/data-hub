@@ -137,6 +137,14 @@ docs-catalogs:
 	make py-watcher-cli-catalog
 	make docs-bundle-generate
 
+# Retake the docs site screenshots from a throwaway local database and rewrite
+# docs/site/public/images. Needs Postgres, uv, and Playwright's Chromium.
+# Usage: make docs-screenshots [ONLY=home,my-runs] [SKIP_SEED=1]. See
+# docs/developer/local-development.md.
+.PHONY: docs-screenshots
+docs-screenshots:
+	cd web && npm run docs:screenshots -- $(if $(ONLY),--only $(ONLY)) $(if $(SKIP_SEED),--skip-seed)
+
 .PHONY: docs-format
 docs-format:
 	cd docs/site && npm run lint:fix
