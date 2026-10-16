@@ -50,11 +50,10 @@ const publicPrefixes = [
 const publicExactPaths = new Set(["/", "/watchers"]);
 
 // Pages can't see the query string from a layout or a shared component, so the
-// proxy hands them the full address. Deleting before setting is what stops a
-// client from planting its own value.
+// proxy hands them the full address. `set` replaces any value the client sent,
+// so a visitor can't plant their own.
 function nextWithRequestPath(request: NextRequest, requestPath: string) {
   const requestHeaders = new Headers(request.headers);
-  requestHeaders.delete(REQUEST_PATH_HEADER);
   requestHeaders.set(REQUEST_PATH_HEADER, requestPath);
   return NextResponse.next({ request: { headers: requestHeaders } });
 }

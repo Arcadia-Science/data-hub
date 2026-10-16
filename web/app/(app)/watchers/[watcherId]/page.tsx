@@ -61,7 +61,11 @@ export default async function WatcherDetailPage({
   const session = await auth();
   const { watcherId } = await params;
   if (!session) {
-    redirect(loginHref(await getRequestPath(`/watchers/${watcherId}`)));
+    redirect(
+      loginHref(
+        await getRequestPath(`/watchers/${encodeURIComponent(watcherId)}`)
+      )
+    );
   }
 
   const filters = watcherDetailParamsCache.parse(await searchParams);
