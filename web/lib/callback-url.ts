@@ -7,9 +7,10 @@ export const REQUEST_PATH_HEADER = "x-data-hub-request-path";
 const PLACEHOLDER_ORIGIN = "http://callback.invalid";
 const LOGIN_PATH = "/login";
 
-// `_rsc` is Next's internal navigation parameter. `error` is dropped so a
-// retried sign-in doesn't land on a page that still shows the old error.
-const DROPPED_QUERY_PARAMS = new Set(["_rsc", "error"]);
+// `_rsc` is Next's internal navigation parameter. `error` and Better Auth's
+// `error_description` are dropped so a retried sign-in doesn't land on a page
+// that still shows the old error.
+const DROPPED_QUERY_PARAMS = new Set(["_rsc", "error", "error_description"]);
 
 function hasControlCharacter(value: string): boolean {
   for (const char of value) {
@@ -58,16 +59,6 @@ export function safeCallbackPath(value: unknown): string {
     return "/";
   }
 
-  let decoded: string;
-  try {
-    decoded = decodeURIComponent(value);
-  } catch {
-    return "/";
-  }
-  if (hasControlCharacter(decoded)) {
-    return "/";
-  }
-
   let url: URL;
   try {
     url = new URL(value, PLACEHOLDER_ORIGIN);
@@ -75,6 +66,18 @@ export function safeCallbackPath(value: unknown): string {
     return "/";
   }
   if (url.origin !== PLACEHOLDER_ORIGIN) {
+    return "/";
+  }
+
+  // Only the path is decoded: the query stays percent-encoded in the
+  // redirect, so encoded control characters or a stray `%` there are harmless.
+  let decodedPath: string;
+  try {
+    decodedPath = decodeURIComponent(url.pathname);
+  } catch {
+    return "/";
+  }
+  if (hasControlCharacter(decodedPath)) {
     return "/";
   }
   if (
@@ -88,6 +91,16 @@ export function safeCallbackPath(value: unknown): string {
   }
 
   return `${url.pathname}${filterSearch(url.search)}`;
+}
+
+/**
+ * Return address for the `/login` page. MCP OAuth sign-ins resume through the
+ * signed `client_id` query, so `callbackURL` must not compete with it.
+ */
+export function loginPageCallbackPath(
+  params: Record<string, string | string[] | undefined>
+): string {
+  return params.client_id ? "/" : safeCallbackPath(params.callbackURL);
 }
 
 /** Sign-in page link that returns to `path` afterwards. */

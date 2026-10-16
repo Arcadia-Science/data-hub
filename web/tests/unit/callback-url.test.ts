@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   loginHref,
+  loginPageCallbackPath,
   safeCallbackPath,
   signInErrorPath,
 } from "@/lib/callback-url";
@@ -53,6 +54,35 @@ describe("safeCallbackPath", () => {
       "/runs?b=2&a=1"
     );
     expect(safeCallbackPath("/runs?_rsc=abc&error=x")).toBe("/runs");
+    expect(
+      safeCallbackPath(
+        "/runs?tab=files&error=access_denied&error_description=x"
+      )
+    ).toBe("/runs?tab=files");
+  });
+
+  it.each([
+    "/runs?q=100%",
+    "/runs?q=a%0Ab",
+  ])("keeps the path and query of %s", (path) => {
+    expect(safeCallbackPath(path)).toBe(path);
+  });
+});
+
+describe("loginPageCallbackPath", () => {
+  it("uses a checked callbackURL", () => {
+    expect(loginPageCallbackPath({ callbackURL: "/comments?from=x" })).toBe(
+      "/comments?from=x"
+    );
+    expect(loginPageCallbackPath({ callbackURL: "//evil.example" })).toBe("/");
+    expect(loginPageCallbackPath({ callbackURL: ["/a", "/b"] })).toBe("/");
+    expect(loginPageCallbackPath({})).toBe("/");
+  });
+
+  it("ignores callbackURL during an MCP OAuth sign-in", () => {
+    expect(
+      loginPageCallbackPath({ client_id: "x", callbackURL: "/comments" })
+    ).toBe("/");
   });
 });
 
