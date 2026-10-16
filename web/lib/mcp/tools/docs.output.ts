@@ -7,9 +7,7 @@ const docPageSummarySchema = z.object({
 });
 
 const docsSearchResultSchema = z.object({
-  page: z
-    .string()
-    .describe("Page ID to pass to read_doc (`changelog/<id>` for a change)."),
+  page: z.string().describe("Page ID to pass to read_doc."),
   title: z.string(),
   section: z
     .string()
@@ -17,14 +15,7 @@ const docsSearchResultSchema = z.object({
     .describe("Heading ID of the matching section, or null for the intro."),
   heading: z.string().nullable(),
   excerpt: z.string(),
-  url: z
-    .string()
-    .nullable()
-    .describe("Link to cite. Null for a change that has no docs page."),
-  date: z
-    .string()
-    .nullable()
-    .describe("YYYY-MM-DD the change shipped. Null for a docs page."),
+  url: z.string().describe("Link to cite."),
 });
 
 export const searchDocsOutputSchema = z.object({
@@ -46,7 +37,7 @@ export const readDocOutputSchema = z.object({
   title: z.string(),
   section: z.string().nullable(),
   heading: z.string().nullable(),
-  url: z.string().nullable(),
+  url: z.string(),
   markdown: z.string(),
   sections: z
     .array(

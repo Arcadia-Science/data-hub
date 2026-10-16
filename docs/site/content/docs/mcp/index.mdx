@@ -95,12 +95,13 @@ Clients that speak MCP but not OAuth can bridge through [`mcp-remote`](https://w
 
 ## Questions about Data Hub [#questions-about-data-hub]
 
-The assistant can answer questions about Data Hub itself, such as how to install a watcher or what a run status means. It searches the documentation and the [changelog](/docs/send-feedback#changelog), reads the page that fits, and links it in its answer. Two tools do this, and both need only the `read` scope:
+The assistant can answer questions about Data Hub itself, such as how to install a watcher, what a run status means, or what changed last week. It searches the documentation or the [changelog](/docs/send-feedback#changelog), reads what fits, and links it in its answer. Three tools do this, and all need only the `read` scope:
 
-- `search_docs` returns up to five matching sections, each with a short excerpt and a link
-- `read_doc` returns one page, or one section of a page, as Markdown
+- `search_docs` returns up to five matching sections of the docs, each with a short excerpt and a link
+- `read_doc` returns one docs page, or one section of a page, as Markdown
+- `search_changelog` lists changelog entries by date, or finds them by topic, and returns each one in full with a link that opens it in the Changelog
 
-The answers come from the docs that ship with your deployment, so they match the version you run, including a staging deployment that is ahead of the published site. Clients that let you attach resources by hand can also attach any page as `datahub://docs/<page>`, for example `datahub://docs/manage-tokens`.
+Ask it what changed this week, what’s new since a date, or when something changed. Dates are calendar days, and both ends count. The answers come from the docs and changelog that ship with your deployment, so they match the version you run, including a staging deployment that is ahead of the published site. A change appears in the changelog once it has reached your deployment. Clients that let you attach resources by hand can also attach any docs page as `datahub://docs/<page>`, for example `datahub://docs/manage-tokens`.
 
 The assistant reads the guides and the changelog. It doesn’t read the generated [API](/docs/api) endpoint pages or the [tools](/docs/mcp/tools), [prompts](/docs/mcp/prompts), and [resources](/docs/mcp/resources) catalogs, because the client already receives the catalog when it connects. When the docs don’t cover a question, the assistant says so and offers to [send feedback](#feedback) about the gap.
 

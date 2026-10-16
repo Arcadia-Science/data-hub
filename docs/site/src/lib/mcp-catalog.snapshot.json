@@ -5119,7 +5119,7 @@
     {
       "name": "search_docs",
       "title": "Search Docs",
-      "description": "Search Data Hub's own documentation and changelog. Use it for how-to and explanation questions about Data Hub itself: setting up instruments and watchers, tokens, permissions, notifications, MCP and API access, and what changed recently. Returns up to five matching sections, each with a short excerpt, a page ID, and a link to cite. Call read_doc to read the full page or section. Not for lab data; use global_search or search_runs for runs, files, and instruments. When nothing matches, the result lists every docs page so you can pick one. If the results do not answer the question, say the docs do not cover it and offer to report the gap with send_feedback.",
+      "description": "Search Data Hub's own documentation. Use it for how-to and explanation questions about Data Hub itself: setting up instruments and watchers, tokens, permissions, notifications, and MCP and API access. Returns up to five matching sections, each with a short excerpt, a page ID, and a link to cite. Call read_doc to read the full page or section. Not for what changed or when; use search_changelog. Not for lab data; use global_search or search_runs for runs, files, and instruments. When nothing matches, the result lists every docs page so you can pick one. If the results do not answer the question, say the docs do not cover it and offer to report the gap with send_feedback.",
       "group": "docs",
       "annotations": {
         "readOnlyHint": true
@@ -5149,7 +5149,7 @@
               "properties": {
                 "page": {
                   "type": "string",
-                  "description": "Page ID to pass to read_doc (`changelog/<id>` for a change)."
+                  "description": "Page ID to pass to read_doc."
                 },
                 "title": {
                   "type": "string"
@@ -5179,26 +5179,8 @@
                   "type": "string"
                 },
                 "url": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ],
-                  "description": "Link to cite. Null for a change that has no docs page."
-                },
-                "date": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ],
-                  "description": "YYYY-MM-DD the change shipped. Null for a docs page."
+                  "type": "string",
+                  "description": "Link to cite."
                 }
               },
               "required": [
@@ -5207,8 +5189,7 @@
                 "section",
                 "heading",
                 "excerpt",
-                "url",
-                "date"
+                "url"
               ],
               "additionalProperties": false
             }
@@ -5251,7 +5232,7 @@
     {
       "name": "read_doc",
       "title": "Read Doc",
-      "description": "Read one page of Data Hub's documentation, or one changelog entry, as Markdown. Pass a page ID from search_docs, such as `manage-tokens` or `changelog/2026-10-08-hina-large-image-previews`. Add `section` (a heading ID from the search result) to read only that part. The result lists the page's section IDs, so a long page can be read in pieces. Cite the returned link in your answer.",
+      "description": "Read one page of Data Hub's documentation as Markdown. Pass a page ID from search_docs, such as `manage-tokens`. Add `section` (a heading ID from the search result) to read only that part. The result lists the page's section IDs, so a long page can be read in pieces. Cite the returned link in your answer. Changelog entries come from search_changelog, not from this tool.",
       "group": "docs",
       "annotations": {
         "readOnlyHint": true
@@ -5305,14 +5286,7 @@
             ]
           },
           "url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "type": "string"
           },
           "markdown": {
             "type": "string"
@@ -5353,6 +5327,108 @@
           "url",
           "markdown",
           "sections"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "search_changelog",
+      "title": "Search Changelog",
+      "description": "List or search Data Hub's changelog: what changed in the app, the API, the MCP server, and file processing, and when. Use it for \"what changed this week\", \"what's new since October 1\", \"when did X change\", and \"is X fixed yet\". Leave out `query` to list every entry in a date range, newest first; do not pass \"what changed\" as the query. With a `query`, the best match comes first. `dateFrom` and `dateTo` are calendar days with both ends included, matched on the day a change was released. A deployment lists an entry only once the change has reached it. Returns whole entries with a link to cite, up to `limit` (default 20, at most 50); `total` says how many matched. Not for how-to questions about using Data Hub; use search_docs. Not for lab data.",
+      "group": "docs",
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "query": {
+            "description": "Topic words to look for, such as 'feedback Linear' or 'Hina image preview' (min 2 characters). Leave out to list entries by date alone.",
+            "type": "string"
+          },
+          "dateFrom": {
+            "description": "First day to include, as YYYY-MM-DD.",
+            "type": "string"
+          },
+          "dateTo": {
+            "description": "Last day to include, as YYYY-MM-DD.",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Most entries to return (default 20, max 50).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "Entry ID: the file name without `.md`."
+                },
+                "title": {
+                  "type": "string"
+                },
+                "date": {
+                  "type": "string",
+                  "description": "YYYY-MM-DD the change was released."
+                },
+                "markdown": {
+                  "type": "string",
+                  "description": "The whole entry as Markdown, without its title."
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link that opens this entry in Data Hub's changelog. Cite it in your answer."
+                },
+                "docsUrl": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The docs page that explains the change. Null when the entry has none."
+                }
+              },
+              "required": [
+                "id",
+                "title",
+                "date",
+                "markdown",
+                "url",
+                "docsUrl"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "total": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "How many entries matched. Larger than `entries` when `limit` cut the list; narrow the dates to see the rest."
+          },
+          "hint": {
+            "description": "Present when nothing matched, or no entry clearly matches the query. Says what to do next.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entries",
+          "total"
         ],
         "additionalProperties": false
       }

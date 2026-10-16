@@ -831,7 +831,7 @@ describe("MCP Protocol (in-memory)", () => {
 
   it("every registered tool advertises outputSchema", async () => {
     const { tools } = await client.listTools();
-    expect(tools).toHaveLength(39);
+    expect(tools).toHaveLength(40);
     for (const tool of tools) {
       const schema = tool.outputSchema as
         | { type?: string; oneOf?: unknown; anyOf?: unknown }
@@ -1098,6 +1098,7 @@ describe("MCP Protocol (in-memory)", () => {
     expect(parsed.results.length).toBeGreaterThan(0);
     expect(parsed.pages).toBeUndefined();
     expect(parsed.hint).toContain("never mention 'Benchling'");
+    expect(parsed.hint).toContain("search_changelog");
     expect(parsed.hint).toContain("send_feedback");
   });
 
@@ -1115,6 +1116,7 @@ describe("MCP Protocol (in-memory)", () => {
     expect(parsed.results).toEqual([]);
     expect(parsed.pages.map((p) => p.page)).toContain("manage-tokens");
     expect(parsed.pages.length).toBeGreaterThan(20);
+    expect(parsed.hint).toContain("search_changelog");
     expect(parsed.hint).toContain("send_feedback");
   });
 
@@ -1179,18 +1181,14 @@ describe("MCP Protocol (in-memory)", () => {
     );
   });
 
-  it("read_doc reads a changelog entry", async () => {
+  it("read_doc sends a changelog ID to search_changelog", async () => {
     const result = await client.callTool({
       name: "read_doc",
       arguments: { page: "changelog/2026-10-08-hina-large-image-previews" },
     });
-    expect(result.isError).toBeFalsy();
-    const parsed = parseText(result.content) as {
-      markdown: string;
-      url: string | null;
-    };
-    expect(parsed.markdown).toContain("Hina");
-    expect(parsed.url).toContain("/docs/instrument-preprocessing");
+    expect(result.isError).toBe(true);
+    const text = (result.content as Array<{ text: string }>)[0]?.text ?? "";
+    expect(text).toContain("search_changelog");
   });
 
   it("read_doc names the pages it has when the page is unknown", async () => {
@@ -1212,6 +1210,162 @@ describe("MCP Protocol (in-memory)", () => {
     expect(result.isError).toBe(true);
     const text = (result.content as Array<{ text: string }>)[0]?.text ?? "";
     expect(text).toContain("revoke-a-token");
+  });
+
+  describe("search_changelog", () => {
+    interface ChangelogResult {
+      entries: Array<{
+        id: string;
+        title: string;
+        date: string;
+        markdown: string;
+        url: string;
+        docsUrl: string | null;
+      }>;
+      hint?: string;
+      total: number;
+    }
+
+    async function searchChangelog(args: Record<string, unknown>) {
+      const result = await client.callTool({
+        name: "search_changelog",
+        arguments: args,
+      });
+      return {
+        result,
+        text: (result.content as Array<{ text: string }>)[0]?.text ?? "",
+      };
+    }
+
+    async function listEntries(args: Record<string, unknown>) {
+      const { result } = await searchChangelog(args);
+      expect(result.isError).toBeFalsy();
+      return parseText(result.content) as ChangelogResult;
+    }
+
+    it("lists entries newest first when no query is given", async () => {
+      const parsed = await listEntries({ limit: 5 });
+      expect(parsed.entries).toHaveLength(5);
+      expect(parsed.total).toBeGreaterThan(5);
+      const dates = parsed.entries.map((entry) => entry.date);
+      expect(dates).toEqual([...dates].sort().reverse());
+      expect(parsed.hint).toBeUndefined();
+    });
+
+    it("returns the same payload as text and structured content", async () => {
+      const { result } = await searchChangelog({ limit: 2 });
+      expect(result.structuredContent).toEqual(parseText(result.content));
+    });
+
+    it("links each entry to the changelog window, with its docs link apart", async () => {
+      const parsed = await listEntries({
+        query: "Hina large image preview smaller",
+        limit: 3,
+      });
+      const hina = parsed.entries.find(
+        (entry) => entry.id === "2026-10-08-hina-large-image-previews"
+      );
+      expect(hina?.url).toMatch(
+        /\/\?changelog=2026-10-08-hina-large-image-previews$/
+      );
+      expect(hina?.docsUrl).toContain("/docs/instrument-preprocessing");
+      expect(hina?.markdown).toContain("Hina");
+      expect(hina?.markdown).not.toContain(hina?.title ?? "never");
+    });
+
+    it("keeps only entries inside the dates, both ends included", async () => {
+      const all = await listEntries({ limit: 50 });
+      const days = [...new Set(all.entries.map((entry) => entry.date))];
+      const to = days[1] ?? "";
+      const from = days[3] ?? "";
+      const parsed = await listEntries({
+        dateFrom: from,
+        dateTo: to,
+        limit: 50,
+      });
+
+      const expected = all.entries.filter(
+        (entry) => entry.date >= from && entry.date <= to
+      );
+      expect(parsed.entries.map((entry) => entry.id)).toEqual(
+        expected.map((entry) => entry.id)
+      );
+      expect(parsed.total).toBe(expected.length);
+      const returned = new Set(parsed.entries.map((entry) => entry.date));
+      expect(returned.has(from)).toBe(true);
+      expect(returned.has(to)).toBe(true);
+    });
+
+    it("applies the dates to a query too", async () => {
+      const everywhere = await listEntries({
+        query: "Linear feedback",
+        limit: 50,
+      });
+      const day = everywhere.entries[0]?.date ?? "";
+      const parsed = await listEntries({
+        query: "Linear feedback",
+        dateFrom: day,
+        dateTo: day,
+        limit: 50,
+      });
+      expect(parsed.entries.length).toBeGreaterThan(0);
+      expect(parsed.entries.every((entry) => entry.date === day)).toBe(true);
+      expect(parsed.total).toBe(parsed.entries.length);
+    });
+
+    it("reports how many entries matched when the limit cuts the list", async () => {
+      const parsed = await listEntries({ limit: 1 });
+      expect(parsed.entries).toHaveLength(1);
+      expect(parsed.total).toBeGreaterThan(1);
+    });
+
+    it("rejects dates that are not real days, and ranges that run backwards", async () => {
+      const impossible = await searchChangelog({ dateFrom: "2026-13-01" });
+      expect(impossible.result.isError).toBe(true);
+      expect(impossible.text).toContain("dateFrom");
+
+      const words = await searchChangelog({ dateTo: "last week" });
+      expect(words.result.isError).toBe(true);
+      expect(words.text).toContain("YYYY-MM-DD");
+
+      const backwards = await searchChangelog({
+        dateFrom: "2026-10-09",
+        dateTo: "2026-10-01",
+      });
+      expect(backwards.result.isError).toBe(true);
+      expect(backwards.text).toContain("after");
+    });
+
+    it("rejects a one-letter query", async () => {
+      const short = await searchChangelog({ query: " a " });
+      expect(short.result.isError).toBe(true);
+      expect(short.text).toContain("Leave it out");
+    });
+
+    it("says when the dates hold no entries, and where the changelog runs", async () => {
+      const parsed = await listEntries({ dateFrom: "2099-01-01" });
+      expect(parsed.entries).toEqual([]);
+      expect(parsed.total).toBe(0);
+      expect(parsed.hint).toContain("on or after 2099-01-01");
+      expect(parsed.hint).toMatch(
+        /runs from \d{4}-\d{2}-\d{2} to \d{4}-\d{2}-\d{2}/
+      );
+    });
+
+    it("flags a question no entry clearly answers, without offering feedback", async () => {
+      const parsed = await listEntries({
+        query: "how do I export runs to Benchling",
+      });
+      expect(parsed.hint).toContain("never mentions 'Benchling'");
+      expect(parsed.hint).toContain("changelog starts on");
+      expect(parsed.hint).not.toContain("send_feedback");
+    });
+
+    it("points a query that matches nothing at the date filters", async () => {
+      const parsed = await listEntries({ query: "zxqv plorgnak" });
+      expect(parsed.entries).toEqual([]);
+      expect(parsed.hint).toContain("dateFrom and dateTo");
+    });
   });
 
   it("get_me errors without auth on the in-memory transport", async () => {

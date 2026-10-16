@@ -192,26 +192,18 @@ describe("parseDocRef", () => {
 });
 
 describe("findDoc", () => {
-  it("returns a docs page and a changelog entry by ID", () => {
-    expect(findDoc("manage-tokens")?.kind).toBe("docs");
+  it("returns a docs page by ID", () => {
+    expect(findDoc("manage-tokens")?.page).toBe("manage-tokens");
+  });
+
+  it("does not return a changelog entry", () => {
     expect(
-      findDoc("changelog/2026-10-08-hina-large-image-previews")?.kind
-    ).toBe("changelog");
+      findDoc("changelog/2026-10-08-hina-large-image-previews")
+    ).toBeUndefined();
   });
 
   it("returns nothing for an unknown ID", () => {
     expect(findDoc("no-such-page")).toBeUndefined();
-  });
-
-  it("gives a changelog entry the date in its heading and its docs link", () => {
-    const entry = findDoc("changelog/2026-10-08-hina-large-image-previews");
-    expect(entry?.kind).toBe("changelog");
-    if (entry?.kind !== "changelog") {
-      return;
-    }
-    expect(entry.markdown).toContain("(2026-10-08)");
-    expect(entry.markdown).toContain("Related docs: ");
-    expect(entry.docsUrl).toContain("/docs/instrument-preprocessing");
   });
 
   it("keeps a page's intro as plain text, apart from its sections", () => {
@@ -241,5 +233,16 @@ describe("unknownPageMessage", () => {
 
   it("caps the suggestions at three", () => {
     expect(closest("watcher").length).toBeLessThanOrEqual(3);
+  });
+
+  it("sends a changelog ID to search_changelog instead of listing pages", () => {
+    for (const page of [
+      "changelog/2026-10-08-hina-large-image-previews",
+      "Changelog",
+    ]) {
+      const message = unknownPageMessage(page);
+      expect(message).toContain("search_changelog");
+      expect(message).not.toContain("Docs pages:");
+    }
   });
 });

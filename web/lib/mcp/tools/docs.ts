@@ -4,7 +4,6 @@ import { DOCS_URL } from "@/lib/docs";
 import { trackDocsRead, trackDocsSearch } from "@/lib/mcp/analytics";
 import { toolRegistrationConfig } from "@/lib/mcp/catalog/register";
 import {
-  type DocEntry,
   findDoc,
   listDocPages,
   parseDocRef,
@@ -15,17 +14,20 @@ import { errorResult, structuredResult } from "@/lib/mcp/tools/helpers";
 import { MIN_QUERY_LENGTH } from "@/lib/search-constants";
 import { readDocTool, searchDocsTool } from "./docs.defs";
 
+const TRY_CHANGELOG =
+  "If the question is about a change, or about something that used to work differently, try search_changelog.";
+
 const REPORT_GAP =
   "If the docs do not cover the question, say so and offer to report the gap with send_feedback.";
 
-const NO_MATCH_HINT = `Nothing matched. Pick a page from \`pages\` and call read_doc, or try different words. ${REPORT_GAP}`;
+const NO_MATCH_HINT = `Nothing matched. Pick a page from \`pages\` and call read_doc, or try different words. ${TRY_CHANGELOG} ${REPORT_GAP}`;
 
 function weakMatchHint(missingWords: readonly string[]): string {
   const missing =
     missingWords.length > 0
       ? `The docs never mention ${missingWords.map((word) => `'${word}'`).join(", ")}. `
       : "";
-  return `${missing}No section matches most of the question, so these results may not answer it. ${REPORT_GAP}`;
+  return `${missing}No section matches most of the question, so these results may not answer it. ${TRY_CHANGELOG} ${REPORT_GAP}`;
 }
 
 // `DOCS_URL` is path-only when the docs share the app's origin, and an agent
@@ -34,11 +36,8 @@ function docsBaseUrl(): string {
   return DOCS_URL.startsWith("http") ? DOCS_URL : `${appOrigin()}${DOCS_URL}`;
 }
 
-function docUrl(entry: DocEntry, sectionId: string | null): string | null {
-  if (entry.kind === "changelog") {
-    return entry.docsUrl;
-  }
-  return `${docsBaseUrl()}/${entry.page}${sectionId ? `#${sectionId}` : ""}`;
+function docUrl(page: string, sectionId: string | null): string {
+  return `${docsBaseUrl()}/${page}${sectionId ? `#${sectionId}` : ""}`;
 }
 
 export function registerDocsTools(server: McpServer) {
@@ -70,8 +69,7 @@ export function registerDocsTools(server: McpServer) {
           section: section?.id ?? null,
           heading: section?.heading ?? null,
           excerpt,
-          url: docUrl(entry, section?.id ?? null),
-          date: entry.kind === "changelog" ? entry.date : null,
+          url: docUrl(entry.page, section?.id ?? null),
         })),
         ...(goodMatches === 0 ? { hint: weakMatchHint(missingWords) } : {}),
       });
@@ -109,7 +107,7 @@ export function registerDocsTools(server: McpServer) {
         title: entry.title,
         section: match?.id ?? null,
         heading: match?.heading ?? null,
-        url: docUrl(entry, match?.id ?? null),
+        url: docUrl(entry.page, match?.id ?? null),
         markdown: match ? match.markdown : entry.markdown,
         sections: entry.sections.map(({ id, heading, level }) => ({
           id,

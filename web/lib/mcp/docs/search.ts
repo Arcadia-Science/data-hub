@@ -1,4 +1,5 @@
 import MiniSearch from "minisearch";
+import { createSearchTerms, wordsNeeded } from "@/lib/mcp/search-terms";
 import { type DocEntry, type DocSection, getDocsBundle } from "./bundle";
 import { makeExcerpt } from "./markdown";
 
@@ -6,123 +7,13 @@ const SEARCH_RESULT_LIMIT = 5;
 // Keeps the `SEARCH_RESULT_LIMIT` results from all being sections of one long
 // page.
 const MAX_HITS_PER_PAGE = 2;
-// Changelog entries are short, so they would otherwise outrank the docs page
-// that explains the same thing in more depth.
-const CHANGELOG_WEIGHT = 0.7;
 
-// Questions arrive as sentences. Without this, "how do I" matches every page.
-// `data` and `hub` are here because every page names the product.
-const STOP_WORDS = new Set([
-  "a",
-  "about",
-  "am",
-  "an",
-  "and",
-  "are",
-  "as",
-  "at",
-  "be",
-  "been",
-  "but",
-  "by",
-  "can",
-  "could",
-  "data",
-  "did",
-  "do",
-  "does",
-  "for",
-  "from",
-  "get",
-  "had",
-  "has",
-  "have",
-  "how",
-  "hub",
-  "i",
-  "if",
-  "in",
-  "into",
-  "is",
-  "it",
-  "its",
-  "me",
-  "much",
-  "my",
-  "myself",
-  "of",
-  "on",
-  "or",
-  "our",
-  "should",
-  "so",
-  "that",
-  "the",
-  "their",
-  "then",
-  "there",
-  "this",
-  "to",
-  "up",
-  "us",
-  "was",
-  "we",
-  "were",
-  "what",
-  "when",
-  "where",
-  "which",
-  "who",
-  "why",
-  "will",
-  "with",
-  "would",
-  "you",
-  "your",
-]);
-
-// Strips plurals only, applied to the index and the query alike, so "tokens"
-// finds "token" without a stemming library.
-function normalizeTerm(term: string): string | null {
-  const lower = term.toLowerCase();
-  if (STOP_WORDS.has(lower)) {
-    return null;
-  }
-  if (lower.length > 4 && lower.endsWith("ies")) {
-    return `${lower.slice(0, -3)}y`;
-  }
-  if (lower.length > 3 && lower.endsWith("s") && !lower.endsWith("ss")) {
-    return lower.slice(0, -1);
-  }
-  return lower;
-}
-
-const tokenize: (text: string) => string[] = MiniSearch.getDefault("tokenize");
-
-/** The question's words as the index stores them, mapped to how they were typed. */
-function queryWords(query: string): Map<string, string> {
-  const words = new Map<string, string>();
-  for (const token of tokenize(query)) {
-    const term = normalizeTerm(token);
-    if (term && !words.has(term)) {
-      words.set(term, token);
-    }
-  }
-  return words;
-}
-
-// Search matches any one word, so a result alone says little. A section that
-// holds two thirds of the question's words, rounded up, counts as an answer.
-// The golden questions in `tests/unit/mcp-docs-search.test.ts` check the bar.
-function wordsNeeded(wordCount: number): number {
-  return Math.ceil((wordCount * 2) / 3);
-}
+const { normalize: normalizeTerm, queryWords } = createSearchTerms();
 
 interface IndexedPassage {
   description: string;
   heading: string;
   id: string;
-  kind: DocEntry["kind"];
   pageTitle: string;
   text: string;
 }
@@ -138,7 +29,7 @@ interface Passage {
 function passagesOf(
   entry: DocEntry
 ): Array<{ passage: Passage; indexed: IndexedPassage }> {
-  const description = entry.kind === "docs" ? entry.description : "";
+  const { description } = entry;
   const parts: Array<{
     heading: string;
     section: DocSection | null;
@@ -155,7 +46,6 @@ function passagesOf(
     passage: { entry, section, excerptSource: text || description },
     indexed: {
       id: `${entry.page}#${section?.id ?? ""}`,
-      kind: entry.kind,
       pageTitle: entry.title,
       description,
       heading,
@@ -165,7 +55,6 @@ function passagesOf(
 }
 
 interface DocsIndex {
-  bundle: DocEntry[];
   index: MiniSearch<IndexedPassage>;
   passages: Map<string, Passage>;
 }
@@ -173,30 +62,26 @@ interface DocsIndex {
 let cached: DocsIndex | null = null;
 
 function getIndex(): DocsIndex {
-  const bundle = getDocsBundle();
-  // The bundle is the same array on every call in production, so the index is
-  // built once per server instance. Elsewhere it is rebuilt with the bundle.
-  if (cached?.bundle === bundle) {
+  // The bundle is fixed per deployment, so the index is built once per server
+  // instance.
+  if (cached) {
     return cached;
   }
 
   const index = new MiniSearch<IndexedPassage>({
     fields: ["heading", "pageTitle", "description", "text"],
-    storeFields: ["kind"],
     processTerm: normalizeTerm,
     searchOptions: {
       boost: { heading: 3, pageTitle: 2, description: 1.5 },
       // Short terms such as "run" would otherwise prefix-match half the docs.
       prefix: (term) => term.length >= 4,
       fuzzy: (term) => (term.length >= 5 ? 0.2 : false),
-      boostDocument: (_id, _term, stored) =>
-        stored?.kind === "changelog" ? CHANGELOG_WEIGHT : 1,
     },
   });
 
   const passages = new Map<string, Passage>();
   const documents: IndexedPassage[] = [];
-  for (const entry of bundle) {
+  for (const entry of getDocsBundle()) {
     for (const { passage, indexed } of passagesOf(entry)) {
       passages.set(indexed.id, passage);
       documents.push(indexed);
@@ -204,7 +89,7 @@ function getIndex(): DocsIndex {
   }
   index.addAll(documents);
 
-  cached = { bundle, index, passages };
+  cached = { index, passages };
   return cached;
 }
 

@@ -8,9 +8,9 @@ import {
   ScrollText,
   Settings,
 } from "lucide-react";
-import dynamic from "next/dynamic";
 import Link from "next/link";
 import { type ReactNode, useState, useTransition } from "react";
+import { useChangelog } from "@/components/changelog/changelog-provider";
 import { DocsLink } from "@/components/docs-link";
 import {
   DropdownMenu,
@@ -29,26 +29,10 @@ import { UserAvatar } from "@/components/user-avatar";
 import { useChangelogSeen } from "@/hooks/use-changelog-seen";
 import { toUserAvatarUser } from "@/lib/avatar-color";
 import { dataHubMarkBlueClassName } from "@/lib/changelog/copy";
-import type { ChangelogDaySection } from "@/lib/changelog/group";
 import { DOCS_URL } from "@/lib/docs";
 import { cn } from "@/lib/utils";
 
-// The window pulls in the markdown renderer, which the sidebar does not need
-// until someone opens the account menu.
-const ChangelogDialog = dynamic(
-  () =>
-    import("@/components/changelog/changelog-dialog").then(
-      (module) => module.ChangelogDialog
-    ),
-  { ssr: false }
-);
-
-function preloadChangelogDialog() {
-  import("@/components/changelog/changelog-dialog");
-}
-
 interface UserMenuFooterProps {
-  changelogSections: readonly ChangelogDaySection[];
   // Extra account menu items, shown after Changelog.
   children?: ReactNode;
   signOutAction: () => Promise<void>;
@@ -61,20 +45,15 @@ interface UserMenuFooterProps {
 }
 
 export function UserMenuFooter({
-  changelogSections,
   children,
   user,
   signOutAction,
 }: UserMenuFooterProps) {
   const { isMobile } = useSidebar();
   const { hasUnseen } = useChangelogSeen();
-  const changelogIds = changelogSections.flatMap((section) =>
-    section.entries.map((entry) => entry.id)
-  );
-  const unseen = hasUnseen(changelogIds);
+  const changelog = useChangelog();
+  const unseen = hasUnseen(changelog.ids);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [changelogMounted, setChangelogMounted] = useState(false);
-  const [changelogOpen, setChangelogOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
   const avatarUser = toUserAvatarUser({
     userId: user.id,
@@ -90,7 +69,7 @@ export function UserMenuFooter({
           onOpenChange={(next) => {
             setMenuOpen(next);
             if (next) {
-              preloadChangelogDialog();
+              changelog.preload();
             }
           }}
           open={menuOpen}
@@ -138,8 +117,7 @@ export function UserMenuFooter({
               onSelect={(event) => {
                 event.preventDefault();
                 setMenuOpen(false);
-                setChangelogMounted(true);
-                setChangelogOpen(true);
+                changelog.open();
               }}
             >
               <ScrollText data-icon="inline-start" />
@@ -185,14 +163,6 @@ export function UserMenuFooter({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        {changelogMounted ? (
-          <ChangelogDialog
-            ids={changelogIds}
-            onOpenChange={setChangelogOpen}
-            open={changelogOpen}
-            sections={changelogSections}
-          />
-        ) : null}
       </SidebarMenuItem>
     </SidebarMenu>
   );
