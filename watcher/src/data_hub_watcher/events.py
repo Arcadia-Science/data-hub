@@ -14,7 +14,10 @@ a database migration. Known ``kind`` values, with their per-kind
 ``details`` schemas:
 
 * ``run_report_failed`` -- POST/PATCH against
-  ``/instruments/:id/runs[/:run_id]`` raised ``ApiError``.
+  ``/instruments/:id/runs[/:run_id]`` failed. Everything except a 4xx is
+  retried until it succeeds, so only the first of a row of such failures
+  is emitted; a 4xx is emitted every time because it is not retried.
+  ``status_code`` is 0 when no HTTP status came back.
   ``details = {"kind", "run_id", "operation": "create"|"update",
   "status_code", "error", "file_count"}``.
 * ``config_sync_failed`` -- the startup ``PUT /watchers/:id/config``

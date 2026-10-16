@@ -50,6 +50,16 @@ The watcher cannot reach the Data Hub API. Check:
 - Environment in config (`staging`, `production`, or `preview`): `data-hub-watcher config show`
 - That the API base URL for that environment is reachable
 
+### A run is missing after a connection problem [#a-run-is-missing-after-a-connection-problem]
+
+Watcher 1.2.2 and later retry a run report that failed because the watcher couldn’t reach Data Hub, or because Data Hub returned a server error. The first retry comes after 5 seconds. The wait then doubles up to 5 minutes between tries, and the watcher keeps trying every 5 minutes until the report goes through. It needs no new file and no restart, so the run appears on its own once the problem clears.
+
+The watcher records one `run_report_failed` event when a run’s report first fails. It doesn’t record another for the same run while it keeps retrying, even if more files in the run finish in the meantime.
+
+A failure that isn’t a connection problem or a server error, such as `401 Unauthorized`, is not retried, because it would fail the same way. Each one is recorded. Fix the cause, then restart the watcher.
+
+Older watchers try again only when another file in the run finishes or the watcher restarts. Restart the watcher to report the run.
+
 ## Files are not being detected
 
 - Confirm the watch directory and file patterns. The instrument’s page in the web app shows both, or run `data-hub-watcher config show` on the PC

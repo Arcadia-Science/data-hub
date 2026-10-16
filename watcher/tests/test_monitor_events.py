@@ -47,6 +47,7 @@ def _make_monitor(
     on_stable_file: MagicMock | None = None,
     reporter: MagicMock | None = None,
     max_stability_wait_seconds: int = MAX_STABILITY_WAIT_SECONDS,
+    on_tick: MagicMock | None = None,
 ) -> FileMonitor:
     return FileMonitor(
         watch_directory=watch_dir,
@@ -54,6 +55,7 @@ def _make_monitor(
         stability_period=1,
         max_stability_wait_seconds=max_stability_wait_seconds,
         on_stable_file=on_stable_file or MagicMock(),
+        on_tick=on_tick,
         state_db=state_db,
         recursive=False,
         event_reporter=reporter,
@@ -177,3 +179,45 @@ class TestStableCallbackFailure:
         assert call.args[0] == "stable_callback_failed"
         assert call.kwargs["path"] == str(f)
         assert "downstream blew up" in call.kwargs["error"]
+
+
+class TestTickCallback:
+    def test_runs_when_no_files_are_pending(self, watch_dir: Path, state_db: StateDB) -> None:
+        on_tick = MagicMock()
+        monitor = _make_monitor(watch_dir, state_db, on_tick=on_tick)
+
+        monitor._check_pending()
+
+        on_tick.assert_called_once_with()
+
+    def test_runs_after_stable_file_callbacks(self, watch_dir: Path, state_db: StateDB) -> None:
+        calls: list[str] = []
+        monitor = _make_monitor(
+            watch_dir,
+            state_db,
+            on_stable_file=MagicMock(side_effect=lambda _path: calls.append("stable")),
+            on_tick=MagicMock(side_effect=lambda: calls.append("tick")),
+        )
+        f = watch_dir / "ready.csv"
+        f.write_text("hello")
+        st = f.stat()
+        now = time.monotonic()
+        monitor._pending[f] = _PendingFile(
+            path=f,
+            size=st.st_size,
+            mtime=st.st_mtime,
+            first_seen=now - 5,
+            last_changed=now - 5,
+        )
+
+        monitor._check_pending()
+
+        assert calls == ["stable", "tick"]
+
+    def test_exception_does_not_escape(self, watch_dir: Path, state_db: StateDB) -> None:
+        on_tick = MagicMock(side_effect=RuntimeError("tick blew up"))
+        monitor = _make_monitor(watch_dir, state_db, on_tick=on_tick)
+
+        monitor._check_pending()  # Must not raise, or the checker thread would die.
+
+        on_tick.assert_called_once_with()
