@@ -1,4 +1,5 @@
 import type { McpToolDef } from "@/lib/mcp/catalog/types";
+import { CHANGELOG_TOOL_DEFS } from "@/lib/mcp/tools/changelog.defs";
 import { DISCOVERY_TOOL_DEFS } from "@/lib/mcp/tools/discovery.defs";
 import { DOCS_TOOL_DEFS } from "@/lib/mcp/tools/docs.defs";
 import { FEEDBACK_TOOL_DEFS } from "@/lib/mcp/tools/feedback.defs";
@@ -17,5 +18,6 @@ export const MCP_TOOL_DEFS: readonly McpToolDef[] = [
   ...WATCHER_TOOL_DEFS,
   ...DISCOVERY_TOOL_DEFS,
   ...DOCS_TOOL_DEFS,
+  ...CHANGELOG_TOOL_DEFS,
   ...FEEDBACK_TOOL_DEFS,
 ];

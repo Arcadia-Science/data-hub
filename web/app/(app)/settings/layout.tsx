@@ -27,11 +27,7 @@ export default async function SettingsLayout({
   // children — so unfurlers still see "Settings | Data Hub" / "Access
   // tokens" titles.
   if (!session?.user) {
-    return (
-      <SignInRequired callbackUrl="/settings">
-        Sign in to manage settings.
-      </SignInRequired>
-    );
+    return <SignInRequired>Sign in to manage settings.</SignInRequired>;
   }
 
   // No layout-level "Settings" title: the SettingsNav sidebar already

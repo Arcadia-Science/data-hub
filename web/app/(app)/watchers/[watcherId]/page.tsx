@@ -17,7 +17,9 @@ import {
   WATCHER_PAGE_SIZE,
 } from "@/lib/api/watchers";
 import { auth } from "@/lib/auth";
+import { loginHref } from "@/lib/callback-url";
 import { todayDateString } from "@/lib/date";
+import { getRequestPath } from "@/lib/request-path";
 import { watcherDetailParamsCache } from "@/lib/search-params";
 import { getViewerTimeZone } from "@/lib/viewer-timezone";
 
@@ -58,7 +60,7 @@ export default async function WatcherDetailPage({
 }: Props) {
   const session = await auth();
   if (!session) {
-    redirect("/login");
+    redirect(loginHref(await getRequestPath()));
   }
 
   const { watcherId } = await params;

@@ -1,6 +1,7 @@
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { AppSidebar } from "@/components/app-sidebar";
+import { ChangelogProvider } from "@/components/changelog/changelog-provider";
 import { FeedbackMenuItem } from "@/components/feedback/feedback-menu-item";
 import { DataHubFeedbackProvider } from "@/components/feedback/feedback-provider";
 import { NotificationBell } from "@/components/notifications/notification-bell";
@@ -51,9 +52,9 @@ export default async function AppLayout({
   // the partial `idx_notifications_user_id_unread` index keeps the
   // count cheap regardless of total notification volume.
   //
-  // The changelog window opens from the account menu on every page. Grouping
-  // here avoids a second request, and the files are small enough to send
-  // with the sidebar.
+  // The changelog window opens from the account menu, or from a link, on every
+  // page. Grouping here avoids a second request, and the files are small
+  // enough to send with the sidebar.
   //
   // A failed feedback check only hides the Feedback menu item. It reads
   // columns that a new feedback package version can add, and the app can
@@ -98,50 +99,51 @@ export default async function AppLayout({
         {/* Wraps the whole shell, not just the sidebar: the review page and the
             Linear setup read their settings from it too. */}
         <DataHubFeedbackProvider>
-          <SidebarProvider defaultOpen={sidebarDefaultOpen}>
-            {/* First tab stop, so keyboard users can skip the sidebar and
-                the header buttons on every page. */}
-            <a
-              className="sr-only focus-visible:not-sr-only focus-visible:fixed focus-visible:top-2 focus-visible:left-2 focus-visible:z-50 focus-visible:rounded-md focus-visible:bg-background focus-visible:px-3 focus-visible:py-2 focus-visible:font-medium focus-visible:text-sm focus-visible:shadow-md focus-visible:ring-2 focus-visible:ring-ring"
-              href={`#${MAIN_CONTENT_ID}`}
-            >
-              Skip to Main Content
-            </a>
-            <AppSidebar
-              changelogSections={changelogSections}
-              instruments={instruments}
-              session={session}
-              signOutAction={async () => {
-                "use server";
-                await authInstance.api.signOut({
-                  headers: await headers(),
-                });
-                redirect("/login");
-              }}
-            >
-              {feedbackEnabled ? <FeedbackMenuItem /> : null}
-            </AppSidebar>
-            {/* `min-w-0` lets the main pane shrink beside the sidebar so wide
-                tables scroll inside their container instead of stretching the page. */}
-            <SidebarInset className="min-w-0 pb-12">
-              <header className="flex h-14 shrink-0 items-center justify-between gap-2 px-4">
-                <div className="flex h-8 items-center">
-                  <SidebarTrigger />
-                </div>
-                <div className="flex h-8 items-center gap-2">
-                  <SearchTrigger />
-                  <NotificationBell />
-                </div>
-              </header>
-              <div
-                className="flex flex-1 flex-col focus:outline-none"
-                id={MAIN_CONTENT_ID}
-                tabIndex={-1}
+          <ChangelogProvider sections={changelogSections}>
+            <SidebarProvider defaultOpen={sidebarDefaultOpen}>
+              {/* First tab stop, so keyboard users can skip the sidebar and
+                  the header buttons on every page. */}
+              <a
+                className="sr-only focus-visible:not-sr-only focus-visible:fixed focus-visible:top-2 focus-visible:left-2 focus-visible:z-50 focus-visible:rounded-md focus-visible:bg-background focus-visible:px-3 focus-visible:py-2 focus-visible:font-medium focus-visible:text-sm focus-visible:shadow-md focus-visible:ring-2 focus-visible:ring-ring"
+                href={`#${MAIN_CONTENT_ID}`}
               >
-                {children}
-              </div>
-            </SidebarInset>
-          </SidebarProvider>
+                Skip to Main Content
+              </a>
+              <AppSidebar
+                instruments={instruments}
+                session={session}
+                signOutAction={async () => {
+                  "use server";
+                  await authInstance.api.signOut({
+                    headers: await headers(),
+                  });
+                  redirect("/login");
+                }}
+              >
+                {feedbackEnabled ? <FeedbackMenuItem /> : null}
+              </AppSidebar>
+              {/* `min-w-0` lets the main pane shrink beside the sidebar so wide
+                tables scroll inside their container instead of stretching the page. */}
+              <SidebarInset className="min-w-0 pb-12">
+                <header className="flex h-14 shrink-0 items-center justify-between gap-2 px-4">
+                  <div className="flex h-8 items-center">
+                    <SidebarTrigger />
+                  </div>
+                  <div className="flex h-8 items-center gap-2">
+                    <SearchTrigger />
+                    <NotificationBell />
+                  </div>
+                </header>
+                <div
+                  className="flex flex-1 flex-col focus:outline-none"
+                  id={MAIN_CONTENT_ID}
+                  tabIndex={-1}
+                >
+                  {children}
+                </div>
+              </SidebarInset>
+            </SidebarProvider>
+          </ChangelogProvider>
         </DataHubFeedbackProvider>
       </ArchiveDownloadProvider>
     </NotificationsProvider>

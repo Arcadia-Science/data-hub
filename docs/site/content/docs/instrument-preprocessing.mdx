@@ -35,6 +35,8 @@ Processing is chosen by the instrument’s **type**, not by its instrument ID. T
 
 To set it, open the instrument page as an admin, choose **Edit details** from the three-dot menu, and pick an **Instrument type**.
 
+![Edit instrument window with the display name and instrument type fields](/images/instrument-edit-dialog.webp)
+
 <Callout type="warn">
   One type means one vendor’s output format. Names like `qpcr` and `fplc` read as generic, but each is bound to a single vendor’s parser: `fplc` expects ÄKTA PDFs, `qpcr` expects Azure Cielo exports. Typing a different vendor’s instrument into an existing type feeds files to a parser that can’t read them. Supporting a second vendor means splitting the type, which is a code change.
 </Callout>
@@ -102,6 +104,8 @@ Reads dye channel names, melting curves, and the instrument’s PDF report.
 - **On the run page**: dye-channel badges, the PDF report under **Report Data**, and a **Melting Curves** section
 
 The **Melting Curves** section shows the plate for one dye channel at a time. Click a well to see its melting curve and derivative, with a dashed line at the melting temperature. A run with more than one PDF gets previous and next buttons under **Report Data**.
+
+![qPCR run page with dye-channel badges, the files table, and a Melting Curves plate showing a derivative curve in each well](/images/qpcr-run-detail.webp)
 
 The other CSV files a qPCR run writes upload normally and show as completed, but contribute no metadata.
 
@@ -181,6 +185,8 @@ Reads Aunty exports, which measure protein melting temperature and particle size
 - **Metadata**: `experiment_type` (`thermal_ramp`, `sizing`, or `isothermal`), `experiment_count`, and the first experiment’s settings: `analysis_mode`, `start_temp_c`, `end_temp_c`, `rate_c_per_min`, `temperature_c`, `analysis_version`, and `experiment_name`
 - **Processed files**: `{run_id}_aunty_curves.csv`, with every curve point for every well, and `{run_id}_aunty_plate.json`, which drives the plate view
 - **On the run page**: a plate with a small chart in each well. Click a well to open its full chart.
+
+![Aunty run page with the experiment type and temperature badges, the files table, and a plate with a small curve in each well](/images/aunty-run-detail.webp)
 
 On the instrument page, filter Aunty runs by experiment type, analysis mode, temperature, and ramp rate.
 

@@ -24,11 +24,7 @@ export const metadata: Metadata = {
 export default async function WatchersSettingsPage() {
   const session = await auth();
   if (!session?.user) {
-    return (
-      <SignInRequired callbackUrl="/settings/watchers">
-        Sign in to manage watcher settings.
-      </SignInRequired>
-    );
+    return <SignInRequired>Sign in to manage watcher settings.</SignInRequired>;
   }
 
   // Page-level admin gate. Non-admins reach this URL via a stale link,

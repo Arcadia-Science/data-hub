@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  type ChangelogDocEntry,
-  getDocsBundle,
-  listDocPages,
-} from "@/lib/mcp/docs/bundle";
+import { getDocsBundle, listDocPages } from "@/lib/mcp/docs/bundle";
 import { searchDocs } from "@/lib/mcp/docs/search";
 
 // Real questions a person might put to an assistant, each with the page or
@@ -66,10 +62,6 @@ const GOLDEN_QUESTIONS: Array<{ question: string; pages: string[] }> = [
   {
     question: "how do I call the REST API",
     pages: ["api"],
-  },
-  {
-    question: "large Hina Microscope image preview",
-    pages: ["changelog/2026-10-08-hina-large-image-previews"],
   },
 ];
 
@@ -135,9 +127,11 @@ describe("docs search", () => {
     expect(revoke?.excerpt.length).toBeLessThanOrEqual(320);
   });
 
-  it("finds a changelog entry by its wording", () => {
+  it("leaves the changelog to search_changelog", () => {
     const { hits } = searchDocs("Hina large image preview smaller");
-    expect(hits.some((hit) => hit.entry.kind === "changelog")).toBe(true);
+    expect(hits.every((hit) => !hit.entry.page.startsWith("changelog/"))).toBe(
+      true
+    );
   });
 });
 
@@ -151,7 +145,6 @@ describe("docs bundle", () => {
     expect(ids).not.toContain("mcp/tools");
     expect(ids).not.toContain("mcp/prompts");
     expect(ids).not.toContain("mcp/resources");
-    expect(ids.every((id) => !id.startsWith("changelog/"))).toBe(true);
   });
 
   it("gives every page a title and a description", () => {
@@ -161,15 +154,10 @@ describe("docs bundle", () => {
     }
   });
 
-  it("includes changelog entries as separate documents", () => {
-    const changes = getDocsBundle().filter(
-      (entry): entry is ChangelogDocEntry => entry.kind === "changelog"
-    );
-    expect(changes.length).toBeGreaterThan(0);
-    for (const change of changes) {
-      expect(change.page.startsWith("changelog/")).toBe(true);
-      expect(change.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-    }
+  it("holds no changelog entries", () => {
+    expect(
+      getDocsBundle().every((entry) => !entry.page.startsWith("changelog/"))
+    ).toBe(true);
   });
 
   // Claude Code caps one tool result at 25,000 tokens. Three characters per

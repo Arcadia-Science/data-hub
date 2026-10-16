@@ -23,11 +23,7 @@ export const metadata: Metadata = {
 export default async function InstrumentsPage() {
   const session = await auth();
   if (!session) {
-    return (
-      <SignInRequired callbackUrl="/instruments">
-        Sign in to browse instruments.
-      </SignInRequired>
-    );
+    return <SignInRequired>Sign in to browse instruments.</SignInRequired>;
   }
 
   // Row actions are admin-only; everyone else sees the same listing tabs.

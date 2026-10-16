@@ -29,11 +29,7 @@ export const metadata: Metadata = {
 export default async function IntegrationsSettingsPage() {
   const session = await auth();
   if (!session?.user) {
-    return (
-      <SignInRequired callbackUrl="/settings/integrations">
-        Sign in to manage integrations.
-      </SignInRequired>
-    );
+    return <SignInRequired>Sign in to manage integrations.</SignInRequired>;
   }
 
   if (!session.user.isAdmin) {

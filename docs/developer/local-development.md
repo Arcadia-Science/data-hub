@@ -227,9 +227,47 @@ A few details worth knowing:
 - The route is gated on `NODE_ENV !== "production"` AND `LOCAL_S3_MIRROR` set; either condition unmet returns 404 unconditionally, so a production build can never expose the filesystem.
 - The MCP tool at `/mcp/v1` returns a relative `/api/local-s3/...` URL when the mirror is active — browsers resolve it against the current origin, but non-browser MCP clients on localhost may need to prefix with `http://localhost:3000`.
 
+## Docs screenshots
+
+The screenshots on the docs site are generated. `make docs-screenshots` seeds a separate database, starts the web app on its own port, opens each screen in a headless Chromium, and writes a light and a dark WebP file for it into `docs/site/public/images/`. The workflow [.github/workflows/docs-screenshots.yml](../../.github/workflows/docs-screenshots.yml) runs it on the first of every month and opens a pull request into `staging`. You can also start it from the Actions tab with **Run workflow**.
+
+You need Postgres running with the same `postgres` login as above, `uv` (the sample files go through the Python processors), and the browser, which you install once:
+
+```sh
+cd web && npx playwright install chromium
+```
+
+```sh
+make docs-screenshots                      # every screenshot
+make docs-screenshots ONLY=home,my-runs    # only these
+make docs-screenshots SKIP_SEED=1          # reuse the data from the last run
+cd web && npm run docs:screenshots -- --serve   # seed and start the app, then wait
+```
+
+How it works:
+
+- It uses its own database, `data_hub_screenshots`, and its own file mirror under `web/.docs-screenshots/`, so your local data is untouched and `make dev` can keep running.
+- It runs the app with `next dev`, because the local file mirror that serves the gel images, PDFs, and plate maps is turned off in production builds. It restores `web/tsconfig.json`, `web/AGENTS.md`, and `web/next-env.d.ts`, which `next dev` edits when it starts.
+- The data is the same as `make db-reseed` ([web/scripts/seed-workspace.ts](../../web/scripts/seed-workspace.ts)), plus a few things only the screenshots need ([web/scripts/docs-screenshots/setup.ts](../../web/scripts/docs-screenshots/setup.ts)): realistic access tokens, a fake Linear workspace from the feedback package's test server, sample feedback reports, and a sample AI client for the sign-in approval screen. Shots that change data, such as the manual-upload run and the deleted run, undo their change when they finish.
+- It signs in by writing a session row for Alice, so the dev-only sign-in form isn't needed.
+- Dates are real, and every run rewrites every image. Before each shot it moves the seeded watcher heartbeats forward, because a watcher shows as offline after five minutes without one.
+- With `--serve`, it writes `web/.docs-screenshots/serve.json` with the app's address and a session cookie, so you can drive the app yourself while you work out the steps for a new shot.
+
+If a screen fails, its old images stay. The run prints the failure, saves what the browser showed to `web/.docs-screenshots/failures/`, and writes `web/.docs-screenshots/summary.md`, which the workflow uses as the pull request description.
+
+To add a screenshot:
+
+1. Add an entry to [web/scripts/docs-screenshots/shots.ts](../../web/scripts/docs-screenshots/shots.ts). It names the page to open, the steps to reach the right state, and whether it is a full window or a close-up of one element.
+2. Run `make docs-screenshots ONLY=<name>`.
+3. Reference `![Alt text](/images/<name>.webp)` from a docs page. The docs site draws a browser frame around full windows and shows the light or dark image to match the reader's theme.
+4. Commit the new images and `docs/site/src/lib/screenshots.generated.ts`, which the script writes.
+
+A screenshot the script can't take, such as the Claude desktop app in `mcp.png`, is listed under `MANUAL_SHOTS` in the same file with the date it was taken. The pull request lists how old each one is.
+
 ## Where the seed lives
 
 - [web/lib/db/seed.ts](../../web/lib/db/seed.ts) — shared builder functions (`seedDevUser`, `seedInstruments`, `seedRuns`, etc.) plus a schema-driven `clearAll()`.
+- [web/scripts/seed-workspace.ts](../../web/scripts/seed-workspace.ts) — the full seeded workspace, shared by `npm run db:seed` and the docs screenshots.
 - [web/scripts/seed-database.ts](../../web/scripts/seed-database.ts) — the entry point that `npm run db:seed` runs.
 - [web/scripts/process-fixtures.ts](../../web/scripts/process-fixtures.ts) — shared probe/spawn logic for the post-seed handler step.
 - [web/scripts/process-seeded-fixtures.ts](../../web/scripts/process-seeded-fixtures.ts) — `npm run db:process-fixtures` entry point for re-running the handler step on demand.

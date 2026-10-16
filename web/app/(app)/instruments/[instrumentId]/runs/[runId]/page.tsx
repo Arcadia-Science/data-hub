@@ -94,13 +94,7 @@ export default async function RunDetailPage({ params, searchParams }: Props) {
   // run + instrument title from `generateMetadata`. Humans without a
   // session see a sign-in CTA that returns them here afterwards.
   if (!session) {
-    return (
-      <SignInRequired
-        callbackUrl={`/instruments/${instrumentId}/runs/${encodeURIComponent(runId)}`}
-      >
-        Sign in to view this run.
-      </SignInRequired>
-    );
+    return <SignInRequired>Sign in to view this run.</SignInRequired>;
   }
 
   // Run lookup and heavy fetches live inside Suspense so the shell + skeletons

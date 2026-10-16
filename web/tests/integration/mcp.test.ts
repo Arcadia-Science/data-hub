@@ -13,7 +13,7 @@ import {
 } from "@/tests/integration/helpers";
 
 /** Bump when adding/removing an MCP tool so the change shows up in review. */
-const EXPECTED_MCP_TOOL_COUNT = 39;
+const EXPECTED_MCP_TOOL_COUNT = 40;
 
 function jsonRpc(method: string, params: unknown = {}, id = 1) {
   return {
@@ -199,6 +199,7 @@ describe("MCP Server (HTTP)", () => {
     expect(toolNames).toContain("get_instrument_filter_options");
     expect(toolNames).toContain("search_docs");
     expect(toolNames).toContain("read_doc");
+    expect(toolNames).toContain("search_changelog");
     expect(toolNames).toHaveLength(EXPECTED_MCP_TOOL_COUNT);
   });
 
@@ -247,16 +248,30 @@ describe("MCP Server (HTTP)", () => {
     expect(doc.markdown).toContain("## Revoke a token");
   });
 
-  it("search_docs finds changelog entries in the built app", async () => {
-    const result = await callTool("search_docs", {
+  it("search_changelog lists and finds changelog entries in the built app", async () => {
+    const listed = await callTool("search_changelog", { limit: 3 });
+    expect(listed.isError).toBeFalsy();
+    const recent = JSON.parse(listed.content[0].text) as {
+      entries: Array<{ id: string; date: string }>;
+      total: number;
+    };
+    expect(recent.entries).toHaveLength(3);
+    expect(recent.total).toBeGreaterThanOrEqual(3);
+    const dates = recent.entries.map((entry) => entry.date);
+    expect(dates).toEqual([...dates].sort().reverse());
+
+    const found = await callTool("search_changelog", {
       query: "Hina large image preview smaller",
     });
-    expect(result.isError).toBeFalsy();
-    const parsed = JSON.parse(result.content[0].text) as {
-      results: Array<{ page: string }>;
+    expect(found.isError).toBeFalsy();
+    const parsed = JSON.parse(found.content[0].text) as {
+      entries: Array<{ id: string; url: string }>;
     };
-    expect(parsed.results.some((r) => r.page.startsWith("changelog/"))).toBe(
-      true
+    const hina = parsed.entries.find(
+      (entry) => entry.id === "2026-10-08-hina-large-image-previews"
+    );
+    expect(hina?.url).toContain(
+      "/?changelog=2026-10-08-hina-large-image-previews"
     );
   });
 
