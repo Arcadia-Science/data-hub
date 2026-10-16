@@ -5,7 +5,7 @@ import Link from "next/link";
 import { FilePatterns } from "@/components/instruments/file-patterns";
 import { InstrumentActions } from "@/components/instruments/instrument-actions";
 import { InstrumentStatusBadge } from "@/components/instruments/instrument-status-badge";
-import { InstrumentNotificationSwitch } from "@/components/notifications/instrument-notification-switch";
+import { InstrumentNotificationPill } from "@/components/notifications/instrument-notification-toggle";
 import { RecordInstrumentVisit } from "@/components/recent-instrument-visit";
 import { ActorLabel } from "@/components/token-actor";
 import {
@@ -22,6 +22,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { useViewerTimeZone } from "@/components/viewer-time-zone-provider";
 import {
   getWatcherOnlineStatus,
   type WatcherOnlineStatus,
@@ -30,9 +31,6 @@ import { WatcherStatusBadge } from "@/components/watchers/watcher-status-badge";
 import type { InstrumentDetail } from "@/lib/api/instruments";
 import { formatDate } from "@/lib/date";
 
-// Must stay a client component: the retired-by line's `formatDate` resolves the
-// timezone at runtime, so server rendering would use UTC and can land the date
-// on the wrong calendar day near midnight.
 export function InstrumentHeaderSkeleton() {
   return (
     <div
@@ -89,14 +87,14 @@ function WatchDirectory({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span
-          className="flex min-w-0 cursor-default items-center gap-1.5"
-          tabIndex={0}
+        <button
+          className="flex min-w-0 cursor-default items-center gap-1.5 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          type="button"
         >
           <FolderOpen aria-hidden="true" className="size-4 shrink-0" />
           <span className="sr-only">Watched folder: </span>
           <span className="break-all font-mono text-[13px]">{path}</span>
-        </span>
+        </button>
       </TooltipTrigger>
       <TooltipContent className="flex-col items-start" side="bottom">
         <p className="font-medium">
@@ -129,6 +127,7 @@ export function InstrumentHeader({
     masterMuted: boolean;
   };
 }) {
+  const timeZone = useViewerTimeZone();
   const watcherStatus = getWatcherOnlineStatus(instrument);
   const watchDirectory = instrument.activeWatcherWatchDirectory;
   const retiredAt =
@@ -186,7 +185,7 @@ export function InstrumentHeader({
                 <>
                   {watchDirectory ? <span>·</span> : null}
                   <span className="flex items-center gap-1.5">
-                    <span>Retired {formatDate(retiredAt)}</span>
+                    <span>Retired {formatDate(retiredAt, timeZone)}</span>
                     {instrument.retiredBy ? (
                       <span className="flex items-center gap-1.5">
                         <span>by</span>
@@ -208,12 +207,11 @@ export function InstrumentHeader({
               pill would be a dead control — hide it outside the active state
               (matches `/settings/notifications`, which lists active only). */}
           {notifications && instrument.status === "active" ? (
-            <InstrumentNotificationSwitch
+            <InstrumentNotificationPill
               initialEnabled={notifications.enabled}
               instrumentId={instrument.id}
               masterMuted={notifications.masterMuted}
               size="sm"
-              variant="button"
             />
           ) : null}
           {isAdmin ? (

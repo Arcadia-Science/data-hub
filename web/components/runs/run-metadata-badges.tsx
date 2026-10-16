@@ -115,14 +115,15 @@ function FilterBadgeList({
       {hidden.length > 0 ? (
         <Tooltip>
           <TooltipTrigger asChild>
-            <Badge
+            <button
               aria-label={`${hidden.length} more`}
-              className="cursor-default font-mono"
-              tabIndex={0}
-              variant="outline"
+              className="cursor-default rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              type="button"
             >
-              +{hidden.length}
-            </Badge>
+              <Badge className="font-mono" variant="outline">
+                +{hidden.length}
+              </Badge>
+            </button>
           </TooltipTrigger>
           <TooltipContent className="max-w-sm">
             <div className="flex flex-wrap gap-1">

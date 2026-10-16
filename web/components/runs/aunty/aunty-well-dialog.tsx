@@ -1,24 +1,18 @@
 "use client";
 
-import { AlertTriangle } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
 import { AuntySeriesToggle } from "@/components/runs/aunty/aunty-series-toggle";
 import { AuntyWellChart } from "@/components/runs/aunty/aunty-well-chart";
+import { usePlateWellsState } from "@/components/runs/plate-wells-provider";
 import {
-  usePlateWellsActions,
-  usePlateWellsState,
-} from "@/components/runs/plate-wells-provider";
-import { useReportDataSource } from "@/components/runs/report-data-source-provider";
-import { SeekerToolbar } from "@/components/runs/report-item-seeker";
-import { Button } from "@/components/ui/button";
+  type CurvesState,
+  createCachedCurveLoader,
+  useWellCurves,
+} from "@/components/runs/well-curves";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Skeleton } from "@/components/ui/skeleton";
+  CurveLoadError,
+  CurveLoading,
+  WellDialogShell,
+} from "@/components/runs/well-dialog-shell";
 import {
   type AuntyExperiment,
   type AuntyPoint,
@@ -28,49 +22,15 @@ import {
   parseAuntyCurvesCsv,
   presentWellValues,
 } from "@/lib/runs/aunty";
-import type { ReportDataSource } from "@/lib/runs/view-data-source";
 
-const WELL_SEEKER_LABELS = {
-  empty: "No wells found.",
-  next: "Next well",
-  previous: "Previous well",
-  search: "Search wells...",
-  select: "Select a well\u2026",
-};
+type AuntyCurves = Map<string, AuntyPoint[]>;
 
-type CurvesState =
-  | { status: "idle" }
-  | { status: "loading" }
-  | { status: "ready"; index: Map<string, AuntyPoint[]> }
-  | { status: "error"; message: string };
-
-// Module scope, so a run with several experiments downloads each curves file
-// once instead of once per dialog. Failures evict themselves for Retry.
-const curvesCache = new Map<number, Promise<Map<string, AuntyPoint[]>>>();
-
-async function downloadCurves(
-  dataSource: ReportDataSource,
-  fileId: number
-): Promise<Map<string, AuntyPoint[]>> {
-  const { rows } = await dataSource.fetchTableRows(fileId);
-  return indexAuntyCurves(parseAuntyCurvesCsv(rows));
-}
-
-function loadCurves(
-  dataSource: ReportDataSource,
-  fileId: number
-): Promise<Map<string, AuntyPoint[]>> {
-  const cached = curvesCache.get(fileId);
-  if (cached) {
-    return cached;
+const loadCurves = createCachedCurveLoader<AuntyCurves>(
+  async (dataSource, fileId) => {
+    const { rows } = await dataSource.fetchTableRows(fileId);
+    return indexAuntyCurves(parseAuntyCurvesCsv(rows));
   }
-  const pending = downloadCurves(dataSource, fileId).catch((err: unknown) => {
-    curvesCache.delete(fileId);
-    throw err;
-  });
-  curvesCache.set(fileId, pending);
-  return pending;
-}
+);
 
 export function AuntyWellDialog({
   curvesFileId,
@@ -89,118 +49,89 @@ export function AuntyWellDialog({
   seriesId: AuntySeriesId;
   seriesOptions: AuntySeriesId[];
 }) {
-  const dataSource = useReportDataSource();
   const state = usePlateWellsState();
-  const actions = usePlateWellsActions();
   const selectedWellLabel = state.selectedItem?.filename ?? null;
   const well = experiment.wells.find((w) => w.well === selectedWellLabel);
-
-  const [curves, setCurves] = useState<CurvesState>({ status: "idle" });
-  const requestId = useRef(0);
-
-  const startLoad = useCallback(
-    (fileId: number) => {
-      const id = requestId.current + 1;
-      requestId.current = id;
-      setCurves({ status: "loading" });
-      loadCurves(dataSource, fileId)
-        .then((index) => {
-          if (requestId.current === id) {
-            setCurves({ status: "ready", index });
-          }
-        })
-        .catch((err: unknown) => {
-          if (requestId.current === id) {
-            setCurves({
-              status: "error",
-              message:
-                err instanceof Error ? err.message : "Failed to load curves",
-            });
-          }
-        });
-    },
-    [dataSource]
-  );
-
-  useEffect(() => {
-    if (open && curvesFileId != null) {
-      startLoad(curvesFileId);
-    }
-  }, [curvesFileId, open, startLoad]);
+  const { retry, state: curves } = useWellCurves({
+    fileId: curvesFileId,
+    load: loadCurves,
+    open,
+  });
 
   const thumbnailPoints = well?.series[seriesId] ?? [];
-  const fullPoints =
-    curves.status === "ready" && selectedWellLabel
-      ? (curves.index.get(
-          curveKey(experiment.fileName, selectedWellLabel, seriesId)
-        ) ?? thumbnailPoints)
-      : thumbnailPoints;
+  const fullPoints = pointsForWell({
+    curves,
+    experiment,
+    seriesId,
+    thumbnailPoints,
+    well: selectedWellLabel,
+  });
 
   return (
-    <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent className="sm:max-w-3xl" showCloseButton>
-        <DialogHeader>
-          <DialogTitle className="font-mono text-2xl">
-            {selectedWellLabel ?? "Well"}
-          </DialogTitle>
-          <DialogDescription className="sr-only">
-            {well?.sample
-              ? `Curve for well ${selectedWellLabel}, sample ${well.sample}`
-              : `Curve for well ${selectedWellLabel ?? "the selected well"}`}
-          </DialogDescription>
-        </DialogHeader>
-        <div className="flex flex-col gap-3">
-          <SeekerToolbar
-            actions={actions}
-            labels={WELL_SEEKER_LABELS}
-            state={state}
-          />
-          <AuntySeriesToggle
-            onChange={onSeriesChange}
-            options={seriesOptions}
-            value={seriesId}
-          />
-        </div>
-        {curves.status === "error" && (
-          <div className="flex h-80 flex-col items-center justify-center gap-3 rounded-md border border-dashed bg-muted/20 p-6 text-center">
-            <AlertTriangle
-              aria-hidden
-              className="size-6 text-muted-foreground"
-            />
-            <p className="text-muted-foreground text-sm">{curves.message}</p>
-            <Button
-              onClick={() => {
-                if (curvesFileId != null) {
-                  startLoad(curvesFileId);
-                }
-              }}
-              size="sm"
-              variant="outline"
-            >
-              Retry
-            </Button>
-          </div>
-        )}
-        {curves.status === "loading" && fullPoints.length === 0 && (
-          <Skeleton aria-label="Loading curve" className="h-80 w-full" />
-        )}
-        {well && curves.status !== "error" && fullPoints.length > 0 && (
-          <AuntyWellChart
-            fileName={experiment.fileName}
-            flavor={experiment.flavor}
-            points={fullPoints}
-            seriesId={seriesId}
-            well={well}
-          />
-        )}
-        {well && (
-          <AuntyWellValuesList
-            showEmpty={fullPoints.length === 0 && curves.status !== "loading"}
-            well={well}
-          />
-        )}
-      </DialogContent>
-    </Dialog>
+    <WellDialogShell
+      controls={
+        <AuntySeriesToggle
+          onChange={onSeriesChange}
+          options={seriesOptions}
+          value={seriesId}
+        />
+      }
+      description={
+        well?.sample
+          ? `Curve for well ${selectedWellLabel}, sample ${well.sample}`
+          : `Curve for well ${selectedWellLabel ?? "the selected well"}`
+      }
+      onOpenChange={onOpenChange}
+      open={open}
+      title={selectedWellLabel ?? "Well"}
+    >
+      {curves.status === "error" && (
+        <CurveLoadError message={curves.message} onRetry={retry} />
+      )}
+      {curves.status === "loading" && fullPoints.length === 0 && (
+        <CurveLoading />
+      )}
+      {well && curves.status !== "error" && fullPoints.length > 0 && (
+        <AuntyWellChart
+          fileName={experiment.fileName}
+          flavor={experiment.flavor}
+          points={fullPoints}
+          seriesId={seriesId}
+          well={well}
+        />
+      )}
+      {well && (
+        <AuntyWellValuesList
+          showEmpty={fullPoints.length === 0 && curves.status !== "loading"}
+          well={well}
+        />
+      )}
+    </WellDialogShell>
+  );
+}
+
+// Prefers the full-resolution CSV curve and falls back to the thinned points
+// the plate grid is already drawing, so the chart is never blank while the
+// download is in flight.
+function pointsForWell({
+  curves,
+  experiment,
+  seriesId,
+  thumbnailPoints,
+  well,
+}: {
+  curves: CurvesState<AuntyCurves>;
+  experiment: AuntyExperiment;
+  seriesId: AuntySeriesId;
+  thumbnailPoints: AuntyPoint[];
+  well: string | null;
+}): AuntyPoint[] {
+  if (curves.status !== "ready" || !well) {
+    return thumbnailPoints;
+  }
+  return (
+    curves.index.get(curveKey(experiment.fileName, well, seriesId)) ??
+    thumbnailPoints
   );
 }
 

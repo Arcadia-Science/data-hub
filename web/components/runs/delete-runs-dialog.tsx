@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useReturnFocus } from "@/hooks/use-return-focus";
 
 export interface DeleteRunTarget {
   fileCount: number;
@@ -24,16 +25,15 @@ export interface DeleteRunTarget {
   runId: string;
 }
 
-// ---------------------------------------------------------------------------
-// Controlled delete dialog shared by the row "..." menu and the bulk action
-// bar. For a single run with processed files, reuses the same "type the run
-// ID" confirmation gate as the detail-page DeleteRunDialog. For bulk, per
-// product clarification, a simple confirm is enough.
-// ---------------------------------------------------------------------------
+// Shared by the run page's Delete button, the list's row menu, and the bulk
+// action bar. One run with processed files asks for its run ID to be typed;
+// several runs need only a confirm.
 
-async function fanOut(
+// Deletes every run and keeps the first error message the server gave, so a
+// run that cannot be deleted can say why.
+async function deleteRuns(
   runs: DeleteRunTarget[]
-): Promise<{ ok: number; failed: number }> {
+): Promise<{ failed: number; message: string | null; ok: number }> {
   const results = await Promise.all(
     runs.map(async (r) => {
       try {
@@ -41,14 +41,19 @@ async function fanOut(
           `/api/v1/instruments/${r.instrumentId}/runs/${encodeURIComponent(r.runId)}`,
           { method: "DELETE" }
         );
-        return res.ok;
+        if (res.ok) {
+          return { ok: true, message: null };
+        }
+        const body = await res.json().catch(() => null);
+        return { ok: false, message: body?.error?.message ?? null };
       } catch {
-        return false;
+        return { ok: false, message: null };
       }
     })
   );
-  const ok = results.filter(Boolean).length;
-  return { ok, failed: results.length - ok };
+  const ok = results.filter((r) => r.ok).length;
+  const message = results.find((r) => r.message !== null)?.message ?? null;
+  return { ok, failed: results.length - ok, message };
 }
 
 export function DeleteRunsDialog({
@@ -65,6 +70,7 @@ export function DeleteRunsDialog({
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [confirmValue, setConfirmValue] = useState("");
+  const returnFocus = useReturnFocus();
 
   const runCount = runs.length;
   const singleRun = runCount === 1 ? runs[0] : undefined;
@@ -78,6 +84,10 @@ export function DeleteRunsDialog({
   const isConfirmed = !requiresTypeConfirm || confirmValue === singleRun?.runId;
 
   function handleOpenChange(next: boolean) {
+    // A request is running, so closing now would hide its result.
+    if (isPending) {
+      return;
+    }
     if (!next) {
       setConfirmValue("");
     }
@@ -87,19 +97,29 @@ export function DeleteRunsDialog({
   function handleDelete(e: React.MouseEvent) {
     e.preventDefault();
     startTransition(async () => {
-      const { ok, failed } = await fanOut(runs);
-      if (failed === 0) {
-        toast.success(`Deleted ${ok} ${ok === 1 ? "run" : "runs"}`);
-      } else if (ok === 0) {
+      const { ok, failed, message } = await deleteRuns(runs);
+      if (ok === 0) {
+        // Nothing was deleted, so the dialog stays open with the typed run ID
+        // and the user can try again.
         toast.error(
-          `Failed to delete ${failed} ${failed === 1 ? "run" : "runs"}`
+          message ??
+            (isSingle
+              ? "Failed to delete run"
+              : `Failed to delete ${failed} runs`)
         );
+        return;
+      }
+      if (failed === 0) {
+        toast.success(isSingle ? "Run deleted" : `Deleted ${ok} runs`);
       } else {
         toast.warning(
           `Deleted ${ok} ${ok === 1 ? "run" : "runs"}, ${failed} failed`
         );
       }
-      handleOpenChange(false);
+      startTransition(() => {
+        setConfirmValue("");
+        onOpenChange(false);
+      });
       onComplete?.();
       router.refresh();
     });
@@ -109,7 +129,7 @@ export function DeleteRunsDialog({
 
   return (
     <AlertDialog onOpenChange={handleOpenChange} open={open}>
-      <AlertDialogContent>
+      <AlertDialogContent {...returnFocus}>
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription asChild>
@@ -152,7 +172,7 @@ export function DeleteRunsDialog({
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogCancel disabled={isPending}>Cancel</AlertDialogCancel>
           <AlertDialogAction
             disabled={isPending || !isConfirmed}
             onClick={handleDelete}

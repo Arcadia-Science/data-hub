@@ -65,24 +65,18 @@ export function FileBulkActionBar({
       </div>
       <div className="flex items-center gap-2">
         {meta.allCanUpload && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <WatcherGatedUploadButton
-                className="h-7 gap-1.5 text-xs"
-                disabled={isPending}
-                onClick={() => onUpload(ids)}
-                size="sm"
-                type="button"
-                variant="default"
-              >
-                <Upload className="size-3.5" />
-                Upload
-              </WatcherGatedUploadButton>
-            </TooltipTrigger>
-            <TooltipContent>
-              Request upload for {count} {noun}
-            </TooltipContent>
-          </Tooltip>
+          <WatcherGatedUploadButton
+            className="h-7 gap-1.5 text-xs"
+            disabled={isPending}
+            onClick={() => onUpload(ids)}
+            onlineTooltip={`Request upload for ${count} ${noun}`}
+            size="sm"
+            type="button"
+            variant="default"
+          >
+            <Upload className="size-3.5" />
+            Upload
+          </WatcherGatedUploadButton>
         )}
 
         {meta.allCanDismiss && (
@@ -159,6 +153,7 @@ export function FileBulkActionBar({
             <TooltipTrigger asChild>
               <Button
                 className="h-7 gap-1.5 text-xs"
+                disabled={isPending}
                 onClick={() => onDownload(refs)}
                 size="sm"
                 type="button"
@@ -169,7 +164,9 @@ export function FileBulkActionBar({
               </Button>
             </TooltipTrigger>
             <TooltipContent>
-              Download {count} {noun}
+              {count === 1
+                ? "Download this file"
+                : `Download ${count} files as one zip`}
             </TooltipContent>
           </Tooltip>
         )}

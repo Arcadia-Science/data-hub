@@ -1,5 +1,6 @@
 import { SearchX } from "lucide-react";
 import Link from "next/link";
+import { EmptyState } from "@/components/empty-state";
 import { FilterableColumnHeader } from "@/components/instruments/runs-table/filterable-column-header";
 import {
   type RanByOption,
@@ -52,12 +53,9 @@ export function RunsTable({
 }) {
   if (data.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed bg-background py-16 dark:bg-muted">
-        <SearchX className="size-8 text-muted-foreground" />
-        <p className="text-muted-foreground text-sm">
-          {hasFilters ? "No runs match your filters." : emptyLabel}
-        </p>
-      </div>
+      <EmptyState icon={SearchX}>
+        {hasFilters ? "No runs match your filters." : emptyLabel}
+      </EmptyState>
     );
   }
 

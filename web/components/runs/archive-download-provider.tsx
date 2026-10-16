@@ -61,6 +61,9 @@ export const ArchiveDownloadContext =
   createContext<ArchiveDownloadContextValue | null>(null);
 
 const POLL_INTERVAL_MS = 2000;
+// Slower check while the tab is hidden. The download still starts on its own
+// when the build finishes, but nobody is watching the progress.
+const HIDDEN_POLL_INTERVAL_MS = 15_000;
 // Stop polling after a generous amount of time so a stuck Lambda doesn't
 // leave the dialog spinning forever. Lambda Function URLs cap at 15 minutes;
 // we double that as a hard ceiling.
@@ -257,74 +260,123 @@ export function ArchiveDownloadProvider({ children }: { children: ReactNode }) {
   // URL (NOT `/api/v1/archive-jobs/:id`). The route's S3 HEAD short-circuit
   // is the canonical "is it ready?" signal — much more robust than reading
   // the row's status, which only flips after the Lambda's PATCH callback
-  // succeeds. A single shared interval handles all in-flight jobs so we
-  // don't spin up N timers.
+  // succeeds. One shared loop handles all in-flight jobs so we don't spin up
+  // N timers.
+  //
+  // The effect depends on a boolean, not `jobs`, so a status patch on one job
+  // doesn't restart the timer for the others.
+  const hasBuilding = jobs.some((j) => j.status === "building");
   useEffect(() => {
-    const building = jobs.filter((j) => j.status === "building");
-    if (building.length === 0) {
+    if (!hasBuilding) {
       return;
     }
 
-    const interval = window.setInterval(async () => {
-      for (const job of jobsRef.current) {
-        if (job.status !== "building") {
-          continue;
-        }
-        if (Date.now() - job.startedAt > POLL_TIMEOUT_MS) {
+    let stopped = false;
+    let inFlight = false;
+    let timer: number | undefined;
+
+    const checkJob = async (job: ArchiveDownloadJob) => {
+      if (Date.now() - job.startedAt > POLL_TIMEOUT_MS) {
+        updateJob(job.id, {
+          status: "failed",
+          errorMessage:
+            "Build is taking longer than expected. Try again later.",
+        });
+        return;
+      }
+
+      const result = await probeArchiveUrl(job.archiveUrl);
+      switch (result.kind) {
+        case "ready":
+          completeReady(
+            job.id,
+            job.defaultFilename,
+            result.downloadUrl,
+            result.sizeBytes
+          );
+          toast.success(`Downloading ${job.runId}…`);
+          break;
+        case "failed":
           updateJob(job.id, {
             status: "failed",
-            errorMessage:
-              "Build is taking longer than expected. Try again later.",
+            errorMessage: result.message,
           });
-          continue;
-        }
-
-        const result = await probeArchiveUrl(job.archiveUrl);
-        switch (result.kind) {
-          case "ready":
-            completeReady(
-              job.id,
-              job.defaultFilename,
-              result.downloadUrl,
-              result.sizeBytes
-            );
-            toast.success(`Downloading ${job.runId}...`);
-            break;
-          case "failed":
+          break;
+        case "building":
+          // A different `job_id` than the one we got at start time means
+          // the previous attempt was marked failed (or aged out via the
+          // stuck-row sweep) and the route's dedup INSERT created a
+          // fresh row to start a new build. Surface that to the user
+          // instead of silently chasing a build that already failed
+          // once — they can retry explicitly if they want another shot.
+          if (job.initialJobId && result.jobId !== job.initialJobId) {
             updateJob(job.id, {
               status: "failed",
-              errorMessage: result.message,
+              errorMessage:
+                "The previous build attempt failed. Click Download again to retry.",
             });
-            break;
-          case "building":
-            // A different `job_id` than the one we got at start time means
-            // the previous attempt was marked failed (or aged out via the
-            // stuck-row sweep) and the route's dedup INSERT created a
-            // fresh row to start a new build. Surface that to the user
-            // instead of silently chasing a build that already failed
-            // once — they can retry explicitly if they want another shot.
-            if (job.initialJobId && result.jobId !== job.initialJobId) {
-              updateJob(job.id, {
-                status: "failed",
-                errorMessage:
-                  "The previous build attempt failed. Click Download again to retry.",
-              });
-            }
-            // Otherwise: same job_id, still building — keep polling.
-            break;
-          case "redirect":
-            // Polling is a background activity; don't navigate the user.
-            // Try again on the next interval — by then the route will
-            // hopefully be honoring the JSON Accept header again.
-            break;
-          default:
-            break;
-        }
+          }
+          // Otherwise: same job_id, still building — keep polling.
+          break;
+        case "redirect":
+          // Polling is a background activity; don't navigate the user.
+          // Try again on the next interval — by then the route will
+          // hopefully be honoring the JSON Accept header again.
+          break;
+        default:
+          break;
       }
-    }, POLL_INTERVAL_MS);
+    };
 
-    return () => window.clearInterval(interval);
-  }, [jobs, completeReady, updateJob]);
+    const schedule = () => {
+      window.clearTimeout(timer);
+      if (stopped) {
+        return;
+      }
+      timer = window.setTimeout(
+        run,
+        document.visibilityState === "hidden"
+          ? HIDDEN_POLL_INTERVAL_MS
+          : POLL_INTERVAL_MS
+      );
+    };
+
+    // Probes run side by side, so several builds cost one round trip per tick
+    // instead of one each. The next tick starts only after this one finishes,
+    // so slow responses can't pile up.
+    const run = async () => {
+      if (inFlight || stopped) {
+        return;
+      }
+      inFlight = true;
+      try {
+        const building = jobsRef.current.filter((j) => j.status === "building");
+        await Promise.allSettled(building.map(checkJob));
+      } finally {
+        inFlight = false;
+        // In `finally` so one bad round never stops the polling.
+        schedule();
+      }
+    };
+
+    // A hidden tab only needs an occasional check. Coming back to the tab
+    // checks right away instead of waiting out the slow delay.
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        window.clearTimeout(timer);
+        run();
+      }
+    };
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    schedule();
+
+    return () => {
+      stopped = true;
+      window.clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [hasBuilding, completeReady, updateJob]);
 
   const value = useMemo(
     () => ({ jobs, actions: { start, dismiss } }),

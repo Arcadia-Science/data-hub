@@ -1,8 +1,7 @@
-import { DeleteRunDialog } from "@/components/runs/delete-run-dialog";
 import { QpcrMeltingReport } from "@/components/runs/qpcr/qpcr-melting-report";
-import { RestoreRunButton } from "@/components/runs/restore-run-button";
 import type { RunDetailProps } from "@/components/runs/run-detail";
 import { RunDetail } from "@/components/runs/run-detail";
+import { RunDetailLayout } from "@/components/runs/run-detail-layout";
 import {
   hasQpcrMetadata,
   QpcrRunBadges,
@@ -10,23 +9,9 @@ import {
 import { isQpcrMeltingArtifact } from "@/lib/runs/qpcr-melting";
 import { isPdfFile } from "@/lib/runs/run-file-types";
 
-export function QpcrRunDetail({
-  run,
-  files,
-  filesDownloadableCount,
-  filesPagination,
-  fileStats,
-  reportFiles,
-  reportItems,
-  qpcrMeltingPlate,
-  instrumentId,
-  runId,
-  attributionsSlot,
-  runNavSlot,
-}: RunDetailProps) {
-  const isDeleted = run.deletedAt !== null;
-  const activeFileCount = fileStats.active;
-  const hasProcessedFiles = fileStats.processedActive > 0;
+export function QpcrRunDetail(props: RunDetailProps) {
+  const { qpcrMeltingPlate, reportFiles, reportItems } = props;
+  const metadata = props.run.metadata as Record<string, unknown>;
   const pdfCount = reportItems.pagination.total;
   // The plate grids own the melt artifacts, so the fallback list would
   // otherwise repeat them under a second heading.
@@ -35,43 +20,12 @@ export function QpcrRunDetail({
   );
 
   return (
-    <>
-      <RunDetail.Header run={run} runNavSlot={runNavSlot}>
-        {!isDeleted && (
-          <DeleteRunDialog
-            fileCount={activeFileCount}
-            hasProcessedFiles={hasProcessedFiles}
-            instrumentId={instrumentId}
-            runId={runId}
-          />
-        )}
-        {isDeleted && (
-          <RestoreRunButton instrumentId={instrumentId} runId={runId} />
-        )}
-      </RunDetail.Header>
-
-      <RunDetail.FilesMetadataLayout>
-        <RunDetail.Metadata
-          attributionsSlot={attributionsSlot}
-          fileStats={fileStats}
-          run={run}
-        >
-          {hasQpcrMetadata(run.metadata as Record<string, unknown>) && (
-            <QpcrRunBadges metadata={run.metadata as Record<string, unknown>} />
-          )}
-        </RunDetail.Metadata>
-        <RunDetail.Files
-          files={files}
-          filteredDownloadableCount={filesDownloadableCount}
-          instrumentId={instrumentId}
-          instrumentType={run.instrumentType}
-          isDeleted={isDeleted}
-          pagination={filesPagination}
-          runId={runId}
-          stats={fileStats}
-        />
-      </RunDetail.FilesMetadataLayout>
-
+    <RunDetailLayout
+      {...props}
+      badges={
+        hasQpcrMetadata(metadata) ? <QpcrRunBadges metadata={metadata} /> : null
+      }
+    >
       {qpcrMeltingPlate != null && (
         <QpcrMeltingReport
           derivativesCsvFileId={qpcrMeltingPlate.derivativesCsvFileId}
@@ -85,6 +39,6 @@ export function QpcrRunDetail({
       ) : (
         <RunDetail.Report files={otherReportFiles} />
       )}
-    </>
+    </RunDetailLayout>
   );
 }

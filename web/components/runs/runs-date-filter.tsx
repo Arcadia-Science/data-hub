@@ -10,9 +10,9 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
+import { useViewerTimeZone } from "@/components/viewer-time-zone-provider";
 import {
   formatDateRange,
-  getBrowserTimeZone,
   startOfMonthISO,
   startOfTodayISO,
   startOfWeekISO,
@@ -80,8 +80,7 @@ function rangesEqual(a: DateRange, b: DateRange): boolean {
  * end day so the list API's "advance date_to by one day" rule yields the
  * correct exclusive upper bound (start of today).
  */
-function rangeForPreset(id: PresetId): DateRange {
-  const tz = getBrowserTimeZone();
+function rangeForPreset(id: PresetId, tz: string): DateRange {
   switch (id) {
     case "today":
       return { from: startOfTodayISO(tz), to: null };
@@ -112,7 +111,7 @@ function rangeForPreset(id: PresetId): DateRange {
  * window (today → week → month). Interactive picks that collide are kept via
  * `pinnedPreset` in `RunsDateFilter`.
  */
-function resolveActivePreset(value: DateRange): PresetId | null {
+function resolveActivePreset(value: DateRange, tz: string): PresetId | null {
   if (!value.from) {
     return null;
   }
@@ -124,8 +123,6 @@ function resolveActivePreset(value: DateRange): PresetId | null {
   if (value.to && (toMs === null || Number.isNaN(toMs))) {
     return null;
   }
-
-  const tz = getBrowserTimeZone();
 
   // Bounded calendar presets (require both ends).
   if (toMs !== null) {
@@ -173,16 +170,17 @@ function presetLabel(id: PresetId): string {
 function resolveLabel(
   value: DateRange,
   activePreset: PresetId | null,
+  tz: string,
   defaultPreset?: PresetId
 ): string {
   if (activePreset) {
     return presetLabel(activePreset);
   }
   if (value.from && value.to) {
-    return formatDateRange(new Date(value.from), new Date(value.to));
+    return formatDateRange(new Date(value.from), new Date(value.to), tz);
   }
   if (value.from) {
-    return formatDateRange(new Date(value.from), new Date());
+    return formatDateRange(new Date(value.from), new Date(), tz);
   }
   return defaultPreset ? presetLabel(defaultPreset) : "All time";
 }
@@ -220,6 +218,7 @@ export function RunsDateFilter({
    */
   defaultPreset?: PresetId;
 }) {
+  const tz = useViewerTimeZone();
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<"presets" | "custom">("presets");
   // When today / this-week / this-month share a midnight cutoff, keep the
@@ -228,12 +227,13 @@ export function RunsDateFilter({
 
   const isEmpty = value.from === null && value.to === null;
   const pinMatches =
-    pinnedPreset !== null && rangesEqual(value, rangeForPreset(pinnedPreset));
-  const resolved = resolveActivePreset(value);
+    pinnedPreset !== null &&
+    rangesEqual(value, rangeForPreset(pinnedPreset, tz));
+  const resolved = resolveActivePreset(value, tz);
   const activePreset = pinMatches
     ? pinnedPreset
     : (resolved ?? (isEmpty && defaultPreset ? defaultPreset : null));
-  const label = resolveLabel(value, activePreset, defaultPreset);
+  const label = resolveLabel(value, activePreset, tz, defaultPreset);
   const isCustom =
     activePreset === null && (value.from !== null || value.to !== null);
 
@@ -247,7 +247,7 @@ export function RunsDateFilter({
 
   function applyPreset(preset: Preset) {
     setPinnedPreset(preset.id);
-    onChange(rangeForPreset(preset.id));
+    onChange(rangeForPreset(preset.id, tz));
     setOpen(false);
   }
 

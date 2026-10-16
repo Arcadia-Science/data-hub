@@ -6,11 +6,21 @@ Nobody signs up for Data Hub. Your team deploys it, so raw instrument data and e
 
 [Documentation](https://datahub.arcadiascience.com/docs) · [Set up an instrument](https://datahub.arcadiascience.com/docs/set-up-an-instrument) · [Deploy it yourself](docs/developer/first-time-deployment.md) · [Architecture](docs/developer/architecture.md)
 
-![The Data Hub dashboard, showing run counts, instrument status, and a table of recent runs](.github/images/dashboard.png)
+<!-- These are the docs site's screenshots, retaken by `make docs-screenshots`. -->
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/site/public/images/home.dark.webp">
+  <img alt="The Data Hub dashboard, showing run counts, instrument status, and a table of recent runs" src="docs/site/public/images/home.webp">
+</picture>
 
-![The runs table for a SpectraMax iD5 plate reader, filtered by measurement mode, with wavelength and measurement type columns](.github/images/runs-table.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/site/public/images/plate-reader-runs-table.dark.webp">
+  <img alt="The runs table for a SpectraMax iD5 plate reader, with wavelength, measurement mode, and measurement type columns" src="docs/site/public/images/plate-reader-runs-table.webp">
+</picture>
 
-![A plate reader run detail page showing measurement metadata, a file list, and a color-coded 96-well plate map](.github/images/run-detail.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/site/public/images/plate-reader-run-details-1.dark.webp">
+  <img alt="A plate reader run detail page showing measurement metadata, a file list, and a color-coded plate map" src="docs/site/public/images/plate-reader-run-details-1.webp">
+</picture>
 
 ## Web app, REST API, and MCP
 

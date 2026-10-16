@@ -18,7 +18,7 @@ The **Instruments** page has tabs for active, pending, and retired instruments.
 | `active` | Active | Confirmed and accepting uploads. |
 | `inactive` | Retired | Deactivated; no new uploads. Historical runs stay browsable. |
 
-![Instruments page with Active, Pending, and Retired tabs](/images/instruments-table.png)
+![Instruments page with Active, Pending, and Retired tabs](/images/instruments-table.webp)
 
 ## Confirm a pending instrument [#confirm-a-pending-instrument]
 
@@ -37,6 +37,8 @@ Click **Confirm**. Status becomes `active` and the operator’s watcher can uplo
 </Step>
 
 </Steps>
+
+![Instruments page on the Pending tab, with a pending instrument showing a yellow Pending badge and a Confirm button](/images/instruments-pending.webp)
 
 Confirming is admin-only for signed-in users. Under the hood it is `PATCH /api/v1/instruments/:id`. Token automation uses the `instruments:write` scope instead. See the [generated API docs](/docs/api).
 
@@ -59,5 +61,7 @@ The three-dot menu on an instrument page, and the row menu on the instruments ta
 - **Edit details**: change the **Display name** and the **Instrument type**
 - **View watcher**: open the watcher registered for this instrument
 - **Retire** or **Reactivate**: see [Retire an instrument](/docs/retire-an-instrument)
+
+![Edit instrument window with the display name and instrument type fields](/images/instrument-edit-dialog.webp)
 
 The instrument type decides which processor reads the instrument’s files, including DishCam and Aunty; see [Instrument data preprocessing](/docs/instrument-preprocessing). The instrument ID never changes, because it is the storage key prefix.

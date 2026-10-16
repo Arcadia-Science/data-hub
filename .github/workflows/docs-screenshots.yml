@@ -1,0 +1,117 @@
+name: Docs screenshots
+
+# Retakes the docs site screenshots and opens a pull request into staging.
+# Run it by hand from the Actions tab for an extra refresh. Pull requests made
+# with the built-in token don't start other workflows, which is fine because
+# staging requires a review and no checks.
+
+on:
+  schedule:
+    # 17:00 UTC on the 1st, which is morning in US Pacific time.
+    - cron: "0 17 1 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+# A second run would force-push over the first one's branch.
+concurrency:
+  group: docs-screenshots
+  cancel-in-progress: false
+
+env:
+  BRANCH: automation/docs-screenshots
+
+jobs:
+  docs-screenshots:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: staging
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - uses: astral-sh/setup-uv@v8.1.0
+
+      - name: Install Node.js packages
+        run: npm ci
+        working-directory: web
+
+      # The sample files go through the Python processors, as in local
+      # development.
+      - name: Install Python packages
+        run: uv sync --all-packages
+
+      - name: Install the browser
+        run: npx playwright install --with-deps chromium
+        working-directory: web
+
+      # A screen that fails keeps its old image and is listed in the pull
+      # request. The run exits non-zero for it, so the next steps must not
+      # depend on this one passing.
+      - name: Take the screenshots
+        id: shots
+        run: make docs-screenshots
+        continue-on-error: true
+
+      - name: Check for changes
+        id: changes
+        run: |
+          git add docs/site/public/images docs/site/src/lib/screenshots.generated.ts
+          if git diff --cached --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open or update the pull request
+        if: steps.changes.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          summary=web/.docs-screenshots/summary.md
+          if [ ! -f "$summary" ]; then
+            echo "Automated refresh of the docs screenshots. The run did not write a summary, so check the workflow log." > "$summary"
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -C "$BRANCH"
+          git commit -m "Refresh docs screenshots"
+          git push --force origin "$BRANCH"
+
+          open=$(gh pr list --head "$BRANCH" --base staging --state open --json number --jq 'length')
+          if [ "$open" = "0" ]; then
+            gh pr create --base staging --head "$BRANCH" \
+              --title "Refresh docs screenshots" --body-file "$summary"
+          else
+            gh pr edit "$BRANCH" --body-file "$summary"
+          fi
+
+      # If nothing changed and the run failed, it never got as far as taking
+      # screenshots. Failing here makes that visible.
+      - name: Fail when nothing was captured
+        if: steps.changes.outputs.changed == 'false' && steps.shots.outcome == 'failure'
+        run: |
+          echo "::error::The screenshot run failed before it changed any image. Check the log above."
+          exit 1

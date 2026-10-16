@@ -1,7 +1,17 @@
 "use client";
 
 import { Loader2, RotateCw, Upload, X } from "lucide-react";
-import { type ComponentProps, useEffect, useMemo, useState } from "react";
+import {
+  type ComponentProps,
+  lazy,
+  Suspense,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+import { toast } from "sonner";
+import { LoadErrorBoundary } from "@/components/load-error-boundary";
+import { TruncatedTooltip } from "@/components/truncated-tooltip";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -23,13 +33,16 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useViewerTimeZone } from "@/components/viewer-time-zone-provider";
 import type { RunFileRow } from "@/lib/api/instrument-runs";
 import { formatDateTime } from "@/lib/date";
 import type { InstrumentType } from "@/lib/db/schema";
+import { preloader } from "@/lib/preload";
 import { canReprocessFile } from "@/lib/runs/reprocessable-statuses";
 import { filePreviewKind } from "@/lib/runs/run-file-types";
 import { cn, formatBytes } from "@/lib/utils";
-import { FilePreviewDialog, type PreviewableFile } from "./file-preview-dialog";
+import type { PreviewableFile } from "./file-preview-dialog";
+import { FilePreviewLoading } from "./file-preview-loading";
 import {
   FileSelectAllCheckbox,
   FileSelectCheckbox,
@@ -80,10 +93,23 @@ function previewableFileOf(file: RunFileRow): PreviewableFile | null {
     : null;
 }
 
+// The dialog pulls in the CSV parser and the colony table. Most visits never
+// open a preview, so that code loads on the first open instead of with the
+// page, or earlier when the pointer or focus reaches a file name.
+const loadFilePreviewDialog = () =>
+  import("./file-preview-dialog").then((m) => ({
+    default: m.FilePreviewDialog,
+  }));
+
+const FilePreviewDialog = lazy(loadFilePreviewDialog);
+const preloadFilePreviewDialog = preloader(loadFilePreviewDialog);
+
 // Shared by both table variants. Navigation covers only the files on the
 // current page, in table order.
 function useFilePreview(files: RunFileRow[]) {
   const [openFileId, setOpenFileId] = useState<number | null>(null);
+  // Stays mounted after the first open so closing still plays its animation.
+  const [hasOpened, setHasOpened] = useState(false);
   const previewable = useMemo(
     () =>
       files
@@ -101,19 +127,41 @@ function useFilePreview(files: RunFileRow[]) {
     }
   }, [openFileId, isOpenFileListed]);
 
-  const dialog = (
-    <FilePreviewDialog
-      files={previewable}
-      onOpenChange={(open) => {
-        if (!open) {
-          setOpenFileId(null);
-        }
+  const dialog = hasOpened ? (
+    <LoadErrorBoundary
+      fallback={null}
+      onError={() => {
+        setOpenFileId(null);
+        toast.error("Couldn’t load the preview. Reload the page to try again.");
       }}
-      onSelect={setOpenFileId}
-      openFileId={openFileId}
-    />
-  );
-  return { dialog, openPreview: setOpenFileId };
+    >
+      <Suspense
+        fallback={
+          openFileId === null ? null : (
+            <FilePreviewLoading onClose={() => setOpenFileId(null)} />
+          )
+        }
+      >
+        <FilePreviewDialog
+          files={previewable}
+          onOpenChange={(open) => {
+            if (!open) {
+              setOpenFileId(null);
+            }
+          }}
+          onSelect={setOpenFileId}
+          openFileId={openFileId}
+        />
+      </Suspense>
+    </LoadErrorBoundary>
+  ) : null;
+
+  function openPreview(fileId: number) {
+    setHasOpened(true);
+    setOpenFileId(fileId);
+  }
+
+  return { dialog, openPreview };
 }
 
 // Checkboxes and row actions are buttons inside the row. A click on those
@@ -157,20 +205,29 @@ function FileInfoCells({
   file: RunFileRow;
   onPreview: (fileId: number) => void;
 }) {
+  const timeZone = useViewerTimeZone();
   const previewable = previewableFileOf(file);
   return (
     <>
-      <TableCell className="py-2 font-mono text-sm">
+      {/* Long instrument filenames cut off with an ellipsis instead of pushing
+          the status and action columns off screen. The title shows the rest. */}
+      <TableCell className="max-w-sm py-2 font-mono text-sm">
         {previewable ? (
-          <button
-            className="cursor-pointer text-left"
-            onClick={() => onPreview(file.id)}
-            type="button"
-          >
-            {file.filename}
-          </button>
+          <TruncatedTooltip text={file.filename}>
+            <button
+              className="block max-w-full cursor-pointer truncate text-left"
+              onClick={() => onPreview(file.id)}
+              onFocus={preloadFilePreviewDialog}
+              onMouseEnter={preloadFilePreviewDialog}
+              type="button"
+            >
+              {file.filename}
+            </button>
+          </TruncatedTooltip>
         ) : (
-          file.filename
+          <span className="block truncate" title={file.filename}>
+            {file.filename}
+          </span>
         )}
       </TableCell>
       <TableCell className="py-2">
@@ -184,14 +241,14 @@ function FileInfoCells({
           {file.category}
         </Badge>
       </TableCell>
-      <TableCell className="py-2 text-muted-foreground text-sm">
+      <TableCell className="py-2 text-muted-foreground text-sm tabular-nums">
         {formatBytes(file.sizeBytes)}
       </TableCell>
-      <TableCell className="py-2 text-muted-foreground text-sm">
+      <TableCell className="py-2 text-muted-foreground text-sm tabular-nums">
         {file.fileCreatedAt
-          ? formatDateTime(file.fileCreatedAt)
+          ? formatDateTime(file.fileCreatedAt, timeZone)
           : file.createdAt
-            ? formatDateTime(file.createdAt)
+            ? formatDateTime(file.createdAt, timeZone)
             : "—"}
       </TableCell>
       <TableCell className="py-2 align-middle">
@@ -322,14 +379,14 @@ function UploadDismissActions({
 export interface ReadOnlyRunFilesTableProps {
   files: RunFileRow[];
   instrumentType: InstrumentType;
-  isPending: boolean;
+  isFilePending: (id: number) => boolean;
   onReprocess: (id: number) => void;
 }
 
 export function ReadOnlyRunFilesTable({
   files,
   instrumentType,
-  isPending,
+  isFilePending,
   onReprocess,
 }: ReadOnlyRunFilesTableProps) {
   const { dialog, openPreview } = useFilePreview(files);
@@ -358,7 +415,7 @@ export function ReadOnlyRunFilesTable({
                     <div className="flex items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
                       <ReprocessAction
                         file={file}
-                        isPending={isPending}
+                        isPending={isFilePending(file.id)}
                         onReprocess={onReprocess}
                       />
                     </div>
@@ -385,7 +442,7 @@ export function ReadOnlyRunFilesTable({
 export interface EditableRunFilesTableProps {
   files: RunFileRow[];
   instrumentType: InstrumentType;
-  isPending: boolean;
+  isFilePending: (id: number) => boolean;
   onDismiss: (id: number) => void;
   onReprocess: (id: number) => void;
   onUpload: (id: number) => void;
@@ -394,7 +451,7 @@ export interface EditableRunFilesTableProps {
 export function EditableRunFilesTable({
   files,
   instrumentType,
-  isPending,
+  isFilePending,
   onUpload,
   onDismiss,
   onReprocess,
@@ -478,7 +535,7 @@ export function EditableRunFilesTable({
                     <div className={`flex items-center gap-1 ${revealClass}`}>
                       <UploadDismissActions
                         file={file}
-                        isPending={isPending}
+                        isPending={isFilePending(file.id)}
                         onDismiss={onDismiss}
                         onUpload={onUpload}
                       />
@@ -487,7 +544,7 @@ export function EditableRunFilesTable({
                     <div className={`flex items-center gap-1 ${revealClass}`}>
                       <ReprocessAction
                         file={file}
-                        isPending={isPending}
+                        isPending={isFilePending(file.id)}
                         onReprocess={onReprocess}
                       />
                     </div>

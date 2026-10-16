@@ -92,7 +92,7 @@ export function IntegrationField({
           id={id}
           onChange={(event) => onChange(event.target.value)}
           placeholder={
-            status.set ? "Paste a new value to replace it" : placeholder
+            status.set ? "Paste a new value to replace it…" : placeholder
           }
           value={value}
         />

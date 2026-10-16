@@ -39,7 +39,10 @@ export function FilePatterns({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <div className="flex cursor-default flex-wrap gap-1" tabIndex={0}>
+        <button
+          className="flex cursor-default flex-wrap gap-1 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          type="button"
+        >
           <span className="sr-only">File patterns: </span>
           {visible.map((pattern) => (
             <PatternBadge key={pattern}>{pattern}</PatternBadge>
@@ -49,7 +52,7 @@ export function FilePatterns({
               +{hidden.length}
             </PatternBadge>
           ) : null}
-        </div>
+        </button>
       </TooltipTrigger>
       <TooltipContent className="flex-col items-start" side="bottom">
         <p className="font-medium">File patterns</p>

@@ -36,6 +36,8 @@ export default async function FeedbackSettingsPage({
   // Full width because the table needs more room than the default column.
   return (
     <SettingsPageContent className="w-full">
+      {/* The package renders its own visible "Feedback" title as an h2. */}
+      <h1 className="sr-only">Feedback</h1>
       <FeedbackReviewPage
         feedback={feedback}
         integrationsHref="/settings/integrations"

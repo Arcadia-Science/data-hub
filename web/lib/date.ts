@@ -13,14 +13,15 @@ export const TIMEZONE_COOKIE_NAME = "timezone";
 /** One year — timezone rarely changes, and we re-sync on mismatch. */
 export const TIMEZONE_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
 
-/** Returns the IANA timezone of the current runtime (e.g. `"America/New_York"`). */
-function getTimeZone(): string {
-  return Intl.DateTimeFormat().resolvedOptions().timeZone;
-}
-
-/** Browser IANA timezone; same as the runtime zone in client components. */
+/**
+ * IANA timezone of the current runtime (e.g. `"America/New_York"`). In a client
+ * component this is the browser's zone on the client but the server's zone
+ * (usually UTC) while rendering on the server, so use it only for work that
+ * runs after hydration, such as event handlers. Display code should use the
+ * viewer's zone from `useViewerTimeZone()` instead.
+ */
 export function getBrowserTimeZone(): string {
-  return getTimeZone();
+  return Intl.DateTimeFormat().resolvedOptions().timeZone;
 }
 
 /**
@@ -118,6 +119,26 @@ export function startOfMonthISO(
   return fromZonedTime(startOfMonth(zoned), timeZone).toISOString();
 }
 
+/**
+ * The calendar day `dateStr` (`"yyyy-MM-dd"`) in `timeZone`, from its first
+ * moment to the start of the next day. A day still in progress ends at `now`
+ * instead, so the window never reaches into the future.
+ */
+export function dayWindow(
+  dateStr: string,
+  timeZone: string,
+  now: Date = new Date()
+): { start: Date; end: Date } {
+  const start = fromZonedTime(`${dateStr}T00:00:00.000`, timeZone);
+  // Add the day to the date string, not the instant, so a 23 or 25 hour day
+  // around a clock change still ends at the next local midnight.
+  const next = new Date(`${dateStr}T00:00:00.000Z`);
+  next.setUTCDate(next.getUTCDate() + 1);
+  const nextDay = next.toISOString().slice(0, 10);
+  const endOfDay = fromZonedTime(`${nextDay}T00:00:00.000`, timeZone);
+  return { start, end: endOfDay.getTime() > now.getTime() ? now : endOfDay };
+}
+
 /** Calendar day of `date` in `timeZone` as `"yyyy-MM-dd"`. */
 export function calendarDayKey(date: Date, timeZone: string): string {
   return formatInTimeZone(date, timeZone, "yyyy-MM-dd");
@@ -153,67 +174,80 @@ export function formatDayHeading(
   return formatInTimeZone(midday, timeZone, pattern);
 }
 
+// Formatters take the zone explicitly: the runtime zone is UTC on the server
+// and local in the browser, so a component rendering on both would mismatch.
+// Pass `useViewerTimeZone()` in client code, `getViewerTimeZone()` on the server.
+
 /** Formats a date as a 12-hour time string, e.g. `"2:30 PM"`. */
-export function formatTime(date: Date): string {
-  return formatInTimeZone(date, getTimeZone(), "h:mm a");
+export function formatTime(date: Date, timeZone: string): string {
+  return formatInTimeZone(date, timeZone, "h:mm a");
 }
 
 /** Formats a date as `"MMM d, yyyy"`, e.g. `"Jan 5, 2025"`. */
-export function formatDate(date: Date): string {
-  return formatInTimeZone(date, getTimeZone(), "MMM d, yyyy");
+export function formatDate(date: Date, timeZone: string): string {
+  return formatInTimeZone(date, timeZone, "MMM d, yyyy");
 }
 
 /**
  * Formats a date as `"MMM d"` in the current year and `"MMM d, yyyy"` in any
  * other, e.g. `"Oct 7"`. Inject `now` in tests to pin the clock.
  */
-export function formatDateCompact(date: Date, now: Date = new Date()): string {
-  const zone = getTimeZone();
+export function formatDateCompact(
+  date: Date,
+  timeZone: string,
+  now: Date = new Date()
+): string {
   const sameYear =
-    formatInTimeZone(date, zone, "yyyy") ===
-    formatInTimeZone(now, zone, "yyyy");
-  return formatInTimeZone(date, zone, sameYear ? "MMM d" : "MMM d, yyyy");
+    formatInTimeZone(date, timeZone, "yyyy") ===
+    formatInTimeZone(now, timeZone, "yyyy");
+  return formatInTimeZone(date, timeZone, sameYear ? "MMM d" : "MMM d, yyyy");
 }
 
 /** Formats a date as `"d MMMM yyyy"`, e.g. `"12 March 2026"`. */
-export function formatDateLong(date: Date): string {
-  return formatInTimeZone(date, getTimeZone(), "d MMMM yyyy");
+export function formatDateLong(date: Date, timeZone: string): string {
+  return formatInTimeZone(date, timeZone, "d MMMM yyyy");
 }
 
 /** Formats a date as `"MMM d, yyyy h:mm a"`, e.g. `"Jan 5, 2025 2:30 PM"`. */
-export function formatDateTime(date: Date): string {
-  return formatInTimeZone(date, getTimeZone(), "MMM d, yyyy h:mm a");
+export function formatDateTime(date: Date, timeZone: string): string {
+  return formatInTimeZone(date, timeZone, "MMM d, yyyy h:mm a");
 }
 
 /** Formats a date as `"MMM d, h:mm a"`, e.g. `"Jun 26, 9:13 AM"`. */
-export function formatDateTimeShort(date: Date): string {
-  return formatInTimeZone(date, getTimeZone(), "MMM d, h:mm a");
+export function formatDateTimeShort(date: Date, timeZone: string): string {
+  return formatInTimeZone(date, timeZone, "MMM d, h:mm a");
 }
 
 /** Returns the date as a `"yyyy-MM-dd"` string for HTML date inputs. */
-export function toDateInputValue(date: Date): string {
-  return formatInTimeZone(date, getTimeZone(), "yyyy-MM-dd");
+export function toDateInputValue(date: Date, timeZone: string): string {
+  return formatInTimeZone(date, timeZone, "yyyy-MM-dd");
 }
 
-/** Returns today's date as a `"yyyy-MM-dd"` string in the local timezone. */
-export function todayDateString(): string {
-  return toDateInputValue(new Date());
+/** Returns today's date as a `"yyyy-MM-dd"` string in `timeZone`. */
+export function todayDateString(
+  timeZone: string,
+  now: Date = new Date()
+): string {
+  return toDateInputValue(now, timeZone);
 }
 
 /**
  * Formats a date range as `"MMM d – MMM d, yyyy"` when both ends share a year,
  * otherwise `"MMM d, yyyy – MMM d, yyyy"`.
  */
-export function formatDateRange(from: Date, to: Date): string {
-  const tz = getTimeZone();
-  const fromYear = formatInTimeZone(from, tz, "yyyy");
-  const toYear = formatInTimeZone(to, tz, "yyyy");
+export function formatDateRange(
+  from: Date,
+  to: Date,
+  timeZone: string
+): string {
+  const fromYear = formatInTimeZone(from, timeZone, "yyyy");
+  const toYear = formatInTimeZone(to, timeZone, "yyyy");
   if (fromYear === toYear) {
-    return `${formatInTimeZone(from, tz, "MMM d")} – ${formatInTimeZone(
+    return `${formatInTimeZone(from, timeZone, "MMM d")} – ${formatInTimeZone(
       to,
-      tz,
+      timeZone,
       "MMM d, yyyy"
     )}`;
   }
-  return `${formatDate(from)} – ${formatDate(to)}`;
+  return `${formatDate(from, timeZone)} – ${formatDate(to, timeZone)}`;
 }

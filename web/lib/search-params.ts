@@ -171,6 +171,8 @@ export const changelogSearchParams = {
 export function hasActiveFilters(params: {
   search: string;
   instrument_id: string[];
+  date_from: string | null;
+  date_to: string | null;
   include_deleted: boolean;
   status: RunStatus[];
   ran_by: string | null;
@@ -178,8 +180,66 @@ export function hasActiveFilters(params: {
   return (
     params.search !== "" ||
     params.instrument_id.length > 0 ||
+    params.date_from !== null ||
+    params.date_to !== null ||
     params.include_deleted ||
     params.status.length > 0 ||
     params.ran_by !== null
   );
+}
+
+// Every nullable filter on an instrument's runs table. The toolbar's "Clear"
+// button and the page's empty-state message both read this list, so a filter
+// added to `instrumentDetailSearchParams` is covered in one place.
+export const INSTRUMENT_NULLABLE_FILTER_KEYS = [
+  "date_from",
+  "date_to",
+  "wavelength",
+  "measurement_mode",
+  "measurement_type",
+  "capture_type",
+  "imaging_mode",
+  "gel_wavelength",
+  "gel_color",
+  "dye_channel",
+  "hina_channel",
+  "hina_dimension",
+  "hina_size",
+  "dpi",
+  "color_mode",
+  "aunty_experiment_type",
+  "aunty_analysis_mode",
+  "aunty_temperature",
+  "aunty_ramp_rate",
+  "ran_by",
+] as const;
+
+type InstrumentFilterParams = {
+  search: string;
+  include_deleted: boolean;
+  status: RunStatus[];
+} & Record<(typeof INSTRUMENT_NULLABLE_FILTER_KEYS)[number], string | null>;
+
+export function hasActiveInstrumentFilters(
+  params: InstrumentFilterParams
+): boolean {
+  return (
+    params.search !== "" ||
+    params.include_deleted ||
+    params.status.length > 0 ||
+    INSTRUMENT_NULLABLE_FILTER_KEYS.some((key) => params[key] !== null)
+  );
+}
+
+/** Values that put every instrument filter back to its default. */
+export function clearedInstrumentFilters() {
+  return {
+    search: "",
+    include_deleted: false,
+    status: [] as RunStatus[],
+    page: 1,
+    ...(Object.fromEntries(
+      INSTRUMENT_NULLABLE_FILTER_KEYS.map((key) => [key, null])
+    ) as Record<(typeof INSTRUMENT_NULLABLE_FILTER_KEYS)[number], null>),
+  };
 }

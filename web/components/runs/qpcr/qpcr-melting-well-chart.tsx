@@ -15,6 +15,7 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from "@/components/ui/chart";
+import { describeCurve } from "@/lib/runs/chart-summary";
 import {
   meltPeakTemperature,
   QPCR_MELTING_PEAK_COLOR,
@@ -87,101 +88,123 @@ export function QpcrMeltingWellChart({
     [curves.derivative, seriesIds]
   );
 
+  // The chart is a picture, so this is its text version: each plotted series
+  // with its range and peak, plus the melting temperature when it is shown.
+  const summary = [
+    ...seriesIds.map((id) =>
+      describeCurve({
+        label: QPCR_MELTING_SERIES_META[id].label,
+        points: curves[id] ?? [],
+        xLabel: QPCR_MELTING_X_LABEL,
+      })
+    ),
+    peakX === null ? null : `Melting temperature ${peakX.toFixed(1)} °C.`,
+  ]
+    .filter(Boolean)
+    .join(" ");
+
   return (
-    <ChartContainer className="aspect-auto h-80 w-full" config={CHART_CONFIG}>
-      <LineChart
-        data={rows}
-        margin={{ top: 20, right: 8, bottom: 28, left: 8 }}
-      >
-        <CartesianGrid
-          strokeDasharray="3 3"
-          vertical={false}
-          yAxisId={seriesIds[0]}
-        />
-        <XAxis
-          axisLine={false}
-          dataKey="x"
-          domain={["dataMin", "dataMax"]}
-          label={{
-            value: QPCR_MELTING_X_LABEL,
-            position: "insideBottom",
-            offset: -16,
-            style: { fontSize: 11, fill: "var(--color-muted-foreground)" },
-          }}
-          tickFormatter={formatTick}
-          tickLine={false}
-          tickMargin={8}
-          type="number"
-        />
-        {/* One axis per visible series. They share no units — a derivative in
-            %/°C against a percentage of peak fluorescence — so each is fitted
-            to its own data and tinted to match its line. */}
-        {seriesIds.map((id, index) => {
-          const meta = QPCR_MELTING_SERIES_META[id];
-          const onLeft = index === 0;
-          return (
-            <YAxis
-              axisLine={false}
-              dataKey={id}
-              domain={["dataMin", "dataMax"]}
-              key={id}
-              label={{
-                value: meta.yLabel,
-                angle: onLeft ? -90 : 90,
-                position: onLeft ? "insideLeft" : "insideRight",
-                style: { fontSize: 11, fill: meta.color, textAnchor: "middle" },
-              }}
-              orientation={onLeft ? "left" : "right"}
-              tick={{ fill: meta.color, fontSize: 12 }}
-              tickFormatter={formatTick}
-              tickLine={false}
-              tickMargin={8}
-              type="number"
-              width={76}
-              yAxisId={id}
-            />
-          );
-        })}
-        <ChartTooltip
-          content={
-            <ChartTooltipContent
-              labelFormatter={(label) =>
-                typeof label === "number"
-                  ? `${QPCR_MELTING_X_LABEL}: ${formatTick(label)}`
-                  : String(label)
-              }
-            />
-          }
-        />
-        {peakX !== null && (
-          <ReferenceLine
-            ifOverflow="extendDomain"
-            label={{
-              value: `Tm ${peakX.toFixed(1)} \u00b0C`,
-              fill: QPCR_MELTING_PEAK_COLOR,
-              fontSize: 11,
-              position: "top",
-            }}
-            stroke={QPCR_MELTING_PEAK_COLOR}
-            strokeDasharray="4 4"
-            x={peakX}
+    <figure className="w-full">
+      <figcaption className="sr-only">{summary}</figcaption>
+      <ChartContainer className="aspect-auto h-80 w-full" config={CHART_CONFIG}>
+        <LineChart
+          data={rows}
+          margin={{ top: 20, right: 8, bottom: 28, left: 8 }}
+        >
+          <CartesianGrid
+            strokeDasharray="3 3"
+            vertical={false}
             yAxisId={seriesIds[0]}
           />
-        )}
-        {seriesIds.map((id) => (
-          <Line
-            connectNulls
-            dataKey={id}
-            dot={false}
-            isAnimationActive={false}
-            key={id}
-            name={QPCR_MELTING_SERIES_META[id].label}
-            stroke={QPCR_MELTING_SERIES_META[id].color}
-            strokeWidth={1.75}
-            yAxisId={id}
+          <XAxis
+            axisLine={false}
+            dataKey="x"
+            domain={["dataMin", "dataMax"]}
+            label={{
+              value: QPCR_MELTING_X_LABEL,
+              position: "insideBottom",
+              offset: -16,
+              style: { fontSize: 11, fill: "var(--color-muted-foreground)" },
+            }}
+            tickFormatter={formatTick}
+            tickLine={false}
+            tickMargin={8}
+            type="number"
           />
-        ))}
-      </LineChart>
-    </ChartContainer>
+          {/* One axis per visible series. They share no units — a derivative in
+            %/°C against a percentage of peak fluorescence — so each is fitted
+            to its own data and tinted to match its line. */}
+          {seriesIds.map((id, index) => {
+            const meta = QPCR_MELTING_SERIES_META[id];
+            const onLeft = index === 0;
+            return (
+              <YAxis
+                axisLine={false}
+                dataKey={id}
+                domain={["dataMin", "dataMax"]}
+                key={id}
+                label={{
+                  value: meta.yLabel,
+                  angle: onLeft ? -90 : 90,
+                  position: onLeft ? "insideLeft" : "insideRight",
+                  style: {
+                    fontSize: 11,
+                    fill: meta.color,
+                    textAnchor: "middle",
+                  },
+                }}
+                orientation={onLeft ? "left" : "right"}
+                tick={{ fill: meta.color, fontSize: 12 }}
+                tickFormatter={formatTick}
+                tickLine={false}
+                tickMargin={8}
+                type="number"
+                width={76}
+                yAxisId={id}
+              />
+            );
+          })}
+          <ChartTooltip
+            content={
+              <ChartTooltipContent
+                labelFormatter={(label) =>
+                  typeof label === "number"
+                    ? `${QPCR_MELTING_X_LABEL}: ${formatTick(label)}`
+                    : String(label)
+                }
+              />
+            }
+          />
+          {peakX !== null && (
+            <ReferenceLine
+              ifOverflow="extendDomain"
+              label={{
+                value: `Tm ${peakX.toFixed(1)} \u00b0C`,
+                fill: QPCR_MELTING_PEAK_COLOR,
+                fontSize: 11,
+                position: "top",
+              }}
+              stroke={QPCR_MELTING_PEAK_COLOR}
+              strokeDasharray="4 4"
+              x={peakX}
+              yAxisId={seriesIds[0]}
+            />
+          )}
+          {seriesIds.map((id) => (
+            <Line
+              connectNulls
+              dataKey={id}
+              dot={false}
+              isAnimationActive={false}
+              key={id}
+              name={QPCR_MELTING_SERIES_META[id].label}
+              stroke={QPCR_MELTING_SERIES_META[id].color}
+              strokeWidth={1.75}
+              yAxisId={id}
+            />
+          ))}
+        </LineChart>
+      </ChartContainer>
+    </figure>
   );
 }

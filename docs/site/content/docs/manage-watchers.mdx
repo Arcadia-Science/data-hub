@@ -17,7 +17,13 @@ Each watcher sends a [heartbeat](/docs/concepts#heartbeat) every 60 seconds with
 - **Hostname and instrument assignment**
 - **Events**: per-watcher log (`watcher_started`, `run_reported`, `file_uploaded`, `update_*`, and `error` with a `details.kind` discriminator)
 
+![Watchers page listing each watcher with its instrument, hostname, version, status badge, and last heartbeat](/images/watchers-list.webp)
+
 Events are the primary remote-diagnosis tool. For operator-side symptoms, see [Troubleshoot a watcher](/docs/troubleshoot-a-watcher).
+
+Open a watcher to see its event log, a status chart with a connectivity strip of recent heartbeats, and its configuration.
+
+![Watcher page on the Status tab, with an Online badge, the version, a chart of files, runs, and errors, and a connectivity strip](/images/watcher-detail.webp)
 
 ## Deregister a watcher [#deregister-a-watcher]
 
@@ -41,7 +47,9 @@ You don’t need to deregister a watcher just because its token was revoked. Re-
 
 ## Approving manual uploads [#approving-manual-uploads]
 
-For instruments in [manual upload mode](/docs/concepts#upload-mode), the watcher reports runs but waits for server approval before uploading file bytes. Approve a file with **Upload**, or choose **Dismiss** to tell the watcher not to upload it.
+For instruments in [manual upload mode](/docs/concepts#upload-mode), the watcher reports runs but waits for server approval before uploading file bytes. Approve a file with **Upload**, or choose **Dismiss** to tell the watcher not to upload it. To act on several files at once, select them in the files table and use the bar that appears.
+
+![Run page for a manual-upload instrument with its pending files selected and a bar offering Upload and Dismiss](/images/manual-upload.webp)
 
 Safeguards that keep the queue healthy:
 

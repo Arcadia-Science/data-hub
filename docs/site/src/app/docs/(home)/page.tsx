@@ -9,6 +9,7 @@ import {
 import Link from "next/link";
 import { DataHubLogo } from "@/components/data-hub-logo";
 import { DocsImage } from "@/components/docs-image";
+import { Screenshot } from "@/components/screenshot";
 import {
   CodeBlock,
   CodeBlockActions,
@@ -18,9 +19,8 @@ import {
   CodeBlockTitle,
 } from "@/components/ui/code";
 import { cn } from "@/lib/cn";
-import homeImage from "../../../../public/images/home.png";
+import { screenshots } from "@/lib/screenshots.generated";
 import mcpImage from "../../../../public/images/mcp.png";
-import runDetailImage from "../../../../public/images/plate-reader-run-details-1.png";
 
 const features = [
   {
@@ -58,15 +58,17 @@ const features = [
 ];
 
 const homeShot = {
-  src: homeImage,
+  entry: screenshots.home,
   alt: "Data Hub home dashboard with instrument status and recent runs",
 } as const;
 
 const runDetailShot = {
-  src: runDetailImage,
+  entry: screenshots["plate-reader-run-details-1"],
   alt: "Data Hub run detail with plate map visualization and comments",
 } as const;
 
+// Taken by hand in the Claude desktop app, so the script cannot retake it.
+// It is also listed in `web/scripts/docs-screenshots/shots.ts`.
 const mcpShot = {
   src: mcpImage,
   alt: "Claude Desktop asking Data Hub about microscope runs over MCP",
@@ -178,23 +180,23 @@ export default function HomePage() {
           </div>
         </div>
 
-        <div className="w-full min-w-0 overflow-hidden rounded-xl border bg-fd-card shadow-sm lg:w-3/5">
-          <DocsImage
+        <div className="w-full min-w-0 lg:w-3/5">
+          <Screenshot
             alt={runDetailShot.alt}
+            entry={runDetailShot.entry}
             preload
             sizes="(max-width: 1024px) 100vw, 64rem"
-            src={runDetailShot.src}
           />
         </div>
       </section>
 
       <section className="border-fd-border border-y">
         <div className="mx-auto flex w-full max-w-348 flex-col items-center gap-10 px-4 py-16 lg:flex-row lg:items-center lg:gap-16 lg:py-20">
-          <div className="w-full min-w-0 overflow-hidden rounded-xl border bg-fd-card shadow-sm lg:w-1/2">
-            <DocsImage
+          <div className="w-full min-w-0 lg:w-1/2">
+            <Screenshot
               alt={homeShot.alt}
+              entry={homeShot.entry}
               sizes="(max-width: 1024px) 100vw, 40rem"
-              src={homeShot.src}
             />
           </div>
 

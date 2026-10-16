@@ -7,6 +7,7 @@ import {
   Download,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { LoadingSkeleton } from "@/components/loading-skeleton";
 import { ColonyDataTableView } from "@/components/runs/colony-data-table";
 import { Button } from "@/components/ui/button";
 import {
@@ -16,7 +17,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Skeleton } from "@/components/ui/skeleton";
 import { trackClientEvent } from "@/lib/analytics/track-client";
 import { type FilePreview, loadFilePreview } from "@/lib/runs/file-preview";
 import type { FilePreviewKind } from "@/lib/runs/run-file-types";
@@ -158,7 +158,10 @@ export function FilePreviewDialog({
             <div className="flex shrink-0 items-center gap-1">
               {current && (
                 <Button asChild variant="outline">
-                  <a href={`/api/v1/files/${current.id}/download`}>
+                  <a
+                    download={current.filename}
+                    href={`/api/v1/files/${current.id}/download`}
+                  >
                     <Download />
                     Download
                   </a>
@@ -190,10 +193,13 @@ export function FilePreviewDialog({
         </DialogHeader>
         <div className="flex min-w-0 flex-col gap-2">
           {state === null && (
-            <Skeleton aria-label="Loading preview" className="h-72 w-full" />
+            <LoadingSkeleton className="h-72 w-full" label="Loading preview…" />
           )}
           {state?.status === "error" && (
-            <div className="flex h-72 flex-col items-center justify-center gap-3 rounded-md border border-dashed bg-muted/20 p-6 text-center">
+            <div
+              className="flex h-72 flex-col items-center justify-center gap-3 rounded-md border border-dashed bg-muted/20 p-6 text-center"
+              role="alert"
+            >
               <AlertTriangle
                 aria-hidden
                 className="size-6 text-muted-foreground"

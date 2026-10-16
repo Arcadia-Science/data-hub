@@ -14,17 +14,19 @@ The sidebar and the home page are the two starting points for daily work.
 
 **Home** lists recent runs across instruments, most recent first, with counts for today and this week at the top. Filter by date range, who ran it, and instrument-specific metadata when it’s available, then page through results. Below the runs, Home shows up to four of today’s comments; use the date picker to see comments from a different range.
 
-![Home dashboard with instrument status and recent runs](/images/home.png)
+![Home dashboard with instrument status and recent runs](/images/home.webp)
 
 **Instruments** in the sidebar lists five instruments, and **View all** opens the full list. Each instrument’s page shows the folder its watcher reads from and the file patterns it uploads, then a runs table with column filters that match the instrument type (for example wavelengths on a plate reader).
 
-![Plate reader instrument page with the runs table and column filters](/images/plate-reader-runs-table.png)
+![Plate reader instrument page with the runs table and column filters](/images/plate-reader-runs-table.webp)
 
 **My runs** lists runs you’ve claimed, so you can return to your own work without re-filtering the full dashboard.
 
-![My runs page listing runs attributed to the signed-in user](/images/my-runs.png)
+![My runs page listing runs attributed to the signed-in user](/images/my-runs.webp)
 
 **Comments** lists every run comment by day. Open it from **View all comments** on Home. Each person’s profile page also shows the comments they wrote and the comments on runs they ran.
+
+![Comments page listing each run comment by day, with filters for instrument and for comments on your runs](/images/comments-page.webp)
 
 ### Narrow a long run list [#narrow-a-long-run-list]
 
@@ -57,7 +59,7 @@ A run with files in several states shows the first status in this table that app
 
 Press **⌘&nbsp;K** (macOS) or **Ctrl&nbsp;K** (Windows/Linux) to open global search from any page. Results are grouped into runs, files, instruments, users, and comments. That means you can also look up a colleague’s work or the text of a lab note. A file hit opens the parent run with the files table already filtered to that file.
 
-![Global search modal with results for runs and files](/images/search-modal.png)
+![Global search modal with results for runs and files](/images/search-modal.webp)
 
 ## Open a run and inspect results [#open-run-detail]
 
@@ -75,11 +77,11 @@ Reports with many images, PDFs, or spectra show one item at a time. Search by fi
 
 Per-type inputs and outputs are in [Instrument data preprocessing](/docs/instrument-preprocessing).
 
-![Gel doc run detail with metadata badges, files table, and report preview](/images/gel-doc-run-details.png)
+![Gel doc run detail with metadata badges, files table, and report preview](/images/gel-doc-run-details.webp)
 
-![Plate reader run detail with plate map visualization](/images/plate-reader-run-details-1.png)
+![Plate reader run detail with plate map visualization](/images/plate-reader-run-details-1.webp)
 
-![Plate reader run detail with kinetic traces and comments](/images/plate-reader-run-details-2.png)
+![Plate reader run detail with kinetic traces and comments](/images/plate-reader-run-details-2.webp)
 
 ### Filter the files table [#filter-files]
 
@@ -98,8 +100,10 @@ Use **Claim** on the run details page to attribute yourself. You can claim or un
 From the files table you can:
 
 - Preview a CSV, TSV, JSON, or other text file by clicking its row. The preview shows the first 1 MB of the file. Use the back and forward buttons to move between previewable files on the same page of the table. **Download** in that window saves the file
-- Select one or more files and choose **Download** in the bar that appears at the bottom of the page
+- Select files and choose **Download** in the bar that appears above the files table. One file downloads directly. Two or more come as a single zip, which builds in the background like **Download all**
 - Choose **Download all** to build a zip of active files in the run, with any active file filters applied
+
+![File preview window showing the first rows of a processed CSV, with a Download button and buttons for the next and previous file](/images/csv-preview.webp)
 
 Large zips build in the background. When one isn’t ready yet, Data Hub tells you how long to wait before trying again.
 
@@ -116,9 +120,11 @@ Select the checkbox on one or more run rows to open an action bar at the bottom 
 
 **Upload**, **Download**, **Reprocess**, and **Delete** appear only when every selected run allows them. For example, **Reprocess** is hidden if one of the selected runs belongs to an instrument type with no processor. The checkbox in the header row selects every run on the page, and **Clear** drops the selection.
 
-The files table on a run page works the same way: select files to get **Upload**, **Dismiss**, **Reprocess**, and **Download** for just those files.
+The selection stays when you move to another page of the same results. It clears when you change the search, a filter, or the sort, so the bar never acts on runs from a list you are no longer looking at.
 
-![Run list with several runs selected and the bulk action bar open](/images/bulk-actions.png)
+The files table on a run page works the same way: select files to get **Upload**, **Dismiss**, **Reprocess**, and **Download** for just those files. Its selection also clears when you change the files search, a filter, or the sort.
+
+![Run list with several runs selected and the bulk action bar open](/images/bulk-actions.webp)
 
 ## Comment on a run [#comment]
 
@@ -126,7 +132,7 @@ The comments thread on run details is for lab notes and follow-ups. Comment acti
 
 Only the author of a comment can edit it. Authors can delete their own comments, and workspace admins can delete any comment. Comments posted by a script through an API token show the token’s name with a key icon instead of a person.
 
-![Gel doc processed image with a lab comment on the run](/images/gel-doc-run-comments.png)
+![Gel doc processed image with a lab comment on the run](/images/gel-doc-run-comments.webp)
 
 ## Reprocess or delete a run [#reprocess-and-delete]
 
@@ -140,11 +146,15 @@ Reprocessing sends only the original instrument files. Files Data Hub generated,
 
 **Delete** marks the run deleted without removing stored files. To find a deleted run again, turn on **Show deleted runs** under **Add filter**, then open it and choose **Restore**. Anyone signed in can delete or restore a run.
 
+![Deleted run page with a red banner naming who deleted it and when, and a Restore button](/images/deleted-run.webp)
+
 ### Request an upload [#request-upload]
 
 A file that the watcher found but hasn’t uploaded shows **Pending**. Choose **Upload** on that file, or select runs and choose **Upload**, to ask the watcher to send it. The watcher picks up the request within a minute. On instruments that upload automatically, this needs watcher 1.2.1 or later; see [Roll out watcher releases](/docs/watcher-releases#what-each-version-adds).
 
 For instruments in [manual upload mode](/docs/concepts#upload-mode), every file waits for this approval. **Dismiss** tells the watcher not to upload a file. See [Manage the watcher fleet](/docs/manage-watchers#approving-manual-uploads).
+
+![Run page for a manual-upload instrument with its pending files selected and a bar offering Upload and Dismiss](/images/manual-upload.webp)
 
 ## Use the same data outside the UI [#programmatic-access]
 

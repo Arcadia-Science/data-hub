@@ -1,7 +1,5 @@
 import type { ImageProps, StaticImageData } from "next/image";
 import Image from "next/image";
-import type { ImgHTMLAttributes } from "react";
-import { cn } from "@/lib/cn";
 
 type DocsImageProps = Omit<ImageProps, "style">;
 
@@ -13,12 +11,9 @@ const responsiveStyle = {
   height: "auto",
 } as const;
 
-const mdxSizes =
-  "(max-width: 768px) 100vw, (max-width: 1200px) 70vw, 900px" as const;
-
 const PIXEL_DIMENSION = /^\d+$/;
 
-function toPixel(value: unknown): number | undefined {
+export function toPixel(value: unknown): number | undefined {
   if (typeof value === "number" && Number.isFinite(value)) {
     return value;
   }
@@ -38,19 +33,6 @@ function getStaticImageData(
     return src.default;
   }
   return src;
-}
-
-function resolveMdxSrc(src: unknown): ImageProps["src"] | undefined {
-  if (typeof src === "string" && src.length > 0) {
-    return src;
-  }
-  if (!src || typeof src !== "object" || src instanceof Blob) {
-    return;
-  }
-  if ("default" in src || "src" in src) {
-    return src as ImageProps["src"];
-  }
-  return;
 }
 
 export function DocsImage({
@@ -81,39 +63,6 @@ export function DocsImage({
           : {}),
       }}
       width={widthPx}
-    />
-  );
-}
-
-type MdxImageProps = ImgHTMLAttributes<HTMLImageElement> &
-  Pick<ImageProps, "placeholder">;
-
-export function MdxImage({
-  alt = "",
-  className,
-  height,
-  placeholder,
-  sizes,
-  src,
-  style: _style,
-  title,
-  width,
-}: MdxImageProps) {
-  const imageSrc = resolveMdxSrc(src);
-  if (!imageSrc) {
-    return null;
-  }
-
-  return (
-    <DocsImage
-      alt={alt}
-      className={cn("rounded-lg", className)}
-      height={toPixel(height)}
-      placeholder={placeholder}
-      sizes={sizes ?? mdxSizes}
-      src={imageSrc}
-      title={title}
-      width={toPixel(width)}
     />
   );
 }

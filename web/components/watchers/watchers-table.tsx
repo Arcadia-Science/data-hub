@@ -1,8 +1,8 @@
 import { SearchX } from "lucide-react";
 import type { ReactNode } from "react";
 import { RelativeTime } from "@/components/dashboard/relative-time";
-import { RowActionsCell } from "@/components/instruments/row-actions-cell";
-import { ClickableRow } from "@/components/instruments/runs-table/clickable-row";
+import { EmptyState } from "@/components/empty-state";
+import { RowControl, RowLink } from "@/components/row-link";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -85,12 +85,7 @@ export function WatchersTable({
   renderRowActions?: (row: WatcherListItem) => ReactNode;
 }) {
   if (data.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed bg-background py-16 dark:bg-muted">
-        <SearchX className="size-8 text-muted-foreground" />
-        <p className="text-muted-foreground text-sm">{emptyMessage}</p>
-      </div>
-    );
+    return <EmptyState icon={SearchX}>{emptyMessage}</EmptyState>;
   }
 
   return (
@@ -108,19 +103,20 @@ export function WatchersTable({
         </TableHeader>
         <TableBody>
           {data.map((row) => (
-            <ClickableRow
-              className={cn("text-sm", row.deletedAt && "opacity-60")}
-              href={`/watchers/${row.id}`}
+            <TableRow
+              className={cn("relative text-sm", row.deletedAt && "opacity-60")}
               key={row.id}
             >
               <TableCell>
-                {row.instrumentDisplayName ? (
-                  row.instrumentDisplayName
-                ) : (
-                  <span className="font-mono text-muted-foreground">
-                    {row.instrumentId}
-                  </span>
-                )}
+                <RowLink href={`/watchers/${row.id}`}>
+                  {row.instrumentDisplayName ? (
+                    row.instrumentDisplayName
+                  ) : (
+                    <span className="font-mono text-muted-foreground">
+                      {row.instrumentId}
+                    </span>
+                  )}
+                </RowLink>
               </TableCell>
               <TableCell>
                 {row.hostname ?? (
@@ -133,10 +129,12 @@ export function WatchersTable({
                 )}
               </TableCell>
               <TableCell>
-                <WatcherStatusBadge
-                  className="text-xs"
-                  status={row.effectiveStatus}
-                />
+                <RowControl>
+                  <WatcherStatusBadge
+                    className="text-xs"
+                    status={row.effectiveStatus}
+                  />
+                </RowControl>
               </TableCell>
               <TableCell>
                 {row.lastHeartbeatAt ? (
@@ -146,9 +144,11 @@ export function WatchersTable({
                 )}
               </TableCell>
               {renderRowActions ? (
-                <RowActionsCell>{renderRowActions(row)}</RowActionsCell>
+                <TableCell>
+                  <RowControl>{renderRowActions(row)}</RowControl>
+                </TableCell>
               ) : null}
-            </ClickableRow>
+            </TableRow>
           ))}
         </TableBody>
       </Table>

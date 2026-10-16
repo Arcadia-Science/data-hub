@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { parseAsStringLiteral, useQueryState } from "nuqs";
+import { useCallback } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { WatcherActions } from "@/components/watchers/watcher-actions";
 import {
@@ -27,11 +28,13 @@ export function WatchersViewSkeleton() {
   );
 }
 
-type Tab = "active" | "deregistered";
+const TABS = ["active", "deregistered"] as const;
+type Tab = (typeof TABS)[number];
 
 // Both partitions are pre-fetched on the server and passed down, so toggling
-// between Active / Deregistered is purely client-side (no URL state or
-// refetch needed — the watcher count is small enough to hold both in memory).
+// between Active / Deregistered needs no refetch (the watcher count is small
+// enough to hold both in memory). The tab lives in the URL so a reload or a
+// shared link opens on the same one, and Back returns to the last.
 export function WatchersView({
   activeData,
   deregisteredData,
@@ -42,7 +45,12 @@ export function WatchersView({
   /** Admins get the row-actions menu on active watchers. */
   isAdmin?: boolean;
 }) {
-  const [tab, setTab] = useState<Tab>("active");
+  const [tab, setTab] = useQueryState(
+    "tab",
+    parseAsStringLiteral(TABS)
+      .withDefault("active")
+      .withOptions({ history: "push" })
+  );
 
   // `WatcherActions` uses hooks, so render it as JSX, not a function call.
   const renderRow = useCallback(

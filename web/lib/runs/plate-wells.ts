@@ -88,3 +88,38 @@ export function sparklineGeometry(
     markerX == null || markerX < minX || markerX > maxX ? null : sx(markerX);
   return { d, markerX: marker };
 }
+
+export interface PlateLayout<W> {
+  byPos: Map<string, W>;
+  cols: number;
+  rows: number;
+  // Wells whose label is not a plate position such as `A1`. The grid lists
+  // them apart from the plate instead of dropping them.
+  unplaced: W[];
+}
+
+export function plateCellKey(row: number, col: number): string {
+  return `${row}-${col}`;
+}
+
+// Places each well on a row and column from its label. The grid is as large as
+// the furthest well, so a 96-well and a 384-well plate both fit.
+export function buildPlateLayout<W extends { well: string }>(
+  wells: readonly W[]
+): PlateLayout<W> {
+  let maxRow = 0;
+  let maxCol = 0;
+  const byPos = new Map<string, W>();
+  const unplaced: W[] = [];
+  for (const well of wells) {
+    const pos = parseWellPosition(well.well);
+    if (!pos) {
+      unplaced.push(well);
+      continue;
+    }
+    maxRow = Math.max(maxRow, pos.row);
+    maxCol = Math.max(maxCol, pos.col);
+    byPos.set(plateCellKey(pos.row, pos.col), well);
+  }
+  return { rows: maxRow + 1, cols: maxCol + 1, byPos, unplaced };
+}
