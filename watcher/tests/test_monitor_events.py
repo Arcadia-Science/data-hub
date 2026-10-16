@@ -218,6 +218,6 @@ class TestTickCallback:
         on_tick = MagicMock(side_effect=RuntimeError("tick blew up"))
         monitor = _make_monitor(watch_dir, state_db, on_tick=on_tick)
 
-        monitor._check_pending()  # must not raise, or the checker thread would die
+        monitor._check_pending()  # Must not raise, or the checker thread would die.
 
         on_tick.assert_called_once_with()

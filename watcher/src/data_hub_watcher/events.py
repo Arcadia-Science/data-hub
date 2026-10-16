@@ -14,15 +14,12 @@ a database migration. Known ``kind`` values, with their per-kind
 ``details`` schemas:
 
 * ``run_report_failed`` -- POST/PATCH against
-  ``/instruments/:id/runs[/:run_id]`` raised ``ApiError``. Connection
-  errors and 5xx are retried, so only the first failure of a retry window
+  ``/instruments/:id/runs[/:run_id]`` failed. Everything except a 4xx is
+  retried until it succeeds, so only the first of a row of such failures
   is emitted; a 4xx is emitted every time because it is not retried.
+  ``status_code`` is 0 when no HTTP status came back.
   ``details = {"kind", "run_id", "operation": "create"|"update",
   "status_code", "error", "file_count"}``.
-* ``run_report_retries_exhausted`` -- a run report still failed after
-  ``MAX_RUN_REPORT_RETRIES`` retries. The next file in the run or a
-  watcher restart tries again.
-  ``details = {"kind", "run_id", "operation", "attempts", "file_count"}``.
 * ``config_sync_failed`` -- the startup ``PUT /watchers/:id/config``
   call raised ``ApiError``. ``details = {"kind", "checksum", "error"}``.
 * ``stability_timeout`` -- a file kept changing past the configured

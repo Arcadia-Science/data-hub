@@ -43,6 +43,14 @@ class ApiError(Exception):
         self.status_code = status_code
         self.detail = detail
 
+    @property
+    def is_transient(self) -> bool:
+        """True when no response came back (status 0) or the server returned a 5xx.
+
+        A 4xx needs someone to fix the cause, and replaying it would fail the same way.
+        """
+        return self.status_code == 0 or self.status_code >= 500
+
 
 DEFAULT_TIMEOUT: tuple[float, float] = (5, 30)  # (connect, read) seconds
 

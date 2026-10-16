@@ -80,7 +80,7 @@ Some Data Hub features need a minimum watcher version. Set **Latest version** to
 
 | Version | What it adds |
 | --- | --- |
-| 1.2.2 | A run report that fails because the watcher can’t reach Data Hub, or because Data Hub returns a server error, is retried for about an hour. Older watchers leave the run unreported until another file in the run finishes or the watcher restarts. |
+| 1.2.2 | A run report that fails because the watcher can’t reach Data Hub, or because Data Hub returns a server error, is retried until it goes through. Older watchers leave the run unreported until another file in the run finishes or the watcher restarts. |
 | 1.2.1 | **Request upload** works on instruments that upload automatically; older watchers in auto mode leave the file showing **Uploading**. The watcher also retries an automatic upload that didn’t finish, such as one cut off by a restart or an update, the next time it starts. It tries on up to three starts. |
 | 1.2.0 | Files of 100 MB or more upload in 64 MB parts, and a failed part is retried on its own. Files larger than 5 GB can upload; older watchers are refused for files that large. |
 | 1.1.0 | When a run gathers files from several folders, files with the same name are all kept instead of only the first. Later copies get a short tag in the name, such as `sample~3f9a1c2b.tif`. Adds the `data-hub-watcher state forget` command. |
