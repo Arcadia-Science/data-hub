@@ -4,13 +4,18 @@
 
 export const REQUEST_PATH_HEADER = "x-data-hub-request-path";
 
-const PLACEHOLDER_ORIGIN = "http://callback.invalid";
+export const PLACEHOLDER_ORIGIN = "http://callback.invalid";
 const LOGIN_PATH = "/login";
 
 // `_rsc` is Next's internal navigation parameter. `error` and Better Auth's
 // `error_description` are dropped so a retried sign-in doesn't land on a page
 // that still shows the old error.
 const DROPPED_QUERY_PARAMS = new Set(["_rsc", "error", "error_description"]);
+
+// On preview deployments, Better Auth's `oAuthProxy` callback rejects a return
+// address whose query has any other character, and nuqs writes list filters
+// with raw commas, so everything else is percent-encoded.
+const BETTER_AUTH_REJECTED_QUERY_CHARACTER = /[^\w\-.+/=&%@]/g;
 
 function hasControlCharacter(value: string): boolean {
   for (const char of value) {
@@ -22,6 +27,13 @@ function hasControlCharacter(value: string): boolean {
   return false;
 }
 
+// `URL` has already percent-encoded every non-ASCII character in the query,
+// so each character left to encode is a single byte.
+function percentEncodeByte(char: string): string {
+  const hex = char.charCodeAt(0).toString(16).toUpperCase();
+  return `%${hex.padStart(2, "0")}`;
+}
+
 function queryParamName(part: string): string {
   const raw = part.split("=")[0] ?? "";
   try {
@@ -31,7 +43,7 @@ function queryParamName(part: string): string {
   }
 }
 
-function filterSearch(search: string): string {
+function returnAddressQuery(search: string): string {
   if (!search) {
     return "";
   }
@@ -39,7 +51,13 @@ function filterSearch(search: string): string {
     .slice(1)
     .split("&")
     .filter((part) => part && !DROPPED_QUERY_PARAMS.has(queryParamName(part)));
-  return kept.length > 0 ? `?${kept.join("&")}` : "";
+  if (kept.length === 0) {
+    return "";
+  }
+  const query = kept
+    .join("&")
+    .replace(BETTER_AUTH_REJECTED_QUERY_CHARACTER, percentEncodeByte);
+  return `?${query}`;
 }
 
 /**
@@ -50,10 +68,13 @@ export function safeCallbackPath(value: unknown): string {
   if (typeof value !== "string" || value === "") {
     return "/";
   }
+  // Browsers read `\` as `/` in a path, but a backslash in the query is plain
+  // text that gets percent-encoded below.
+  const rawPath = value.split(/[?#]/, 1)[0] ?? "";
   if (
     !value.startsWith("/") ||
     value.startsWith("//") ||
-    value.includes("\\") ||
+    rawPath.includes("\\") ||
     hasControlCharacter(value)
   ) {
     return "/";
@@ -86,11 +107,13 @@ export function safeCallbackPath(value: unknown): string {
   ) {
     return "/";
   }
+  // Dot segments can collapse into a leading `//`, as in `/.//evil.example`,
+  // which a browser reads as another site.
   if (url.pathname.startsWith("//")) {
     return "/";
   }
 
-  return `${url.pathname}${filterSearch(url.search)}`;
+  return `${url.pathname}${returnAddressQuery(url.search)}`;
 }
 
 /**
@@ -103,7 +126,6 @@ export function loginPageCallbackPath(
   return params.client_id ? "/" : safeCallbackPath(params.callbackURL);
 }
 
-/** Sign-in page link that returns to `path` afterwards. */
 export function loginHref(path: unknown): string {
   const safe = safeCallbackPath(path);
   if (safe === "/") {
@@ -112,19 +134,12 @@ export function loginHref(path: unknown): string {
   return `${LOGIN_PATH}?callbackURL=${encodeURIComponent(safe)}`;
 }
 
-/**
- * Where a failed sign-in attempt goes, before the error code is added. The
- * `/login` page keeps its return address; an in-page sign-in box goes back to
- * its own address, except on `/` where the banner would be hidden behind the
- * signed-out home page.
- */
+// Where a failed sign-in goes, before the error code is added. `/login` has to
+// carry the return address forward; an in-page sign-in box is already on it.
 export function signInErrorPath(
   callbackUrl: unknown,
   fromLoginPage: boolean
 ): string {
   const safe = safeCallbackPath(callbackUrl);
-  if (fromLoginPage) {
-    return loginHref(safe);
-  }
-  return safe === "/" ? LOGIN_PATH : safe;
+  return fromLoginPage ? loginHref(safe) : safe;
 }

@@ -50,6 +50,7 @@ export function AuthScreen({
   children,
 }: AuthScreenProps) {
   const callbackUrl = safeCallbackPath(requestedCallbackUrl);
+  const errorPath = signInErrorPath(callbackUrl, fromLoginPage);
   async function signInWithGoogle() {
     "use server";
     try {
@@ -57,7 +58,7 @@ export function AuthScreen({
         body: {
           provider: "google",
           callbackURL: callbackUrl,
-          errorCallbackURL: signInErrorPath(callbackUrl, fromLoginPage),
+          errorCallbackURL: errorPath,
         },
         headers: await headers(),
       });
@@ -67,7 +68,7 @@ export function AuthScreen({
     } catch (error) {
       unstable_rethrow(error);
     }
-    redirectWithAuthError(callbackUrl, "google", fromLoginPage);
+    redirectWithAuthError(errorPath, "google");
   }
 
   async function signInWithDev(formData: FormData) {
@@ -87,7 +88,7 @@ export function AuthScreen({
       });
     } catch (error) {
       unstable_rethrow(error);
-      redirectWithAuthError(callbackUrl, "credentials", fromLoginPage);
+      redirectWithAuthError(errorPath, "credentials");
     }
     redirect(callbackUrl);
   }

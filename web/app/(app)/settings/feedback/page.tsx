@@ -22,11 +22,7 @@ export default async function FeedbackSettingsPage({
 }) {
   const session = await auth();
   if (!session?.user) {
-    return (
-      <SignInRequired callbackUrl="/settings/feedback">
-        Sign in to review feedback.
-      </SignInRequired>
-    );
+    return <SignInRequired>Sign in to review feedback.</SignInRequired>;
   }
 
   if (!session.user.isAdmin) {

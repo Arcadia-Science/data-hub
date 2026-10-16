@@ -19,7 +19,10 @@ describe("safeCallbackPath", () => {
 
   it.each([
     "//evil.example",
+    "/.//evil.example",
+    "/a/..//evil.example",
     "/\\evil.example",
+    "/a\\b?x=1",
     "\\\\evil.example",
     "https://evil.example",
     "javascript:alert(1)",
@@ -67,6 +70,37 @@ describe("safeCallbackPath", () => {
   ])("keeps the path and query of %s", (path) => {
     expect(safeCallbackPath(path)).toBe(path);
   });
+
+  it.each([
+    ["/?status=failed,stalled", "/?status=failed%2Cstalled"],
+    ["/?search=C:\\data\\run1", "/?search=C%3A%5Cdata%5Crun1"],
+    ["/runs/a?temp=20|30&tab=files", "/runs/a?temp=20%7C30&tab=files"],
+    ["/runs?q=a~b!c*(d)", "/runs?q=a%7Eb%21c%2A%28d%29"],
+  ])("percent-encodes the query of %s", (path, expected) => {
+    expect(safeCallbackPath(path)).toBe(expected);
+  });
+
+  // Better Auth's relative-path rule, which its `oAuthProxy` callback applies
+  // to the return address on preview deployments. It also rejects `%` in the
+  // path, which this helper can't avoid.
+  const betterAuthRelativePath =
+    /^\/(?!\/|\\|%2f|%5c)[\w\-.+/@]*(?:\?[\w\-.+/=&%@]*)?$/;
+
+  it.each([
+    "/comments?from=2026-10-01",
+    "/?changelog=2026-10-08-some-entry",
+    "/?status=failed,stalled&instrument_id=a,b",
+    "/?search=C:\\data\\run1",
+    "/runs/a?temp=20|30&tab=files",
+    "/runs?q=a b&r=\"x\"&s=<y>&t='z'&u=a?b",
+    "/runs?q=café",
+  ])("returns an address Better Auth accepts, with the same query, for %j", (path) => {
+    const safe = safeCallbackPath(path);
+    expect(safe).toMatch(betterAuthRelativePath);
+    expect([...new URL(safe, "http://x.test").searchParams]).toEqual([
+      ...new URL(path, "http://x.test").searchParams,
+    ]);
+  });
 });
 
 describe("loginPageCallbackPath", () => {
@@ -107,10 +141,10 @@ describe("signInErrorPath", () => {
     expect(signInErrorPath("/", true)).toBe("/login");
   });
 
-  it("returns to the page itself from an in-page box, except on /", () => {
+  it("returns an in-page box to its own address", () => {
     expect(signInErrorPath("/runs/a?tab=files", false)).toBe(
       "/runs/a?tab=files"
     );
-    expect(signInErrorPath("/", false)).toBe("/login");
+    expect(signInErrorPath("/", false)).toBe("/");
   });
 });

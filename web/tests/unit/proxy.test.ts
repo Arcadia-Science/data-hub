@@ -61,6 +61,17 @@ describe("proxy", () => {
     expect(forwardedPath(response)).toBe("/comments?from=x");
   });
 
+  it.each([
+    "/api/v1/runs",
+    "/api/auth/callback/google",
+    "/mcp/v1",
+    "/.well-known/oauth-authorization-server",
+  ])("passes route handler %s through without the address", (path) => {
+    const response = proxy(request(path));
+    expect(response.status).toBe(200);
+    expect(forwardedPath(response)).toBeNull();
+  });
+
   it("replaces a header value planted by the client", () => {
     const response = proxy(
       request("/instruments?x=1", { header: "//evil.example" })

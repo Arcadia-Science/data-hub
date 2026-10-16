@@ -59,15 +59,11 @@ export default async function WatcherDetailPage({
   searchParams,
 }: Props) {
   const session = await auth();
-  const { watcherId } = await params;
   if (!session) {
-    redirect(
-      loginHref(
-        await getRequestPath(`/watchers/${encodeURIComponent(watcherId)}`)
-      )
-    );
+    redirect(loginHref(await getRequestPath()));
   }
 
+  const { watcherId } = await params;
   const filters = watcherDetailParamsCache.parse(await searchParams);
 
   const isAdmin = session.user.isAdmin === true;

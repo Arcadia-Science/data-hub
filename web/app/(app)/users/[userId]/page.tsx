@@ -74,11 +74,7 @@ export default async function UserRunsPage({ params, searchParams }: Props) {
   const { userId } = await params;
 
   if (!session) {
-    return (
-      <SignInRequired callbackUrl={`/users/${userId}`}>
-        Sign in to view runs.
-      </SignInRequired>
-    );
+    return <SignInRequired>Sign in to view runs.</SignInRequired>;
   }
 
   const profile = await getUserProfile(userId);

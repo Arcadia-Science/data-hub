@@ -49,6 +49,14 @@ const publicPrefixes = [
 // page surfaces watcher config YAML / hostnames).
 const publicExactPaths = new Set(["/", "/watchers"]);
 
+// Route handlers never render `SignInRequired`, so they don't need the
+// request-address header.
+const routeHandlerPrefixes = ["/api", "/mcp", "/.well-known"];
+
+function matchesRoute(pathname: string, route: string) {
+  return pathname === route || pathname.startsWith(`${route}/`);
+}
+
 // Pages can't see the query string from a layout or a shared component, so the
 // proxy hands them the full address. `set` replaces any value the client sent,
 // so a visitor can't plant their own.
@@ -64,11 +72,11 @@ export function proxy(request: NextRequest) {
 
   const isPublic =
     publicExactPaths.has(pathname) ||
-    publicPrefixes.some(
-      (route) => pathname === route || pathname.startsWith(`${route}/`)
-    );
+    publicPrefixes.some((route) => matchesRoute(pathname, route));
   if (isPublic) {
-    return nextWithRequestPath(request, requestPath);
+    return routeHandlerPrefixes.some((route) => matchesRoute(pathname, route))
+      ? NextResponse.next()
+      : nextWithRequestPath(request, requestPath);
   }
 
   // Cookie presence only — optimistic redirect. Pages still call `auth()`

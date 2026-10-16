@@ -22,29 +22,34 @@ describe("redirectWithAuthError", () => {
     });
   });
 
-  it("keeps the return address on the login page", () => {
+  it("keeps the login page's return address", () => {
     expect(
-      redirectedTo(() => redirectWithAuthError("/comments?a=1", "google", true))
+      redirectedTo(() =>
+        redirectWithAuthError(
+          "/login?callbackURL=%2Fcomments%3Fa%3D1",
+          "google"
+        )
+      )
     ).toBe("/login?callbackURL=%2Fcomments%3Fa%3D1&error=google");
   });
 
-  it("sends the login page's default address to a bare /login", () => {
+  it("adds the code to a bare /login", () => {
     expect(
-      redirectedTo(() => redirectWithAuthError("/", "credentials", true))
+      redirectedTo(() => redirectWithAuthError("/login", "credentials"))
     ).toBe("/login?error=credentials");
   });
 
-  it("returns to the page itself from an in-page box, keeping its query", () => {
+  it("keeps an in-page box's own query", () => {
     expect(
       redirectedTo(() =>
-        redirectWithAuthError("/runs/a?tab=files", "credentials", false)
+        redirectWithAuthError("/runs/a?tab=files", "credentials")
       )
     ).toBe("/runs/a?tab=files&error=credentials");
   });
 
-  it("uses /login for an in-page box on the home page", () => {
+  it("stays on this site for an off-site path", () => {
     expect(
-      redirectedTo(() => redirectWithAuthError("/", "google", false))
-    ).toBe("/login?error=google");
+      redirectedTo(() => redirectWithAuthError("//evil.example/x", "google"))
+    ).toBe("/x?error=google");
   });
 });
