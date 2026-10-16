@@ -47,6 +47,7 @@ The code shows two separate causes.
    - Seven of the pages, and the layout, have no `searchParams` to build the address from.
 
 `AuthScreen` (`web/components/auth/auth-screen.tsx`) uses the address in three places:
+
 - Google sign-in passes it as `callbackURL` to `authInstance.api.signInSocial`.
 - Dev sign-in passes it to `signInEmail` and then calls `redirect(callbackUrl)`.
 - Both error paths pass it to `redirectWithAuthError` (`web/components/auth/auth-sign-in-error.ts`).
@@ -67,6 +68,7 @@ No engineer was interviewed. The agent made every decision below. No person has 
    - It removes Next's internal `_rsc` parameter.
 
    Set aside: separate checks at each call site, and relying on Better Auth's origin check.
+
 4. **Places that redirect to `/login`.** Decided by the agent.
    - The proxy redirect adds `callbackURL` with the path and query.
    - The `/login` page reads and checks it in place of the hardcoded `"/"`.
@@ -74,6 +76,7 @@ No engineer was interviewed. The agent made every decision below. No person has 
    - Sign-out stays as it is.
 
    Set aside: none recorded.
+
 5. **Failed sign-ins.** Decided by the agent. `redirectWithAuthError` keeps `callbackURL` next to `error`. For a failed Google callback, the plan passes a per-request error address to `signInSocial` if Better Auth 1.6.27 supports one; otherwise losing the address there is accepted. The planning agent checked: it is supported (see Approach). Set aside: always sending a bare `/login?error=`.
 6. **Signed-in visitors on `/login`.** Decided by the agent. No change: the form still shows, as it does today. Set aside: redirecting them to `callbackURL`, which is outside the ticket.
 7. **Ordering with pull request #320.** Decided by the agent. Ship independently. Test with a run-page query and an arbitrary query on `/`. Set aside: waiting for #320 so the changelog link can be tested directly.
@@ -107,17 +110,20 @@ No engineer was interviewed. The agent made every decision below. No person has 
 - `/login` is a public route, so a request to it never reaches the redirect branch, and the helper refuses `/login` as a target. Together these rule out a redirect loop.
 
 **3. `/login` page (`web/app/(auth)/login/page.tsx`).**
+
 - Take `searchParams`.
 - If `client_id` is present, use `"/"`, which is today's behavior, and leave the OAuth query untouched. Better Auth's `buildSignedOAuthQuery` only forwards signed parameters, so an extra `callbackURL` in that URL can't break the signature either way.
 - Otherwise pass `safeCallbackPath(searchParams.callbackURL)` as `callbackUrl` to `AuthScreen`, along with a new prop saying the screen is the `/login` page. The prop lets the error helper know where to send failures.
 
 **4. `SignInRequired` (`web/components/auth/sign-in-required.tsx`).**
+
 - Make it `async`.
 - Read the request-address header with `await headers()` and pass `safeCallbackPath(header)` to `AuthScreen`.
 - When the header is missing, fall back to the existing `callbackUrl` prop. This covers any render path the proxy didn't touch. The 15 call sites keep their prop as that fallback, so no call site has to change.
 - The doc comment on the prop changes to say it is the fallback.
 
 **5. `AuthScreen` and the error helper.**
+
 - In `AuthScreen`, run `callbackUrl` through `safeCallbackPath` once at the top, and use the checked value in both server actions.
 - Google sign-in also passes `errorCallbackURL` to `signInSocial`. On the `/login` page that is `loginHref(path)`; for the in-page box it is the page's own address. Better Auth 1.6.27 supports this: `signInSocial` accepts `errorCallbackURL`, stores it in the OAuth state, and the Google callback sends errors there. Better Auth appends `?error=` or `&error=` itself.
 - Callback errors that happen before the state can be read still go to `onAPIError.errorURL`, which stays `"/login"`. In that case the address is lost, as accepted in decision 5.
@@ -150,6 +156,7 @@ Medium. The change touches about seven files in the sign-in path plus one new he
 ## Testing
 
 **Unit tests** (`web/tests/unit/`, `vitest.unit.config.ts`):
+
 - **New `callback-url.test.ts`.** The helper accepts:
   - `/`
   - `/comments?from=2026-10-01`
@@ -167,6 +174,7 @@ Medium. The change touches about seven files in the sign-in path plus one new he
   - `/login` and `/login?x=1`
 
   It also checks that `_rsc` and `error` are removed while other parameters stay in order, and that `loginHref` encodes the path and returns bare `/login` for `"/"`.
+
 - **New `proxy.test.ts`.** Call `proxy()` with a `NextRequest` and check:
   - With no cookie on `/comments?from=x`, the redirect's `Location` is `/login?callbackURL=%2Fcomments%3Ffrom%3Dx`.
   - Unknown paths redirect the same way.
@@ -176,6 +184,7 @@ Medium. The change touches about seven files in the sign-in path plus one new he
 - **Error helper.** Cover `redirectWithAuthError` for both surfaces: from `/login`, from an in-page box with a query, and the `"/"` case. Mock `next/navigation`'s `redirect` and read the address it receives.
 
 **Integration test** (`web/tests/integration/`, against `next build` and `next start`). Add a test that follows `settings-pages.test.ts` and uses `api(path, { redirect: "manual" })` with no cookie:
+
 - `/comments?from=2026-10-01` returns a redirect whose `Location` points to `/login?callbackURL=…` with that path and query.
 - `/login?callbackURL=//evil.example` renders with status 200 and no error.
 - `/login?client_id=x&callbackURL=/comments` renders with status 200.
@@ -183,6 +192,7 @@ Medium. The change touches about seven files in the sign-in path plus one new he
 The in-page box's address is held inside an encrypted server action, so it can't be read from the HTML. The manual check below covers it.
 
 **Manual check** on a seeded local app with dev sign-in:
+
 - Sign out, open `/comments?from=<date>`, sign in, and land back on that address.
 - Open `/?any=query` signed out, sign in from the in-page box, and land on `/?any=query`.
 - Open a run page with a tab or filter query and confirm the same.
