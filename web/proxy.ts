@@ -1,5 +1,10 @@
 import { getSessionCookie } from "better-auth/cookies";
 import { type NextRequest, NextResponse } from "next/server";
+import {
+  loginHref,
+  REQUEST_PATH_HEADER,
+  safeCallbackPath,
+} from "@/lib/callback-url";
 
 // Routes whose page bodies must be reachable without a session so that link
 // unfurlers (Slack, Notion, etc.) and signed-out humans can read the page
@@ -44,8 +49,19 @@ const publicPrefixes = [
 // page surfaces watcher config YAML / hostnames).
 const publicExactPaths = new Set(["/", "/watchers"]);
 
+// Pages can't see the query string from a layout or a shared component, so the
+// proxy hands them the full address. Deleting before setting is what stops a
+// client from planting its own value.
+function nextWithRequestPath(request: NextRequest, requestPath: string) {
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.delete(REQUEST_PATH_HEADER);
+  requestHeaders.set(REQUEST_PATH_HEADER, requestPath);
+  return NextResponse.next({ request: { headers: requestHeaders } });
+}
+
 export function proxy(request: NextRequest) {
-  const { pathname } = request.nextUrl;
+  const { pathname, search } = request.nextUrl;
+  const requestPath = safeCallbackPath(`${pathname}${search}`);
 
   const isPublic =
     publicExactPaths.has(pathname) ||
@@ -53,18 +69,17 @@ export function proxy(request: NextRequest) {
       (route) => pathname === route || pathname.startsWith(`${route}/`)
     );
   if (isPublic) {
-    return NextResponse.next();
+    return nextWithRequestPath(request, requestPath);
   }
 
   // Cookie presence only — optimistic redirect. Pages still call `auth()`
   // / `SignInRequired` for the real session check.
   const sessionCookie = getSessionCookie(request);
   if (!sessionCookie) {
-    const loginUrl = new URL("/login", request.url);
-    return NextResponse.redirect(loginUrl);
+    return NextResponse.redirect(new URL(loginHref(requestPath), request.url));
   }
 
-  return NextResponse.next();
+  return nextWithRequestPath(request, requestPath);
 }
 
 export const config = {

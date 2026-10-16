@@ -17,7 +17,9 @@ import {
   WATCHER_PAGE_SIZE,
 } from "@/lib/api/watchers";
 import { auth } from "@/lib/auth";
+import { loginHref } from "@/lib/callback-url";
 import { todayDateString } from "@/lib/date";
+import { getRequestPath } from "@/lib/request-path";
 import { watcherDetailParamsCache } from "@/lib/search-params";
 import { getViewerTimeZone } from "@/lib/viewer-timezone";
 
@@ -57,11 +59,11 @@ export default async function WatcherDetailPage({
   searchParams,
 }: Props) {
   const session = await auth();
+  const { watcherId } = await params;
   if (!session) {
-    redirect("/login");
+    redirect(loginHref(await getRequestPath(`/watchers/${watcherId}`)));
   }
 
-  const { watcherId } = await params;
   const filters = watcherDetailParamsCache.parse(await searchParams);
 
   const isAdmin = session.user.isAdmin === true;

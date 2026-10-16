@@ -9,6 +9,7 @@ import { DevSignInForm } from "@/components/auth/dev-sign-in-form";
 import { GoogleSignInButton } from "@/components/auth/google-sign-in-button";
 import { DocsLink } from "@/components/docs-link";
 import { authInstance } from "@/lib/auth";
+import { safeCallbackPath, signInErrorPath } from "@/lib/callback-url";
 import { DEV_PASSWORD, isDevAuthEnabled } from "@/lib/dev-auth";
 import { DOCS_URL, QUICKSTART_DOCS_URL } from "@/lib/docs";
 
@@ -18,6 +19,8 @@ interface AuthScreenProps {
   callbackUrl: string;
   children?: React.ReactNode;
   devInputId: string;
+  /** True on the `/login` page, so failed sign-ins return there. */
+  fromLoginPage?: boolean;
   heading: string;
 }
 
@@ -40,11 +43,13 @@ const FEATURES = [
 ] as const;
 
 export function AuthScreen({
-  callbackUrl,
+  callbackUrl: requestedCallbackUrl,
+  fromLoginPage = false,
   heading,
   devInputId,
   children,
 }: AuthScreenProps) {
+  const callbackUrl = safeCallbackPath(requestedCallbackUrl);
   async function signInWithGoogle() {
     "use server";
     try {
@@ -52,6 +57,7 @@ export function AuthScreen({
         body: {
           provider: "google",
           callbackURL: callbackUrl,
+          errorCallbackURL: signInErrorPath(callbackUrl, fromLoginPage),
         },
         headers: await headers(),
       });
@@ -61,7 +67,7 @@ export function AuthScreen({
     } catch (error) {
       unstable_rethrow(error);
     }
-    redirectWithAuthError(callbackUrl, "google");
+    redirectWithAuthError(callbackUrl, "google", fromLoginPage);
   }
 
   async function signInWithDev(formData: FormData) {
@@ -81,7 +87,7 @@ export function AuthScreen({
       });
     } catch (error) {
       unstable_rethrow(error);
-      redirectWithAuthError(callbackUrl, "credentials");
+      redirectWithAuthError(callbackUrl, "credentials", fromLoginPage);
     }
     redirect(callbackUrl);
   }

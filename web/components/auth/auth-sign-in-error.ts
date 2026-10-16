@@ -1,16 +1,19 @@
 import { redirect } from "next/navigation";
+import { signInErrorPath } from "@/lib/callback-url";
 
 export type AuthSignInErrorCode = "google" | "credentials";
 
-// Bounce back to the auth surface with a query param the banner can read.
-// Login uses `callbackUrl="/"` — send those errors to `/login` so the banner
-// lands on the auth screen rather than the signed-out home page.
+// Bounce back to the auth surface with a query param the banner can read,
+// keeping the return address so a retry still lands on the requested page.
 export function redirectWithAuthError(
   callbackUrl: string,
-  code: AuthSignInErrorCode
+  code: AuthSignInErrorCode,
+  fromLoginPage: boolean
 ): never {
-  const path = callbackUrl === "/" ? "/login" : callbackUrl;
-  const url = new URL(path, "http://local.invalid");
+  const url = new URL(
+    signInErrorPath(callbackUrl, fromLoginPage),
+    "http://local.invalid"
+  );
   url.searchParams.set("error", code);
   redirect(`${url.pathname}${url.search}`);
 }

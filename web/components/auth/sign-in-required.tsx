@@ -1,10 +1,11 @@
 import { AuthScreen } from "@/components/auth/auth-screen";
+import { getRequestPath } from "@/lib/request-path";
 
 interface SignInRequiredProps {
   /**
-   * URL the user should land on after a successful sign-in. The unfurler
-   * arrives here without a session, so `callbackUrl` lets us return them to
-   * the exact page they originally clicked on once they sign in.
+   * Fallback for the URL the user lands on after signing in. Normally the
+   * address (path and query) comes from the request header set by `proxy.ts`;
+   * this is used only when the proxy didn't run for the render.
    */
   callbackUrl: string;
   /**
@@ -28,10 +29,13 @@ interface SignInRequiredProps {
  * indistinguishable from hitting `/login` directly. Both gates pull from
  * the same `isDevAuthEnabled` flag in `lib/dev-auth.ts`.
  */
-export function SignInRequired({ callbackUrl, children }: SignInRequiredProps) {
+export async function SignInRequired({
+  callbackUrl,
+  children,
+}: SignInRequiredProps) {
   return (
     <AuthScreen
-      callbackUrl={callbackUrl}
+      callbackUrl={await getRequestPath(callbackUrl)}
       devInputId="sign-in-required-dev-email"
       heading="Sign in to Data Hub"
     >
