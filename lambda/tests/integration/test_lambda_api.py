@@ -758,6 +758,7 @@ class TestFunctionUrlInvocation:
 # Keep in sync with the `lambda` entry in `web/lib/api/scope-catalog.ts`.
 _LAMBDA_PRESET_SCOPES = [
     "instruments:read",
+    "runs:read",
     "runs:create",
     "runs:update",
     "files:create",
