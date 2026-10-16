@@ -8,6 +8,7 @@ import {
   clearAll,
   type SeedUserOptions,
   seedDevUser,
+  seedMcpResource,
   seedSlackChannelConfig,
   seedWatcherReleaseConfig,
 } from "@/lib/db/seed";
@@ -41,11 +42,11 @@ export async function closeTestDb() {
   }
 }
 
-// TRUNCATE every `pgTable` declared in `lib/db/schema.ts`, then re-seed
-// singleton config rows with deterministic baselines. Tests previously
-// hard-coded both the table list and the singleton SQL inline; both now
-// live in `@/lib/db/seed` so adding a new table doesn't require touching
-// this file.
+// TRUNCATE every `pgTable` declared in `lib/db/schema.ts` (except the auth
+// signing keys; see `clearAll`), then re-seed singleton config rows with
+// deterministic baselines. Tests previously hard-coded both the table list
+// and the singleton SQL inline; both now live in `@/lib/db/seed` so adding a
+// new table doesn't require touching this file.
 //
 // `clearAll` uses TRUNCATE CASCADE, which ignores the `ON DELETE SET NULL`
 // on singleton `updated_by → user.id` FKs and wipes the rows regardless
@@ -60,6 +61,7 @@ export async function resetDb() {
     db,
     captureBase ? `${captureBase}/webhook` : null
   );
+  await seedMcpResource(db, getBaseUrl());
 }
 
 // ---------------------------------------------------------------------------

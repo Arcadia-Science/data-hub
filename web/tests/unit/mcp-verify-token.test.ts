@@ -5,14 +5,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // verify → `authInfoFromPayload`, and that `dhub_` tokens never reach the
 // token table.
 
-const { mockVerifyAccessToken, mockAuthenticateWithToken } = vi.hoisted(() => ({
-  mockVerifyAccessToken: vi.fn(),
+const { mockVerifyBearerToken, mockAuthenticateWithToken } = vi.hoisted(() => ({
+  mockVerifyBearerToken: vi.fn(),
   mockAuthenticateWithToken: vi.fn(),
 }));
 
 vi.mock("better-auth/client", () => ({
   createAuthClient: () => ({
-    verifyAccessToken: mockVerifyAccessToken,
+    verifyBearerToken: mockVerifyBearerToken,
   }),
 }));
 
@@ -35,7 +35,7 @@ import { verifyMcpToken } from "@/lib/mcp/auth";
 
 describe("verifyMcpToken", () => {
   beforeEach(() => {
-    mockVerifyAccessToken.mockReset();
+    mockVerifyBearerToken.mockReset();
     mockAuthenticateWithToken.mockReset();
   });
 
@@ -43,11 +43,11 @@ describe("verifyMcpToken", () => {
     await expect(
       verifyMcpToken(new Request("http://localhost/mcp/v1"))
     ).resolves.toBeUndefined();
-    expect(mockVerifyAccessToken).not.toHaveBeenCalled();
+    expect(mockVerifyBearerToken).not.toHaveBeenCalled();
   });
 
   it("maps a verified JWT payload onto AuthInfo", async () => {
-    mockVerifyAccessToken.mockResolvedValue({
+    mockVerifyBearerToken.mockResolvedValue({
       sub: "user-1",
       client_id: "client-1",
       scope: "read write",
@@ -70,7 +70,7 @@ describe("verifyMcpToken", () => {
   });
 
   it("rejects verified JWTs that look like client_credentials", async () => {
-    mockVerifyAccessToken.mockResolvedValue({
+    mockVerifyBearerToken.mockResolvedValue({
       sub: "client-1",
       client_id: "client-1",
       scope: "read",
@@ -82,7 +82,7 @@ describe("verifyMcpToken", () => {
   });
 
   it("returns undefined when JWT verification fails", async () => {
-    mockVerifyAccessToken.mockRejectedValue(new Error("invalid access token"));
+    mockVerifyBearerToken.mockRejectedValue(new Error("invalid access token"));
 
     await expect(
       verifyMcpToken(new Request("http://localhost/mcp/v1"), "not-a-jwt")
@@ -91,7 +91,7 @@ describe("verifyMcpToken", () => {
   });
 
   it("does not accept dhub_ personal access tokens", async () => {
-    mockVerifyAccessToken.mockRejectedValue(new Error("JWSInvalid"));
+    mockVerifyBearerToken.mockRejectedValue(new Error("JWSInvalid"));
     mockAuthenticateWithToken.mockResolvedValue({
       userId: "pat-user",
       scopes: ["*"],

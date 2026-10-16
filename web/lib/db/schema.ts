@@ -121,8 +121,9 @@ export const accounts = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     // Provider's account ID, or the user id for `credential` accounts.
     accountId: text("accountId").notNull(),
-    // Written by Better Auth 1.7 only. Left nullable so the 1.6 runtime,
-    // which does not know this column, can still insert account rows.
+    // Only Better Auth 1.7.0–1.7.2 wrote this; 1.7.3+ identifies accounts by
+    // `providerId` and `accountId` again. Must stay nullable, because new rows
+    // leave it empty.
     issuer: text("issuer"),
     // OAuth provider id (e.g. `google`) or `credential` for email/password.
     providerId: text("providerId").notNull(),
