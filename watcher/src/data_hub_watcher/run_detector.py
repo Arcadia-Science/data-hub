@@ -17,6 +17,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from data_hub_watcher.api_client import ApiError, DataHubClient
+from data_hub_watcher.constants import (
+    MAX_RUN_REPORT_RETRIES,
+    RUN_REPORT_RETRY_BASE_DELAY_SECONDS,
+    RUN_REPORT_RETRY_MAX_DELAY_SECONDS,
+)
 from data_hub_watcher.events import EventReporter, EventType, WatcherEvent
 from data_hub_watcher.heartbeat import WatcherCounters
 from data_hub_watcher.state import StateDB
@@ -73,9 +78,8 @@ class RunState:
     # field when a later-stabilising file reveals an earlier creation
     # time than what the server already knows.
     acquired_at_sent: float | None = None
-    # Transient report/PATCH failures need an in-process retry even when no
-    # other file arrives. The monitor's stability tick services this timer.
-    retry_at: float | None = None
+    # Retries scheduled since the last success or new file. Capped by
+    # `MAX_RUN_REPORT_RETRIES`; the due times live on `RunDetector._retry_at`.
     retry_attempts: int = 0
 
 
@@ -137,6 +141,10 @@ class RunDetector:
         self._watch_dir = watch_directory
 
         self._runs: dict[str, RunState] = {}
+        # Due time (`time.monotonic()`) of the next retry, by run ID. Only the
+        # monitor's stability-checker thread calls into this class, so it
+        # needs no lock.
+        self._retry_at: dict[str, float] = {}
         # Set of parent-directory POSIX paths we've already surfaced a
         # ``kind=pattern_mismatch`` event for. Pattern misses are
         # routine for excluded files, so without throttling a
@@ -185,41 +193,103 @@ class RunDetector:
             return
         run.files.append(info)
 
+        # A new file is a fresh chance to report, including after the retries
+        # ran out, so it gets its own window instead of waiting for a restart.
+        self._clear_retry(run)
         if not run.reported:
             self._report_new_run(run)
         else:
             self._update_run(run)
 
     def retry_failed_reports(self) -> None:
-        """Retry one due run per monitor tick, independent of new file events."""
+        """Retry the run that has waited longest, if its retry is due.
+
+        Runs at most one request per call. A slow server can take 35 seconds
+        to time out, and the monitor's file checks share this thread.
+        """
         now = time.monotonic()
-        for run in self._runs.values():
-            if run.retry_at is None or run.retry_at > now:
-                continue
-            # Clear the due timer before sending; a failure schedules the next
-            # attempt, while a success leaves the run out of the retry queue.
-            run.retry_at = None
+        due = [(at, run_id) for run_id, at in self._retry_at.items() if at <= now]
+        if not due:
+            return
+        _, run_id = min(due)
+        run = self._runs[run_id]
+        del self._retry_at[run_id]
+        try:
             if run.reported:
                 self._update_run(run)
             else:
                 self._report_new_run(run)
-            return
+        except Exception:
+            # Not an `ApiError`, so the failure handlers never saw it. Count it
+            # as a failed attempt; otherwise the run silently leaves the queue.
+            logger.exception("Retrying run %s failed unexpectedly", run.run_id)
+            self._counters.errors += 1
+            self._schedule_retry(run, "update" if run.reported else "create")
 
-    @staticmethod
-    def _schedule_retry(run: RunState, exc: ApiError) -> None:
-        # 4xx validation/auth failures need operator action. 429, transport
-        # failures (status 0) and 5xx are transient. POST is safe to replay:
-        # the server upserts on (instrument_id, run_id).
-        if exc.status_code not in (0, 429) and exc.status_code < 500:
-            run.retry_at = None
+    def _clear_retry(self, run: RunState) -> None:
+        run.retry_attempts = 0
+        self._retry_at.pop(run.run_id, None)
+
+    def _note_report_success(self, run: RunState) -> None:
+        if run.retry_attempts:
+            logger.info(
+                "Run %s recovered after %d failed attempt(s)", run.run_id, run.retry_attempts
+            )
+        self._clear_retry(run)
+
+    def _handle_report_failure(self, run: RunState, operation: str, exc: ApiError) -> None:
+        """Count a failed POST or PATCH, report it, and schedule a retry if it can help."""
+        verb = "report" if operation == "create" else "update"
+        logger.warning("Failed to %s run %s: %s", verb, run.run_id, exc.message)
+        self._counters.errors += 1
+        # Connection errors (status 0) and 5xx are worth retrying. A 4xx needs
+        # someone to fix the cause, and replaying it would fail the same way.
+        retryable = exc.status_code == 0 or exc.status_code >= 500
+        # Only the first failure in a window and a final one are reported, so a
+        # long outage doesn't push other events out of the bounded queue.
+        if run.retry_attempts == 0 or not retryable:
+            self._reporter.report_error(
+                "run_report_failed",
+                f"Failed to {verb} run {run.run_id}: {exc.message}",
+                run_id=run.run_id,
+                operation=operation,
+                status_code=exc.status_code,
+                error=exc.message,
+                file_count=len(run.files),
+            )
+        if retryable:
+            self._schedule_retry(run, operation)
+        else:
+            self._retry_at.pop(run.run_id, None)
+
+    def _schedule_retry(self, run: RunState, operation: str) -> None:
+        if run.retry_attempts >= MAX_RUN_REPORT_RETRIES:
+            self._retry_at.pop(run.run_id, None)
+            self._reporter.report_error(
+                "run_report_retries_exhausted",
+                (
+                    f"Gave up reporting run {run.run_id} after {run.retry_attempts} retries; "
+                    "the next file in the run or a watcher restart will try again"
+                ),
+                run_id=run.run_id,
+                operation=operation,
+                attempts=run.retry_attempts,
+                file_count=len(run.files),
+            )
             return
+        delay = min(
+            RUN_REPORT_RETRY_BASE_DELAY_SECONDS * 2**run.retry_attempts,
+            RUN_REPORT_RETRY_MAX_DELAY_SECONDS,
+        )
         run.retry_attempts += 1
-        delay = min(5 * 2 ** min(run.retry_attempts - 1, 6), 300)
-        if exc.status_code == 429:
-            delay = max(delay, 60)
-        if exc.retry_after_seconds is not None:
-            delay = max(delay, exc.retry_after_seconds)
-        run.retry_at = time.monotonic() + delay
+        self._retry_at[run.run_id] = time.monotonic() + delay
+        logger.info(
+            "Will retry run %s in %ds (retry %d of %d)",
+            run.run_id,
+            delay,
+            run.retry_attempts,
+            MAX_RUN_REPORT_RETRIES,
+        )
 
     # ------------------------------------------------------------------
     # run-ID extraction
@@ -308,8 +378,7 @@ class RunDetector:
         try:
             resp = self._client.report_run(self._instrument_id, payload)
             run.reported = True
-            run.retry_at = None
-            run.retry_attempts = 0
+            self._note_report_success(run)
             run.api_run_id = resp.id
             run.patched_file_count = len(run.files)
             run.acquired_at_sent = acquired
@@ -326,23 +395,7 @@ class RunDetector:
             )
             logger.info("Reported new run %s (%d files)", run.run_id, len(run.files))
         except ApiError as exc:
-            self._schedule_retry(run, exc)
-            logger.warning(
-                "Failed to report run %s: %s%s",
-                run.run_id,
-                exc.message,
-                " (retry scheduled)" if run.retry_at is not None else "",
-            )
-            self._counters.errors += 1
-            self._reporter.report_error(
-                "run_report_failed",
-                f"Failed to report run {run.run_id}: {exc.message}",
-                run_id=run.run_id,
-                operation="create",
-                status_code=exc.status_code,
-                error=exc.message,
-                file_count=len(run.files),
-            )
+            self._handle_report_failure(run, "create", exc)
             return
 
         if self._upload_cb:
@@ -360,9 +413,9 @@ class RunDetector:
         API call entirely when the delta is empty avoids a needless round
         trip if `on_stable_file` re-fires for an already-reported file.
 
-        On failure the PATCH cursor is left untouched, so the next
-        stable file's PATCH naturally carries the backlog plus the new
-        entry. The upload callback continues to receive only files the
+        On failure the PATCH cursor is left untouched, so a scheduled retry
+        or the next stable file's PATCH carries the backlog (plus the new
+        entry). The upload callback continues to receive only files the
         uploader hasn't seen yet (`uploaded_file_count` is independent
         of the PATCH cursor).
         """
@@ -378,6 +431,8 @@ class RunDetector:
             else None
         )
         if not new_files and earlier_acquired is None:
+            # Nothing is waiting to be sent, so a queued retry has no work left.
+            self._clear_retry(run)
             return
 
         payload: dict[str, object] = {
@@ -389,8 +444,7 @@ class RunDetector:
             ).isoformat()
         try:
             self._client.update_run(self._instrument_id, run.run_id, payload)
-            run.retry_at = None
-            run.retry_attempts = 0
+            self._note_report_success(run)
             run.patched_file_count = len(run.files)
             if earlier_acquired is not None:
                 run.acquired_at_sent = earlier_acquired
@@ -402,18 +456,7 @@ class RunDetector:
                 len(run.files),
             )
         except ApiError as exc:
-            logger.warning("Failed to update run %s: %s", run.run_id, exc.message)
-            self._schedule_retry(run, exc)
-            self._counters.errors += 1
-            self._reporter.report_error(
-                "run_report_failed",
-                f"Failed to update run {run.run_id}: {exc.message}",
-                run_id=run.run_id,
-                operation="update",
-                status_code=exc.status_code,
-                error=exc.message,
-                file_count=len(run.files),
-            )
+            self._handle_report_failure(run, "update", exc)
             return
 
         upload_new = run.files[run.uploaded_file_count :]
