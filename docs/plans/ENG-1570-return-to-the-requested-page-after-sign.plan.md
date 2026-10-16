@@ -6,28 +6,28 @@ repo: data-hub
 todos:
   - id: path-helper
     content: Add one shared helper that checks a return address is a path on this site and builds the /login link, with unit tests for the unsafe inputs
-    status: pending
+    status: done
   - id: proxy
     content: In web/proxy.ts, add callbackURL to the /login redirect, and on every request that passes through, replace the request-address header with the real path and query
-    status: pending
+    status: done
   - id: login-page
     content: Have the /login page read and check callbackURL, ignore it when client_id is present, and pass it to AuthScreen
-    status: pending
+    status: done
   - id: sign-in-required
     content: Make SignInRequired async and read the return address from the request header, falling back to the callbackUrl prop
-    status: pending
+    status: done
   - id: auth-screen-errors
     content: Check the address in AuthScreen, keep it on failed sign-ins in redirectWithAuthError, and pass errorCallbackURL to signInSocial
-    status: pending
+    status: done
   - id: watcher-redirect
     content: Pass the address in the plain redirect to /login in watchers/[watcherId]/page.tsx
-    status: pending
+    status: done
   - id: tests
     content: Add unit tests for the proxy redirect and header, and an integration test for the /login redirect against the production build
-    status: pending
+    status: done
   - id: changelog
     content: Add a dated changelog entry in web/content/changelog/
-    status: pending
+    status: done
   - id: checks
     content: Run unit and integration tests and make check, and sign in by hand from a proxy-gated page, the home page with a query, and a run page with a query
     status: pending
