@@ -46,11 +46,7 @@ export default async function CommentsPage({
 }) {
   const session = await auth();
   if (!session) {
-    return (
-      <SignInRequired callbackUrl="/comments">
-        Sign in to view comments.
-      </SignInRequired>
-    );
+    return <SignInRequired>Sign in to view comments.</SignInRequired>;
   }
 
   const params = commentsParamsCache.parse(await searchParams);

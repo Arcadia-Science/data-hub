@@ -165,7 +165,7 @@ export default async function InstrumentDetailPage({
   // session get a sign-in CTA that returns them here afterwards.
   if (!session) {
     return (
-      <SignInRequired callbackUrl={`/instruments/${instrumentId}`}>
+      <SignInRequired>
         Sign in to view this instrument&rsquo;s runs.
       </SignInRequired>
     );

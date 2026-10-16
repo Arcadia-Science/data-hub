@@ -24,9 +24,7 @@ export default async function NotificationsSettingsPage() {
   const session = await auth();
   if (!session?.user) {
     return (
-      <SignInRequired callbackUrl="/settings/notifications">
-        Sign in to manage notification settings.
-      </SignInRequired>
+      <SignInRequired>Sign in to manage notification settings.</SignInRequired>
     );
   }
 

@@ -24,11 +24,7 @@ export const metadata: Metadata = {
 export default async function MembersPage() {
   const session = await auth();
   if (!session?.user) {
-    return (
-      <SignInRequired callbackUrl="/settings/members">
-        Sign in to manage members.
-      </SignInRequired>
-    );
+    return <SignInRequired>Sign in to manage members.</SignInRequired>;
   }
 
   // Page-level admin gate. Non-admins reach this URL via a stale link,

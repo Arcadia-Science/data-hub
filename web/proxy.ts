@@ -1,5 +1,10 @@
 import { getSessionCookie } from "better-auth/cookies";
 import { type NextRequest, NextResponse } from "next/server";
+import {
+  loginHref,
+  REQUEST_PATH_HEADER,
+  safeCallbackPath,
+} from "@/lib/callback-url";
 
 // Routes whose page bodies must be reachable without a session so that link
 // unfurlers (Slack, Notion, etc.) and signed-out humans can read the page
@@ -44,27 +49,44 @@ const publicPrefixes = [
 // page surfaces watcher config YAML / hostnames).
 const publicExactPaths = new Set(["/", "/watchers"]);
 
+// Route handlers never render `SignInRequired`, so they don't need the
+// request-address header.
+const routeHandlerPrefixes = ["/api", "/mcp", "/.well-known"];
+
+function matchesRoute(pathname: string, route: string) {
+  return pathname === route || pathname.startsWith(`${route}/`);
+}
+
+// Pages can't see the query string from a layout or a shared component, so the
+// proxy hands them the full address. `set` replaces any value the client sent,
+// so a visitor can't plant their own.
+function nextWithRequestPath(request: NextRequest, requestPath: string) {
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set(REQUEST_PATH_HEADER, requestPath);
+  return NextResponse.next({ request: { headers: requestHeaders } });
+}
+
 export function proxy(request: NextRequest) {
-  const { pathname } = request.nextUrl;
+  const { pathname, search } = request.nextUrl;
+  const requestPath = safeCallbackPath(`${pathname}${search}`);
 
   const isPublic =
     publicExactPaths.has(pathname) ||
-    publicPrefixes.some(
-      (route) => pathname === route || pathname.startsWith(`${route}/`)
-    );
+    publicPrefixes.some((route) => matchesRoute(pathname, route));
   if (isPublic) {
-    return NextResponse.next();
+    return routeHandlerPrefixes.some((route) => matchesRoute(pathname, route))
+      ? NextResponse.next()
+      : nextWithRequestPath(request, requestPath);
   }
 
   // Cookie presence only — optimistic redirect. Pages still call `auth()`
   // / `SignInRequired` for the real session check.
   const sessionCookie = getSessionCookie(request);
   if (!sessionCookie) {
-    const loginUrl = new URL("/login", request.url);
-    return NextResponse.redirect(loginUrl);
+    return NextResponse.redirect(new URL(loginHref(requestPath), request.url));
   }
 
-  return NextResponse.next();
+  return nextWithRequestPath(request, requestPath);
 }
 
 export const config = {

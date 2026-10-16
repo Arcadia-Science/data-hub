@@ -45,11 +45,7 @@ export default async function TokensPage() {
   // call is free.
   const session = await auth();
   if (!session?.user) {
-    return (
-      <SignInRequired callbackUrl="/settings/tokens">
-        Sign in to manage access tokens.
-      </SignInRequired>
-    );
+    return <SignInRequired>Sign in to manage access tokens.</SignInRequired>;
   }
 
   // Mount the create dialog only for admins. Non-admins get a disabled button

@@ -21,11 +21,7 @@ export const metadata: Metadata = {
 export default async function WatchersPage() {
   const session = await auth();
   if (!session) {
-    return (
-      <SignInRequired callbackUrl="/watchers">
-        Sign in to view watchers.
-      </SignInRequired>
-    );
+    return <SignInRequired>Sign in to view watchers.</SignInRequired>;
   }
 
   // Deregister is admin-only; everyone else sees the same listing tabs.

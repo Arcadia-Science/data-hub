@@ -56,14 +56,10 @@ export default async function DashboardPage({
   const session = await auth();
   // Render the page metadata (title) for unauthenticated visitors so links
   // shared into Notion / Slack still unfurl with a useful title; show a
-  // sign-in CTA in the body instead of leaking data. Real users come back
-  // here after the Google flow via `callbackUrl`.
+  // sign-in CTA in the body instead of leaking data. Signing in brings real
+  // users back to this address, query included.
   if (!session) {
-    return (
-      <SignInRequired callbackUrl="/">
-        Sign in to view your dashboard.
-      </SignInRequired>
-    );
+    return <SignInRequired>Sign in to view your dashboard.</SignInRequired>;
   }
 
   const params = dashboardParamsCache.parse(await searchParams);
