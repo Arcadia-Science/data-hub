@@ -2,7 +2,7 @@
 
 ## GitHub Actions
 
-Five workflows run on pushes to `staging`/`production` and on pull requests targeting those branches. A sixth (`apply-migrations.yml`) runs on merges to `staging`/`production` that touch migration files, and a seventh (`publish-watcher.yml`) runs only on `watcher-v*` tag pushes and manual dispatch.
+Six workflows run on pushes to `staging`/`production` and on pull requests targeting those branches. `apply-migrations.yml` runs on merges to `staging`/`production` that touch migration files, `deploy-lambda.yml` runs on merges that touch the Lambda or its infrastructure (see [Lambda (AWS)](#lambda-aws)), and `publish-watcher.yml` runs only on `watcher-v*` tag pushes and manual dispatch. `docs-screenshots.yml` runs monthly and on demand (see [Docs screenshots](local-development.md#docs-screenshots)).
 
 ### Python lint and typecheck (`python-lint.yml`)
 
@@ -15,7 +15,7 @@ Five workflows run on pushes to `staging`/`production` and on pull requests targ
 - Starts a Postgres 17 service container.
 - Installs both Node.js 24 and Python packages.
 - `make py-test` — runs all pytest tests (unit and integration). Integration tests build and start a real Next.js production server, seed a test database, and exercise the Lambda and watcher against the live API.
-- `make py-watcher-cli-catalog`, then fails if `docs/site/src/lib/cli-catalog.snapshot.json` changed. The docs site renders its watcher CLI reference from that committed file, so a change to the CLI or a watcher version bump has to commit the regenerated snapshot. The MCP docs bundle embeds the same page, so run `make py-watcher-cli-catalog docs-bundle-generate` and commit both files, or `docs-lint.yml` fails next.
+- `make py-watcher-cli-catalog`, then fails if `docs/site/src/lib/cli-catalog.snapshot.json` changed. The docs site renders its watcher CLI reference from that committed file, so a change to the CLI or a watcher version bump has to commit the regenerated snapshot. The MCP docs bundle embeds the same page, so run `make docs-catalogs` and commit both files, or `docs-lint.yml` fails next.
 
 ### TypeScript lint and typecheck (`typescript-lint.yml`)
 
@@ -39,6 +39,13 @@ Runs when `docs/**`, `web/lib/docs.ts`, `web/lib/mcp/docs/docs-bundle.snapshot.j
 - Starts a Postgres 17 service container and Node.js 24.
 - `make fe-test-unit` — runs `tests/unit/` and `tests/mcp/` (in-memory MCP protocol tests) together; no Postgres, no Next.js server, no global setup. See [Testing](testing.md).
 - `make fe-test-integration` — runs Vitest integration tests that test the API routes and MCP server over HTTP against a real database.
+
+### Infra template validation (`infra-validate.yml`)
+
+Runs when `infra/**`, `deploy-lambda.yml`, `.github/scripts/check_sam_deploy_overrides.py`, or the `Makefile` changes:
+
+1. `make sam-validate` — lints both CloudFormation templates with cfn-lint.
+2. `make sam-check-overrides` — runs the CI and Makefile `sam deploy` commands with dummy credentials and no reachable AWS endpoint, to catch parameter overrides SAM rejects before they reach AWS.
 
 ### Apply database migrations (`apply-migrations.yml`)
 
@@ -238,4 +245,7 @@ This is equivalent to:
 ```sh
 make py-check    # py-format + py-lint + py-typecheck
 make fe-check    # fe-format + fe-lint + fe-typecheck
+make docs-check  # docs-format + docs-lint + docs-typecheck + docs-links
 ```
+
+The `*-format` steps rewrite files, so review the diff afterward. The docs checks need `npm ci` in `docs/site/` first.

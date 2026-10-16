@@ -8,7 +8,7 @@ This guide walks through setting up the full Data Hub development environment.
 | --- | --- | --- |
 | Python | >= 3.12 | Lambda, watcher, shared library |
 | [uv](https://docs.astral.sh/uv/) | latest | Python package manager and workspace orchestrator |
-| Node.js | >= 22 | Web application |
+| Node.js | 24, with npm 11 | Web application and docs site. `npm ci` against the committed lockfile fails under npm 10. |
 | PostgreSQL | >= 15 | Database (local development) |
 | Docker | latest | Lambda container builds |
 | ffmpeg | latest | DishCam TIFF → MP4 encode (`brew install ffmpeg` / `apt install ffmpeg`). Encode tests skip if it is missing. |

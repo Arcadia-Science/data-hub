@@ -6,6 +6,10 @@ const appDir = path.dirname(fileURLToPath(import.meta.url));
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // `web/AGENTS.md` carries its own Next.js guidance. Without this, every
+  // `next dev` writes its managed block back into that file.
+  agentRules: false,
+
   // The MCP server moved from `/api/v1/mcp` to `/mcp/v1`. MCP client configs
   // (Claude Desktop, Cursor, …) live on end users' machines and can't be
   // migrated for them, so the old paths keep working. 308 preserves the POST

@@ -85,7 +85,7 @@ Docs are split by who is reading:
 
 ## Run it locally
 
-The web app, API, and database run with no AWS or Google credentials, which is enough for work on the UI, REST endpoints, MCP tools, or the schema. You need PostgreSQL 15 or later and Node.js 22 or later:
+The web app, API, and database run with no AWS or Google credentials, which is enough for work on the UI, REST endpoints, MCP tools, or the schema. You need PostgreSQL 15 or later and Node.js 24 with npm 11:
 
 ```sh
 cd web && npm install && cd ..

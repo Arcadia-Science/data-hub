@@ -11,6 +11,7 @@ the docs site does not render them.
 
 - [Getting started](getting-started.md) — development setup, environment variables, running locally
 - [Local development](local-development.md) — zero-credential dev workflow for the web app + API + database (no watcher / Lambda needed)
+- [Cursor Cloud](cursor-cloud.md) — PostgreSQL, `web/.env`, and toolchain setup on a Cursor Cloud VM, plus the recommended dashboard install script
 - [Architecture](architecture.md) — system overview, data flow, and design decisions
 - [MCP Apps](mcp-apps.md) — run-report View: host render flow, the three app-only tools, the shared data source, `mcp-apps:build`, and the gitignored HTML artifact
 - [Docs and changelog over MCP](mcp-docs.md) — how the `search_docs`, `read_doc`, and `search_changelog` tools get their content, how search works, how changelog entry links work, and what to update when docs change
