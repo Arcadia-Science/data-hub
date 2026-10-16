@@ -1,0 +1,1 @@
+ALTER TABLE "linear_integration_config" ADD COLUMN "factory_origin" text;
