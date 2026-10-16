@@ -51,10 +51,14 @@ export const SEED_WATCHER_VERSION = "1.0.0";
 
 // ---------------------------------------------------------------------------
 // clearAll — schema-driven TRUNCATE of every `pgTable` declared in
-// `lib/db/schema.ts`. Uses CASCADE so FK ordering doesn't matter; the
-// previous static `TRUNCATE_ORDER` list was a maintenance hazard (every
-// new table required a manual edit) and is replaced by this.
+// `lib/db/schema.ts` except `jwks`. Uses CASCADE so FK ordering doesn't
+// matter; the previous static `TRUNCATE_ORDER` list was a maintenance hazard
+// (every new table required a manual edit) and is replaced by this.
 // ---------------------------------------------------------------------------
+
+// The MCP route caches the published signing keys and rate-limits refetches,
+// so a running server would reject tokens signed by a replacement key.
+const KEPT_TABLES = new Set<string>([getTableName(schema.jwks)]);
 
 export async function clearAll(db: Db): Promise<void> {
   // Cast through `unknown[]` so the `isTable` type predicate can narrow
@@ -64,7 +68,8 @@ export async function clearAll(db: Db): Promise<void> {
   // but TS won't accept the union as-is).
   const tableNames = (Object.values(schema) as unknown[])
     .filter(isTable)
-    .map((t) => getTableName(t));
+    .map((t) => getTableName(t))
+    .filter((name) => !KEPT_TABLES.has(name));
 
   if (tableNames.length === 0) {
     return;
@@ -197,6 +202,24 @@ export async function seedSlackChannelConfig(
        updated_at = now(),
        updated_by = NULL`
   );
+}
+
+// The MCP audience row that `resources` in `lib/auth.ts` declares. Better Auth
+// inserts it only once per server process, so a server that outlives a reset
+// rejects every MCP token request with `invalid_target` until this restores it.
+export async function seedMcpResource(db: Db, origin: string): Promise<void> {
+  const identifier = `${origin}/mcp/v1`;
+  const now = new Date();
+  await db
+    .insert(schema.oauthResources)
+    .values({
+      id: crypto.randomUUID(),
+      identifier,
+      name: identifier,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .onConflictDoNothing({ target: schema.oauthResources.identifier });
 }
 
 // ---------------------------------------------------------------------------
