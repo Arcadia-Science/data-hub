@@ -1059,7 +1059,7 @@ export async function notifyFeedbackUpdated(
         userId: recipient.userId,
         slackUserId: recipient.slackUserId,
         payload: {
-          text: `Your feedback "${escapeMrkdwn(input.title)}" was marked ${escapeMrkdwn(statusLabel)}.`,
+          text: escapeMrkdwn(body),
           blocks: buildFeedbackUpdatedBlocks({
             title: input.title,
             statusLabel,
