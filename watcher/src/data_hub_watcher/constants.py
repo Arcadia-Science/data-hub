@@ -129,6 +129,11 @@ MAX_QUEUE_FILE_ATTEMPTS = 3
 # How many watcher starts retry an auto-mode upload that never finished.
 # After that the file waits for someone to request it from the run page.
 MAX_PENDING_UPLOAD_ATTEMPTS = 3
+# A run report that fails with a connection error or a 5xx is retried until it
+# succeeds, so a single-file run isn't stranded until the next restart. The
+# delay doubles from the base, then stays at the cap.
+RUN_REPORT_RETRY_BASE_DELAY_SECONDS = 5
+RUN_REPORT_RETRY_MAX_DELAY_SECONDS = 300
 # Upload records older than this are pruned from the local state DB
 # to prevent unbounded growth on long-running watcher instances.
 PRUNE_DAYS = 90

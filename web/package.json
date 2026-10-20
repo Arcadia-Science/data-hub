@@ -34,13 +34,13 @@
     "check": "npm run lint:check && npm run typecheck"
   },
   "dependencies": {
-    "@arcadiascience/app-feedback-toolkit": "^0.1.0",
+    "@arcadiascience/app-feedback-toolkit": "^0.4.0",
     "@asteasolutions/zod-to-openapi": "^8.5.0",
     "@aws-sdk/client-s3": "^3.1021.0",
     "@aws-sdk/crc64-nvme": "^3.972.5",
     "@aws-sdk/s3-request-presigner": "^3.1021.0",
     "@base-ui/react": "^1.7.0",
-    "@better-auth/oauth-provider": "1.6.27",
+    "@better-auth/oauth-provider": "1.7.10",
     "@modelcontextprotocol/client": "^2.0.0",
     "@modelcontextprotocol/server": "^2.0.0",
     "@slack/web-api": "^7.17.0",
@@ -52,7 +52,7 @@
     "@vercel/functions": "^3.7.3",
     "@vercel/microfrontends": "^2.4.0",
     "@vercel/oidc-aws-credentials-provider": "^3.0.7",
-    "better-auth": "1.6.27",
+    "better-auth": "1.7.10",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
@@ -105,7 +105,6 @@
     "vitest": "^4.1.2"
   },
   "overrides": {
-    "@better-auth/core": "1.6.27",
     "body-parser": "^2.3.0",
     "brace-expansion": "^5.0.7",
     "esbuild": "^0.28.1",

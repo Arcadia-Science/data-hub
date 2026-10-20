@@ -10,17 +10,25 @@ from __future__ import annotations
 import logging
 import os
 import re
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Literal
 
 from data_hub_watcher.api_client import ApiError, DataHubClient
+from data_hub_watcher.constants import (
+    RUN_REPORT_RETRY_BASE_DELAY_SECONDS,
+    RUN_REPORT_RETRY_MAX_DELAY_SECONDS,
+)
 from data_hub_watcher.events import EventReporter, EventType, WatcherEvent
 from data_hub_watcher.heartbeat import WatcherCounters
 from data_hub_watcher.state import StateDB
 
 logger = logging.getLogger(__name__)
+
+ReportOperation = Literal["create", "update"]
 
 
 def file_created_at(st: os.stat_result) -> float:
@@ -65,13 +73,17 @@ class RunState:
     # PATCHed to the API. Used as a cursor so `_update_run` can send only
     # newly-stable files instead of re-transmitting the full manifest on
     # every call. On a failed PATCH the cursor is left untouched so the
-    # next stable file's PATCH carries the backlog plus the new entry.
+    # next PATCH, from a retry or a new file, carries the backlog.
     patched_file_count: int = 0
     # Last `acquired_at` value (seconds since epoch) we successfully sent
     # to the API for this run. Used so `_update_run` only PATCHes the
     # field when a later-stabilising file reveals an earlier creation
     # time than what the server already knows.
     acquired_at_sent: float | None = None
+    # Failed reports since the last success, and the wait before the next
+    # retry. The due time itself lives on `RunDetector._retry_at`.
+    retry_attempts: int = 0
+    retry_delay: int = 0
 
 
 def _run_acquired_at(files: list[FileInfo]) -> float | None:
@@ -132,6 +144,10 @@ class RunDetector:
         self._watch_dir = watch_directory
 
         self._runs: dict[str, RunState] = {}
+        # Due time (`time.monotonic()`) of the next retry, by run ID. A run has
+        # an entry exactly when its `retry_attempts` is non-zero. Only the
+        # monitor's stability-checker thread calls into this class, so no lock.
+        self._retry_at: dict[str, float] = {}
         # Set of parent-directory POSIX paths we've already surfaced a
         # ``kind=pattern_mismatch`` event for. Pattern misses are
         # routine for excluded files, so without throttling a
@@ -180,10 +196,89 @@ class RunDetector:
             return
         run.files.append(info)
 
-        if not run.reported:
-            self._report_new_run(run)
-        else:
+        # Sent right away even while a retry is waiting, so the run catches up
+        # as soon as the server is back. A failure keeps doubling the backoff.
+        self._send_report(run)
+
+    def retry_failed_reports(self) -> None:
+        """Retry the run that has waited longest, if its retry is due.
+
+        Sends at most one request per call. A request to a slow server can
+        block until `DEFAULT_TIMEOUT` runs out, and the monitor's file checks
+        share this thread.
+        """
+        now = time.monotonic()
+        due = [(at, run_id) for run_id, at in self._retry_at.items() if at <= now]
+        if not due:
+            return
+        _, run_id = min(due)
+        del self._retry_at[run_id]
+        self._send_report(self._runs[run_id])
+
+    def _send_report(self, run: RunState) -> None:
+        if run.reported:
             self._update_run(run)
+        else:
+            self._report_new_run(run)
+
+    def _clear_retry(self, run: RunState) -> None:
+        run.retry_attempts = 0
+        run.retry_delay = 0
+        self._retry_at.pop(run.run_id, None)
+
+    def _note_report_success(self, run: RunState) -> None:
+        if run.retry_attempts:
+            logger.info(
+                "Run %s recovered after %d failed attempt(s)", run.run_id, run.retry_attempts
+            )
+        self._clear_retry(run)
+
+    def _handle_report_failure(
+        self, run: RunState, operation: ReportOperation, exc: Exception
+    ) -> None:
+        """Count a failed POST or PATCH, report it, and schedule a retry if it can help."""
+        verb = "report" if operation == "create" else "update"
+        if isinstance(exc, ApiError):
+            status_code, error, retryable = exc.status_code, exc.message, exc.is_transient
+            logger.warning("Failed to %s run %s: %s", verb, run.run_id, error)
+        else:
+            # Anything else the client raises, such as a connection that drops
+            # mid-response or a proxy's HTML page instead of JSON, is retried
+            # like a connection error.
+            status_code, error, retryable = 0, f"{type(exc).__name__}: {exc}", True
+            logger.warning("Failed to %s run %s: %s", verb, run.run_id, error, exc_info=exc)
+        self._counters.errors += 1
+        # Report the first retryable failure in a row and every 4xx, so a long
+        # outage doesn't push other events out of the bounded queue.
+        if run.retry_attempts == 0 or not retryable:
+            self._reporter.report_error(
+                "run_report_failed",
+                f"Failed to {verb} run {run.run_id}: {error}",
+                run_id=run.run_id,
+                operation=operation,
+                status_code=status_code,
+                error=error,
+                file_count=len(run.files),
+            )
+        if retryable:
+            self._schedule_retry(run)
+        else:
+            self._clear_retry(run)
+
+    def _schedule_retry(self, run: RunState) -> None:
+        run.retry_delay = (
+            min(run.retry_delay * 2, RUN_REPORT_RETRY_MAX_DELAY_SECONDS)
+            if run.retry_delay
+            else RUN_REPORT_RETRY_BASE_DELAY_SECONDS
+        )
+        run.retry_attempts += 1
+        self._retry_at[run.run_id] = time.monotonic() + run.retry_delay
+        logger.info(
+            "Will retry run %s in %ds (%d failed attempt(s) so far)",
+            run.run_id,
+            run.retry_delay,
+            run.retry_attempts,
+        )
 
     # ------------------------------------------------------------------
     # run-ID extraction
@@ -271,35 +366,26 @@ class RunDetector:
             payload["acquired_at"] = datetime.fromtimestamp(acquired, tz=timezone.utc).isoformat()
         try:
             resp = self._client.report_run(self._instrument_id, payload)
-            run.reported = True
-            run.api_run_id = resp.id
-            run.patched_file_count = len(run.files)
-            run.acquired_at_sent = acquired
-            self._state_db.record_run_reported(run.run_id)
-            self._persist_detected_files(run)
-            self._counters.runs_reported += 1
-
-            self._reporter.queue_event(
-                WatcherEvent(
-                    event_type=EventType.RUN_REPORTED,
-                    message=f"Run {run.run_id} reported",
-                    details={"run_id": run.run_id},
-                )
-            )
-            logger.info("Reported new run %s (%d files)", run.run_id, len(run.files))
-        except ApiError as exc:
-            logger.warning("Failed to report run %s: %s (will retry)", run.run_id, exc.message)
-            self._counters.errors += 1
-            self._reporter.report_error(
-                "run_report_failed",
-                f"Failed to report run {run.run_id}: {exc.message}",
-                run_id=run.run_id,
-                operation="create",
-                status_code=exc.status_code,
-                error=exc.message,
-                file_count=len(run.files),
-            )
+        except Exception as exc:
+            self._handle_report_failure(run, "create", exc)
             return
+        run.reported = True
+        self._note_report_success(run)
+        run.api_run_id = resp.id
+        run.patched_file_count = len(run.files)
+        run.acquired_at_sent = acquired
+        self._state_db.record_run_reported(run.run_id)
+        self._persist_detected_files(run)
+        self._counters.runs_reported += 1
+
+        self._reporter.queue_event(
+            WatcherEvent(
+                event_type=EventType.RUN_REPORTED,
+                message=f"Run {run.run_id} reported",
+                details={"run_id": run.run_id},
+            )
+        )
+        logger.info("Reported new run %s (%d files)", run.run_id, len(run.files))
 
         if self._upload_cb:
             succeeded = self._upload_cb(run.run_id, list(run.files))
@@ -316,9 +402,9 @@ class RunDetector:
         API call entirely when the delta is empty avoids a needless round
         trip if `on_stable_file` re-fires for an already-reported file.
 
-        On failure the PATCH cursor is left untouched, so the next
-        stable file's PATCH naturally carries the backlog plus the new
-        entry. The upload callback continues to receive only files the
+        On failure the PATCH cursor is left untouched, so a scheduled retry
+        or the next stable file's PATCH carries the backlog (plus the new
+        entry). The upload callback continues to receive only files the
         uploader hasn't seen yet (`uploaded_file_count` is independent
         of the PATCH cursor).
         """
@@ -334,6 +420,8 @@ class RunDetector:
             else None
         )
         if not new_files and earlier_acquired is None:
+            # Nothing is waiting to be sent, so a queued retry has no work left.
+            self._clear_retry(run)
             return
 
         payload: dict[str, object] = {
@@ -345,29 +433,20 @@ class RunDetector:
             ).isoformat()
         try:
             self._client.update_run(self._instrument_id, run.run_id, payload)
-            run.patched_file_count = len(run.files)
-            if earlier_acquired is not None:
-                run.acquired_at_sent = earlier_acquired
-            self._persist_detected_files(run)
-            logger.info(
-                "Updated run %s (sent %d new file(s), %d total)",
-                run.run_id,
-                len(new_files),
-                len(run.files),
-            )
-        except ApiError as exc:
-            logger.warning("Failed to update run %s: %s", run.run_id, exc.message)
-            self._counters.errors += 1
-            self._reporter.report_error(
-                "run_report_failed",
-                f"Failed to update run {run.run_id}: {exc.message}",
-                run_id=run.run_id,
-                operation="update",
-                status_code=exc.status_code,
-                error=exc.message,
-                file_count=len(run.files),
-            )
+        except Exception as exc:
+            self._handle_report_failure(run, "update", exc)
             return
+        self._note_report_success(run)
+        run.patched_file_count = len(run.files)
+        if earlier_acquired is not None:
+            run.acquired_at_sent = earlier_acquired
+        self._persist_detected_files(run)
+        logger.info(
+            "Updated run %s (sent %d new file(s), %d total)",
+            run.run_id,
+            len(new_files),
+            len(run.files),
+        )
 
         upload_new = run.files[run.uploaded_file_count :]
         if self._upload_cb and upload_new:

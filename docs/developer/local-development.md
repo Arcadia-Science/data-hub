@@ -24,8 +24,8 @@ Sign in at `/login` using the "Sign in (dev)" button with the seeded `alice@exam
 
 ## Prerequisites
 
-- **PostgreSQL >= 15** running locally on `127.0.0.1:5432` and reachable as the OS user.
-- **Node.js >= 22**.
+- **PostgreSQL >= 15** running locally on `127.0.0.1:5432`, with a `postgres` user whose password is `postgres`. The reset and seed scripts refuse any other `DATABASE_URL` (see [web/scripts/README.md](../../web/scripts/README.md)).
+- **Node.js 24** with npm 11. `npm ci` against the committed lockfile fails under npm 10.
 
 Python, AWS CLI, Docker, and SAM are not required for this workflow.
 
@@ -34,7 +34,7 @@ Python, AWS CLI, Docker, and SAM are not required for this workflow.
 Create `web/.env` with the following. The first two are mandatory; the rest are dummy values that let signed-URL generation and IAM-flagged code paths run without hitting AWS.
 
 ```sh
-DATABASE_URL=postgres://localhost:5432/data-hub-local
+DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/data-hub-local
 
 # Any 32+ character string. Better Auth uses it to sign cookies / encrypt
 # session data (also accepted as `BETTER_AUTH_SECRET`).
@@ -223,7 +223,7 @@ Components don't need to change — every existing run viewer already fetches `/
 
 A few details worth knowing:
 
-- Adding fixtures for more instruments means an `INSTRUMENT_FIXTURES` entry in [web/lib/db/seed.ts](../../web/lib/db/seed.ts) keyed by the kebab-case instrument id from `data_hub_shared.enums.Instrument` (`{ files: [{ filename, contentType }, …], runIds }`) pointing at files under `lambda/tests/fixtures/`. List every fixture you want cycled across seeded runs. The handler rejects unknown instrument ids because `parse_s3_event` only accepts values from that enum.
+- Adding fixtures for more instruments means an `INSTRUMENT_FIXTURES` entry in [web/lib/db/seed.ts](../../web/lib/db/seed.ts) keyed by the kebab-case instrument id of a seeded instrument (`{ files: [{ filename, contentType }, …], runIds }`) pointing at files under `lambda/tests/fixtures/`. List every fixture you want cycled across seeded runs. The handler looks up the instrument and picks a processor by its `instrument_type`, so the seeded instrument needs a type that has a processor in `lambda/src/data_hub_lambda/processors.py`. Files for other types are skipped.
 - The route is gated on `NODE_ENV !== "production"` AND `LOCAL_S3_MIRROR` set; either condition unmet returns 404 unconditionally, so a production build can never expose the filesystem.
 - The MCP tool at `/mcp/v1` returns a relative `/api/local-s3/...` URL when the mirror is active — browsers resolve it against the current origin, but non-browser MCP clients on localhost may need to prefix with `http://localhost:3000`.
 
@@ -247,7 +247,7 @@ cd web && npm run docs:screenshots -- --serve   # seed and start the app, then w
 How it works:
 
 - It uses its own database, `data_hub_screenshots`, and its own file mirror under `web/.docs-screenshots/`, so your local data is untouched and `make dev` can keep running.
-- It runs the app with `next dev`, because the local file mirror that serves the gel images, PDFs, and plate maps is turned off in production builds. It restores `web/tsconfig.json`, `web/AGENTS.md`, and `web/next-env.d.ts`, which `next dev` edits when it starts.
+- It runs the app with `next dev`, because the local file mirror that serves the gel images, PDFs, and plate maps is turned off in production builds. It restores `web/tsconfig.json` and `web/next-env.d.ts`, which `next dev` edits when it starts.
 - The data is the same as `make db-reseed` ([web/scripts/seed-workspace.ts](../../web/scripts/seed-workspace.ts)), plus a few things only the screenshots need ([web/scripts/docs-screenshots/setup.ts](../../web/scripts/docs-screenshots/setup.ts)): realistic access tokens, a fake Linear workspace from the feedback package's test server, sample feedback reports, and a sample AI client for the sign-in approval screen. Shots that change data, such as the manual-upload run and the deleted run, undo their change when they finish.
 - It signs in by writing a session row for Alice, so the dev-only sign-in form isn't needed.
 - Dates are real, and every run rewrites every image. Before each shot it moves the seeded watcher heartbeats forward, because a watcher shows as offline after five minutes without one.

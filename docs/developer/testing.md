@@ -27,8 +27,8 @@ and start a real Next.js **production** server (`next build && next start`)
 rather than `next dev` — dev mode recompiles on every request, which makes a
 large suite 5–10x slower, and a production build matches actual deployment
 behavior. That build writes to `web/.next`, which **contends with a running
-`make dev`** (same directory) — stop the dev server first. See `AGENTS.md` for
-this and other local-environment caveats.
+`make dev`** (same directory) — stop the dev server first. See
+[Local development](local-development.md) for the rest of the local setup.
 
 ## Python (pytest): `lambda/`, `watcher/`
 

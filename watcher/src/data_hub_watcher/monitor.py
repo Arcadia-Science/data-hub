@@ -114,6 +114,10 @@ class FileMonitor:
         ``MAX_STABILITY_WAIT_SECONDS``.
     on_stable_file:
         Called with the `Path` of each stable file.
+    on_tick:
+        Optional callback run at the end of every stability check, even when
+        no files are pending, on the same thread as `on_stable_file`. Lets the
+        owner do periodic work without waiting for a filesystem event.
     state_db:
         Used to skip files that have already been uploaded.
     recursive:
@@ -138,6 +142,7 @@ class FileMonitor:
         event_reporter: EventReporter | None = None,
         seed_baseline: bool = False,
         max_stability_wait_seconds: int = MAX_STABILITY_WAIT_SECONDS,
+        on_tick: Callable[[], None] | None = None,
     ) -> None:
         self._watch_dir = watch_directory
         self._patterns = file_patterns
@@ -150,6 +155,7 @@ class FileMonitor:
         self._stability_period = stability_period
         self._max_stability_wait_seconds = max_stability_wait_seconds
         self._on_stable = on_stable_file
+        self._on_tick = on_tick
         self._state_db = state_db
         self._recursive = recursive
         # Optional so unit tests that build a FileMonitor in isolation
@@ -509,6 +515,12 @@ class FileMonitor:
                         path=str(path),
                         error=str(exc),
                     )
+
+        if self._on_tick is not None:
+            try:
+                self._on_tick()
+            except Exception:
+                logger.exception("Monitor tick callback failed")
 
 
 def _stat_in_dedup_index(

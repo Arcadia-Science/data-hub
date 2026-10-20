@@ -188,7 +188,7 @@ describe("MCP OAuth authorization-code flow", () => {
         scope: "openid profile email offline_access read write",
       },
     });
-    expect(registerRes.status).toBe(200);
+    expect(registerRes.status).toBe(201);
     const registered = (await registerRes.json()) as {
       client_id?: string;
     };
@@ -323,28 +323,38 @@ describe("MCP OAuth authorization-code flow", () => {
     );
   });
 
-  it("DCR without scope body still allows authorize with read write", async () => {
-    // Cursor registers without `scope`, then requests `read write` from the
-    // WWW-Authenticate challenge. The client's stored scopes must include write
-    // or authorize redirects with invalid_scope.
+  it("registers Cursor's DCR request and authorizes read write", async () => {
+    // Cursor's real registration body: no `application_type`, no `scope`, and
+    // a host-bearing `cursor://` callback. It then requests `read write` from
+    // the WWW-Authenticate challenge, so the stored scopes must include write.
     const issuer = expectedIssuer();
-    const redirectUri = "http://127.0.0.1:8787/callback";
+    const redirectUri = "cursor://anysphere.cursor-mcp/oauth/callback";
     const { challenge } = pkcePair();
 
     const registerRes = await api("/api/auth/oauth2/register", {
       method: "POST",
       body: {
-        client_name: "Cursor-like MCP Client",
-        redirect_uris: [redirectUri],
-        token_endpoint_auth_method: "none",
-        grant_types: ["authorization_code"],
+        client_name: "Cursor",
+        redirect_uris: [
+          redirectUri,
+          "https://www.cursor.com/agents/mcp/oauth/callback",
+          "http://localhost:8787/callback",
+        ],
+        grant_types: ["authorization_code", "refresh_token"],
         response_types: ["code"],
+        token_endpoint_auth_method: "none",
       },
     });
-    expect(registerRes.status).toBe(200);
+    expect(registerRes.status).toBe(201);
     const { client_id: clientId } = (await registerRes.json()) as {
       client_id: string;
     };
+    const [storedClient] = await getTestDb()
+      .select({ applicationType: schema.oauthClients.applicationType })
+      .from(schema.oauthClients)
+      .where(eq(schema.oauthClients.clientId, clientId))
+      .limit(1);
+    expect(storedClient?.applicationType).toBe("native");
 
     const sessionCookie = await seedSessionCookie(userId);
     const authorizeUrl = new URL(`${issuer}/oauth2/authorize`);
@@ -379,7 +389,7 @@ describe("MCP OAuth authorization-code flow", () => {
     // the AS advertises it. Both lists must agree or authorize redirects with
     // invalid_scope.
     const issuer = expectedIssuer();
-    const redirectUri = "http://127.0.0.1:8788/callback";
+    const redirectUri = "http://localhost:3118/callback";
     const { challenge } = pkcePair();
 
     const prmRes = await api("/.well-known/oauth-protected-resource/mcp/v1");
@@ -399,7 +409,7 @@ describe("MCP OAuth authorization-code flow", () => {
         scope: advertisedScopes.join(" "),
       },
     });
-    expect(registerRes.status).toBe(200);
+    expect(registerRes.status).toBe(201);
     const { client_id: clientId } = (await registerRes.json()) as {
       client_id: string;
     };
@@ -429,6 +439,27 @@ describe("MCP OAuth authorization-code flow", () => {
     expect(consentUrl.pathname).toBe("/consent");
     expect(consentUrl.searchParams.get("error")).toBeNull();
     expect(consentUrl.search).not.toMatch(/invalid_scope/);
+  });
+
+  it("DCR rejects a routable http callback next to a custom scheme", async () => {
+    // The custom scheme makes "infer" treat the client as native, and native
+    // clients may only use loopback for plain http.
+    const registerRes = await api("/api/auth/oauth2/register", {
+      method: "POST",
+      body: {
+        client_name: "Mixed Redirect Client",
+        redirect_uris: [
+          "cursor://anysphere.cursor-mcp/oauth/callback",
+          "http://example.com/callback",
+        ],
+        token_endpoint_auth_method: "none",
+        grant_types: ["authorization_code"],
+        response_types: ["code"],
+      },
+    });
+    expect(registerRes.status).toBe(400);
+    const body = (await registerRes.json()) as { error?: string };
+    expect(body.error).toBe("invalid_redirect_uri");
   });
 
   it("read-only OAuth token can read but not mutate via MCP", async () => {

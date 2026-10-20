@@ -6,6 +6,7 @@
 // caller reaches the app.
 
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
+import { appOrigin } from "@/lib/app-origin";
 import type * as schema from "@/lib/db/schema";
 import {
   clearAll,
@@ -18,6 +19,7 @@ import {
   seedDevUser,
   seedInstrumentSubscriptions,
   seedInstruments,
+  seedMcpResource,
   seedNotifications,
   seedRunAttributions,
   seedRunComments,
@@ -48,6 +50,9 @@ export async function seedWorkspace(db: Db): Promise<SeededWorkspace> {
 
   console.log("Seeding slack_channel_config…");
   await seedSlackChannelConfig(db);
+
+  console.log("Seeding oauth_resource…");
+  await seedMcpResource(db, appOrigin());
 
   console.log("Seeding admin user…");
   const { userId, email, token } = await seedDevUser(db, {

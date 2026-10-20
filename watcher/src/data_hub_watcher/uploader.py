@@ -847,8 +847,7 @@ class Uploader:
                 return
             except ApiError as exc:
                 last_exc = exc
-                retryable = exc.status_code == 0 or exc.status_code >= 500
-                if not retryable:
+                if not exc.is_transient:
                     raise
                 logger.warning(
                     "Complete attempt %d/%d failed: %s",

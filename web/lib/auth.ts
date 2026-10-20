@@ -15,9 +15,12 @@ import {
   accounts,
   jwks,
   oauthAccessTokens,
+  oauthClientAssertions,
+  oauthClientResources,
   oauthClients,
   oauthConsents,
   oauthRefreshTokens,
+  oauthResources,
   sessions,
   users,
   verifications,
@@ -140,6 +143,9 @@ export const authInstance = betterAuth({
       oauthRefreshToken: oauthRefreshTokens,
       oauthAccessToken: oauthAccessTokens,
       oauthConsent: oauthConsents,
+      oauthResource: oauthResources,
+      oauthClientResource: oauthClientResources,
+      oauthClientAssertion: oauthClientAssertions,
     },
   }),
   ...(googleClientId && googleClientSecret
@@ -258,9 +264,12 @@ export const authInstance = betterAuth({
       loginPage: "/login",
       consentPage: "/consent",
       scopes: [...oauthScopes],
-      // One audience per deployment: GHSA-p2fr-6hmx-4528 lets a client pick any
-      // allow-listed `resource` at the token endpoint until 1.7 ships stable.
-      validAudiences: [mcpResourceAudience],
+      // One audience per deployment, seeded into `oauth_resource` at boot.
+      resources: [mcpResourceAudience],
+      // Clients registered under Better Auth 1.6 have no `oauth_client_resource`
+      // link and would get `invalid_target`. With a single resource, linking
+      // each client restricts nothing.
+      enforcePerClientResources: false,
       // Cursor / mcp-remote still require RFC 7591 Dynamic Client Registration.
       // Open registration only creates OAuth clients — Google Workspace still
       // gates who can sign in.
@@ -274,11 +283,10 @@ export const authInstance = betterAuth({
       allowUnauthenticatedClientRegistration: true,
       clientRegistrationDefaultScopes: [...oauthScopes],
       clientRegistrationAllowedScopes: [...oauthScopes],
-      // Path-aware AS metadata lives at
-      // `/.well-known/oauth-authorization-server/api/auth` (issuer path).
-      silenceWarnings: {
-        oauthAuthServerConfig: true,
-      },
+      // Cursor and Claude Code omit `application_type`, and the `web` default
+      // rejects their `cursor://` and loopback callbacks. "infer" registers
+      // them as `native`; clients with only https callbacks stay `web`.
+      clientRegistrationDefaultApplicationType: "infer",
     }),
     // Must be last so Set-Cookie from server actions (sign-in / sign-out)
     // reaches the browser via Next's `cookies()` helper.
