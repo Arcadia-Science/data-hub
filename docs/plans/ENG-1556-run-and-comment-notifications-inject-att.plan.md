@@ -9,32 +9,32 @@ decisions:
   engineers: 0
 todos:
   - id: share-helper
-    content: Export escapeMrkdwn from web/lib/slack/dm.ts (or move it to a small shared module under web/lib/slack/) so notifications.ts and the runs route can use it
-    status: pending
+    content: Move escapeMrkdwn to web/lib/slack/mrkdwn.ts so dm.ts, notifications.ts and the runs route can use it
+    status: completed
   - id: builders
     content: Escape names, instrument names, run IDs, comment previews and generic message bodies in buildRunCreatedBlocks, buildCommentBlocks and buildGenericBlocks, and set verbatim true on their mrkdwn text objects
-    status: pending
+    status: completed
   - id: fallback-text
     content: Escape the user strings in the top-level text fallback of every direct message in web/lib/api/notifications.ts, including the feedback-submitted one
-    status: pending
+    status: completed
   - id: webhook
     content: Escape the instrument name and run ID in the channel webhook text in web/app/api/v1/instruments/[instrumentId]/runs/route.ts
-    status: pending
+    status: completed
   - id: encode-links
     content: Encode the instrument ID with encodeURIComponent in the Data Hub links built in notifyRunCreated, notifyGeneric and the runs route
-    status: pending
+    status: completed
   - id: unit-tests
     content: Add web/tests/unit/slack-dm-blocks.test.ts covering escaping, the verbatim flag, an intact Data Hub link and an encoded instrument ID
-    status: pending
+    status: completed
   - id: integration-tests
     content: Extend the Slack-capturing integration tests with hostile inputs and assert the escaped form arrives in both blocks and text
-    status: pending
+    status: completed
   - id: changelog
     content: Add a short, neutral changelog entry in web/content/changelog/
-    status: pending
+    status: completed
   - id: checks
     content: Run make check, make fe-test-unit and make fe-test-integration, and confirm a new test fails without the fix
-    status: pending
+    status: completed
 ---
 
 ## Problem

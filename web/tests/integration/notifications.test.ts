@@ -1293,6 +1293,79 @@ describe("Notifications", () => {
       expect(dms[0].channel).toBe("U_ATTR_SLACK");
     });
 
+    it("escapes user text in new-run and comment DMs, in blocks and in text", async () => {
+      const oddInstrumentId = "odd id|x>";
+      const hostileInstrument = "Lab <!channel> & Co";
+      const hostileRunId = "run`<https://evil.example|reset>";
+      const hostileName = "<@U999> Mallory";
+      const hostileComment =
+        "see <https://evil.example|reset>\nand <!here> & more";
+
+      const { userId: author } = await seedTestUser();
+      const { userId: attributee } = await seedTestUser();
+      await connectSlack(attributee, "U_ESCAPE");
+      const db = getTestDb();
+      await db.insert(instruments).values({
+        id: oddInstrumentId,
+        displayName: hostileInstrument,
+        status: "active",
+      });
+      await setInstrumentSubscription(attributee, oddInstrumentId, true);
+
+      const runInternalId = await seedRun(oddInstrumentId, hostileRunId);
+      await db
+        .insert(runAttributions)
+        .values({ runId: runInternalId, userId: attributee });
+      const [{ id: commentId }] = await db
+        .insert(runComments)
+        .values({ runId: runInternalId, userId: author, body: hostileComment })
+        .returning({ id: runComments.id });
+
+      await notifyRunCreated({
+        runInternalId,
+        instrumentId: oddInstrumentId,
+        instrumentDisplayName: hostileInstrument,
+        runDisplayId: hostileRunId,
+        origin,
+      });
+      await notifyComment({
+        runInternalId,
+        commentId,
+        author: { kind: "user", userId: author },
+        authorDisplayName: hostileName,
+        instrumentId: oddInstrumentId,
+        instrumentDisplayName: hostileInstrument,
+        runDisplayId: hostileRunId,
+        commentBody: hostileComment,
+        origin,
+      });
+
+      const dms = await getCapturedSlackDms();
+      expect(dms).toHaveLength(2);
+      const encodedInstrument = encodeURIComponent(oddInstrumentId);
+      for (const dm of dms) {
+        const blockText = JSON.stringify(dm.blocks);
+        expect(dm.text).not.toContain("<https://evil.example");
+        expect(dm.text).not.toContain("<!channel>");
+        expect(dm.text).not.toContain("<@U999>");
+        expect(blockText).not.toContain("<https://evil.example");
+        expect(blockText).not.toContain("<!channel>");
+        expect(blockText).not.toContain("<!here>");
+        expect(blockText).not.toContain("<@U999>");
+        expect(blockText).toContain("&lt;https://evil.example|reset&gt;");
+        expect(blockText).toContain(
+          `<${origin}/instruments/${encodedInstrument}/runs/`
+        );
+        expect(blockText).toContain('"verbatim":true');
+      }
+      expect(dms.map((d) => d.text).join("\n")).toContain(
+        "Lab &lt;!channel&gt; &amp; Co"
+      );
+      expect(dms.map((d) => JSON.stringify(d.blocks)).join("\n")).toContain(
+        "&lt;!here&gt; &amp; more"
+      );
+    });
+
     it("delivers both in-app and Slack for comment_participated", async () => {
       const { userId: author } = await seedTestUser();
       const { userId: participant } = await seedTestUser();

@@ -422,6 +422,39 @@ describe("Notification dispatch", () => {
       expect(dms[0].text).toContain(message);
     });
 
+    it("escapes the token name and message in the Slack DM", async () => {
+      const hostileName = "<@U999> Bot";
+      const hostileMessage =
+        "Reset here: <https://evil.example|login> <!channel> & co";
+      const { token } = await seedTestUser({
+        tokenName: hostileName,
+        scopes: ["notifications:create"],
+      });
+      const { userId: recipient } = await seedTestUser();
+      await connectSlack(recipient, "U_ESCAPE_GENERIC");
+      await updatePreferences(recipient, { slackGenericEnabled: true });
+      await seedRun();
+
+      await dispatch(token, {
+        user_ids: [recipient],
+        message: hostileMessage,
+        run: { instrument_id: instrumentId, run_id: runId },
+      });
+
+      await waitForDms(1);
+      const [dm] = await getCapturedSlackDms();
+      const blockText = JSON.stringify(dm.blocks);
+      for (const text of [dm.text, blockText]) {
+        expect(text).not.toContain("<https://evil.example");
+        expect(text).not.toContain("<!channel>");
+        expect(text).not.toContain("<@U999>");
+        expect(text).toContain("&lt;!channel&gt; &amp; co");
+        expect(text).toContain("&lt;@U999&gt; Bot");
+      }
+      expect(blockText).toContain("|View in Data Hub>");
+      expect(blockText).toContain('"verbatim":true');
+    });
+
     it("counts a Slack-only recipient as notified", async () => {
       const { token } = await seedTestUser({
         scopes: ["notifications:create"],

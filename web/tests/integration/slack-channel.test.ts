@@ -107,6 +107,34 @@ describe("Slack channel config flows through sendSlackMessage", () => {
     expect(messages[0].text).toContain(runId);
   });
 
+  it("escapes user text in the channel message", async () => {
+    await clearCapturedSlackMessages();
+    const db = getTestDb();
+    const hostileInstrumentId = "slack-channel-hostile";
+    await db.insert(instruments).values({
+      id: hostileInstrumentId,
+      displayName: "Lab <!channel> & Co",
+      status: "active",
+    });
+    const runId = "run`<https://evil.example|reset>";
+
+    const res = await api(`/api/v1/instruments/${hostileInstrumentId}/runs`, {
+      method: "POST",
+      token,
+      body: { run_id: runId, source: "lambda" },
+    });
+    expect(res.status).toBe(201);
+
+    const [message] = await waitForCapturedSlackMessages(1);
+    expect(message.text).toContain("*Lab &lt;!channel&gt; &amp; Co*");
+    expect(message.text).toContain("`run`&lt;https://evil.example|reset&gt;`");
+    expect(message.text).not.toContain("<!channel>");
+    expect(message.text).not.toContain("<https://evil.example");
+    expect(message.text.match(/<[^>]*>/g)).toEqual([
+      expect.stringMatching(/\|View in Data Hub>$/),
+    ]);
+  });
+
   it("sendSlackMessage is a no-op when webhook_url is null", async () => {
     const db = getTestDb();
     await db
