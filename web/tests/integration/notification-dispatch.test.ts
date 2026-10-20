@@ -433,12 +433,21 @@ describe("Notification dispatch", () => {
       const { userId: recipient } = await seedTestUser();
       await connectSlack(recipient, "U_ESCAPE_GENERIC");
       await updatePreferences(recipient, { slackGenericEnabled: true });
-      await seedRun();
+      const oddInstrumentId = "odd id|x>";
+      const db = getTestDb();
+      await db.insert(instruments).values({
+        id: oddInstrumentId,
+        displayName: "Odd Instrument",
+        status: "active",
+      });
+      await db
+        .insert(instrumentRuns)
+        .values({ instrumentId: oddInstrumentId, runId, source: "lambda" });
 
       await dispatch(token, {
         user_ids: [recipient],
         message: hostileMessage,
-        run: { instrument_id: instrumentId, run_id: runId },
+        run: { instrument_id: oddInstrumentId, run_id: runId },
       });
 
       await waitForDms(1);
@@ -451,7 +460,9 @@ describe("Notification dispatch", () => {
         expect(text).toContain("&lt;!channel&gt; &amp; co");
         expect(text).toContain("&lt;@U999&gt; Bot");
       }
-      expect(blockText).toContain("|View in Data Hub>");
+      expect(blockText).toContain(
+        `/instruments/${encodeURIComponent(oddInstrumentId)}/runs/${runId}|View in Data Hub>`
+      );
       expect(blockText).toContain('"verbatim":true');
     });
 

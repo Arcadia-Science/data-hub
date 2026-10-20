@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
@@ -7,6 +8,8 @@ import {
   listNotifications,
   markRead,
   notifyComment,
+  notifyFeedbackSubmitted,
+  notifyFeedbackUpdated,
   notifyRunCreated,
   setInstrumentSubscription,
   updatePreferences,
@@ -1363,6 +1366,45 @@ describe("Notifications", () => {
       );
       expect(dms.map((d) => JSON.stringify(d.blocks)).join("\n")).toContain(
         "&lt;!here&gt; &amp; more"
+      );
+    });
+
+    it("escapes user text in the fallback text of feedback DMs", async () => {
+      const hostileName = "<@U999> Mallory";
+      const hostileTitle = "Export <https://evil.example|reset> & <!channel>";
+      const escapedTitle =
+        "Export &lt;https://evil.example|reset&gt; &amp; &lt;!channel&gt;";
+
+      const { userId: admin } = await seedTestUser({ isAdmin: true });
+      const { userId: reporter } = await seedTestUser();
+      await connectSlack(admin, "U_FEEDBACK_ADMIN");
+      await connectSlack(reporter, "U_FEEDBACK_REPORTER");
+      await updatePreferences(admin, { slackFeedbackSubmittedEnabled: true });
+      await updatePreferences(reporter, { slackFeedbackUpdatedEnabled: true });
+
+      await notifyFeedbackSubmitted({
+        feedbackId: randomUUID(),
+        origin,
+        reporterDisplayName: hostileName,
+        reporterUserId: reporter,
+        title: hostileTitle,
+      });
+      await notifyFeedbackUpdated({
+        feedbackId: randomUUID(),
+        reporterUserId: reporter,
+        title: hostileTitle,
+        status: "resolved",
+        stateName: "<!here>",
+      });
+
+      const dms = await getCapturedSlackDms();
+      const submitted = dms.find((d) => d.channel === "U_FEEDBACK_ADMIN");
+      const updated = dms.find((d) => d.channel === "U_FEEDBACK_REPORTER");
+      expect(submitted?.text).toBe(
+        `&lt;@U999&gt; Mallory sent feedback: ${escapedTitle}`
+      );
+      expect(updated?.text).toBe(
+        `Your feedback "${escapedTitle}" was marked Resolved (&lt;!here&gt;).`
       );
     });
 

@@ -110,7 +110,7 @@ describe("Slack channel config flows through sendSlackMessage", () => {
   it("escapes user text in the channel message", async () => {
     await clearCapturedSlackMessages();
     const db = getTestDb();
-    const hostileInstrumentId = "slack-channel-hostile";
+    const hostileInstrumentId = "slack channel|hostile>";
     await db.insert(instruments).values({
       id: hostileInstrumentId,
       displayName: "Lab <!channel> & Co",
@@ -118,7 +118,8 @@ describe("Slack channel config flows through sendSlackMessage", () => {
     });
     const runId = "run`<https://evil.example|reset>";
 
-    const res = await api(`/api/v1/instruments/${hostileInstrumentId}/runs`, {
+    const encodedInstrumentId = encodeURIComponent(hostileInstrumentId);
+    const res = await api(`/api/v1/instruments/${encodedInstrumentId}/runs`, {
       method: "POST",
       token,
       body: { run_id: runId, source: "lambda" },
@@ -131,7 +132,11 @@ describe("Slack channel config flows through sendSlackMessage", () => {
     expect(message.text).not.toContain("<!channel>");
     expect(message.text).not.toContain("<https://evil.example");
     expect(message.text.match(/<[^>]*>/g)).toEqual([
-      expect.stringMatching(/\|View in Data Hub>$/),
+      expect.stringMatching(
+        new RegExp(
+          `/instruments/${encodedInstrumentId}/runs/.*\\|View in Data Hub>$`
+        )
+      ),
     ]);
   });
 
