@@ -21,6 +21,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { slackConnections } from "@/lib/db/schema";
 import { getSlackAppCredentials } from "@/lib/slack/app-config";
+import { escapeMrkdwn } from "@/lib/slack/mrkdwn";
 
 // The recipient can't be DM'd: their stored member ID no longer resolves to a
 // DM channel (left the workspace, deactivated). Revoke just this connection.
@@ -181,7 +182,8 @@ export function buildRunCreatedBlocks(opts: {
         // A mrkdwn link rather than an `actions` button: link buttons are
         // still interactive components, so they make Slack demand a configured
         // Interactivity Request URL the bot doesn't have.
-        text: `*New run on ${opts.instrumentDisplayName}*\nRun \`${opts.runDisplayId}\` has been reported.\n<${opts.runUrl}|View in Data Hub>`,
+        text: `*New run on ${escapeMrkdwn(opts.instrumentDisplayName)}*\nRun \`${escapeMrkdwn(opts.runDisplayId)}\` has been reported.\n<${opts.runUrl}|View in Data Hub>`,
+        verbatim: true,
       },
     },
   ];
@@ -195,29 +197,25 @@ export function buildCommentBlocks(opts: {
   runUrl: string;
   type: "comment_attributed" | "comment_participated";
 }): (Block | KnownBlock)[] {
+  const actor = escapeMrkdwn(opts.actorDisplayName);
+  const instrument = escapeMrkdwn(opts.instrumentDisplayName);
+  const runId = escapeMrkdwn(opts.runDisplayId);
   const summary =
     opts.type === "comment_attributed"
-      ? `*${opts.actorDisplayName}* commented on a run you ran on *${opts.instrumentDisplayName}* (\`${opts.runDisplayId}\`)`
-      : `*${opts.actorDisplayName}* commented on *${opts.instrumentDisplayName}* (\`${opts.runDisplayId}\`), a run you've commented on`;
+      ? `*${actor}* commented on a run you ran on *${instrument}* (\`${runId}\`)`
+      : `*${actor}* commented on *${instrument}* (\`${runId}\`), a run you've commented on`;
+  const preview = escapeMrkdwn(opts.commentPreview).replace(/\n/g, "\n> ");
 
   return [
     {
       type: "section",
       text: {
         type: "mrkdwn",
-        text: `${summary}\n> ${opts.commentPreview.replace(/\n/g, "\n> ")}\n<${opts.runUrl}|View comment>`,
+        text: `${summary}\n> ${preview}\n<${opts.runUrl}|View comment>`,
+        verbatim: true,
       },
     },
   ];
-}
-
-// Feedback text is typed by any signed-in user. Slack treats `<...|...>` as a
-// link, so unescaped titles would become clickable in every admin's DM.
-function escapeMrkdwn(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
 }
 
 export function buildFeedbackSubmittedBlocks(opts: {
@@ -234,6 +232,7 @@ export function buildFeedbackSubmittedBlocks(opts: {
       text: {
         type: "mrkdwn",
         text: `*${escapeMrkdwn(opts.actorDisplayName)}* sent feedback:\n${escapeMrkdwn(opts.title)}${link}`,
+        verbatim: true,
       },
     },
   ];
@@ -249,6 +248,7 @@ export function buildFeedbackUpdatedBlocks(opts: {
       text: {
         type: "mrkdwn",
         text: `Your feedback *${escapeMrkdwn(opts.title)}* was marked *${escapeMrkdwn(opts.statusLabel)}*.`,
+        verbatim: true,
       },
     },
   ];
@@ -267,7 +267,8 @@ export function buildGenericBlocks(opts: {
       type: "section",
       text: {
         type: "mrkdwn",
-        text: `*${opts.actorDisplayName}* sent you a notification:\n${opts.message}${link}`,
+        text: `*${escapeMrkdwn(opts.actorDisplayName)}* sent you a notification:\n${escapeMrkdwn(opts.message)}${link}`,
+        verbatim: true,
       },
     },
   ];

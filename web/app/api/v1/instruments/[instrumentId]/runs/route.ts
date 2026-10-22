@@ -16,6 +16,7 @@ import { watcherClientFrom } from "@/lib/api/watcher-compat";
 import { db } from "@/lib/db";
 import { instrumentRuns, instruments, watchers } from "@/lib/db/schema";
 import { sendSlackMessage } from "@/lib/slack";
+import { escapeMrkdwn } from "@/lib/slack/mrkdwn";
 
 interface RouteContext {
   params: Promise<{ instrumentId: string }>;
@@ -148,9 +149,9 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     after(async () => {
       const origin = new URL(request.url).origin;
       await sendSlackMessage(
-        `*${instrument.displayName}*\n` +
-          `New instrument run reported: \`${runId}\`.\n` +
-          `<${origin}/instruments/${instrumentId}/runs/${encodeURIComponent(runId)}|View in Data Hub>`
+        `*${escapeMrkdwn(instrument.displayName)}*\n` +
+          `New instrument run reported: \`${escapeMrkdwn(runId)}\`.\n` +
+          `<${origin}/instruments/${encodeURIComponent(instrumentId)}/runs/${encodeURIComponent(runId)}|View in Data Hub>`
       );
 
       await notifyRunCreated({
