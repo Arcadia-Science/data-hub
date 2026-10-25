@@ -16,6 +16,14 @@ permissions:
   id-token: write
   contents: read
 
+# Serialize deploys per environment so two merges can't update the same
+# CloudFormation stack at once. Don't cancel a running deploy: CloudFormation
+# keeps updating the stack after the job stops, so a cancelled run would still
+# block the next one.
+concurrency:
+  group: deploy-lambda-${{ github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
   deploy-lambda:
     runs-on: ubuntu-latest

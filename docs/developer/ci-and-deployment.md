@@ -148,6 +148,8 @@ On pushes to `staging` or `production`, the **Deploy Lambda** workflow:
 2. Builds and pushes the Docker image to ECR.
 3. Runs `sam deploy` to update the CloudFormation stack.
 
+A per-branch `concurrency` group makes a second deploy wait for the first, because CloudFormation rejects an update to a stack that is already updating.
+
 Secrets (`DATA_HUB_API_KEY`, etc.) are stored in GitHub environment secrets scoped to each environment.
 
 > **Note:** The CI deploy role has intentionally narrow permissions — enough to push a new container image, update the existing CloudFormation stack, modify the data buckets' S3 event notifications, and update the data buckets' CORS configuration, but _not_ enough to create the stack from scratch or to add/remove S3 buckets or Lambda functions. Initial stack creation and structural infrastructure changes must be performed by an admin with broader AWS permissions. Once the stack exists, routine image-update deploys through CI work without issue.
