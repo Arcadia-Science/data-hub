@@ -41,6 +41,7 @@ import {
   deliverSlackDms,
   type SlackDmJob,
 } from "@/lib/slack/dm";
+import { escapeMrkdwn } from "@/lib/slack/mrkdwn";
 import { toInitials } from "@/lib/utils";
 
 // ---------------------------------------------------------------------------
@@ -551,13 +552,13 @@ export async function notifyRunCreated(input: {
       runDisplayId &&
       instrumentDisplayName
     ) {
-      const runUrl = `${origin}/instruments/${input.instrumentId}/runs/${encodeURIComponent(runDisplayId)}`;
+      const runUrl = `${origin}/instruments/${encodeURIComponent(input.instrumentId)}/runs/${encodeURIComponent(runDisplayId)}`;
       await deliverSlackDms(
         slackCandidates.map((c) => ({
           userId: c.userId,
           slackUserId: c.slackUserId ?? "",
           payload: {
-            text: `New run on *${instrumentDisplayName}*: \`${runDisplayId}\``,
+            text: `New run on *${escapeMrkdwn(instrumentDisplayName)}*: \`${escapeMrkdwn(runDisplayId)}\``,
             blocks: buildRunCreatedBlocks({
               instrumentDisplayName,
               runDisplayId,
@@ -760,8 +761,8 @@ export async function notifyComment(input: {
           payload: {
             text:
               job.type === "comment_attributed"
-                ? `${dmAuthorDisplayName} commented on a run you ran on *${dmInstrumentDisplayName}*`
-                : `${dmAuthorDisplayName} commented on *${dmInstrumentDisplayName}*, a run you've commented on`,
+                ? `${escapeMrkdwn(dmAuthorDisplayName)} commented on a run you ran on *${escapeMrkdwn(dmInstrumentDisplayName)}*`
+                : `${escapeMrkdwn(dmAuthorDisplayName)} commented on *${escapeMrkdwn(dmInstrumentDisplayName)}*, a run you've commented on`,
             blocks: buildCommentBlocks({
               actorDisplayName: dmAuthorDisplayName,
               instrumentDisplayName: dmInstrumentDisplayName,
@@ -889,7 +890,7 @@ export async function notifyGeneric(input: {
 
   const runUrl =
     input.run && input.origin
-      ? `${input.origin}/instruments/${input.run.instrumentId}/runs/${encodeURIComponent(input.run.runDisplayId)}`
+      ? `${input.origin}/instruments/${encodeURIComponent(input.run.instrumentId)}/runs/${encodeURIComponent(input.run.runDisplayId)}`
       : undefined;
 
   const slackJobs: SlackDmJob[] = candidates
@@ -901,7 +902,7 @@ export async function notifyGeneric(input: {
       userId: c.userId,
       slackUserId: c.slackUserId ?? "",
       payload: {
-        text: `${input.actorDisplayName} sent you a notification: ${input.message}`,
+        text: `${escapeMrkdwn(input.actorDisplayName)} sent you a notification: ${escapeMrkdwn(input.message)}`,
         blocks: buildGenericBlocks({
           actorDisplayName: input.actorDisplayName,
           message: input.message,
@@ -996,7 +997,7 @@ export async function notifyFeedbackSubmitted(
       userId: row.userId,
       slackUserId: row.slackUserId ?? "",
       payload: {
-        text: `${input.reporterDisplayName} sent feedback: ${input.title}`,
+        text: `${escapeMrkdwn(input.reporterDisplayName)} sent feedback: ${escapeMrkdwn(input.title)}`,
         blocks: buildFeedbackSubmittedBlocks({
           actorDisplayName: input.reporterDisplayName,
           title: input.title,
@@ -1058,7 +1059,7 @@ export async function notifyFeedbackUpdated(
         userId: recipient.userId,
         slackUserId: recipient.slackUserId,
         payload: {
-          text: body,
+          text: escapeMrkdwn(body),
           blocks: buildFeedbackUpdatedBlocks({
             title: input.title,
             statusLabel,
