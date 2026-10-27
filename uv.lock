@@ -450,10 +450,11 @@ requires-dist = [
 
 [[package]]
 name = "data-hub-watcher"
-version = "1.2.2"
+version = "1.2.3"
 source = { editable = "watcher" }
 dependencies = [
     { name = "awscrt" },
+    { name = "certifi" },
     { name = "click" },
     { name = "packaging" },
     { name = "pydantic" },
@@ -476,6 +477,7 @@ test = [
 [package.metadata]
 requires-dist = [
     { name = "awscrt", specifier = ">=0.27.0" },
+    { name = "certifi", specifier = ">=2026.10.19" },
     { name = "click", specifier = ">=8.2.1" },
     { name = "packaging", specifier = ">=24.0" },
     { name = "pydantic", specifier = ">=2.11.9" },
