@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
@@ -7,6 +8,8 @@ import {
   listNotifications,
   markRead,
   notifyComment,
+  notifyFeedbackSubmitted,
+  notifyFeedbackUpdated,
   notifyRunCreated,
   setInstrumentSubscription,
   updatePreferences,
@@ -1291,6 +1294,118 @@ describe("Notifications", () => {
       const dms = await getCapturedSlackDms();
       expect(dms).toHaveLength(1);
       expect(dms[0].channel).toBe("U_ATTR_SLACK");
+    });
+
+    it("escapes user text in new-run and comment DMs, in blocks and in text", async () => {
+      const oddInstrumentId = "odd id|x>";
+      const hostileInstrument = "Lab <!channel> & Co";
+      const hostileRunId = "run`<https://evil.example|reset>";
+      const hostileName = "<@U999> Mallory";
+      const hostileComment =
+        "see <https://evil.example|reset>\nand <!here> & more";
+
+      const { userId: author } = await seedTestUser();
+      const { userId: attributee } = await seedTestUser();
+      await connectSlack(attributee, "U_ESCAPE");
+      const db = getTestDb();
+      await db.insert(instruments).values({
+        id: oddInstrumentId,
+        displayName: hostileInstrument,
+        status: "active",
+      });
+      await setInstrumentSubscription(attributee, oddInstrumentId, true);
+
+      const runInternalId = await seedRun(oddInstrumentId, hostileRunId);
+      await db
+        .insert(runAttributions)
+        .values({ runId: runInternalId, userId: attributee });
+      const [{ id: commentId }] = await db
+        .insert(runComments)
+        .values({ runId: runInternalId, userId: author, body: hostileComment })
+        .returning({ id: runComments.id });
+
+      await notifyRunCreated({
+        runInternalId,
+        instrumentId: oddInstrumentId,
+        instrumentDisplayName: hostileInstrument,
+        runDisplayId: hostileRunId,
+        origin,
+      });
+      await notifyComment({
+        runInternalId,
+        commentId,
+        author: { kind: "user", userId: author },
+        authorDisplayName: hostileName,
+        instrumentId: oddInstrumentId,
+        instrumentDisplayName: hostileInstrument,
+        runDisplayId: hostileRunId,
+        commentBody: hostileComment,
+        origin,
+      });
+
+      const dms = await getCapturedSlackDms();
+      expect(dms).toHaveLength(2);
+      const encodedInstrument = encodeURIComponent(oddInstrumentId);
+      for (const dm of dms) {
+        const blockText = JSON.stringify(dm.blocks);
+        expect(dm.text).not.toContain("<https://evil.example");
+        expect(dm.text).not.toContain("<!channel>");
+        expect(dm.text).not.toContain("<@U999>");
+        expect(blockText).not.toContain("<https://evil.example");
+        expect(blockText).not.toContain("<!channel>");
+        expect(blockText).not.toContain("<!here>");
+        expect(blockText).not.toContain("<@U999>");
+        expect(blockText).toContain("&lt;https://evil.example|reset&gt;");
+        expect(blockText).toContain(
+          `<${origin}/instruments/${encodedInstrument}/runs/`
+        );
+        expect(blockText).toContain('"verbatim":true');
+      }
+      expect(dms.map((d) => d.text).join("\n")).toContain(
+        "Lab &lt;!channel&gt; &amp; Co"
+      );
+      expect(dms.map((d) => JSON.stringify(d.blocks)).join("\n")).toContain(
+        "&lt;!here&gt; &amp; more"
+      );
+    });
+
+    it("escapes user text in the fallback text of feedback DMs", async () => {
+      const hostileName = "<@U999> Mallory";
+      const hostileTitle = "Export <https://evil.example|reset> & <!channel>";
+      const escapedTitle =
+        "Export &lt;https://evil.example|reset&gt; &amp; &lt;!channel&gt;";
+
+      const { userId: admin } = await seedTestUser({ isAdmin: true });
+      const { userId: reporter } = await seedTestUser();
+      await connectSlack(admin, "U_FEEDBACK_ADMIN");
+      await connectSlack(reporter, "U_FEEDBACK_REPORTER");
+      await updatePreferences(admin, { slackFeedbackSubmittedEnabled: true });
+      await updatePreferences(reporter, { slackFeedbackUpdatedEnabled: true });
+
+      await notifyFeedbackSubmitted({
+        feedbackId: randomUUID(),
+        origin,
+        reporterDisplayName: hostileName,
+        reporterUserId: reporter,
+        title: hostileTitle,
+      });
+      await notifyFeedbackUpdated({
+        feedbackId: randomUUID(),
+        reporterUserId: reporter,
+        title: hostileTitle,
+        status: "resolved",
+        stateName: "<!here>",
+      });
+
+      const dms = await getCapturedSlackDms();
+      const submitted = dms.find((d) => d.channel === "U_FEEDBACK_ADMIN");
+      const updated = dms.find((d) => d.channel === "U_FEEDBACK_REPORTER");
+      expect(submitted?.text).toBe(
+        `&lt;@U999&gt; Mallory sent feedback: ${escapedTitle}`
+      );
+      expect(updated?.text).toBe(
+        `Your feedback "${escapedTitle}" was marked Resolved (&lt;!here&gt;).`
+      );
     });
 
     it("delivers both in-app and Slack for comment_participated", async () => {

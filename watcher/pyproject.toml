@@ -1,6 +1,6 @@
 [project]
 name = "data-hub-watcher"
-version = "1.2.2"
+version = "1.2.3"
 description = "File-watcher agent for lab instrument PCs that ingests data into Data Hub."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -25,6 +25,9 @@ classifiers = [
 ]
 dependencies = [
     "awscrt>=0.27.0",
+    # Not imported directly. requests trusts certifi's CA bundle, and older
+    # bundles still trust the compromised eMudhra/emSign certificates.
+    "certifi>=2026.10.19",
     "click>=8.2.1",
     "packaging>=24.0",
     "pydantic>=2.11.9",
