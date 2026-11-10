@@ -3,7 +3,9 @@ import { parseSettingsFromYaml } from "@/lib/api/watcher-config/from-yaml";
 import {
   checkRunDetectionPattern,
   describeSettingsChanges,
+  normalizeWatchPath,
   RUN_DETECTION_PRESETS,
+  sameWatchPath,
   settingsEqual,
   type WatcherConfigSettings,
   watcherConfigSettingsSchema,
@@ -209,6 +211,43 @@ describe("settingsEqual", () => {
     expect(
       settingsEqual(VALID, { ...VALID, file_patterns: ["*.xlsx", "*.csv"] })
     ).toBe(false);
+  });
+});
+
+describe("normalizeWatchPath", () => {
+  it.each([
+    ["D:\\Exports\\Plate", "d:\\exports\\plate"],
+    ["D:\\Exports\\Plate\\", "d:\\exports\\plate"],
+    ["d:/exports/plate//", "d:\\exports\\plate"],
+    ["C:\\", "c:\\"],
+    ["C:/", "c:\\"],
+    ["C:\\\\", "c:\\"],
+    ["\\\\Server\\Share\\Plate\\", "\\\\server\\share\\plate"],
+    ["\\\\server/share/plate", "\\\\server\\share\\plate"],
+    ["/data/Plate/", "/data/Plate"],
+    ["/", "/"],
+    ["//", "/"],
+  ])("normalizes %j to %j", (path, expected) => {
+    expect(normalizeWatchPath(path)).toBe(expected);
+  });
+
+  it("keeps POSIX paths case-sensitive", () => {
+    expect(sameWatchPath("/data/plate", "/data/Plate")).toBe(false);
+    expect(sameWatchPath("D:\\Exports", "d:/EXPORTS/")).toBe(true);
+    expect(sameWatchPath("D:\\Exports", "D:\\Exports2")).toBe(false);
+  });
+
+  it("makes settingsEqual ignore how the folder was typed", () => {
+    expect(
+      settingsEqual(VALID, { ...VALID, watch_directory: "d:/exports/plate/" })
+    ).toBe(true);
+    expect(
+      describeSettingsChanges(VALID, {
+        ...VALID,
+        watch_directory: "D:\\Exports\\Plate\\",
+        upload_mode: "manual",
+      }).map((c) => c.key)
+    ).toEqual(["upload_mode"]);
   });
 });
 

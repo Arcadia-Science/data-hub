@@ -7,6 +7,7 @@ import { extractWatchDirectory } from "@/lib/api/instruments";
 import { readJsonBody, watcherConfigBody } from "@/lib/api/openapi";
 import { isValidUUID } from "@/lib/api/validators";
 import { recordWatcherConfigPush } from "@/lib/api/watcher-config/revisions";
+import { sameWatchPath } from "@/lib/api/watcher-config/settings";
 import {
   enforceWatcherBinding,
   findActiveWatcher,
@@ -61,8 +62,13 @@ export async function PUT(
   // relative_path under the old root that no longer resolves. Revert them to
   // `detected` to drain the queue instead of erroring each poll.
   // Gated on a known previous dir so first-push / unrelated edits don't
-  // revert spuriously.
-  if (previousWatchDir && nextWatchDir && previousWatchDir !== nextWatchDir) {
+  // revert spuriously. Compared normalized, so retyping `D:\Exports` as
+  // `d:/exports/` doesn't count as a move.
+  if (
+    previousWatchDir &&
+    nextWatchDir &&
+    !sameWatchPath(previousWatchDir, nextWatchDir)
+  ) {
     const revertedIds = await revertPendingUploadRequests(watcher.instrumentId);
     if (revertedIds.length > 0) {
       await db.insert(watcherEvents).values({

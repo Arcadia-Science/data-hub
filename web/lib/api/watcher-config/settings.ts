@@ -70,6 +70,38 @@ export function isAbsoluteWatchPath(path: string): boolean {
   );
 }
 
+const TRAILING_BACKSLASHES = /\\+$/;
+const TRAILING_SLASHES = /\/+$/;
+const BARE_DRIVE = /^[a-z]:$/;
+
+/**
+ * A watch folder in a form that compares equal however it was typed, so
+ * `D:\Exports`, `d:/exports/` and `D:\Exports\` are one folder. Drive and
+ * UNC paths are Windows paths: `/` and `\` are the same separator and case
+ * doesn't matter. POSIX paths stay case-sensitive. Trailing separators are
+ * dropped, except on a root such as `C:\` or `/`. Only for comparing: the
+ * folder is stored and sent to the watcher exactly as typed.
+ */
+export function normalizeWatchPath(path: string): string {
+  if (WINDOWS_DRIVE_PATH.test(path) || UNC_PATH.test(path)) {
+    const windows = path.replaceAll("/", "\\").toLowerCase();
+    const trimmed = windows.replace(TRAILING_BACKSLASHES, "");
+    if (BARE_DRIVE.test(trimmed)) {
+      // `C:` alone means the current folder on drive C, so keep the root.
+      return `${trimmed}\\`;
+    }
+    return trimmed.length > 2 ? trimmed : windows;
+  }
+  if (POSIX_PATH.test(path)) {
+    return path.replace(TRAILING_SLASHES, "") || "/";
+  }
+  return path;
+}
+
+export function sameWatchPath(a: string, b: string): boolean {
+  return normalizeWatchPath(a) === normalizeWatchPath(b);
+}
+
 // Python writes named groups as `(?P<name>…)`, which JavaScript can't parse.
 // JavaScript writes them as `(?<name>…)`, which Python can't parse, so the
 // watcher would reject it. Lookbehinds (`(?<=`, `(?<!`) are fine in both.
@@ -198,13 +230,24 @@ export function canonicalSettings(
   };
 }
 
+// Settings as they're compared: the folder is normalized, so retyping it
+// with a trailing separator, other slashes or other drive-letter case isn't
+// a change.
+function comparableSettings(settings: WatcherConfigSettings) {
+  const canonical = canonicalSettings(settings);
+  return {
+    ...canonical,
+    watch_directory: normalizeWatchPath(canonical.watch_directory),
+  };
+}
+
 export function settingsEqual(
   a: WatcherConfigSettings,
   b: WatcherConfigSettings
 ): boolean {
   return (
-    JSON.stringify(canonicalSettings(a)) ===
-    JSON.stringify(canonicalSettings(b))
+    JSON.stringify(comparableSettings(a)) ===
+    JSON.stringify(comparableSettings(b))
   );
 }
 
@@ -263,7 +306,11 @@ export function describeSettingsChanges(
   const afterRows = settingsDisplayRows(after);
   return afterRows.flatMap((row, i) => {
     const from = beforeRows[i].value;
-    return from === row.value
+    const same =
+      row.key === "watch_directory"
+        ? sameWatchPath(from, row.value)
+        : from === row.value;
+    return same
       ? []
       : [{ key: row.key, label: row.label, from, to: row.value }];
   });

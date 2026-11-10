@@ -831,6 +831,53 @@ describe("Watcher config revisions", () => {
       ]);
     });
 
+    it("treats a retyped folder as the same folder", async () => {
+      const windows = { ...BASE, watch_directory: "D:\\Exports\\Plate" };
+      await pushConfig(windows);
+      const [run] = await db()
+        .insert(instrumentRuns)
+        .values({ instrumentId: INSTRUMENT_ID, runId: "retyped-folder-run" })
+        .returning({ id: instrumentRuns.id });
+      try {
+        await db().insert(files).values({
+          instrumentRunId: run.id,
+          filename: "a.csv",
+          relativePath: "a.csv",
+          status: "upload_requested",
+          uploadRequestedAt: new Date(),
+        });
+
+        // The same folder with a trailing separator is no change on its own.
+        const same = await saveFromWeb(
+          { ...windows, watch_directory: "D:\\Exports\\Plate\\" },
+          1
+        );
+        expect(same.status).toBe(400);
+        expect((await same.json()).error.message).toBe("No changes");
+
+        // Retyped with other slashes and case alongside a pattern change: the
+        // text is stored as typed, and pending upload requests stay queued.
+        const retyped = {
+          ...windows,
+          watch_directory: "d:/exports/plate/",
+          file_patterns: ["*.csv", "*.txt"],
+        };
+        await pushConfig(retyped, { based_on_revision: 1 });
+        const [file] = await db()
+          .select({ status: files.status })
+          .from(files)
+          .where(eq(files.instrumentRunId, run.id));
+        expect(file.status).toBe("upload_requested");
+        const rows = await revisions();
+        expect(rows[1].settings).toMatchObject({
+          watch_directory: "d:/exports/plate/",
+        });
+      } finally {
+        await db().delete(files).where(eq(files.instrumentRunId, run.id));
+        await db().delete(instrumentRuns).where(eq(instrumentRuns.id, run.id));
+      }
+    });
+
     it("keeps cancelling upload requests when the folder changes", async () => {
       await pushConfig(BASE);
       const [run] = await db()
