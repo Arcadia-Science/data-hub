@@ -35,11 +35,14 @@ from data_hub_watcher.constants import (
 from data_hub_watcher.events import EventReporter, EventType, WatcherEvent
 from data_hub_watcher.heartbeat import WatcherCounters
 from data_hub_watcher.models import (
+    FILE_PATTERN_MAX_LENGTH,
+    FILE_PATTERNS_MAX,
     InstrumentConfig,
     RunDetectionConfig,
     WatcherConfig,
     watch_directory_problem,
 )
+from data_hub_watcher.remote_config import editable_settings_problem
 from data_hub_watcher.runtime import WatcherSupervisor, run_supervisor
 from data_hub_watcher.self_update import (
     DEFAULT_INDEX_URL,
@@ -191,6 +194,29 @@ def _prompted_watch_directory(value: str) -> Path:
     return watch_dir
 
 
+def _prompted_file_patterns(value: str) -> list[str]:
+    """Split typed file patterns, within the limits Data Hub can read.
+
+    The watcher would run with more or longer patterns, but the server
+    couldn't parse the pushed config, so it couldn't be edited from the web
+    app and PC edits wouldn't show in its history.
+    """
+    patterns = [p.strip() for p in value.split(",") if p.strip()]
+    if not patterns:
+        raise click.ClickException("At least one file pattern is required.")
+    if len(patterns) > FILE_PATTERNS_MAX:
+        raise click.ClickException(
+            f"Use at most {FILE_PATTERNS_MAX} file patterns (got {len(patterns)})."
+        )
+    for pattern in patterns:
+        if len(pattern) > FILE_PATTERN_MAX_LENGTH:
+            raise click.ClickException(
+                f"File patterns can be at most {FILE_PATTERN_MAX_LENGTH} characters: "
+                f"{pattern[:40]}…"
+            )
+    return patterns
+
+
 # ---------------------------------------------------------------------------
 # init command
 # ---------------------------------------------------------------------------
@@ -290,9 +316,7 @@ def init(ctx: click.Context, show_key: bool) -> None:
     # 5. File patterns
     default_patterns = ",".join(selected.file_patterns) if selected.file_patterns else "*.*"
     patterns_raw = click.prompt("File patterns (comma-separated)", default=default_patterns)
-    file_patterns = [p.strip() for p in patterns_raw.split(",") if p.strip()]
-    if not file_patterns:
-        raise click.ClickException("At least one file pattern is required.")
+    file_patterns = _prompted_file_patterns(patterns_raw)
 
     run_pattern, run_recursive = _prompt_run_detection(watch_dir)
 
@@ -418,6 +442,16 @@ def _prompt_run_detection(
                 click.echo(
                     click.style(
                         f"  Pattern must have exactly 1 capture group, got {compiled.groups}",
+                        fg="red",
+                    )
+                )
+                continue
+            if "(?P<" in pattern or "(?P=" in pattern:
+                # Valid in Python, but Data Hub's JavaScript can't read it.
+                click.echo(
+                    click.style(
+                        "  Use a plain capture group, such as (…), not a named one "
+                        "such as (?P<name>…)",
                         fg="red",
                     )
                 )
@@ -941,6 +975,17 @@ def config_validate(ctx: click.Context) -> None:
             "or its config is fixed."
         )
     click.echo(click.style(f"✓ Config is valid: {path}", fg="green"))
+    unreadable = editable_settings_problem(cfg.instrument)
+    if unreadable is not None:
+        # The watcher runs this config, so it isn't an error.
+        click.echo(
+            click.style(
+                f"Warning: Data Hub can't read these settings ({unreadable}). The config "
+                "can't be edited from the web app, and edits made here won't appear in "
+                "its history.",
+                fg="yellow",
+            )
+        )
 
 
 @config.command("set-environment")
@@ -1021,7 +1066,7 @@ def config_edit(ctx: click.Context) -> None:
         "File patterns (comma-separated)",
         default=",".join(inst.file_patterns),
     )
-    file_patterns = [p.strip() for p in patterns_raw.split(",") if p.strip()]
+    file_patterns = _prompted_file_patterns(patterns_raw)
 
     run_pattern, run_recursive = _prompt_run_detection(
         watch_dir,

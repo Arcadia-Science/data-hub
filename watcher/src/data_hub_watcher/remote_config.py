@@ -56,6 +56,28 @@ def settings_from_config(inst: InstrumentConfig) -> WatcherConfigSettings:
     )
 
 
+def editable_settings_problem(inst: InstrumentConfig) -> str | None:
+    """Why Data Hub can't read the editable settings of *inst*, or `None`.
+
+    The watcher accepts some configs the server's rules don't, such as more
+    than 50 file patterns, a pattern longer than 200 characters, or a
+    Python-only named group in the run regex. The watcher runs them fine, but
+    the server can't parse the pushed YAML, so it records no revision for the
+    PC's edits and the web form can't start from them.
+    """
+    try:
+        WatcherConfigSettings.model_validate(settings_from_config(inst).model_dump())
+    except ValidationError as exc:
+        return format_validation_error(exc)
+    pattern = inst.run_detection.pattern
+    if "(?P<" in pattern or "(?P=" in pattern:
+        return (
+            "run_detection.pattern: Python-style named groups, such as (?P<name>…), "
+            "can't be read by Data Hub; use a plain capture group, such as (…)"
+        )
+    return None
+
+
 def _normalized_dir(path: str | Path) -> str:
     # The web app stores the folder as typed, and the watcher stores it
     # resolved, so `D:/Exports` and `D:\\Exports` must compare equal.

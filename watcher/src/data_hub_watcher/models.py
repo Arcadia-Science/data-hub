@@ -270,6 +270,11 @@ class HeartbeatResponse(BaseModel):
 # Remote config revisions
 # ---------------------------------------------------------------------------
 
+# The server's limits on the editable settings (`WatcherConfigSettings`).
+FILE_PATTERNS_MAX = 50
+FILE_PATTERN_MAX_LENGTH = 200
+WATCH_DIRECTORY_MAX_LENGTH = 1024
+
 # Matches the server's rule for an absolute `watch_directory`: a Windows drive
 # path (`D:\...` or `D:/...`), a UNC path (`\\server\share`) or a POSIX path.
 _ABSOLUTE_PATH_RE = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\|/)")
@@ -297,8 +302,8 @@ class WatcherConfigSettings(BaseModel):
 
     model_config = _API_MODEL_CONFIG
 
-    watch_directory: str = Field(min_length=1, max_length=1024)
-    file_patterns: list[str] = Field(min_length=1, max_length=50)
+    watch_directory: str = Field(min_length=1, max_length=WATCH_DIRECTORY_MAX_LENGTH)
+    file_patterns: list[str] = Field(min_length=1, max_length=FILE_PATTERNS_MAX)
     run_detection: RunDetectionSettings
     upload_mode: Literal["auto", "manual"]
     stability_period_seconds: int = Field(ge=1, le=300)
@@ -318,8 +323,11 @@ class WatcherConfigSettings(BaseModel):
         for pattern in v:
             if not pattern.strip():
                 raise ValueError("file_patterns must not contain blank entries")
-            if len(pattern) > 200:
-                raise ValueError(f"file pattern is longer than 200 characters: {pattern[:40]}…")
+            if len(pattern) > FILE_PATTERN_MAX_LENGTH:
+                raise ValueError(
+                    f"file pattern is longer than {FILE_PATTERN_MAX_LENGTH} characters: "
+                    f"{pattern[:40]}…"
+                )
         return v
 
     @model_validator(mode="after")

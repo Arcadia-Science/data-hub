@@ -45,6 +45,7 @@ from data_hub_watcher.monitor import FileMonitor
 from data_hub_watcher.remote_config import (
     RevisionRejected,
     config_with_revision,
+    editable_settings_problem,
     folder_changed,
     report_only_predicate,
     settings_match,
@@ -847,6 +848,13 @@ class WatcherSupervisor:
         if self._unsent_result is not None:
             self._send_unsent_result()
 
+        unreadable = editable_settings_problem(self.cfg.instrument)
+        if unreadable is not None:
+            logger.warning(
+                "Data Hub can't read this config's settings (%s), so it can't be edited "
+                "from the web app and edits made on this PC won't appear in its history",
+                unreadable,
+            )
         sync = self._push_config(trigger="startup")
         # Without a push there is no revision number to compare, so ask for the
         # latest revision directly. A push that reports a revision we haven't
