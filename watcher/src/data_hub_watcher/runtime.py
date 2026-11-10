@@ -687,6 +687,18 @@ class _WaitingMode:
     updater: Updater
 
 
+def _any_rule(
+    rules: list[Callable[[str, float], bool]],
+) -> Callable[[str, float], bool] | None:
+    """One `FileMonitor` ``report_only`` predicate that is true when any rule is."""
+    if not rules:
+        return None
+    if len(rules) == 1:
+        return rules[0]
+    frozen = tuple(rules)
+    return lambda relative_path, mtime: any(rule(relative_path, mtime) for rule in frozen)
+
+
 def _read_config_identity(path: Path) -> tuple[str | None, str | None, str | None] | None:
     """``(environment, watcher_id, instrument_id)`` from the config file, or `None`.
 
@@ -776,9 +788,14 @@ class WatcherSupervisor:
         self._revision_due = threading.Event()
         self._folder_check_due = threading.Event()
         self._result_retry_due = threading.Event()
-        # Set when `start` applies a widening revision before anything runs,
-        # so the first runtime's scan reports newly matching files only.
-        self._startup_report_only: Callable[[str, float], bool] | None = None
+        # One `report_only_predicate` per widening revision applied in this
+        # process. Every runtime built afterwards scans with all of them, not
+        # just the newest: a second change that arrives before the first
+        # one's scan has reported everything would otherwise rebuild without
+        # the first rule and upload those files. A rule only matches files
+        # modified before its change that no state row covers, so keeping it
+        # doesn't affect anything already handled or written later.
+        self._report_only_rules: list[Callable[[str, float], bool]] = []
 
     # ------------------------------------------------------------------
     # public API
@@ -960,11 +977,9 @@ class WatcherSupervisor:
             return False
 
         old_inst, new_inst = old_cfg.instrument, new_cfg.instrument
-        report_only = (
-            report_only_predicate(old_inst, new_inst, cutoff=time.time())
-            if widens_scope(old_inst, new_inst)
-            else None
-        )
+        rules = list(self._report_only_rules)
+        if widens_scope(old_inst, new_inst):
+            rules.append(report_only_predicate(old_inst, new_inst, cutoff=time.time()))
 
         try:
             config_io.save_config(new_cfg, self.config_path)
@@ -985,17 +1000,16 @@ class WatcherSupervisor:
                     started_message=(
                         f"{self.role} restarted on {self.host} with config revision {number}"
                     ),
-                    report_only=report_only,
+                    report_only_rules=rules,
                 )
             except Exception as exc:
                 logger.exception("Could not start with config revision %d", number)
                 self._roll_back(old_cfg)
                 self._reject(number, f"Could not start with the new config: {exc}")
                 return False
-        else:
-            # Called from `start`, before anything runs: `start` builds the
-            # runtime with the new config right after this.
-            self._startup_report_only = report_only
+        # Kept only once the new config runs. When called from `start`, before
+        # anything runs, `start` builds the first runtime with them next.
+        self._report_only_rules = rules
 
         self._record_applied(number)
         logger.info("Config revision %d applied", number)
@@ -1200,11 +1214,14 @@ class WatcherSupervisor:
         self,
         *,
         started_message: str,
-        report_only: Callable[[str, float], bool] | None = None,
+        report_only_rules: list[Callable[[str, float], bool]] | None = None,
     ) -> None:
-        if report_only is None and self._startup_report_only is not None:
-            report_only = self._startup_report_only
-        self._startup_report_only = None
+        """Build and start a runtime for `self.cfg`, or wait if its folder is missing.
+
+        *report_only_rules* defaults to the rules of the revisions applied so
+        far (see `_report_only_rules`).
+        """
+        rules = self._report_only_rules if report_only_rules is None else report_only_rules
         problem = watch_directory_problem(self.cfg.instrument.watch_directory)
         if problem is not None:
             self._enter_waiting(problem, started_message=started_message)
@@ -1217,7 +1234,7 @@ class WatcherSupervisor:
             reporter=self.reporter,
             shutdown_event=self.shutdown_event,
             upgrade_restart_event=self.upgrade_restart_event,
-            report_only=report_only,
+            report_only=_any_rule(rules),
             config_revision=lambda: self._applied,
             on_config_revision=self._on_heartbeat_revision,
         )

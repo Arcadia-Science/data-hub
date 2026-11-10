@@ -212,6 +212,31 @@ class TestApplyInProcess:
         assert sup.rt is not None
         assert sup.rt.monitor._report_only_paths == {old_txt}
 
+    def test_next_rebuild_keeps_reporting_files_the_earlier_change_matched(
+        self, env: _Env
+    ) -> None:
+        sup = env.supervisor()
+        sup.start()
+        old_txt = env.watch_dir / "RUN002_old.txt"
+        old_txt.write_text("x\n")
+        past = old_txt.stat().st_mtime - 600
+        os.utime(old_txt, (past, past))
+        widened = _settings(env.watch_dir, file_patterns=["*.csv", "*.txt"])
+        env.client.get_latest_config_revision.return_value = _revision(2, widened)
+        _deliver(sup, 2)
+        assert sup.rt is not None and sup.rt.monitor._report_only_paths == {old_txt}
+
+        # A second change that doesn't widen anything arrives before the first
+        # rebuild's scan has reported the file.
+        env.client.get_latest_config_revision.return_value = _revision(
+            3, {**widened, "stability_period_seconds": 10}
+        )
+        _deliver(sup, 3)
+
+        assert sup.applied_revision == 3
+        assert sup.rt is not None and sup.rt.monitor._stability_period == 10
+        assert sup.rt.monitor._report_only_paths == {old_txt}
+
     def test_non_widening_revision_rescans_normally(self, env: _Env) -> None:
         sup = env.supervisor()
         sup.start()
