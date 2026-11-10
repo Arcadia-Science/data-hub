@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Crc64Nvme } from "@aws-sdk/crc64-nvme";
@@ -322,6 +323,41 @@ describe("Request Upload URL API", () => {
     expect(row?.multipartUploadId).toBeNull();
     expect(row?.s3Key).toBe(`${instrumentId}/${runId}/parts.bin`);
     expect(row?.contentType).toBe("application/octet-stream");
+  });
+
+  // Next.js cuts a request body at 10 MB whenever `proxy.ts` runs on the
+  // route. Real parts are 64 MiB, so the stand-in must get the whole body.
+  it("stores a part larger than 10 MB whole", async () => {
+    const res = await api(
+      `/api/v1/instruments/${instrumentId}/runs/${runId}/request-upload-url`,
+      {
+        method: "POST",
+        token,
+        headers: watcher12,
+        body: { filename: "big-part.bin", size_bytes: 1500 },
+      }
+    );
+    const started = await res.json();
+    expect(started.upload_type).toBe("multipart");
+    const urls = await api(
+      `/api/v1/files/${started.file_id}/multipart-upload/part-urls`,
+      {
+        method: "POST",
+        token,
+        body: { upload_id: started.upload_id, part_numbers: [1] },
+      }
+    );
+    const [part] = (await urls.json()).parts;
+
+    const body = Buffer.alloc(11 * 1024 * 1024, 5);
+    const put = await fetch(`${getBaseUrl()}${part.upload_url}`, {
+      method: "PUT",
+      body,
+    });
+    expect(put.status).toBe(200);
+    // The stand-in's ETag is the MD5 of the bytes it stored.
+    const md5 = createHash("md5").update(body).digest("hex");
+    expect(put.headers.get("etag")).toBe(`"${md5}"`);
   });
 
   it("finishes when S3 already assembled the object", async () => {

@@ -1,7 +1,8 @@
+import { unstable_doesMiddlewareMatch } from "next/experimental/testing/server";
 import { NextRequest } from "next/server";
 import { describe, expect, it } from "vitest";
 import { REQUEST_PATH_HEADER } from "@/lib/callback-url";
-import { proxy } from "@/proxy";
+import { config, proxy } from "@/proxy";
 
 const SESSION_COOKIE = "better-auth.session_token=abc.def";
 
@@ -93,5 +94,34 @@ describe("proxy", () => {
     const response = proxy(request("/login?callbackURL=%2Fcomments"));
     expect(response.headers.get("location")).toBeNull();
     expect(forwardedPath(response)).toBe("/");
+  });
+});
+
+describe("proxy matcher", () => {
+  function runsProxy(path: string) {
+    return unstable_doesMiddlewareMatch({
+      config,
+      url: `http://localhost:3000${path}`,
+    });
+  }
+
+  // Next.js cuts a request body at 10 MB when the proxy runs, which breaks
+  // the stand-in's 64 MiB upload parts.
+  it.each([
+    "/api/local-s3/test-raw-data-bucket/inst/run/big.bin",
+    "/api/local-s3/test-raw-data-bucket/inst/run/big.bin?uploadId=u&partNumber=1",
+  ])("skips the local S3 stand-in at %s", (path) => {
+    expect(runsProxy(path)).toBe(false);
+  });
+
+  it.each([
+    "/",
+    "/comments",
+    "/instruments/a/runs/b",
+    "/api/v1/runs",
+    "/api/local-s3",
+    "/api/local-s3x/b/k",
+  ])("runs on %s", (path) => {
+    expect(runsProxy(path)).toBe(true);
   });
 });

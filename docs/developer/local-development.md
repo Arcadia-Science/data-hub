@@ -225,6 +225,7 @@ A few details worth knowing:
 
 - Adding fixtures for more instruments means an `INSTRUMENT_FIXTURES` entry in [web/lib/db/seed.ts](../../web/lib/db/seed.ts) keyed by the kebab-case instrument id of a seeded instrument (`{ files: [{ filename, contentType }, …], runIds }`) pointing at files under `lambda/tests/fixtures/`. List every fixture you want cycled across seeded runs. The handler looks up the instrument and picks a processor by its `instrument_type`, so the seeded instrument needs a type that has a processor in `lambda/src/data_hub_lambda/processors.py`. Files for other types are skipped.
 - The route is gated on `NODE_ENV !== "production"` AND `LOCAL_S3_MIRROR` set; either condition unmet returns 404 unconditionally, so a production build can never expose the filesystem.
+- The matcher in [web/proxy.ts](../../web/proxy.ts) leaves out `/api/local-s3/`. When the proxy runs on a request, Next.js keeps only the first 10 MB of the body, which would cut every 64 MiB watcher upload part short and fail the upload's checksum.
 - The MCP tool at `/mcp/v1` returns a relative `/api/local-s3/...` URL when the mirror is active — browsers resolve it against the current origin, but non-browser MCP clients on localhost may need to prefix with `http://localhost:3000`.
 
 ## Docs screenshots
