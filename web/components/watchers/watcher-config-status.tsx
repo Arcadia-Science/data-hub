@@ -195,7 +195,6 @@ export function RestartPendingCallout({
               by <ActorLabel actor={revision.createdBy} />
             </span>
           ) : null}
-          .
         </span>
         <span>
           Takes effect when the watcher restarts.
