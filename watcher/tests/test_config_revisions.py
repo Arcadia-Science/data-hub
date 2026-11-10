@@ -251,10 +251,13 @@ class TestApplyInProcess:
     def test_folder_is_saved_as_typed_in_the_web_app(self, env: _Env) -> None:
         sup = env.supervisor()
         sup.start()
-        # A trailing separator, as an admin might type it. Resolving the path
-        # drops it, and the server would then see the pushed YAML as a new
-        # edit made on the PC.
-        typed = str(env.watch_dir) + os.sep
+        # A path that resolves to another one, like a mapped drive that
+        # resolves to a UNC path on Windows. The server can't tell the two are
+        # the same folder, so pushing the resolved form back would look like a
+        # new edit made on the PC.
+        link = env.tmp_path / "data-link"
+        link.symlink_to(env.watch_dir, target_is_directory=True)
+        typed = str(link)
         env.client.get_latest_config_revision.return_value = _revision(
             2, _settings(env.watch_dir, watch_directory=typed, file_patterns=["*.txt"])
         )

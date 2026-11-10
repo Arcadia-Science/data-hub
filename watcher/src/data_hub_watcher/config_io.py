@@ -52,10 +52,11 @@ def save_config(
 
     *watch_directory_text* replaces the resolved folder in the file. A config
     revision from the web app passes the folder as the admin typed it, so the
-    YAML pushed back afterwards matches the revision. The resolved form can
-    differ in slashes, a trailing separator, letter case, or a mapped drive
-    shown as a UNC path, and the server would record that as a new edit.
-    Loading the file resolves the folder again.
+    YAML pushed back afterwards matches the revision. The server treats
+    different slashes, letter case and trailing separators as the same
+    folder, but not a path that resolves elsewhere, such as a mapped drive
+    that resolves to a UNC path or a symlink, and would record the resolved
+    form as a new edit. Loading the file resolves the folder again.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
 

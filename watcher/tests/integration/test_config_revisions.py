@@ -250,12 +250,17 @@ class TestAdminRevision:
             time.sleep(0.25)
         assert rows == [("RUN002_notes.txt", "detected")]
 
-    def test_folder_typed_differently_leaves_no_pc_revision(self, pc: _Pc, admin: _Admin) -> None:
+    def test_folder_that_resolves_elsewhere_leaves_no_pc_revision(
+        self, pc: _Pc, admin: _Admin
+    ) -> None:
         sup = pc.start()
-        # The admin types the folder with a trailing separator. The watcher
-        # resolves it, but must push it back as typed.
-        typed = str(pc.watch_dir) + os.sep
-        admin.save(pc.watcher_id, pc.settings(watch_directory=typed, upload_parallelism=2))
+        # The admin types a path that resolves to another one, like a mapped
+        # drive that resolves to a UNC path on Windows. The server normalizes
+        # slashes, case and trailing separators, but can't see through this,
+        # so the watcher must push the folder back as typed.
+        link = pc.tmp_path / "data-link"
+        link.symlink_to(pc.watch_dir, target_is_directory=True)
+        admin.save(pc.watcher_id, pc.settings(watch_directory=str(link), upload_parallelism=2))
 
         _heartbeat(sup)
         _heartbeat(sup)
@@ -267,6 +272,8 @@ class TestAdminRevision:
         ]
         assert sup.applied_revision == 2
         assert sup.rt is not None and sup.rt.uploader._parallelism == 2
+        assert sup.rt.monitor._watch_dir == pc.watch_dir
+        assert pc.saved_instrument()["watch_directory"] == str(link)
 
 
 class TestRejectedRevision:
