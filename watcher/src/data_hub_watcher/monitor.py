@@ -136,7 +136,8 @@ class FileMonitor:
         instead of `on_stable_file` once stable. Set after a config revision
         widens what the watcher sees, so files already on disk that only the
         new config matches are reported as detected without being uploaded.
-        Files that arrive later are not affected.
+        Files that arrive later are not affected, and neither is a picked-out
+        file that is written to again before it becomes stable.
     on_report_only_file:
         Called instead of `on_stable_file` for files picked out by
         `report_only`. Falls back to `on_stable_file` when unset.
@@ -485,6 +486,9 @@ class FileMonitor:
                     existing.size = stat_result.st_size
                     existing.mtime = stat_result.st_mtime
                     existing.last_changed = time.monotonic()
+                    # See `_check_pending`: a file written to after the
+                    # report-only scan follows `upload_mode` again.
+                    self._report_only_paths.discard(path)
 
     def _stability_loop(self) -> None:
         """Periodically check pending files for stability or timeout."""
@@ -517,6 +521,9 @@ class FileMonitor:
                     pf.size = stat.st_size
                     pf.mtime = stat.st_mtime
                     pf.last_changed = now
+                    # Written to after the scan, so it holds data from after
+                    # the config change: it follows `upload_mode` again.
+                    self._report_only_paths.discard(path)
                     continue
 
                 elapsed_since_change = now - pf.last_changed

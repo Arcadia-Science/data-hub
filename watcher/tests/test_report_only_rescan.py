@@ -177,6 +177,39 @@ class TestWidenedPatternRescan:
         assert [f.path for f in uploaded] == [new_file]
         assert existing not in [f.path for f in uploaded]
 
+    @pytest.mark.parametrize("noticed_by", ["stability_check", "watchdog_event"])
+    def test_file_written_to_after_the_scan_follows_upload_mode(
+        self, watch_dir: Path, state_db: StateDB, noticed_by: str
+    ) -> None:
+        # An acquisition was still writing this file when the change arrived.
+        old_inst = _inst(watch_dir, ["*.csv"])
+        new_inst = _inst(watch_dir, ["*.csv", "*.raw"])
+        growing = _write(watch_dir / "RUN1_live.raw", age_seconds=600)
+        on_stable = MagicMock()
+        on_report_only = MagicMock()
+        monitor = FileMonitor(
+            watch_directory=watch_dir,
+            file_patterns=new_inst.file_patterns,
+            stability_period=1,
+            on_stable_file=on_stable,
+            state_db=state_db,
+            report_only=report_only_predicate(old_inst, new_inst, cutoff=time.time()),
+            on_report_only_file=on_report_only,
+        )
+        monitor._initial_scan()
+        assert monitor._report_only_paths == {growing}
+
+        with growing.open("a") as fh:
+            fh.write("more data\n")
+        if noticed_by == "watchdog_event":
+            monitor._enqueue(growing)
+        else:
+            monitor._check_pending()
+        _settle(monitor)
+
+        on_stable.assert_called_once_with(growing)
+        on_report_only.assert_not_called()
+
     def test_files_already_in_state_are_skipped(self, watch_dir: Path, state_db: StateDB) -> None:
         old_inst = _inst(watch_dir, ["*.csv"])
         new_inst = _inst(watch_dir, ["*.csv", "*.txt"])
