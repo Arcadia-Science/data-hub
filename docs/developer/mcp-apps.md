@@ -44,13 +44,15 @@ Steps 5 and 6 happen inside `useApp` from `@modelcontextprotocol/ext-apps`. `web
 
 No file bytes pass through the server. Every tool returns a presigned S3 URL and the View reads the object itself, the same way the web app has always read them through the `/api/v1/files/:id/download` redirect. The server only ever runs the permission check and signs.
 
-### Report items — images, PDFs, spectra, and videos
+### Report items — images, PDFs, spectra, videos, and media
 
 1. The View calls `report_view_items` with the instrument, run, item kind, and a window offset.
 2. The server looks up the run by its instrument ID and run ID, then asks `getReportItemsPage` for one window of matching files.
 3. The server signs a download URL for every file in that window and returns those URLs alongside the file IDs and filenames.
 4. The View stores each URL in an in-memory cache keyed by file ID.
 5. The carousel points an `<img>`, `<iframe>`, or `<video>` straight at the cached URL.
+
+The `media` kind lists videos and images together for the Hina viewer. It leaves out an image whose video has the same name in the same run, and gives each video the file ID of that image as `poster_id`. The View loads the poster through `report_view_file_url`, like any other file it has an ID for.
 
 Windows are 50 items by default and 200 at most. The signed URLs deliberately leave out the filename so S3 does not add a `Content-Disposition: attachment` header, which would stop a PDF from rendering inside a nested iframe.
 
@@ -106,7 +108,8 @@ Two implementations exist:
 
 | Instrument type | Renderer |
 | --- | --- |
-| `gel_doc`, `hina_microscope` | `ImageCarouselReport` |
+| `gel_doc` | `ImageCarouselReport` |
+| `hina_microscope` | `MediaCarouselReport` |
 | `tape_station` | `PdfCarouselReport` |
 | `dishcam` | `VideoCarouselReport` |
 | `instant_raman` | `RamanReportSection` |

@@ -50,7 +50,7 @@ To set it, open the instrument page as an admin, choose **Edit details** from th
 | `gel_doc` | Azure 600 Gel Doc | `.tif`, `.tiff` | Contrast-enhanced PNG, imaging badges |
 | `qpcr` | Azure Cielo qPCR | `.csv`, `.pdf`, `.aze` | Dye-channel badges, melting curves, the instrument’s PDF report |
 | `epson_v700_scanner` | Epson V700 Scanner | `.tif`, `.tiff` | Plate preview JPG, colony measurements |
-| `hina_microscope` | Hina Microscope (Nikon ND2) | `.nd2` | Channel overlay JPG, channel badges |
+| `hina_microscope` | Hina Microscope (Nikon ND2) | `.nd2` | Channel overlay JPG, a video of each timelapse, channel badges |
 | `plate_reader` | SpectraMax iD3 and iD5 | `.xls` | Well-data CSV, interactive plate maps |
 | `dishcam` | DishCam time-lapse camera | `.tif`, `.tiff`, `run.json` | A video of each photo stack, camera-setting badges |
 | `aunty` | Unchained Labs Aunty | `.xlsx` | A plate with a curve chart in each well, experiment badges |
@@ -130,14 +130,18 @@ When no plates are found, you still get a resized JPG of the whole scan, and col
 
 ## Hina Microscope [#hina-microscope]
 
-Turns each Nikon ND2 into a single composite image you can view in the browser.
+Turns each Nikon ND2 into a composite image you can view in the browser, and each timelapse into a video.
 
-Every channel is reduced to one 2D frame (a maximum projection over Z, the first index over time or position), stretched to the 1st to 99th percentile, then composited onto a brightfield background in each channel’s fluorophore color. The processor reads one frame at a time, so large stacks process without loading the whole file.
+Every channel is reduced to one 2D frame per time point (a maximum projection over Z, the first index over position), stretched to the 1st to 99th percentile, then composited onto a brightfield background in each channel’s fluorophore color. The processor reads one frame at a time, so large stacks process without loading the whole file.
 
 - **Expected files**: ND2
-- **Metadata**: `sizes`, `channels` (name, excitation and emission wavelength, color), and `dimensions`
-- **Processed files**: an RGB overlay JPG for every file in the run
-- **On the run page**: channel and size badges, files table, image viewer for the JPGs
+- **Metadata**: `sizes`, `channels` (name, excitation and emission wavelength, color), and `dimensions`. Each timelapse file also records `frames`, `frame_interval_ms` (the measured time between frames), and `playback_fps` in its own file metadata.
+- **Processed files**: an RGB overlay JPG of the first time point for every file in the run, plus an MP4 for every file with more than one time point
+- **On the run page**: channel and size badges, files table, and a viewer with one item per file. A timelapse plays as a video, with its JPG shown before you press play. Any other file shows its JPG.
+
+A timelapse video plays at the capture rate or at 10 frames per second, whichever is faster, so slow captures stay watchable. A file that doesn’t record the time between frames plays at 10 frames per second. Each channel’s contrast comes from the first frame and stays the same for the whole video, so brightness doesn’t flicker and the first frame matches the JPG. Pixels that later grow brighter than the brightest 1% of the first frame show at full brightness, so a signal that grows strongly during the capture can look saturated.
+
+If the video can’t be made, for example because the timelapse can’t finish within the [15-minute processing limit](#when-processing-fails), the file shows **Failed** and the message says why. The JPG and the raw file are still available. A timelapse processed before Data Hub made videos gets its video when you choose **Reprocess** on the file or on the run.
 
 Channel layout is identical across a Hina run, so metadata is written once by whichever file finishes processing first. Later files still get their JPG and skip the metadata write. Reprocessing one file therefore won’t correct run metadata if the layout changed mid-run.
 

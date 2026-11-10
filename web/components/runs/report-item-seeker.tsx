@@ -46,6 +46,13 @@ const LABELS: Record<ReportItemKind, SeekerLabels> = {
     search: "Search images…",
     select: "Select an image\u2026",
   },
+  media: {
+    empty: "No images or videos found.",
+    next: "Next file",
+    previous: "Previous file",
+    search: "Search files\u2026",
+    select: "Select a file\u2026",
+  },
   pdf: {
     empty: "No PDFs found.",
     next: "Next PDF",

@@ -1,6 +1,14 @@
 import type { InstrumentType } from "@/lib/db/schema";
 
-export const REPORT_ITEM_KINDS = ["image", "pdf", "spectrum", "video"] as const;
+// `media` lists videos and images together, and drops an image whose video
+// has the same name, because that image is the video's poster.
+export const REPORT_ITEM_KINDS = [
+  "image",
+  "media",
+  "pdf",
+  "spectrum",
+  "video",
+] as const;
 
 export type ReportItemKind = (typeof REPORT_ITEM_KINDS)[number];
 
@@ -9,6 +17,8 @@ export type ReportItemKind = (typeof REPORT_ITEM_KINDS)[number];
 export interface ReportItem {
   filename: string;
   id: number;
+  // `media` only: the poster image for a video, or null for an image.
+  poster_id?: number | null;
 }
 
 export interface ReportItemsPage {
@@ -65,7 +75,7 @@ export function showsReportDataSection(instrumentType: InstrumentType) {
 
 const KIND_BY_INSTRUMENT: Partial<Record<InstrumentType, ReportItemKind>> = {
   gel_doc: "image",
-  hina_microscope: "image",
+  hina_microscope: "media",
   tape_station: "pdf",
   qpcr: "pdf",
   instant_raman: "spectrum",

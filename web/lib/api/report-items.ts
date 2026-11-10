@@ -1,10 +1,21 @@
-import { and, eq, ilike, isNull, type SQL, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  eq,
+  ilike,
+  isNull,
+  notExists,
+  type SQL,
+  sql,
+} from "drizzle-orm";
+import { type AnyPgColumn, alias } from "drizzle-orm/pg-core";
 import { escapeLikePattern } from "@/lib/api/like-pattern";
 import { db } from "@/lib/db";
 import { NATURAL_FILENAME_COLLATION } from "@/lib/db/collations";
 import { files } from "@/lib/db/schema";
 import {
   REPORT_ITEMS_MAX_LIMIT,
+  type ReportItem,
   type ReportItemKind,
   type ReportItemsPage,
 } from "@/lib/runs/report-items";
@@ -20,15 +31,80 @@ export interface ReportItemsQuery {
 
 const naturalFilename = sql`${files.filename} collate ${sql.identifier(NATURAL_FILENAME_COLLATION)}`;
 
+// The columns a kind predicate reads, so the same check runs on `files` and
+// on an aliased copy of it in a subquery.
+interface FileColumns {
+  contentType: AnyPgColumn;
+  filename: AnyPgColumn;
+}
+
+const isImage = (file: FileColumns) => sql`(
+  ${file.contentType} in ('image/png', 'image/jpeg', 'image/gif', 'image/webp')
+  or lower(${file.filename}) like '%.png'
+  or lower(${file.filename}) like '%.jpg'
+  or lower(${file.filename}) like '%.jpeg'
+  or lower(${file.filename}) like '%.gif'
+  or lower(${file.filename}) like '%.webp'
+)`;
+
+const isVideo = (file: FileColumns) => sql`(
+  ${file.contentType} like 'video/%'
+  or lower(${file.filename}) like '%.mp4'
+)`;
+
+// The filename without its last extension, matching `fileStem` in
+// `lib/runs/run-file-types.ts`: a leading dot is part of the name.
+const stem = (filename: AnyPgColumn) =>
+  sql`regexp_replace(${filename}, '(.)\\.[^.]*$', '\\1')`;
+
+interface SiblingColumns extends FileColumns {
+  deletedAt: AnyPgColumn;
+  instrumentRunId: AnyPgColumn;
+  s3Bucket: AnyPgColumn;
+  s3Key: AnyPgColumn;
+}
+
+// Another stored, renderable file in the same run with the same stem.
+function sameStemSibling(sibling: SiblingColumns) {
+  return and(
+    eq(sibling.instrumentRunId, files.instrumentRunId),
+    isNull(sibling.deletedAt),
+    sql`${sibling.s3Bucket} is not null and ${sibling.s3Key} is not null`,
+    sql`${stem(sibling.filename)} = ${stem(files.filename)}`
+  );
+}
+
+const videoSibling = alias(files, "video_sibling");
+const poster = alias(files, "poster");
+
+// A timelapse has `{stem}.mp4` and its poster `{stem}.jpg`. `media` lists
+// the video and drops the poster, so each source file is one item.
+const mediaPredicate = sql`(
+  ${isVideo(files)}
+  or (
+    ${isImage(files)}
+    and ${notExists(
+      db
+        .select({ id: videoSibling.id })
+        .from(videoSibling)
+        .where(and(sameStemSibling(videoSibling), isVideo(videoSibling)))
+    )}
+  )
+)`;
+
+// The poster for a `media` video: the image with the same stem, or null.
+// `node-postgres` returns a bare bigint as a string, so map it back to the
+// number the `id` column gives elsewhere. Drizzle skips the mapping for null.
+const posterIdColumn = sql<number | null>`(${db
+  .select({ id: poster.id })
+  .from(poster)
+  .where(and(sameStemSibling(poster), isVideo(files), isImage(poster)))
+  .orderBy(asc(poster.id))
+  .limit(1)})`.mapWith(Number);
+
 const KIND_PREDICATES: Record<ReportItemKind, SQL> = {
-  image: sql`(
-    ${files.contentType} in ('image/png', 'image/jpeg', 'image/gif', 'image/webp')
-    or lower(${files.filename}) like '%.png'
-    or lower(${files.filename}) like '%.jpg'
-    or lower(${files.filename}) like '%.jpeg'
-    or lower(${files.filename}) like '%.gif'
-    or lower(${files.filename}) like '%.webp'
-  )`,
+  image: isImage(files),
+  media: mediaPredicate,
   pdf: sql`(
     ${files.contentType} = 'application/pdf'
     or lower(${files.filename}) like '%.pdf'
@@ -37,10 +113,7 @@ const KIND_PREDICATES: Record<ReportItemKind, SQL> = {
     ${files.contentType} = 'text/csv'
     or lower(${files.filename}) like '%.csv'
   )`,
-  video: sql`(
-    ${files.contentType} like 'video/%'
-    or lower(${files.filename}) like '%.mp4'
-  )`,
+  video: isVideo(files),
 };
 
 function reportItemsWhere(
@@ -109,8 +182,12 @@ export async function getReportItemsPage(
       ? Math.max(offset, 0)
       : Math.floor(anchorIndex / safeLimit) * safeLimit;
 
-  const data = await db
-    .select({ id: files.id, filename: files.filename })
+  const data: ReportItem[] = await db
+    .select({
+      id: files.id,
+      filename: files.filename,
+      ...(kind === "media" ? { poster_id: posterIdColumn } : {}),
+    })
     .from(files)
     .where(where)
     .orderBy(naturalFilename)

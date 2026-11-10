@@ -6,12 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from data_hub_lambda.dishcam.parse_metadata import (
-    MIN_PLAYBACK_FPS,
-    encode_fps,
-    parse_run_json,
-    playback_fps,
-)
+from data_hub_lambda.dishcam.parse_metadata import encode_fps, parse_run_json
 
 
 def _write_json(path: Path, payload: object) -> Path:
@@ -54,8 +49,3 @@ def test_omits_missing_and_null_keys(tmp_path: Path) -> None:
     assert "duration_seconds" not in metadata
     assert "quality" not in metadata
     assert metadata["fps"] == 1.0
-
-
-def test_playback_fps_floors_slow_captures() -> None:
-    assert playback_fps(0.0167) == MIN_PLAYBACK_FPS
-    assert playback_fps(24.0) == 24.0

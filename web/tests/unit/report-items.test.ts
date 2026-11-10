@@ -10,6 +10,10 @@ describe("reportItemKindForInstrument", () => {
     expect(reportItemKindForInstrument("dishcam")).toBe("video");
   });
 
+  it("maps hina microscope runs to the mixed image and video seeker", () => {
+    expect(reportItemKindForInstrument("hina_microscope")).toBe("media");
+  });
+
   it("maps both PDF-exporting instruments to the PDF seeker", () => {
     expect(reportItemKindForInstrument("tape_station")).toBe("pdf");
     expect(reportItemKindForInstrument("qpcr")).toBe("pdf");
