@@ -40,8 +40,8 @@ export function WatcherConfigHistory({
   watcherId: string;
   revisions: ConfigRevision[];
   /**
-   * What the watcher runs or is about to run. Restoring a revision with the
-   * same settings would be refused as "No changes", so it gets no button.
+   * Restoring a revision with these settings would be refused as "No
+   * changes", so it gets no button. Null after a rejection.
    */
   savedSettings: WatcherConfigSettings | null;
   canRestore: boolean;
@@ -68,8 +68,7 @@ export function WatcherConfigHistory({
             ? describeSettingsChanges(previous.settings, rev.settings)
             : [];
           // Any revision can be restored, including a rejected one once its
-          // cause is fixed, unless it matches what the watcher already runs
-          // or is about to run.
+          // cause is fixed, unless the server would refuse it as no change.
           const restorable =
             canRestore &&
             !(savedSettings && settingsEqual(rev.settings, savedSettings));

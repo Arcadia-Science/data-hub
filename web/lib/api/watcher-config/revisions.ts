@@ -203,9 +203,9 @@ const INTENDED_STATUSES = ["pending", "applied"] as const;
 
 /**
  * The revision whose settings the watcher runs or is about to run: the
- * newest `pending` or `applied` one. Saves and pushes are compared with it,
- * so a rejected change can be saved again once its cause is fixed, and a
- * partial MCP update doesn't carry a rejected change along.
+ * newest `pending` or `applied` one. Pushes and saves are compared with it,
+ * and a partial MCP update merges over it, so a rejected change is never
+ * mistaken for the watcher's settings.
  */
 export async function getIntendedConfigRevision(
   watcherId: string,
@@ -228,6 +228,24 @@ export function pickIntendedRevision(
       (INTENDED_STATUSES as readonly string[]).includes(rev.status)
     ) ?? null
   );
+}
+
+/**
+ * The settings a save is compared with: a save with equal settings is
+ * refused as "No changes". That's what the watcher runs or is about to run
+ * (`intended`), else its pushed YAML. After a rejection there is none,
+ * because any save then means something: trying the change again once its
+ * cause is fixed, or going back to the settings the watcher kept.
+ */
+export function noChangesBaseline(
+  current: ConfigRevision | null,
+  intended: ConfigRevision | null,
+  reportedSettings: WatcherConfigSettings | null
+): WatcherConfigSettings | null {
+  if (current?.status === "rejected") {
+    return null;
+  }
+  return intended?.settings ?? reportedSettings;
 }
 
 async function getNewestAppliedRevision(
@@ -424,16 +442,17 @@ export async function createWebConfigRevision(opts: {
       } satisfies Failure;
     }
 
-    // Compare against what the watcher runs or is about to run, skipping
-    // superseded and rejected history, so a rejected change can be saved
-    // again once its cause is fixed. With no such revision, the watcher's
-    // own pushed YAML is the baseline.
+    const current = latest
+      ? await getCurrentConfigRevision(opts.watcherId, tx)
+      : null;
     const intended = latest
       ? await getIntendedConfigRevision(opts.watcherId, tx)
       : null;
-    const baseline = intended
-      ? intended.settings
-      : parseSettingsFromYaml(watcher.configYaml);
+    const baseline = noChangesBaseline(
+      current,
+      intended,
+      parseSettingsFromYaml(watcher.configYaml)
+    );
     if (baseline && settingsEqual(baseline, opts.settings)) {
       return {
         ok: false,
@@ -793,9 +812,9 @@ export interface WatcherConfigState {
   /** What the watcher last reported in its pushed YAML. */
   reportedSettings: WatcherConfigSettings | null;
   /**
-   * What a save is compared with (see `getIntendedConfigRevision`), else the
-   * pushed YAML. The server refuses a save with these settings as "No
-   * changes", so the form and Restore do too.
+   * What a save is compared with (see `noChangesBaseline`). The server
+   * refuses a save with these settings as "No changes", so the form and
+   * Restore do too. Null after a rejection, when any save is allowed.
    */
   savedSettings: WatcherConfigSettings | null;
   watcherVersion: string | null;
@@ -832,6 +851,6 @@ export async function getWatcherConfigState(
     latest,
     reportedSettings,
     baseSettings: latest?.settings ?? reportedSettings,
-    savedSettings: intended?.settings ?? reportedSettings,
+    savedSettings: noChangesBaseline(latest, intended, reportedSettings),
   };
 }

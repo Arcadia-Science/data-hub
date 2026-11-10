@@ -351,18 +351,13 @@ describe("Watcher config revisions", () => {
       expect((await res.json()).error.message).toBe("No changes");
     });
 
-    it("lets a rejected change be saved again, comparing with what the watcher runs", async () => {
+    it("allows any save after a rejection, then refuses no change again", async () => {
       const moved = { ...BASE, watch_directory: "/data/new-plate" };
       expect((await saveFromWeb(moved, 1)).status).toBe(201);
       await reportResult(2, {
         status: "rejected",
         reason: "watch_directory not found: /data/new-plate",
       });
-
-      // The watcher kept revision 1, so that's what "No changes" means.
-      const same = await saveFromWeb(BASE, 2);
-      expect(same.status).toBe(400);
-      expect((await same.json()).error.message).toBe("No changes");
 
       // Once the folder exists, the rejected settings can be saved again.
       const retry = await saveFromWeb(moved, 2);
@@ -372,6 +367,17 @@ describe("Watcher config revisions", () => {
         status: "pending",
         settings: moved,
       });
+
+      // After another rejection, the admin can go back to the settings the
+      // watcher kept, which clears the rejection.
+      await reportResult(3, { status: "rejected", reason: "still missing" });
+      const back = await saveFromWeb(BASE, 3);
+      expect(back.status).toBe(201);
+
+      // That's now pending, so saving it again is no change.
+      const same = await saveFromWeb(BASE, 4);
+      expect(same.status).toBe(400);
+      expect((await same.json()).error.message).toBe("No changes");
     });
 
     it("supersedes an older pending web revision", async () => {

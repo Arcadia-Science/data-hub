@@ -140,9 +140,9 @@ export function WatcherConfigForm({
   baseRevision: number | null;
   initialSettings: WatcherConfigSettings;
   /**
-   * What the watcher runs or is about to run. Saving these settings again
-   * is refused as "No changes". It differs from `initialSettings` when the
-   * form starts from a rejected change, which can be saved again as is.
+   * Saving these settings is refused as "No changes": what the watcher runs
+   * or is about to run. Null after a rejection, when the form starts from
+   * the rejected change and any save is allowed, including the same one.
    */
   savedSettings: WatcherConfigSettings | null;
   /** False below watcher 1.3.0: the form shows but can't be changed. */
