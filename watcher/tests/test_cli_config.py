@@ -1,4 +1,4 @@
-"""Tests for `config edit` and `config validate` around remote config (watcher 1.3.0)."""
+"""Tests for `config edit` and `config validate` around remote config (watcher 1.4.0)."""
 
 from __future__ import annotations
 from pathlib import Path

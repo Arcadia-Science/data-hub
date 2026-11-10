@@ -203,7 +203,7 @@ class TestAdminRevision:
         [first] = admin.revisions(pc.watcher_id)
         assert (first["revision"], first["source"], first["status"]) == (1, "pc", "applied")
         assert sup.applied_revision == 1
-        assert _watcher_row(integration_env.db_dsn, pc.watcher_id)[4] == "1.3.0"
+        assert _watcher_row(integration_env.db_dsn, pc.watcher_id)[4] == "1.4.0"
 
         # A .txt file that was already on disk before the change.
         old_txt = pc.watch_dir / "RUN002_notes.txt"

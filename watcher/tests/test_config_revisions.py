@@ -1,4 +1,4 @@
-"""Unit tests for config revisions from the web app (watcher 1.3.0).
+"""Unit tests for config revisions from the web app (watcher 1.4.0).
 
 Covers `runtime.WatcherSupervisor` end to end against a mocked API client:
 applying a revision by rebuilding the runtime in the same process, rejecting a
@@ -362,14 +362,14 @@ class TestUpgradeMarker:
         sup.start()
         # The updater dispatched an upgrade to the Windows worker on the same
         # heartbeat tick that announced a new revision.
-        write_upgrade_marker(env.tmp_path, target_version="9.9.9", previous_version="1.3.0")
+        write_upgrade_marker(env.tmp_path, target_version="9.9.9", previous_version="1.4.0")
         write_upgrade_request(
             env.tmp_path,
             target_version="9.9.9",
             pkg_spec="data-hub-watcher==9.9.9",
             uv_executable="uv",
             index_url="https://example.test/simple",
-            previous_version="1.3.0",
+            previous_version="1.4.0",
             install_method="uv-tool",
         )
         env.client.get_latest_config_revision.return_value = _revision(
