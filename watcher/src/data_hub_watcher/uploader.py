@@ -688,7 +688,7 @@ class Uploader:
         file and part thread exits soon. A file that was cut off isn't
         recorded or reported as failed: an auto-mode file keeps its
         ``pending_uploads`` row and a queued file stays in the server's
-        queue, so the next runtime uploads it again from the start.
+        queue, as after a stop.
         """
         self._abort.set()
         self._request_stop()

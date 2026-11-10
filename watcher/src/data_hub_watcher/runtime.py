@@ -1549,8 +1549,7 @@ def _stop_upload_threads(rt: WatcherRuntime) -> None:
     finish. Past that, `Uploader.abort` cuts off the PUTs and hashing still
     running, and this keeps waiting, in short steps, until the threads have
     unwound. A file that was cut off keeps its ``pending_uploads`` row, or
-    stays in the server's queue, so the new runtime uploads it again from
-    the start.
+    stays in the server's queue, as after a restart.
     """
     deadline = time.monotonic() + CONFIG_APPLY_DRAIN_TIMEOUT_SECONDS
     worker = rt.upload_worker

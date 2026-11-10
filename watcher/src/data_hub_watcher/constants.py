@@ -79,9 +79,10 @@ UPLOAD_WORKER_STOP_TIMEOUT_SECONDS = 30
 # How long applying a config revision from the web app waits for uploads in
 # progress before rebuilding the runtime. The stop starts no new file or part
 # and lets the PUTs already sending finish: up to `upload_parallelism` whole
-# files or 64 MB parts. The new runtime uploads the rest, and starts over a
-# large file that still had parts to send. Past the limit the uploader cuts
-# off the PUTs and hashing still running, and the rebuild waits for their
+# files or 64 MB parts. A file that didn't finish, such as a large file that
+# still had parts to send, keeps its `pending_uploads` row or stays in the
+# server's queue, as after a restart. Past the limit the uploader cuts off
+# the PUTs and hashing still running, and the rebuild waits for their
 # threads to exit before it starts the new runtime.
 CONFIG_APPLY_DRAIN_TIMEOUT_SECONDS = 120
 # While waiting with the watch folder present, a start that keeps failing is
