@@ -8,16 +8,21 @@ exercise the actual rebuild, not a stand-in.
 """
 
 from __future__ import annotations
+import collections
+import itertools
 import logging
 import os
 import sqlite3
-from collections.abc import Iterator
+import threading
+import time
+from collections.abc import Callable, Iterator
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+import requests
 import yaml
 
 from data_hub_watcher import runtime
@@ -30,6 +35,9 @@ from data_hub_watcher.models import (
     ConfigRevisionResponse,
     HeartbeatResponse,
     InstrumentConfig,
+    MultipartPartUrl,
+    MultipartPartUrlsResponse,
+    PresignedUploadResponse,
     RunDetectionConfig,
     WatcherConfig,
 )
@@ -346,6 +354,142 @@ class TestApplyInProcess:
         _deliver(sup, None)
 
         env.client.get_latest_config_revision.assert_not_called()
+
+
+def _wait_until(condition: Callable[[], bool], timeout: float = 10.0) -> None:
+    deadline = time.monotonic() + timeout
+    while not condition():
+        if time.monotonic() > deadline:
+            raise AssertionError("timed out waiting for the condition")
+        time.sleep(0.01)
+
+
+class TestRebuildDuringPartUploads:
+    """A rebuild while a large file's parts upload on their own threads (watcher 1.3.0)."""
+
+    PART_SIZE = 64
+    PART_COUNT = 4
+
+    def test_parts_still_sending_at_the_limit_are_cut_off_before_the_new_runtime_starts(
+        self, env: _Env, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # An auto-mode upload an earlier start never finished, so the first
+        # runtime's upload worker sends it as soon as it starts.
+        big = env.watch_dir / "RUN009_big.csv"
+        big.write_bytes(bytes(i % 251 for i in range(self.PART_SIZE * self.PART_COUNT)))
+        cfg = env.write_config(_cfg(env.watch_dir))
+        state = env.state()
+        try:
+            state.record_pending_uploads("RUN009", ["RUN009_big.csv"])
+        finally:
+            state.close()
+
+        upload_numbers = itertools.count(1)
+
+        def presign(*args: Any, **kwargs: Any) -> PresignedUploadResponse:
+            return PresignedUploadResponse(
+                upload_type="multipart",
+                upload_id=f"upload-{next(upload_numbers)}",
+                part_size=self.PART_SIZE,
+                part_count=self.PART_COUNT,
+                s3_bucket="test-bucket",
+                s3_key="test-instrument/RUN009/RUN009_big.csv",
+                file_id=9,
+                expires_in=900,
+                already_uploaded=False,
+            )
+
+        def part_urls(file_id: int, upload_id: str, numbers: list[int]) -> Any:
+            return MultipartPartUrlsResponse(
+                expires_in=900,
+                parts=[
+                    MultipartPartUrl(
+                        part_number=n, upload_url=f"https://s3.example/{upload_id}/{n}"
+                    )
+                    for n in numbers
+                ],
+            )
+
+        env.client.request_upload_url.side_effect = presign
+        env.client.get_part_urls.side_effect = part_urls
+
+        # Each part reads its body a byte at a time. While `slow` is set, a
+        # part takes about three seconds, far past the drain limit below.
+        slow = threading.Event()
+        slow.set()
+        lock = threading.Lock()
+        sending: collections.Counter[str] = collections.Counter()
+
+        def put(session: Any, url: str, *, data: Any, **kwargs: Any) -> MagicMock:
+            upload_id = url.split("/")[-2]
+            with lock:
+                sending[upload_id] += 1
+            try:
+                while data.read(1):
+                    if slow.is_set():
+                        time.sleep(0.05)
+            finally:
+                with lock:
+                    sending[upload_id] -= 1
+            response = MagicMock()
+            response.headers = {"ETag": f'"{url}"'}
+            return response
+
+        monkeypatch.setattr(requests.Session, "put", put)
+        monkeypatch.setattr(runtime, "CONFIG_APPLY_DRAIN_TIMEOUT_SECONDS", 0.2)
+
+        sup = env.supervisor(cfg)
+        sup.start()
+        old_rt = sup.rt
+        assert old_rt is not None
+        # All four parts are sending at once, within upload_parallelism (4).
+        _wait_until(lambda: sending["upload-1"] == self.PART_COUNT)
+
+        real_build = runtime.build_runtime
+        sending_at_rebuild: list[int] = []
+
+        def build(**kwargs: Any) -> Any:
+            with lock:
+                sending_at_rebuild.append(sum(sending.values()))
+            slow.clear()
+            return real_build(**kwargs)
+
+        monkeypatch.setattr(runtime, "build_runtime", build)
+        env.client.get_latest_config_revision.return_value = _revision(
+            2, _settings(env.watch_dir, upload_parallelism=2)
+        )
+
+        _deliver(sup, 2)
+
+        # No part of the old runtime was still sending when the new one was
+        # built, and nothing of it is left to write to its closed state DB.
+        assert sending_at_rebuild == [0]
+        assert not old_rt.state_db._connections
+        assert not [t for t in threading.enumerate() if t.name.startswith("upload-part")]
+        assert env.results() == [(WATCHER_ID, 2, "applied", None)]
+        new_rt = sup.rt
+        assert new_rt is not None
+        assert new_rt.uploader._parallelism == 2
+
+        # The interrupted file kept its pending_uploads row, so the new
+        # runtime sends it again from the start and finishes it.
+        def pending() -> list[str]:
+            state = env.state()
+            try:
+                return [p.relative_path for p in state.pending_uploads()]
+            finally:
+                state.close()
+
+        _wait_until(lambda: pending() == [])
+        [complete] = env.client.complete_multipart_upload.call_args_list
+        assert complete.args[1] == "upload-2"
+        # Being cut off isn't a failure.
+        sup.reporter.flush()
+        flushed = [
+            e["event_type"] for c in env.client.send_events.call_args_list for e in c.args[1]
+        ]
+        assert EventType.UPLOAD_FAILED.value not in flushed
+        assert flushed.count(EventType.FILE_UPLOADED.value) == 1
 
 
 class TestUpgradeMarker:

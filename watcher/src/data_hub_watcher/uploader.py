@@ -40,7 +40,7 @@ from data_hub_watcher.models import (
 )
 from data_hub_watcher.run_detector import FileInfo, file_created_at
 from data_hub_watcher.state import PendingUploadRecord, StateDB
-from data_hub_watcher.util import file_digests
+from data_hub_watcher.util import DigestCancelled, file_digests
 
 logger = logging.getLogger(__name__)
 
@@ -68,22 +68,33 @@ class _UploadStopped(Exception):
     """The watcher was asked to stop while a part was in progress."""
 
 
+class _UploadAborted(_UploadStopped):
+    """`Uploader.abort` cut off a PUT body that was still being sent."""
+
+
 class _FileSlice:
     """A file range with a known length, so `requests` sends Content-Length.
 
-    S3 rejects a part that arrives with chunked transfer encoding.
+    S3 rejects a part that arrives with chunked transfer encoding. Once
+    *abort* is set, the next read raises `_UploadAborted`, which ends the
+    PUT that is sending this body.
     """
 
-    def __init__(self, path: Path, start: int, length: int) -> None:
+    def __init__(
+        self, path: Path, start: int, length: int, abort: threading.Event | None = None
+    ) -> None:
         self._handle = path.open("rb")
         self._handle.seek(start)
         self._left = length
         self._length = length
+        self._abort = abort
 
     def __len__(self) -> int:
         return self._length
 
     def read(self, size: int = -1) -> bytes:
+        if self._abort is not None and self._abort.is_set():
+            raise _UploadAborted
         if self._left <= 0:
             return b""
         if size < 0 or size > self._left:
@@ -463,6 +474,8 @@ class Uploader:
         # parts already sending finish. ``None`` when the caller never stops
         # the uploader (unit tests).
         self._stop_event = stop_event
+        # Set by `abort`, when the owner can't wait for those parts any longer.
+        self._abort = threading.Event()
         # Track consecutive upload-queue poll failures so the watcher
         # surfaces a ``kind=upload_queue_poll_failed`` event on the
         # 1st failure and every 10th repeat. The unthrottled case
@@ -659,12 +672,26 @@ class Uploader:
     # ------------------------------------------------------------------
 
     def _stop_requested(self) -> bool:
-        return self._stop_event is not None and self._stop_event.is_set()
+        return self._abort.is_set() or (self._stop_event is not None and self._stop_event.is_set())
 
     def _request_stop(self) -> None:
         """Set the stop event, if there is one, for a wait that Ctrl-C interrupted."""
         if self._stop_event is not None:
             self._stop_event.set()
+
+    def abort(self) -> None:
+        """Stop, and cut off the PUTs and hashing still in progress.
+
+        For an owner that can no longer wait for a stop to finish, such as a
+        config rebuild past its drain limit. Nothing new starts, as after a
+        stop, and each PUT body and hash raises at its next read, so every
+        file and part thread exits soon. A file that was cut off isn't
+        recorded or reported as failed: an auto-mode file keeps its
+        ``pending_uploads`` row and a queued file stays in the server's
+        queue, so the next runtime uploads it again from the start.
+        """
+        self._abort.set()
+        self._request_stop()
 
     def _for_each(self, items: Sequence[_T], fn: Callable[[_T], None]) -> None:
         """Run *fn* on each item, at most ``upload_parallelism`` at a time.
@@ -883,8 +910,12 @@ class Uploader:
         if content_type:
             headers["Content-Type"] = content_type
 
-        with open(path, "rb") as fh:
-            resp = self._s3_session.put(url, data=fh, headers=headers, timeout=300)
+        # A slice of the whole file, so `abort` can cut the PUT off.
+        body = _FileSlice(path, 0, path.stat().st_size, self._abort)
+        try:
+            resp = self._s3_session.put(url, data=body, headers=headers, timeout=300)
+        finally:
+            body.close()
         resp.raise_for_status()
 
     # ------------------------------------------------------------------
@@ -1000,6 +1031,9 @@ class Uploader:
                         return False
                     self._put_to_presigned_url(url, path, content_type)
                 return True
+            except _UploadAborted:
+                logger.info("Upload cut off; deferring %s", path.name)
+                return False
             except Exception as exc:
                 last_exc = exc
                 logger.warning(
@@ -1190,7 +1224,7 @@ class Uploader:
                     if not acquired:
                         raise _UploadStopped
                     url = urls.get(part_number, refresh=attempt > 0)
-                    slice_reader = _FileSlice(path, start, length)
+                    slice_reader = _FileSlice(path, start, length, self._abort)
                     response = self._s3_session.put(
                         url,
                         data=slice_reader,
@@ -1310,7 +1344,7 @@ class Uploader:
         # method behaves exactly as the old serial version.
         prep_started = time.monotonic()
         with ThreadPoolExecutor(max_workers=2, thread_name_prefix="upload-prep") as prep:
-            sha_future = prep.submit(file_digests, path)
+            sha_future = prep.submit(file_digests, path, self._abort)
             presign_future = prep.submit(
                 self._client.request_upload_url,
                 self._instrument_id,
@@ -1346,6 +1380,10 @@ class Uploader:
 
             try:
                 sha, crc64nvme = sha_future.result()
+            except DigestCancelled:
+                # `abort` cut the hash off. Nothing was sent or recorded.
+                logger.info("Upload cut off; deferring %s", path.name)
+                return False
             except Exception as exc:
                 # Hashing failed (e.g. the file vanished mid-stream).
                 # Treat as an upload failure so the file is retried

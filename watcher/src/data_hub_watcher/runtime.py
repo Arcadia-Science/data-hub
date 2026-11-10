@@ -1516,31 +1516,67 @@ class WatcherSupervisor:
     def _teardown_for_rebuild(self) -> None:
         """Stop the running loops without reporting the watcher as stopped.
 
-        In-progress uploads get up to ``CONFIG_APPLY_DRAIN_TIMEOUT_SECONDS``
-        to finish. The upload stop signal is shared, so queued files and the
-        rest of an auto-mode batch wait for the next runtime, which retries
-        them.
+        Returns only once every upload thread of the old runtime has exited
+        (see `_stop_upload_threads`), so its state DB is closed with nothing
+        left to write to it, and the next runtime never uploads alongside it.
         """
         rt, self.rt = self.rt, None
         if rt is not None:
-            deadline = time.monotonic() + CONFIG_APPLY_DRAIN_TIMEOUT_SECONDS
-            uploads_stopped = True
-            if rt.upload_worker is not None:
-                uploads_stopped = rt.upload_worker.stop(timeout=CONFIG_APPLY_DRAIN_TIMEOUT_SECONDS)
-            monitor_stopped = rt.monitor.stop(timeout=max(1.0, deadline - time.monotonic()))
+            _stop_upload_threads(rt)
             rt.heartbeat.stop(send_stopped=False)
             rt.reporter.flush()
-            if uploads_stopped and monitor_stopped:
-                rt.state_db.close()
-            else:
-                logger.warning(
-                    "An upload was still running after %ds; rebuilding anyway and "
-                    "leaving it to finish on its own",
-                    CONFIG_APPLY_DRAIN_TIMEOUT_SECONDS,
-                )
+            rt.state_db.close()
         waiting, self._waiting = self._waiting, None
         if waiting is not None:
             waiting.heartbeat.stop(send_stopped=False)
+
+
+# How often a rebuild that cut its uploads off checks that their threads have
+# exited, and how often it logs while it keeps waiting.
+_CUT_OFF_JOIN_STEP_SECONDS = 0.5
+_CUT_OFF_LOG_INTERVAL_SECONDS = 60
+
+
+def _stop_upload_threads(rt: WatcherRuntime) -> None:
+    """Stop *rt*'s upload worker and file monitor, and return once both have exited.
+
+    The upload worker, auto-mode uploads on the monitor's thread, and the file
+    and part threads they start all share the uploader's stop signal, so no
+    new file or part starts. Each thread waits for the threads it started, so
+    once the worker and the monitor have exited, no upload thread is left.
+
+    Uploads in progress get up to ``CONFIG_APPLY_DRAIN_TIMEOUT_SECONDS`` to
+    finish. Past that, `Uploader.abort` cuts off the PUTs and hashing still
+    running, and this keeps waiting, in short steps, until the threads have
+    unwound. A file that was cut off keeps its ``pending_uploads`` row, or
+    stays in the server's queue, so the new runtime uploads it again from
+    the start.
+    """
+    deadline = time.monotonic() + CONFIG_APPLY_DRAIN_TIMEOUT_SECONDS
+    worker = rt.upload_worker
+    worker_done = (
+        worker.stop(timeout=CONFIG_APPLY_DRAIN_TIMEOUT_SECONDS) if worker is not None else True
+    )
+    monitor_done = rt.monitor.stop(timeout=max(1.0, deadline - time.monotonic()))
+    if worker_done and monitor_done:
+        return
+    logger.warning(
+        "Uploads were still running after %ss; cutting them off to apply the new "
+        "config. The new config uploads them again.",
+        CONFIG_APPLY_DRAIN_TIMEOUT_SECONDS,
+    )
+    rt.uploader.abort()
+    next_log = time.monotonic() + _CUT_OFF_LOG_INTERVAL_SECONDS
+    while True:
+        if not worker_done and worker is not None:
+            worker_done = worker.stop(timeout=_CUT_OFF_JOIN_STEP_SECONDS)
+        if not monitor_done:
+            monitor_done = rt.monitor.join(timeout=_CUT_OFF_JOIN_STEP_SECONDS)
+        if worker_done and monitor_done:
+            return
+        if time.monotonic() >= next_log:
+            logger.warning("Still waiting for the cut-off uploads to stop")
+            next_log = time.monotonic() + _CUT_OFF_LOG_INTERVAL_SECONDS
 
 
 def run_supervisor(supervisor: WatcherSupervisor, stop_event: threading.Event) -> None:
