@@ -8,11 +8,7 @@ import numpy as np
 import pytest
 import tifffile
 
-from data_hub_lambda.dishcam.encode_video import (
-    _ffmpeg_rate,
-    encode_tiff_stack,
-    resolve_ffmpeg,
-)
+from data_hub_lambda.dishcam.encode_video import encode_tiff_stack
 
 requires_ffmpeg = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg is not on PATH")
 
@@ -56,14 +52,3 @@ def test_encode_odd_width_stack(tmp_path: Path) -> None:
     assert mp4.is_file()
     assert mp4.stat().st_size > 0
     assert poster.is_file()
-
-
-@requires_ffmpeg
-def test_resolve_ffmpeg_finds_binary() -> None:
-    assert Path(resolve_ffmpeg()).name.startswith("ffmpeg")
-
-
-def test_ffmpeg_rate_avoids_scientific_notation() -> None:
-    assert "e" not in _ffmpeg_rate(1e-5).lower()
-    assert _ffmpeg_rate(10.0) == "10"
-    assert _ffmpeg_rate(0.95) == "0.95"

@@ -19,13 +19,13 @@ export const reportViewItemsTool = {
   scope: "files:read",
   title: "Report View Items",
   description:
-    "Return a paginated window of run report items (images, PDFs, spectra, or videos) with download URLs. Used by the Data Hub run report view. Call `get_run_report` instead.",
+    "Return a paginated window of run report items (images, PDFs, spectra, videos, or media) with download URLs. Used by the Data Hub run report view. Call `get_run_report` instead.",
   outputSchema: reportViewItemsOutputSchema,
   inputSchema: {
     instrumentId: z.string().describe("Instrument identifier"),
     runId: z.string().describe("Run identifier within the instrument"),
     kind: reportViewItemKindSchema.describe(
-      "Report item kind: image, pdf, spectrum, or video"
+      "Report item kind: image, media, pdf, spectrum, or video. `media` lists videos and images together, without the image that is a video's poster"
     ),
     offset: z
       .number()

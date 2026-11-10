@@ -1,6 +1,7 @@
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { AuntyPlateReport } from "@/components/runs/aunty/aunty-plate-report";
 import { ImageCarouselReport } from "@/components/runs/image-carousel-report";
+import { MediaCarouselReport } from "@/components/runs/media-carousel-report";
 import { PdfCarouselReport } from "@/components/runs/pdf-carousel-report";
 import {
   PlateMapGrid,
@@ -136,13 +137,17 @@ export function InstrumentReport({
   const instrumentType = asInstrumentType(result.instrumentType);
   const kind = reportItemKindForInstrument(instrumentType);
 
-  if (
-    kind === "image" &&
-    (instrumentType === "gel_doc" || instrumentType === "hina_microscope")
-  ) {
+  if (kind === "image" && instrumentType === "gel_doc") {
     return (
       <CarouselKindReport kind={kind} persistKey={persistKey}>
         <ImageCarouselReport />
+      </CarouselKindReport>
+    );
+  }
+  if (kind === "media" && instrumentType === "hina_microscope") {
+    return (
+      <CarouselKindReport kind={kind} persistKey={persistKey}>
+        <MediaCarouselReport />
       </CarouselKindReport>
     );
   }

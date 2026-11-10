@@ -101,15 +101,16 @@ def gel_doc(file: Path, output_dir: Path | None) -> None:
     "--output-dir",
     type=click.Path(file_okay=False, path_type=Path),
     default=None,
-    help="Directory for the exported JPG (default: same directory as FILE).",
+    help="Directory for the exported JPG and MP4 (default: same directory as FILE).",
 )
 def hina(file: Path, output_dir: Path | None) -> None:
-    """Convert a Hina microscope ND2 file to a JPG overlay.
+    """Convert a Hina microscope ND2 file to a JPG overlay, plus an MP4 for a timelapse.
 
     Loads the ND2 via `arcadia-microscopy-tools`, produces a composite
-    JPG overlay (per-channel percentile-stretched intensities blended onto
-    a brightfield/zero background using each channel's native color), and
-    prints the parsed run-level metadata.
+    JPG overlay of the first time point (per-channel percentile-stretched
+    intensities blended onto a brightfield/zero background using each
+    channel's native color), encodes every time point as an MP4 when the
+    file has more than one, and prints the parsed run-level metadata.
     """
     from data_hub_lambda.hina_microscope.image_processing import ND2Processor
     from data_hub_lambda.hina_microscope.parse_metadata import parse_metadata
@@ -118,6 +119,11 @@ def hina(file: Path, output_dir: Path | None) -> None:
     processor.load()
     jpg_path = processor.export_jpg(output_dir=output_dir)
     click.echo(f"Exported JPG: {jpg_path}")
+    video = processor.export_mp4(output_dir=output_dir)
+    if video is not None:
+        click.echo(
+            f"Exported MP4: {video.path} ({video.frames} frames at {video.playback_fps:g} fps)"
+        )
 
     metadata = parse_metadata(processor.image)
     click.echo(json.dumps(metadata, indent=2))
@@ -273,11 +279,8 @@ def tapestation(filename: str) -> None:
 def dishcam_cmd(tiff: Path, run_json: Path, output_dir: Path | None) -> None:
     """Convert a DishCam TIFF stack to an MP4 preview and JPEG poster."""
     from data_hub_lambda.dishcam.encode_video import encode_tiff_stack
-    from data_hub_lambda.dishcam.parse_metadata import (
-        encode_fps,
-        parse_run_json,
-        playback_fps,
-    )
+    from data_hub_lambda.dishcam.parse_metadata import encode_fps, parse_run_json
+    from data_hub_lambda.video import playback_fps
 
     metadata = parse_run_json(run_json)
     fps = playback_fps(encode_fps(metadata))

@@ -14,6 +14,8 @@ from data_hub_lambda.hina_microscope import image_processing
 from data_hub_lambda.hina_microscope.image_processing import (
     MAX_PREVIEW_BYTES,
     RGB_NOT_SUPPORTED_MESSAGE,
+    _frame_indices_by_time,
+    _reduce_frames,
     _reduce_loops,
     _shrink_plane,
     _shrink_planes,
@@ -86,6 +88,40 @@ def test_t_and_z_project_the_first_timepoint(n_channels: int) -> None:
 
     assert [plane.tolist() for plane in planes] == _expected(4, n_channels)
     assert read == [0, 1, 2]
+
+
+def test_a_later_timepoint_projects_its_own_z_frames(n_channels: int) -> None:
+    read: list[int] = []
+    loops = [{"T": t, "Z": z} for t, z in product(range(2), range(3))]
+    sizes = {"T": 2, "Z": 3, "C": n_channels, "Y": 2, "X": 2}
+    values = [1, 4, 2, 50, 70, 60]
+
+    planes = _reduce_loops(_reader(values, n_channels, read), loops, sizes, t=1)
+
+    assert [plane.tolist() for plane in planes] == _expected(70, n_channels)
+    assert read == [3, 4, 5]
+
+
+def test_a_later_timepoint_keeps_the_first_position_whatever_the_loop_order() -> None:
+    # Positions outside time: P0 T0, P0 T1, P1 T0, P1 T1.
+    loops = [{"P": p, "T": t} for p, t in product(range(2), range(2))]
+    sizes = {"P": 2, "T": 2, "Y": 2, "X": 2}
+
+    assert _frame_indices_by_time(loops, sizes) == [[0], [1]]
+
+
+def test_every_timepoint_gets_its_own_frames() -> None:
+    loops = [{"T": t, "P": p, "Z": z} for t, p, z in product(range(3), range(2), range(2))]
+    sizes = {"T": 3, "P": 2, "Z": 2, "Y": 2, "X": 2}
+
+    assert _frame_indices_by_time(loops, sizes) == [[0, 1], [4, 5], [8, 9]]
+
+
+def test_a_named_step_replaces_the_frame_count_in_the_deadline_message() -> None:
+    set_deadline_from_remaining_ms(0)
+
+    with pytest.raises(ProcessingDeadlineError, match=r"encoding \(4 of 9 frames done\)"):
+        _reduce_frames(_reader([1], 1, []), [0], {}, step="encoding (4 of 9 frames done)")
 
 
 def test_the_first_frame_is_not_changed_by_later_frames() -> None:

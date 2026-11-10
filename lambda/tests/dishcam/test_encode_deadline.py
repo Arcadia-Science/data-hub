@@ -44,7 +44,7 @@ def test_encode_stops_between_frames(tmp_path: Path, monkeypatch: pytest.MonkeyP
     monkeypatch.setattr("data_hub_lambda.dishcam.encode_video.resolve_ffmpeg", lambda: "ffmpeg")
     monkeypatch.setattr("data_hub_lambda.dishcam.encode_video._write_jpeg", lambda *_a, **_k: None)
     monkeypatch.setattr(
-        "data_hub_lambda.dishcam.encode_video._pipe_ffmpeg",
+        "data_hub_lambda.video.pipe_ffmpeg",
         lambda _cmd, chunks: list(chunks),
     )
 

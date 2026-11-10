@@ -71,9 +71,9 @@ DishCam reads the run's file list (`GET /instruments/:id/runs/:runId`, which nee
 
 A folder's own sidecar can be reported after its stacks, so a stack may first be encoded with the plain `run.json`. When that folder's sidecar reaches S3, its event re-encodes every completed stack in the folder whose `sidecar` key names a different file. A stack with no `sidecar` key counts as encoded from `run.json`, which is what the Lambda used before the key existed. That event skips a stack that is still encoding, so an encode that used another folder's sidecar reloads the file list when it finishes and re-encodes if the folder's own sidecar has arrived.
 
-DishCam decodes one TIFF page at a time and pipes it to ffmpeg, so it passes `streams=True` and reads large stacks from the raw-bucket mount. Before each frame it checks the time left in the invocation. When time is short, the encode stops between frames and the stack is marked failed with a message that says how far it got, such as "12 of 400 frames done".
+DishCam decodes one TIFF page at a time and pipes it to ffmpeg through the shared encoder in `data_hub_lambda/video.py`, so it passes `streams=True` and reads large stacks from the raw-bucket mount. Before each frame it checks the time left in the invocation. When time is short, the encode stops between frames and the stack is marked failed with a message that says how far it got, such as "12 of 400 frames done".
 
-Hina Microscope also passes `streams=True`. It reads an ND2 one frame at a time, max-projects Z, and keeps the first time point and position, all in the file's own pixel type. Before reading any frames, it checks that the full-size planes fit. Reading holds the running projection and one decoded frame, so twice the planes' size has to stay within `MAX_PREVIEW_BYTES`. For 16-bit pixels, that only fails an image around 32,000 pixels per side with one channel, 19,000 with three, and 16,000 with four. The file is marked failed with a message that the raw file can still be downloaded.
+Hina Microscope also passes `streams=True`. It reads an ND2 one frame at a time, max-projects Z, and keeps the first position, all in the file's own pixel type. The JPG is the first time point. A file with more than one time point (`sizes["T"] > 1`) is read again, one time point at a time, and each rendered frame is piped to the same encoder as DishCam to make `{stem}.mp4`. Every frame uses the contrast range of the first, and the frame rate comes from the time loop's measured `periodDiff.avg`, floored at 10 fps. A time point with no frames, as in a capture stopped early, is skipped. The JPG is uploaded before the encode starts, so a failed or timed-out encode marks the file failed and leaves the JPG. Before reading any frames, it checks that the full-size planes fit. Reading holds the running projection and one decoded frame, so twice the planes' size has to stay within `MAX_PREVIEW_BYTES`. For 16-bit pixels, that only fails an image around 32,000 pixels per side with one channel, 19,000 with three, and 16,000 with four. The file is marked failed with a message that the raw file can still be downloaded.
 
 Rendering needs much more memory than reading, because the contrast stretch and the color overlay work in 64-bit numbers. An image whose estimated render size (`preview_bytes`) is over `MAX_PREVIEW_BYTES` is shrunk before rendering. `preview_shrink_factor` picks the smallest whole number that makes the render fit, and each plane becomes the average of that many pixels per side, in the plane's own pixel type. The full-size planes are freed as they are replaced. An image that already fits is not shrunk, so its preview does not change. The run metadata still records the real image size, and the preview JPG is smaller than the image.
 
@@ -117,7 +117,7 @@ Available commands:
 | --- | --- |
 | `epson-scanner` | Process an Epson V700 Scanner TIFF (resized JPEG preview + metadata) |
 | `gel-doc` | Process an Azure 600 Gel Doc TIFF (contrast-enhanced PNG + metadata) |
-| `hina` | Convert a Hina microscope ND2 file to a JPG overlay + metadata |
+| `hina` | Convert a Hina microscope ND2 file to a JPG overlay + metadata, and a timelapse to an MP4 as well |
 | `qpcr` | Parse dye channels from an Azure Cielo qPCR Cq Values CSV |
 | `spectramax` | Parse metadata and raw well data from a SpectraMax `.xls` export |
 | `tapestation` | Extract the tape type from a TapeStation CSV filename |
@@ -162,7 +162,7 @@ The Lambda function depends on a scientific Python stack:
 - `scikit-image` — image processing
 - `tifffile` — TIFF file reading
 - `openpyxl` — Excel reading for Unchained Labs Aunty `.xlsx` exports
-- `ffmpeg` — static linux/amd64 binary from `mwader/static-ffmpeg` for DishCam H.264 encode
+- `ffmpeg` — static linux/amd64 binary from `mwader/static-ffmpeg` for the DishCam and Hina timelapse H.264 encodes
 - `arcadia-microscopy-tools` — ND2 reading, channel handling, and multi-channel compositing for the Hina microscope
 - `pydantic` — data validation
 - `requests` — HTTP client for the Data Hub API

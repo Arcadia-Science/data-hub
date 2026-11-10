@@ -4,6 +4,8 @@ import { REPORT_ITEM_KINDS } from "@/lib/runs/report-items";
 export const reportViewItemSchema = z.object({
   id: z.number().int(),
   filename: z.string(),
+  // `media` only: the file id of a video's poster image, or null.
+  poster_id: z.number().int().nullable().optional(),
   downloadUrl: z.string(),
 });
 

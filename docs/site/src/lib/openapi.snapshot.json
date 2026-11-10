@@ -340,13 +340,19 @@
               "lambda",
               "watcher"
             ]
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "The run's stored metadata. Empty for a new run; an existing run returns what processing has written so far."
           }
         },
         "required": [
           "id",
           "instrument_id",
           "run_id",
-          "source"
+          "source",
+          "metadata"
         ]
       },
       "RunDetail": {
@@ -699,6 +705,13 @@
           },
           "filename": {
             "type": "string"
+          },
+          "poster_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Only for `kind=media`. The file id of the image with the same name as this video, used as its poster. Null for an image, or for a video without one."
           }
         },
         "required": [
@@ -2986,14 +2999,15 @@
               "type": "string",
               "enum": [
                 "image",
+                "media",
                 "pdf",
                 "spectrum",
                 "video"
               ],
-              "description": "Which renderable artifacts to list."
+              "description": "Which renderable artifacts to list. `media` lists videos and images together, and leaves out an image whose video has the same name, because that image is the video's poster."
             },
             "required": true,
-            "description": "Which renderable artifacts to list.",
+            "description": "Which renderable artifacts to list. `media` lists videos and images together, and leaves out an image whose video has the same name, because that image is the video's poster.",
             "name": "kind",
             "in": "query"
           },

@@ -58,6 +58,7 @@ describe("Instrument Runs API", () => {
     expect(data.run_id).toBe("run-001");
     expect(data.source).toBe("lambda");
     expect(data.id).toBeTruthy();
+    expect(data.metadata).toEqual({});
     // Drift guard: the live response must match its documented OpenAPI schema
     // (responses aren't validated at runtime, so this is the only backstop).
     runCreated.parse(data);
@@ -295,6 +296,19 @@ describe("Instrument Runs API", () => {
     const data = await res.json();
     expect(data.metadata).toEqual({ assay: "Bradford", plate: "96-well" });
     runUpdated.parse(data);
+  });
+
+  // The Hina Lambda writes run metadata only when this comes back empty.
+  it("POST for an existing run returns the metadata written so far", async () => {
+    const res = await api(`/api/v1/instruments/${instrumentId}/runs`, {
+      method: "POST",
+      token,
+      body: { run_id: "run-001", source: "lambda" },
+    });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.metadata).toEqual({ assay: "Bradford", plate: "96-well" });
+    runCreated.parse(data);
   });
 
   it("PATCH rejects non-object metadata", async () => {

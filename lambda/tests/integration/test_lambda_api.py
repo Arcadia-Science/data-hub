@@ -6,6 +6,7 @@ queries.
 """
 
 from __future__ import annotations
+import importlib.resources
 import shutil
 from collections.abc import Callable
 from pathlib import Path
@@ -239,6 +240,79 @@ class TestAzure600GelDocHappyPath:
         mock_s3_upload.assert_called_once()
         upload_dest = mock_s3_upload.call_args[0][1]
         assert upload_dest == f"s3://test-processed-bucket/azure-600-gel-doc/{run_id}/{run_id}.png"
+
+
+# ------------------------------------------------------------------
+# Test 4b': Hina microscope — a timelapse ND2 gets a JPG and an MP4
+# ------------------------------------------------------------------
+
+
+_ND2_EXAMPLES = Path(str(importlib.resources.files("arcadia_microscopy_tools"))) / "tests" / "data"
+
+
+class TestHinaTimelapse:
+    @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg is not on PATH")
+    def test_timelapse_gets_an_mp4_and_a_z_stack_only_a_jpg(
+        self,
+        integration_env: IntegrationEnv,
+        make_s3_event: Callable[..., dict[str, Any]],
+        s3_fixture_files: dict[str, Path],
+        mock_context: MagicMock,
+        mock_s3_upload: MagicMock,
+    ) -> None:
+        run_id = "hina-timelapse-test"
+        examples = {"well_A1.nd2": "example-timelapse.nd2", "well_A2.nd2": "example-zstack.nd2"}
+        for name, example in examples.items():
+            s3_fixture_files[f"hina-microscope/{run_id}/{name}"] = _ND2_EXAMPLES / example
+            lambda_handler(make_s3_event("hina-microscope", run_id, name), mock_context)
+
+        run = _api_get(
+            integration_env.base_url,
+            integration_env.api_token,
+            f"/api/v1/instruments/hina-microscope/runs/{run_id}",
+        )
+
+        raw = {f["filename"]: f for f in run["files"] if f["category"] == "raw"}
+        assert raw["well_A1.nd2"]["status"] == "completed"
+        assert raw["well_A2.nd2"]["status"] == "completed"
+        processed = {f["filename"] for f in run["files"] if f["category"] == "processed"}
+        assert processed == {"well_A1.jpg", "well_A1.mp4", "well_A2.jpg"}
+
+        # Run metadata comes from the first file. The Z-stack that finished
+        # second must not replace it.
+        assert run["metadata"]["sizes"] == {"T": 53, "Y": 64, "X": 64}
+        assert run["metadata"]["dimensions"] == ["TIMELAPSE"]
+
+        uploaded = {call.args[1] for call in mock_s3_upload.call_args_list}
+        prefix = f"s3://test-processed-bucket/hina-microscope/{run_id}"
+        assert uploaded == {
+            f"{prefix}/well_A1.jpg",
+            f"{prefix}/well_A1.mp4",
+            f"{prefix}/well_A2.jpg",
+        }
+
+        # File metadata is not in the run response, so read it from the table.
+        conn = psycopg2.connect(integration_env.db_dsn)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT f.filename, f.metadata, f.content_type FROM files f "
+                    "JOIN instrument_runs r ON r.id = f.instrument_run_id "
+                    "WHERE r.run_id = %s",
+                    (run_id,),
+                )
+                rows = {name: (metadata, content_type) for name, metadata, content_type in cur}
+        finally:
+            conn.close()
+
+        assert rows["well_A1.nd2"][0] == {
+            "frames": 53,
+            "frame_interval_ms": 500.16,
+            "playback_fps": 10.0,
+        }
+        assert rows["well_A2.nd2"][0] == {}
+        assert rows["well_A1.mp4"][1] == "video/mp4"
+        assert rows["well_A1.jpg"][1] == "image/jpeg"
 
 
 # ------------------------------------------------------------------

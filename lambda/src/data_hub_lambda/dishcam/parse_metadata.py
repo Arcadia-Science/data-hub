@@ -50,13 +50,3 @@ def encode_fps(metadata: dict[str, Any]) -> float:
     if fps <= 0:
         raise ValueError(f"run.json fps must be positive, got {fps}")
     return fps
-
-
-# Multi-day captures can land well below 1 fps. The in-app player is a
-# preview, so floor the encode rate rather than playing in real time.
-MIN_PLAYBACK_FPS = 10.0
-
-
-def playback_fps(capture_fps: float) -> float:
-    """Return the fps used for the MP4 preview, not the stored metadata."""
-    return max(capture_fps, MIN_PLAYBACK_FPS)
