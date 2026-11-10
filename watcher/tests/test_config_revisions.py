@@ -10,6 +10,7 @@ exercise the actual rebuild, not a stand-in.
 from __future__ import annotations
 import logging
 import os
+import sqlite3
 from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
@@ -493,6 +494,33 @@ class TestRejectMissingFolder:
         assert (number, status) == (2, "rejected")
         assert "cannot watch" in reason
         assert sup.applied_revision is None
+
+
+    def test_error_after_teardown_rolls_back_instead_of_going_silent(
+        self, env: _Env, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        sup = env.supervisor()
+        sup.start()
+        before = env.config_path.read_bytes()
+        elsewhere = env.tmp_path / "elsewhere"
+        elsewhere.mkdir()
+
+        def locked() -> None:
+            raise sqlite3.OperationalError("database is locked")
+
+        # Fails after the old loops have stopped, before the new ones start.
+        monkeypatch.setattr(sup, "_forget_old_folder_uploads", locked)
+        env.client.get_latest_config_revision.return_value = _revision(2, _settings(elsewhere))
+
+        _deliver(sup, 2)
+
+        assert sup.rt is not None
+        assert sup.rt.heartbeat._thread is not None and sup.rt.heartbeat._thread.is_alive()
+        assert sup.cfg.instrument.watch_directory == env.watch_dir.resolve()
+        assert env.config_path.read_bytes() == before
+        [(_, number, status, reason)] = env.results()
+        assert (number, status) == (2, "rejected")
+        assert "database is locked" in reason
 
 
 class TestWaitingState:

@@ -1016,24 +1016,26 @@ class WatcherSupervisor:
 
         logger.info("Applying config revision %d from Data Hub", number)
         running = self.rt is not None or self._waiting is not None
-        self._teardown_for_rebuild()
-        if folder_changed(old_inst, new_inst):
-            self._forget_old_folder_uploads()
-        self.cfg = new_cfg
-
-        if running:
-            try:
+        # Everything from the teardown on is rolled back on failure. Otherwise
+        # an error after the old loops stopped would leave nothing running,
+        # not even the heartbeat that could deliver the next fix.
+        try:
+            self._teardown_for_rebuild()
+            if folder_changed(old_inst, new_inst):
+                self._forget_old_folder_uploads()
+            self.cfg = new_cfg
+            if running:
                 self._start_watching_or_wait(
                     started_message=(
                         f"{self.role} restarted on {self.host} with config revision {number}"
                     ),
                     report_only_rules=rules,
                 )
-            except Exception as exc:
-                logger.exception("Could not start with config revision %d", number)
-                self._roll_back(old_cfg, previous_file)
-                self._reject(number, f"Could not start with the new config: {exc}")
-                return False
+        except Exception as exc:
+            logger.exception("Could not switch to config revision %d", number)
+            self._roll_back(old_cfg, previous_file, restart=running)
+            self._reject(number, f"Could not start with the new config: {exc}")
+            return False
         # Kept only once the new config runs. When called from `start`, before
         # anything runs, `start` builds the first runtime with them next.
         self._report_only_rules = rules
@@ -1077,11 +1079,19 @@ class WatcherSupervisor:
         self._record_seen(number)
         self._report_result(number, "rejected", reason)
 
-    def _roll_back(self, old_cfg: WatcherConfig, previous_file: bytes | None) -> None:
-        """Restore the previous config after the new one failed to start."""
+    def _roll_back(
+        self, old_cfg: WatcherConfig, previous_file: bytes | None, *, restart: bool
+    ) -> None:
+        """Restore the previous config after switching to a new one failed.
+
+        *restart* is false when called from `start`, which starts the
+        previous config itself once this returns.
+        """
         self._teardown_for_rebuild()
         self.cfg = old_cfg
         self._restore_config_file(previous_file, old_cfg)
+        if not restart:
+            return
         self._start_or_wait_on_error(
             started_message=f"{self.role} restarted on {self.host} with its previous config"
         )
