@@ -289,6 +289,47 @@ class TestApplyInProcess:
         assert saved["instrument"]["upload_parallelism"] == 2
         assert sup.rt is not None and sup.rt.detector._upload_cb is None
 
+    def test_restoring_the_running_settings_overwrites_an_unloaded_pc_edit(self, env: _Env) -> None:
+        sup = env.supervisor()
+        sup.start()
+        old_rt = sup.rt
+        # `config edit` on the PC while the watcher runs: the file changes,
+        # but this process keeps running what it loaded at startup.
+        save_config(
+            _cfg(env.watch_dir).model_copy(
+                update={
+                    "instrument": _cfg(env.watch_dir).instrument.model_copy(
+                        update={"file_patterns": ["*.csv", "*.dat"]}
+                    )
+                }
+            ),
+            env.config_path,
+        )
+        # An admin restores the settings the watcher still runs.
+        env.client.get_latest_config_revision.return_value = _revision(2, _settings(env.watch_dir))
+        env.client.push_config.reset_mock()
+
+        _deliver(sup, 2)
+
+        assert sup.rt is old_rt  # nothing to rebuild
+        assert env.saved_instrument()["file_patterns"] == ["*.csv"]
+        assert env.results() == [(WATCHER_ID, 2, "applied", None)]
+        env.client.push_config.assert_called_once()
+        assert sup.applied_revision == 2
+
+    def test_matching_file_is_left_alone(self, env: _Env) -> None:
+        sup = env.supervisor()
+        sup.start()
+        before = env.config_path.read_bytes()
+        env.client.get_latest_config_revision.return_value = _revision(2, _settings(env.watch_dir))
+        env.client.push_config.reset_mock()
+
+        _deliver(sup, 2)
+
+        assert env.config_path.read_bytes() == before
+        assert env.results() == [(WATCHER_ID, 2, "applied", None)]
+        env.client.push_config.assert_not_called()
+
     def test_older_revision_than_applied_is_not_refetched(self, env: _Env) -> None:
         sup = env.supervisor()
         sup.start()

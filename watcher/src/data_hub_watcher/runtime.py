@@ -38,6 +38,7 @@ from data_hub_watcher.events import EventReporter, EventType, WatcherEvent
 from data_hub_watcher.heartbeat import HeartbeatLoop, WatcherCounters
 from data_hub_watcher.models import (
     ConfigRevisionResponse,
+    InstrumentConfig,
     WatcherConfig,
     watch_directory_problem,
 )
@@ -989,10 +990,8 @@ class WatcherSupervisor:
 
         old_cfg = self.cfg
         if settings_match(old_cfg.instrument, revision.settings):
-            # Nothing to change, so skip the rebuild.
-            self._record_applied(number)
-            self._report_result(number, "applied")
-            return False
+            # Nothing to rebuild.
+            return self._apply_without_rebuild(revision)
         try:
             self._check_config_file_identity()
             new_cfg = config_with_revision(old_cfg, revision.settings)
@@ -1056,6 +1055,50 @@ class WatcherSupervisor:
                 self._revision_due.set()
                 self._wake.set()
         return True
+
+    def _apply_without_rebuild(self, revision: ConfigRevisionResponse) -> bool:
+        """Accept a revision whose settings the running config already has.
+
+        ``config.yaml`` can still differ: the watcher reads it only at
+        startup, so an edit made on the PC since then (`config edit`, say) is
+        on disk but not running. An admin who restores the running settings
+        from the web app expects them to stay, so the file is saved over
+        rather than left to bring the edit back at the next restart.
+        """
+        number = revision.revision
+        rewritten = False
+        if not self._file_settings_match(revision.settings):
+            previous_file = self._read_config_file()
+            try:
+                self._check_config_file_identity()
+                config_io.save_config(
+                    self.cfg,
+                    self.config_path,
+                    watch_directory_text=str(revision.settings["watch_directory"]),
+                )
+            except RevisionRejected as exc:
+                self._reject(number, str(exc))
+                return False
+            except OSError as exc:
+                self._restore_config_file(previous_file, self.cfg)
+                self._reject(number, f"Could not write {self.config_path}: {exc}")
+                return False
+            rewritten = True
+        self._record_applied(number)
+        self._report_result(number, "applied")
+        if rewritten:
+            self._push_config(trigger="config_revision")
+        return False
+
+    def _file_settings_match(self, raw_settings: dict[str, Any]) -> bool:
+        """Whether the editable settings in ``config.yaml`` equal *raw_settings*."""
+        try:
+            data = yaml.safe_load(self.config_path.read_text(encoding="utf-8"))
+            file_inst = InstrumentConfig(**data["instrument"])
+        except Exception:
+            # Unreadable or invalid: saving the revision over it is right too.
+            return False
+        return settings_match(file_inst, raw_settings)
 
     def _check_config_file_identity(self) -> None:
         """Refuse to overwrite a config file that now belongs to another watcher.
