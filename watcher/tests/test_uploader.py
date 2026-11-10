@@ -693,6 +693,43 @@ class TestPollUploadQueueAttemptCap:
         mock_client.cancel_upload_request.assert_called_once_with(2)
         assert reporter_mock.report_error.call_args.kwargs["reason"] == "upload_failed"
 
+    def test_upload_cut_off_by_a_stop_is_not_an_attempt(
+        self,
+        mock_client: MagicMock,
+        state_db: StateDB,
+        tmp_path: Path,
+    ) -> None:
+        (tmp_path / "data.csv").write_text("x")
+        stop = threading.Event()
+        up = _make_uploader(mock_client, state_db, tmp_path, parallelism=1, stop_event=stop)
+        mock_client.get_upload_queue.return_value = UploadQueueResponse(
+            files=[
+                UploadQueueFile(
+                    id=2,
+                    instrument_id="test-instrument",
+                    run_id="RUN-Y",
+                    filename="data.csv",
+                    relative_path="data.csv",
+                )
+            ]
+        )
+        with patch.object(up, "_upload_single", return_value=False):
+            for _ in range(MAX_QUEUE_FILE_ATTEMPTS - 1):
+                up.poll_upload_queue()
+
+        def cut_off(path: Path, run_id: str) -> bool:
+            # A config rebuild stops the uploader while this file uploads.
+            stop.set()
+            return False
+
+        with patch.object(up, "_upload_single", side_effect=cut_off):
+            up.poll_upload_queue()
+
+        # The last attempt isn't used up, so the request isn't cancelled and
+        # the file stays in the server's queue for the next runtime.
+        mock_client.cancel_upload_request.assert_not_called()
+        assert up._queue_attempts[2].count == MAX_QUEUE_FILE_ATTEMPTS - 1
+
     def test_successful_upload_prunes_without_cancel(
         self,
         uploader: Uploader,

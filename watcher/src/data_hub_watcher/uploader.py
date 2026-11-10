@@ -851,6 +851,11 @@ class Uploader:
         if ok:
             self._queue_attempts.pop(qf.id, None)
             return
+        if self._stop_requested():
+            # A stop, or a config rebuild, cut the upload off. That isn't a
+            # failed attempt, so it can't use up the last one and cancel the
+            # request: the file stays queued for the next poll or runtime.
+            return
 
         attempt_count += 1
         self._queue_attempts[qf.id] = _QueueAttempt(count=attempt_count, reason=reason)
