@@ -230,6 +230,18 @@ export function pickIntendedRevision(
   );
 }
 
+async function getNewestAppliedRevision(
+  watcherId: string,
+  executor: DbExecutor
+): Promise<ConfigRevision | null> {
+  const [applied] = await selectRevisions(
+    watcherId,
+    { limit: 1, statuses: ["applied"] },
+    executor
+  );
+  return applied ?? null;
+}
+
 /**
  * What `GET /watchers/:id/config-revisions/latest` returns: the newest
  * pending revision, else the highest one. When the web wins an offline
@@ -548,12 +560,19 @@ export async function recordWatcherConfigPush(opts: {
       intended.source === "web" &&
       intended.revision > basedOn
     ) {
-      // Offline conflict: the PC file changed while a web change waited.
-      // The newer edit wins and the other stays in history.
+      // The PC file changed while a web change waited. If the settings Data
+      // Hub edits are still the ones the watcher last applied, only other
+      // fields (such as `initial_scan`) or nothing at all changed, so there
+      // is no conflict: the pending change stays and the watcher applies it
+      // next. Otherwise it's an offline conflict, and the newer edit wins
+      // while the other stays in history.
+      const lastApplied = await getNewestAppliedRevision(opts.watcherId, tx);
       const pcIsNewer =
         opts.modifiedAt !== null &&
         opts.modifiedAt.getTime() > intended.createdAt.getTime();
-      if (pcIsNewer) {
+      if (lastApplied && settingsEqual(pushed, lastApplied.settings)) {
+        next = latest.revision;
+      } else if (pcIsNewer) {
         await insertAppliedPcRevision();
       } else if (
         await hasRecordedPcEdit(tx, opts.watcherId, intended.revision, pushed)

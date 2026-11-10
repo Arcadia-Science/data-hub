@@ -756,6 +756,36 @@ describe("Watcher config revisions", () => {
       ]);
     });
 
+    it("keeps a pending change when the PC file changed but its settings didn't", async () => {
+      await pushConfig(BASE);
+      await saveFromWeb({ ...BASE, upload_mode: "manual" }, 1);
+
+      // A file saved on the PC after the web change, with only fields Data
+      // Hub doesn't edit changed (such as `initial_scan`), doesn't win.
+      const newer = new Date(Date.now() + 60_000).toISOString();
+      const body = await pushConfig(BASE, {
+        based_on_revision: 1,
+        modified_at: newer,
+      });
+      expect(body.config_revision).toBe(2);
+      // Nor does a CLI push, which sends no based_on_revision.
+      await pushConfig(BASE, { modified_at: newer });
+      // An older file isn't recorded as an offline edit either.
+      await pushConfig(BASE, {
+        based_on_revision: 1,
+        modified_at: new Date(Date.now() - 60 * 60_000).toISOString(),
+      });
+
+      const rows = await revisions();
+      expect(rows.map((r) => [r.revision, r.source, r.status])).toEqual([
+        [1, "pc", "applied"],
+        [2, "web", "pending"],
+      ]);
+      const row = await watcherRow();
+      expect(row.configRevision).toBe(2);
+      expect(row.appliedConfigRevision).toBe(1);
+    });
+
     it("treats a push with no modified_at as older than the web change", async () => {
       await pushConfig(BASE);
       await saveFromWeb({ ...BASE, upload_mode: "manual" }, 1);
