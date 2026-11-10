@@ -45,6 +45,7 @@ What the **Watchers** page shows for each watcher, derived from its most recent 
 | **Online**       | A heartbeat arrived in the last 5 minutes.                                                        |
 | **Unresponsive** | No heartbeat for more than 5 minutes. The process crashed, the PC is off, or the network is blocking the API. |
 | **Stopped**      | The watcher shut down cleanly and said so in its last heartbeat.                                  |
+| **Waiting: folder not found** | The watcher is running and sending heartbeats, but its watch folder is missing, so it isn’t watching anything. Watcher 1.3.0 and later. |
 | **Registered**   | The watcher registered but hasn’t sent its first heartbeat yet.                                   |
 
 An unresponsive watcher keeps its registration and history, so you can read its last events to work out what happened. See [Troubleshoot a watcher](/docs/troubleshoot-a-watcher).

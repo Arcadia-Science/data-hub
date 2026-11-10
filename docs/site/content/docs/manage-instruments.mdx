@@ -50,7 +50,7 @@ The top of each instrument page shows what you need to tell whether its files wi
 - **Watched folder**: the folder the watcher reads from. Hover over it to see which PC it is on.
 - **File patterns**: the patterns the watcher uploads, such as `*.csv`.
 
-Files saved anywhere other than the watched folder, such as a shared network drive, don’t appear in Data Hub. Neither do files whose names don’t match a pattern. The folder and patterns come from the watcher’s config on the instrument PC, so change them there with `data-hub-watcher config edit`; see [Watcher configuration](/docs/configuration-reference).
+Files saved anywhere other than the watched folder, such as a shared network drive, don’t appear in Data Hub. Neither do files whose names don’t match a pattern. Admins can change the folder and patterns with **Edit watcher config** in the three-dot menu (watcher 1.3.0 and later); see [Change a watcher’s config](/docs/manage-watchers#change-a-watchers-config). You can also change them on the PC with `data-hub-watcher config edit`; see [Watcher configuration](/docs/configuration-reference).
 
 Watcher health comes from heartbeats; see [Manage the watcher fleet](/docs/manage-watchers).
 
@@ -59,6 +59,7 @@ Watcher health comes from heartbeats; see [Manage the watcher fleet](/docs/manag
 The three-dot menu on an instrument page, and the row menu on the instruments table, hold the admin actions:
 
 - **Edit details**: change the **Display name** and the **Instrument type**
+- **Edit watcher config**: change the watcher’s folder, file patterns, run detection, and upload settings; see [Change a watcher’s config](/docs/manage-watchers#change-a-watchers-config)
 - **View watcher**: open the watcher registered for this instrument
 - **Retire** or **Reactivate**: see [Retire an instrument](/docs/retire-an-instrument)
 
