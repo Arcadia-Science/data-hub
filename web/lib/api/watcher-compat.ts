@@ -19,7 +19,7 @@ export const WATCHER_FEATURES = {
   // Admins can edit the watcher's config from Data Hub. Gated on the stored
   // `watchers.watcher_version` (from the heartbeat), not the request header,
   // because the edit comes from an admin rather than the watcher.
-  remoteConfig: "1.3.0",
+  remoteConfig: "1.4.0",
 } as const satisfies Record<string, string>;
 
 export type WatcherFeature = keyof typeof WATCHER_FEATURES;

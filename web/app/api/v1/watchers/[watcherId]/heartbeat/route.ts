@@ -117,7 +117,7 @@ export async function POST(
         // Only a waiting watcher has a reason; any other status clears it.
         statusReason:
           status === "waiting" ? body.status_reason?.trim() || null : null,
-        // Watchers older than 1.3.0 don't send this, so leave it alone.
+        // Watchers older than 1.4.0 don't send this, so leave it alone.
         ...(body.config_revision === undefined
           ? {}
           : { appliedConfigRevision: body.config_revision }),

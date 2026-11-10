@@ -36,7 +36,7 @@ The wizard rejects values that do not start with `dhub_`, and strips zero-width 
 
 ## The watcher shows “Waiting: folder not found” [#waiting-folder-not-found]
 
-Watcher 1.3.0 and later start even when the watch folder is missing, for example when a network drive isn’t connected yet or the folder was renamed. The watcher keeps sending heartbeats but watches nothing, and the **Watchers** page shows **Waiting: folder not found**. Hover over the badge to see which folder it’s looking for.
+Watcher 1.4.0 and later start even when the watch folder is missing, for example when a network drive isn’t connected yet or the folder was renamed. The watcher keeps sending heartbeats but watches nothing, and the **Watchers** page shows **Waiting: folder not found**. Hover over the badge to see which folder it’s looking for.
 
 The watcher checks for the folder again once a minute and starts watching as soon as it appears. To fix it:
 
@@ -60,7 +60,7 @@ Until it’s fixed, edits made on the PC aren’t recorded in the history, and i
 The watcher picks up a change after its next heartbeat, within about a minute. If it stays pending:
 
 - Check that the watcher is **Online**. An offline watcher applies the change when it next starts.
-- Check that the watcher runs 1.3.0 or later. The web app won’t save changes for older watchers.
+- Check that the watcher runs 1.4.0 or later. The web app won’t save changes for older watchers.
 
 ## The watcher shows Offline right after a restart
 

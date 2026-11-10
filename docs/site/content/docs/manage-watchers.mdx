@@ -29,7 +29,7 @@ Open a watcher to see its event log, a status chart with a connectivity strip of
 
 ## Change a watcher’s config [#change-a-watchers-config]
 
-Admins can change a watcher’s settings from the web app, without visiting the instrument PC. This needs watcher 1.3.0 or later. For older watchers the form is turned off with a note to update the watcher.
+Admins can change a watcher’s settings from the web app, without visiting the instrument PC. This needs watcher 1.4.0 or later. For older watchers the form is turned off with a note to update the watcher.
 
 Open the watcher and choose the **Configuration** tab, or choose **Edit watcher config** from the three-dot menu on the instrument page. You can change:
 
@@ -53,7 +53,7 @@ If the watcher is offline, the change waits and is applied when the watcher next
 
 ### Edits made on the PC [#edits-on-the-pc]
 
-An edit made on the PC while the watcher is running, such as with `data-hub-watcher config edit`, is saved to `config.yaml` and recorded in the history at once, as **Applied**. The watcher reads `config.yaml` only when it starts, though, so it keeps running its previous settings until it restarts. Until then the **Configuration** tab shows **Edited on the PC** with what will change, and the watcher list shows **Edited on PC, restart pending**. With watcher 1.3.0 and later, **Current settings** shows what the watcher is running, from the revision it reports in its heartbeat.
+An edit made on the PC while the watcher is running, such as with `data-hub-watcher config edit`, is saved to `config.yaml` and recorded in the history at once, as **Applied**. The watcher reads `config.yaml` only when it starts, though, so it keeps running its previous settings until it restarts. Until then the **Configuration** tab shows **Edited on the PC** with what will change, and the watcher list shows **Edited on PC, restart pending**. With watcher 1.4.0 and later, **Current settings** shows what the watcher is running, from the revision it reports in its heartbeat.
 
 ### History and restore [#config-history]
 

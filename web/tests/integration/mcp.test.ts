@@ -883,7 +883,7 @@ describe("MCP Server (HTTP)", () => {
       .insert(schema.watchers)
       .values({
         instrumentId: configInstrument,
-        watcherVersion: "1.3.0",
+        watcherVersion: "1.4.0",
         status: "watching",
         lastHeartbeatAt: new Date(),
         configYaml: [

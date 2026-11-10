@@ -17,7 +17,7 @@ export const watcherConfigBody = z.object({
   config_checksum: z.string().min(1),
   config_yaml: z.string().min(1),
   // The highest config revision the watcher had applied when it read the
-  // file. Sent by watcher 1.3.0 and later.
+  // file. Sent by watcher 1.4.0 and later.
   based_on_revision: z.number().int().nonnegative().nullable().optional(),
   // The local file's modification time, used to settle a conflict between
   // an offline edit on the PC and a change waiting in Data Hub.

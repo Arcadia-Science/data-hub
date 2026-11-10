@@ -113,7 +113,7 @@ The other CSV files a qPCR run writes upload normally and show as completed, but
 
 Data Hub reads melting curves from the Azure Cielo’s native `.AZE` project files as well as from the CSV export. Melting temperatures match the CSV export, but other values can differ. That’s because `.AZE` files store raw fluorescence, while the CSV export can be adjusted for baseline. A project with no melt data completes with no processed files.
 
-The watcher uploads `.AZE` files only when `*.AZE` is in the instrument’s file patterns. An admin can add it with **Edit watcher config** on the instrument page (watcher 1.3.0 and later); see [Change a watcher’s config](/docs/manage-watchers#change-a-watchers-config). With an older watcher, add it on the instrument PC with `data-hub-watcher config edit` and restart the watcher. Patterns are case-sensitive, so match the case the instrument uses. See [Watcher configuration](/docs/configuration-reference#field-reference).
+The watcher uploads `.AZE` files only when `*.AZE` is in the instrument’s file patterns. An admin can add it with **Edit watcher config** on the instrument page (watcher 1.4.0 and later); see [Change a watcher’s config](/docs/manage-watchers#change-a-watchers-config). With an older watcher, add it on the instrument PC with `data-hub-watcher config edit` and restart the watcher. Patterns are case-sensitive, so match the case the instrument uses. See [Watcher configuration](/docs/configuration-reference#field-reference).
 
 ## Epson V700 Scanner [#epson-v700-scanner]
 

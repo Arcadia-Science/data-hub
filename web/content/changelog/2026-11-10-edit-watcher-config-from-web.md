@@ -9,4 +9,4 @@ The watcher picks up a saved change within about a minute. It checks the change 
 
 If a watcher's folder is missing when it starts, it now keeps running and shows **Waiting: folder not found** instead of stopping, so you can fix the folder from Data Hub.
 
-This needs watcher 1.3.0. For older watchers the form is turned off. An admin rolls out the new watcher by setting **Latest version** to 1.3.0 in **Settings → Watchers**. Watchers then upgrade themselves.
+This needs watcher 1.4.0. For older watchers the form is turned off. An admin rolls out the new watcher by setting **Latest version** to 1.4.0 in **Settings → Watchers**. Watchers then upgrade themselves.

@@ -79,7 +79,7 @@ describe("Watcher config revisions", () => {
     return await api(`${base()}/heartbeat`, {
       method: "POST",
       token: watcherToken,
-      body: { status: "watching", watcher_version: "1.3.0", ...body },
+      body: { status: "watching", watcher_version: "1.4.0", ...body },
     });
   }
 
@@ -174,7 +174,7 @@ describe("Watcher config revisions", () => {
     });
   });
 
-  // Each test starts from a freshly registered watcher on 1.3.0.
+  // Each test starts from a freshly registered watcher on 1.4.0.
   beforeEach(async () => {
     await db().delete(watcherConfigRevisions);
     await db().delete(watcherEvents);
@@ -345,8 +345,8 @@ describe("Watcher config revisions", () => {
       expect(nullBase.status).toBe(409);
     });
 
-    it("refuses a watcher older than 1.3.0 with 409", async () => {
-      await heartbeat({ watcher_version: "1.2.9" });
+    it("refuses a watcher older than 1.4.0 with 409", async () => {
+      await heartbeat({ watcher_version: "1.3.0" });
       const res = await saveFromWeb({ ...BASE, upload_mode: "manual" }, 1);
       expect(res.status).toBe(409);
       expect(await res.json()).toMatchObject({
@@ -354,8 +354,8 @@ describe("Watcher config revisions", () => {
           code: "CONFLICT",
           details: {
             reason: "watcher_update_required",
-            min_version: "1.3.0",
-            watcher_version: "1.2.9",
+            min_version: "1.4.0",
+            watcher_version: "1.3.0",
           },
         },
       });

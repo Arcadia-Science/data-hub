@@ -145,7 +145,7 @@ export function WatcherConfigForm({
    * the rejected change and any save is allowed, including the same one.
    */
   savedSettings: WatcherConfigSettings | null;
-  /** False below watcher 1.3.0: the form shows but can't be changed. */
+  /** False below watcher 1.4.0: the form shows but can't be changed. */
   editable: boolean;
   watcherVersion: string | null;
   onSaved?: () => void;
