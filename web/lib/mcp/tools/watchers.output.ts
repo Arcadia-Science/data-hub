@@ -5,7 +5,15 @@ import {
   watcherEventTypeSchema,
   watcherStatusSchema,
 } from "@/lib/api/openapi/schemas/common";
+import { watcherConfigSettingsSchema } from "@/lib/api/watcher-config/settings";
 import { mcpActorTokenSchema, mcpActorUserSchema } from "./common.output";
+
+const configRevisionStatusSchema = z.enum([
+  "pending",
+  "applied",
+  "rejected",
+  "superseded",
+]);
 
 /** List-row shape from `getWatcherList` after JSON round-trip. */
 export const watcherListItemSchema = z.object({
@@ -15,9 +23,27 @@ export const watcherListItemSchema = z.object({
   hostname: z.string().nullable(),
   watcherVersion: z.string().nullable(),
   effectiveStatus: watcherStatusSchema,
+  statusReason: z.string().nullable(),
+  configRevision: z.number().int().nullable(),
+  appliedConfigRevision: z.number().int().nullable(),
+  configRevisionStatus: configRevisionStatusSchema.nullable(),
   lastHeartbeatAt: isoDateTime.nullable(),
   createdAt: isoDateTime,
   deletedAt: isoDateTime.nullable(),
+});
+
+// A config revision as MCP tools return it. `settings` keeps the YAML key
+// names so it reads the same as the watcher's config file.
+export const mcpConfigRevisionSchema = z.object({
+  revision: z.number().int(),
+  source: z.enum(["web", "pc"]),
+  status: configRevisionStatusSchema,
+  statusReason: z.string().nullable(),
+  settings: watcherConfigSettingsSchema,
+  createdAt: isoDateTime,
+  resolvedAt: isoDateTime.nullable(),
+  createdByUser: mcpActorUserSchema.nullable(),
+  createdByToken: mcpActorTokenSchema.nullable(),
 });
 
 // Object root so 2025-era MCP clients don't SEP-2106-wrap a bare array as
@@ -33,6 +59,12 @@ export const getWatcherOutputSchema = watcherListItemSchema.extend({
   updatedAt: isoDateTime,
   deregisteredByUser: mcpActorUserSchema.nullable(),
   deregisteredByToken: mcpActorTokenSchema.nullable(),
+  pendingConfigRevision: mcpConfigRevisionSchema.nullable(),
+});
+
+export const updateWatcherConfigOutputSchema = z.object({
+  watcherId: z.string(),
+  revision: mcpConfigRevisionSchema,
 });
 
 const watcherEventRowSchema = z.object({

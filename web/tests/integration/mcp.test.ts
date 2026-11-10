@@ -13,7 +13,7 @@ import {
 } from "@/tests/integration/helpers";
 
 /** Bump when adding/removing an MCP tool so the change shows up in review. */
-const EXPECTED_MCP_TOOL_COUNT = 40;
+const EXPECTED_MCP_TOOL_COUNT = 41;
 
 function jsonRpc(method: string, params: unknown = {}, id = 1) {
   return {
@@ -867,6 +867,71 @@ describe("MCP Server (HTTP)", () => {
     });
     expect(edit.isError).toBe(true);
     expect(edit.content[0].text).toMatch(/only edit your own/i);
+  });
+
+  // ---- Watcher config ------------------------------------------------------
+
+  it("update_watcher_config is for admins and merges over the latest settings", async () => {
+    const db = getTestDb();
+    const configInstrument = "mcp-config-instrument";
+    await db.insert(schema.instruments).values({
+      id: configInstrument,
+      displayName: "MCP Config Instrument",
+      status: "active",
+    });
+    const [watcher] = await db
+      .insert(schema.watchers)
+      .values({
+        instrumentId: configInstrument,
+        watcherVersion: "1.3.0",
+        status: "watching",
+        lastHeartbeatAt: new Date(),
+        configYaml: [
+          "instrument:",
+          "  id: mcp-config-instrument",
+          "  watch_directory: /data/plate",
+          "  file_patterns: ['*.csv']",
+          "  run_detection:",
+          "    pattern: '^([^_]+)'",
+          "    recursive: false",
+        ].join("\n"),
+      })
+      .returning({ id: schema.watchers.id });
+
+    const args = {
+      watcherId: watcher.id,
+      baseRevision: null,
+      settings: { file_patterns: ["*.csv", "*.AZE"] },
+    };
+
+    const refused = await callTool("update_watcher_config", args, token);
+    expect(refused.isError).toBe(true);
+    expect(refused.content[0].text).toMatch(/Admin role required/);
+
+    const saved = await callTool("update_watcher_config", args, adminAToken);
+    expect(saved.isError).toBeFalsy();
+    const body = JSON.parse(saved.content[0].text);
+    expect(body.revision).toMatchObject({
+      revision: 1,
+      source: "web",
+      status: "pending",
+      createdByUser: { userId: adminAId },
+    });
+    expect(body.revision.settings).toMatchObject({
+      watch_directory: "/data/plate",
+      file_patterns: ["*.csv", "*.AZE"],
+      run_detection: { pattern: "^([^_]+)", recursive: false },
+      upload_mode: "auto",
+    });
+
+    const detail = await callTool("get_watcher", { watcherId: watcher.id });
+    const detailBody = JSON.parse(detail.content[0].text);
+    expect(detailBody.configRevision).toBe(1);
+    expect(detailBody.pendingConfigRevision).toMatchObject({ revision: 1 });
+
+    const stale = await callTool("update_watcher_config", args, adminAToken);
+    expect(stale.isError).toBe(true);
+    expect(stale.content[0].text).toMatch(/stale_revision/);
   });
 
   // ---- OAuth scope enforcement (coarse read / write) ----------------------

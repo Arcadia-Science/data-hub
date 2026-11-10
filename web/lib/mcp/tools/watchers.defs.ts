@@ -1,4 +1,12 @@
 import { z } from "zod";
+import {
+  FILE_PATTERN_MAX_LENGTH,
+  FILE_PATTERNS_MAX,
+  MAX_STABILITY_WAIT_RANGE,
+  STABILITY_PERIOD_RANGE,
+  UPLOAD_PARALLELISM_RANGE,
+  WATCH_DIRECTORY_MAX_LENGTH,
+} from "@/lib/api/watcher-config/settings";
 import { watcherEventTypeEnum } from "@/lib/db/schema";
 import type { McpToolDef } from "@/lib/mcp/catalog/types";
 import {
@@ -6,6 +14,7 @@ import {
   getWatcherOutputSchema,
   listWatcherEventsOutputSchema,
   listWatchersOutputSchema,
+  updateWatcherConfigOutputSchema,
 } from "./watchers.output";
 
 export const listWatchersTool = {
@@ -27,7 +36,7 @@ export const listWatchersTool = {
         "Include soft-deleted (deregistered) watchers (default: false)"
       ),
     status: z
-      .enum(["registered", "watching", "stopped", "stale"])
+      .enum(["registered", "watching", "stopped", "waiting", "stale"])
       .optional()
       .describe(
         "Filter by effective status (stale is computed from heartbeat age)"
@@ -41,7 +50,7 @@ export const getWatcherTool = {
   name: "get_watcher",
   title: "Get Watcher",
   description:
-    "Get watcher detail including config YAML, OS info, effective status, and deregistration actor when applicable.",
+    "Get watcher detail including config YAML, OS info, effective status (with statusReason when waiting for a missing folder), config revision numbers, any pending config change, and deregistration actor when applicable.",
   group: "watchers",
   scope: "watchers:read",
   inputSchema: { watcherId: z.string().describe("Watcher UUID") },
@@ -108,9 +117,87 @@ export const getWatcherHeartbeatsTool = {
   annotations: { readOnlyHint: true },
 } as const satisfies McpToolDef;
 
+export const updateWatcherConfigTool = {
+  name: "update_watcher_config",
+  title: "Update Watcher Config",
+  description:
+    "Change a watcher's settings from Data Hub. Admins only. Before calling, call get_watcher, show the user exactly which settings will change (old and new values), and get their confirmation. Pass baseRevision as get_watcher's configRevision. Settings you leave out keep their values from the latest revision. The change is stored as pending and the watcher applies it within about a minute of its next heartbeat; if the watcher can't (for example the folder doesn't exist), it rejects the change and keeps its old settings. Needs watcher 1.3.0 or later. watch_directory can point at any folder on the instrument PC.",
+  group: "watchers",
+  scope: "watchers:admin",
+  inputSchema: {
+    watcherId: z.string().describe("Watcher UUID"),
+    baseRevision: z
+      .number()
+      .int()
+      .positive()
+      .nullable()
+      .describe(
+        "The latest revision number from get_watcher (configRevision), or null if it has none. A stale value is refused."
+      ),
+    settings: z
+      .object({
+        watch_directory: z
+          .string()
+          .min(1)
+          .max(WATCH_DIRECTORY_MAX_LENGTH)
+          .optional()
+          .describe(
+            "Absolute folder on the instrument PC, such as D:\\Exports"
+          ),
+        file_patterns: z
+          .array(z.string().min(1).max(FILE_PATTERN_MAX_LENGTH))
+          .min(1)
+          .max(FILE_PATTERNS_MAX)
+          .optional()
+          .describe(
+            "Case-sensitive filename globs, such as *.csv. Replaces the whole list."
+          ),
+        run_detection: z
+          .object({
+            pattern: z
+              .string()
+              .optional()
+              .describe(
+                "Regex with exactly one capture group, matched against the forward-slash path relative to the folder. Group 1 is the run ID."
+              ),
+            recursive: z.boolean().optional().describe("Watch subfolders too"),
+          })
+          .optional(),
+        upload_mode: z
+          .enum(["auto", "manual"])
+          .optional()
+          .describe(
+            "auto uploads new files; manual only reports them until someone requests an upload"
+          ),
+        stability_period_seconds: z
+          .number()
+          .int()
+          .min(STABILITY_PERIOD_RANGE.min)
+          .max(STABILITY_PERIOD_RANGE.max)
+          .optional(),
+        max_stability_wait_seconds: z
+          .number()
+          .int()
+          .min(MAX_STABILITY_WAIT_RANGE.min)
+          .max(MAX_STABILITY_WAIT_RANGE.max)
+          .optional(),
+        upload_parallelism: z
+          .number()
+          .int()
+          .min(UPLOAD_PARALLELISM_RANGE.min)
+          .max(UPLOAD_PARALLELISM_RANGE.max)
+          .optional(),
+      })
+      .describe("Only the settings to change"),
+  },
+  outputSchema: updateWatcherConfigOutputSchema,
+  annotations: { readOnlyHint: false, destructiveHint: false },
+} as const satisfies McpToolDef;
+
 export const WATCHER_TOOL_DEFS = [
   listWatchersTool,
   getWatcherTool,
   listWatcherEventsTool,
   getWatcherHeartbeatsTool,
+  updateWatcherConfigTool,
 ] as const;
