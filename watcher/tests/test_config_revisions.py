@@ -419,11 +419,15 @@ class TestRebuildDuringPartUploads:
         slow.set()
         lock = threading.Lock()
         sending: collections.Counter[str] = collections.Counter()
+        # The threads that sent the first upload's parts.
+        senders: set[threading.Thread] = set()
 
         def put(session: Any, url: str, *, data: Any, **kwargs: Any) -> MagicMock:
             upload_id = url.split("/")[-2]
             with lock:
                 sending[upload_id] += 1
+                if upload_id == "upload-1":
+                    senders.add(threading.current_thread())
             try:
                 while data.read(1):
                     if slow.is_set():
@@ -444,13 +448,18 @@ class TestRebuildDuringPartUploads:
         assert old_rt is not None
         # All four parts are sending at once, within upload_parallelism (4).
         _wait_until(lambda: sending["upload-1"] == self.PART_COUNT)
+        with lock:
+            old_part_threads = list(senders)
+        assert len(old_part_threads) == self.PART_COUNT
 
         real_build = runtime.build_runtime
         sending_at_rebuild: list[int] = []
+        old_threads_at_rebuild: list[list[threading.Thread]] = []
 
         def build(**kwargs: Any) -> Any:
             with lock:
                 sending_at_rebuild.append(sum(sending.values()))
+            old_threads_at_rebuild.append([t for t in old_part_threads if t.is_alive()])
             slow.clear()
             return real_build(**kwargs)
 
@@ -464,8 +473,8 @@ class TestRebuildDuringPartUploads:
         # No part of the old runtime was still sending when the new one was
         # built, and nothing of it is left to write to its closed state DB.
         assert sending_at_rebuild == [0]
+        assert old_threads_at_rebuild == [[]]
         assert not old_rt.state_db._connections
-        assert not [t for t in threading.enumerate() if t.name.startswith("upload-part")]
         assert env.results() == [(WATCHER_ID, 2, "applied", None)]
         new_rt = sup.rt
         assert new_rt is not None
