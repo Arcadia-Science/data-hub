@@ -375,6 +375,23 @@ async function insertRevision(
   });
 }
 
+// The event the watcher's log shows when it applied a revision, whether the
+// watcher reported it or its config push proved it.
+async function insertAppliedEvent(
+  tx: DbExecutor,
+  watcherId: string,
+  revision: number,
+  timestamp: Date
+) {
+  await tx.insert(watcherEvents).values({
+    watcherId,
+    eventType: "config_synced",
+    message: `Applied config revision ${revision}`,
+    details: { kind: "config_revision_applied", revision },
+    timestamp,
+  });
+}
+
 async function resolveRevision(
   tx: DbExecutor,
   watcherId: string,
@@ -571,6 +588,12 @@ export async function recordWatcherConfigPush(opts: {
           "applied",
           null
         );
+        await insertAppliedEvent(
+          tx,
+          opts.watcherId,
+          intended.revision,
+          new Date()
+        );
         applied = intended.revision;
       }
       next = latest.revision;
@@ -623,6 +646,12 @@ export async function recordWatcherConfigPush(opts: {
           intended.revision,
           "applied",
           null
+        );
+        await insertAppliedEvent(
+          tx,
+          opts.watcherId,
+          intended.revision,
+          new Date()
         );
       }
       await insertAppliedPcRevision();
@@ -731,13 +760,7 @@ export async function recordConfigRevisionResult(opts: {
           appliedConfigRevision: sql`greatest(coalesce(${watchers.appliedConfigRevision}, 0), ${opts.revision})`,
         })
         .where(eq(watchers.id, opts.watcherId));
-      await tx.insert(watcherEvents).values({
-        watcherId: opts.watcherId,
-        eventType: "config_synced",
-        message: `Applied config revision ${opts.revision}`,
-        details: { kind: "config_revision_applied", revision: opts.revision },
-        timestamp: now,
-      });
+      await insertAppliedEvent(tx, opts.watcherId, opts.revision, now);
     } else {
       await tx.insert(watcherEvents).values({
         watcherId: opts.watcherId,

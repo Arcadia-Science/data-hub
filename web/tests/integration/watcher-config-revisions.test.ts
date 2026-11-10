@@ -638,6 +638,60 @@ describe("Watcher config revisions", () => {
       expect(rows).toHaveLength(2);
       expect(rows[1].status).toBe("applied");
       expect((await watcherRow()).appliedConfigRevision).toBe(2);
+
+      // The same event the result route writes, once, even when the
+      // watcher's result call arrives afterwards.
+      const appliedEvents = async () =>
+        (
+          await db()
+            .select({ details: watcherEvents.details })
+            .from(watcherEvents)
+            .where(
+              and(
+                eq(watcherEvents.watcherId, watcherId),
+                eq(watcherEvents.eventType, "config_synced")
+              )
+            )
+        ).filter(
+          (e) =>
+            (e.details as { kind?: string } | null)?.kind ===
+            "config_revision_applied"
+        );
+      expect(await appliedEvents()).toEqual([
+        { details: { kind: "config_revision_applied", revision: 2 } },
+      ]);
+      await reportResult(2, { status: "applied" });
+      expect(await appliedEvents()).toHaveLength(1);
+    });
+
+    it("marks a pending change applied when a later PC edit is based on it", async () => {
+      await pushConfig(BASE);
+      const webChange = { ...BASE, upload_mode: "manual" as const };
+      await saveFromWeb(webChange, 1);
+      // The watcher applied revision 2 but its result call was lost, then
+      // the file was edited on the PC.
+      await pushConfig(
+        { ...webChange, upload_parallelism: 8 },
+        { based_on_revision: 2 }
+      );
+      const rows = await revisions();
+      expect(rows.map((r) => [r.revision, r.source, r.status])).toEqual([
+        [1, "pc", "applied"],
+        [2, "web", "applied"],
+        [3, "pc", "applied"],
+      ]);
+      const events = await db()
+        .select({ details: watcherEvents.details })
+        .from(watcherEvents)
+        .where(
+          and(
+            eq(watcherEvents.watcherId, watcherId),
+            eq(watcherEvents.eventType, "config_synced")
+          )
+        );
+      expect(events).toEqual([
+        { details: { kind: "config_revision_applied", revision: 2 } },
+      ]);
     });
 
     it("records a PC edit as an applied pc revision", async () => {
