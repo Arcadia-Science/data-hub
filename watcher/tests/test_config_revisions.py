@@ -438,6 +438,30 @@ class TestRejectMissingFolder:
         assert sup._unsent_result is None
         env.client.get_latest_config_revision.assert_called_once()
 
+    def test_unreadable_result_reply_is_retried_and_the_push_still_happens(
+        self, env: _Env
+    ) -> None:
+        sup = env.supervisor()
+        sup.start()
+        env.client.get_latest_config_revision.return_value = _revision(
+            2, _settings(env.watch_dir, file_patterns=["*.txt"])
+        )
+        # A proxy answered with a page that isn't JSON.
+        env.client.report_config_revision_result.side_effect = [
+            ValueError("Expecting value: line 1 column 1 (char 0)"),
+            None,
+        ]
+        env.client.push_config.reset_mock()
+
+        _deliver(sup, 2)
+
+        assert sup.applied_revision == 2
+        assert sup._unsent_result == {"revision": 2, "status": "applied", "reason": None}
+        env.client.push_config.assert_called_once()
+        _deliver(sup, 2)
+        assert [r[1:3] for r in env.results()] == [(2, "applied"), (2, "applied")]
+        assert sup._unsent_result is None
+
     def test_config_file_switched_to_another_environment_is_not_overwritten(
         self, env: _Env
     ) -> None:

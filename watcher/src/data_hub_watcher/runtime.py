@@ -1200,6 +1200,18 @@ class WatcherSupervisor:
                 result["revision"],
                 exc.message,
             )
+        except Exception as exc:
+            # A connection dropped mid-response, or a proxy page instead of
+            # JSON: retried like a connection error. Raising here would also
+            # skip the config push that follows an apply.
+            logger.warning(
+                "Could not report config revision %s as %s yet: %s: %s",
+                result["revision"],
+                result["status"],
+                type(exc).__name__,
+                exc,
+            )
+            return
         self._unsent_result = None
         self._persist_unsent_result()
 
