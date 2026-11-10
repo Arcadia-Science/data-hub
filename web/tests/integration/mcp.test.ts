@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 // biome-ignore lint/performance/noNamespaceImport: integration tests need the full schema module for Db typing
 import * as schema from "@/lib/db/schema";
@@ -952,6 +952,38 @@ describe("MCP Server (HTTP)", () => {
     expect(JSON.parse(next.content[0].text).revision).toMatchObject({
       revision: 2,
       settings: { file_patterns: ["*.csv"], upload_mode: "manual" },
+    });
+
+    // A PC edit the running watcher hasn't loaded is flagged as waiting for
+    // a restart, while appliedConfigRevision says what it runs.
+    await db
+      .update(schema.watcherConfigRevisions)
+      .set({ status: "applied", resolvedAt: new Date() })
+      .where(
+        and(
+          eq(schema.watcherConfigRevisions.watcherId, watcher.id),
+          eq(schema.watcherConfigRevisions.revision, 2)
+        )
+      );
+    await db.insert(schema.watcherConfigRevisions).values({
+      watcherId: watcher.id,
+      revision: 3,
+      source: "pc",
+      status: "applied",
+      settings: JSON.parse(next.content[0].text).revision.settings,
+      resolvedAt: new Date(),
+    });
+    await db
+      .update(schema.watchers)
+      .set({ configRevision: 3, appliedConfigRevision: 2 })
+      .where(eq(schema.watchers.id, watcher.id));
+    const edited = JSON.parse(
+      (await callTool("get_watcher", { watcherId: watcher.id })).content[0].text
+    );
+    expect(edited).toMatchObject({
+      appliedConfigRevision: 2,
+      configRevision: 3,
+      pcEditAwaitingRestart: true,
     });
   });
 

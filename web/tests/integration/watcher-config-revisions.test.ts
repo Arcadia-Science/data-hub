@@ -8,7 +8,9 @@ import {
   watcherDetail,
   watcherHeartbeatAck,
 } from "@/lib/api/openapi";
+import { getWatcherConfigState } from "@/lib/api/watcher-config/revisions";
 import type { WatcherConfigSettings } from "@/lib/api/watcher-config/settings";
+import { getWatcherList } from "@/lib/api/watchers";
 import {
   files,
   instrumentRuns,
@@ -829,6 +831,62 @@ describe("Watcher config revisions", () => {
         ["web", "pending"],
         ["pc", "superseded"],
       ]);
+    });
+
+    it("shows a PC edit made while the watcher runs as waiting for a restart", async () => {
+      async function listed() {
+        const all = await getWatcherList({ includeDeleted: false });
+        const row = all.find((w) => w.id === watcherId);
+        if (!row) {
+          throw new Error("watcher missing from the list");
+        }
+        return row;
+      }
+      async function configState() {
+        return await getWatcherConfigState(await watcherRow());
+      }
+
+      await pushConfig(BASE);
+      await heartbeat({ config_revision: 1 });
+
+      // `config edit` on the PC pushes at once, with no based_on_revision,
+      // but the running watcher only reads config.yaml at startup.
+      const edited = { ...BASE, file_patterns: ["*.csv", "*.txt"] };
+      await pushConfig(edited, { modified_at: new Date().toISOString() });
+      await heartbeat({ config_revision: 1 });
+
+      // The history keeps the edit as applied; what's running is revision 1.
+      expect((await revisions())[1]).toMatchObject({
+        revision: 2,
+        source: "pc",
+        status: "applied",
+      });
+      expect((await listed()).pcEditAwaitingRestart).toBe(true);
+      let state = await configState();
+      expect(state.running).toEqual({ revision: 1, settings: BASE });
+      expect(state.restartPending?.revision).toBe(2);
+
+      // After a restart the watcher loads the file and reports revision 2.
+      await heartbeat({ config_revision: 2 });
+      expect((await listed()).pcEditAwaitingRestart).toBe(false);
+      state = await configState();
+      expect(state.running).toEqual({ revision: 2, settings: edited });
+      expect(state.restartPending).toBeNull();
+    });
+
+    it("doesn't wait for a restart when a newer change is pending", async () => {
+      await pushConfig(BASE);
+      await heartbeat({ config_revision: 1 });
+      await pushConfig({ ...BASE, upload_parallelism: 2 });
+      await heartbeat({ config_revision: 1 });
+      // Applying this replaces the PC edit, so it never takes effect.
+      await saveFromWeb({ ...BASE, upload_mode: "manual" }, 2);
+      const state = await getWatcherConfigState(await watcherRow());
+      expect(state.restartPending).toBeNull();
+      const all = await getWatcherList({ includeDeleted: false });
+      expect(all.find((w) => w.id === watcherId)?.pcEditAwaitingRestart).toBe(
+        false
+      );
     });
 
     it("treats a retyped folder as the same folder", async () => {

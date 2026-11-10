@@ -50,7 +50,7 @@ export const getWatcherTool = {
   name: "get_watcher",
   title: "Get Watcher",
   description:
-    "Get watcher detail including config YAML, OS info, effective status (with statusReason when waiting for a missing folder), config revision numbers, any pending config change, and deregistration actor when applicable.",
+    "Get watcher detail including config YAML, OS info, effective status (with statusReason when waiting for a missing folder), config revision numbers, any pending config change, and deregistration actor when applicable. appliedConfigRevision is the revision the watcher reports running. configYaml is its config file, which can be newer: when pcEditAwaitingRestart is true, the file was edited on the PC while the watcher ran, and that edit takes effect when the watcher restarts.",
   group: "watchers",
   scope: "watchers:read",
   inputSchema: { watcherId: z.string().describe("Watcher UUID") },

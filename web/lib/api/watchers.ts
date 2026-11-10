@@ -330,6 +330,12 @@ export interface WatcherListItem {
   instrumentDisplayName: string | null;
   instrumentId: string;
   lastHeartbeatAt: Date | null;
+  /**
+   * True when the newest change is a PC edit the running watcher hasn't
+   * loaded: it takes effect when the watcher restarts (see
+   * `pickRestartPending` in `watcher-config/revisions.ts`).
+   */
+  pcEditAwaitingRestart: boolean;
   /** Why the watcher is waiting; null for every other status. */
   statusReason: string | null;
   watcherVersion: string | null;
@@ -347,6 +353,20 @@ const currentRevisionStatus = sql<ConfigRevisionStatus | null>`(
   order by ${watcherConfigRevisions.revision} desc
   limit 1
 )`;
+
+// Same rule as `pickRestartPending`: the newest pending or applied revision
+// is an applied PC edit newer than the revision the watcher reports running.
+// False when the watcher hasn't reported one.
+const pcEditAwaitingRestart = sql<boolean>`coalesce((
+  select ${watcherConfigRevisions.status} = 'applied'
+    and ${watcherConfigRevisions.source} = 'pc'
+    and ${watcherConfigRevisions.revision} > ${watchers.appliedConfigRevision}
+  from ${watcherConfigRevisions}
+  where ${watcherConfigRevisions.watcherId} = ${watchers.id}
+    and ${watcherConfigRevisions.status} in ('pending', 'applied')
+  order by ${watcherConfigRevisions.revision} desc
+  limit 1
+), false)`;
 
 // Fetches all watchers (optionally including soft-deleted ones) with their
 // parent instrument's display name. The total count is small enough that we
@@ -368,6 +388,7 @@ export async function getWatcherList(opts: {
       configRevision: watchers.configRevision,
       appliedConfigRevision: watchers.appliedConfigRevision,
       configRevisionStatus: currentRevisionStatus,
+      pcEditAwaitingRestart,
       lastHeartbeatAt: watchers.lastHeartbeatAt,
       createdAt: watchers.createdAt,
       deletedAt: watchers.deletedAt,
@@ -390,6 +411,7 @@ export async function getWatcherList(opts: {
     configRevision: row.configRevision,
     appliedConfigRevision: row.appliedConfigRevision,
     configRevisionStatus: row.configRevisionStatus,
+    pcEditAwaitingRestart: row.pcEditAwaitingRestart,
     lastHeartbeatAt: row.lastHeartbeatAt,
     createdAt: row.createdAt,
     deletedAt: row.deletedAt,
@@ -427,6 +449,7 @@ export const getWatcherById = cache(async function getWatcherById(
       configRevision: watchers.configRevision,
       appliedConfigRevision: watchers.appliedConfigRevision,
       configRevisionStatus: currentRevisionStatus,
+      pcEditAwaitingRestart,
       lastHeartbeatAt: watchers.lastHeartbeatAt,
       configYaml: watchers.configYaml,
       configChecksum: watchers.configChecksum,
@@ -471,6 +494,7 @@ export const getWatcherById = cache(async function getWatcherById(
     configRevision: row.configRevision,
     appliedConfigRevision: row.appliedConfigRevision,
     configRevisionStatus: row.configRevisionStatus,
+    pcEditAwaitingRestart: row.pcEditAwaitingRestart,
     lastHeartbeatAt: row.lastHeartbeatAt,
     configYaml: row.configYaml,
     configChecksum: row.configChecksum,

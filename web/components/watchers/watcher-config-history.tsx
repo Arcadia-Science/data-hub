@@ -35,10 +35,13 @@ export function WatcherConfigHistory({
   watcherId,
   revisions,
   savedSettings,
+  restartPendingRevision,
   canRestore,
 }: {
   watcherId: string;
   revisions: ConfigRevision[];
+  /** A PC edit the running watcher hasn't loaded yet, if any. */
+  restartPendingRevision: number | null;
   /**
    * Restoring a revision with these settings would be refused as "No
    * changes", so it gets no button. Null after a rejection.
@@ -105,6 +108,12 @@ export function WatcherConfigHistory({
               {rev.statusReason ? (
                 <p className="break-words text-muted-foreground text-xs">
                   {rev.statusReason}
+                </p>
+              ) : null}
+              {rev.revision === restartPendingRevision ? (
+                <p className="text-muted-foreground text-xs">
+                  Saved to the config file on the PC. Takes effect when the
+                  watcher restarts.
                 </p>
               ) : null}
               {previous ? (

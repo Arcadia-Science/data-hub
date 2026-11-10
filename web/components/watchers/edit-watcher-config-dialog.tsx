@@ -9,7 +9,10 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { WatcherConfigForm } from "@/components/watchers/watcher-config-form";
-import { ConfigChangeCallout } from "@/components/watchers/watcher-config-status";
+import {
+  ConfigChangeCallout,
+  RestartPendingCallout,
+} from "@/components/watchers/watcher-config-status";
 import type { WatcherConfigState } from "@/lib/api/watcher-config/revisions";
 
 /**
@@ -49,9 +52,13 @@ export function EditWatcherConfigDialog({
           </DialogDescription>
         </DialogHeader>
         <ConfigChangeCallout
-          current={state.reportedSettings}
+          current={state.running?.settings ?? null}
           latest={state.latest}
           watcherOnline={watcherOnline}
+        />
+        <RestartPendingCallout
+          revision={state.restartPending}
+          running={state.running}
         />
         {state.baseSettings ? (
           <WatcherConfigForm

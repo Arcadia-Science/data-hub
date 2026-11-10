@@ -13,8 +13,6 @@ import {
 import {
   getWatcherConfigState,
   listConfigRevisions,
-  pickCurrentRevision,
-  pickIntendedRevision,
 } from "@/lib/api/watcher-config/revisions";
 import {
   getAllWatcherHeartbeats,
@@ -147,12 +145,7 @@ async function WatcherTabsSection({
     notFound();
   }
 
-  // `history` is newest first, so the current and intended revisions are
-  // in it.
-  const configState = await getWatcherConfigState(watcher, {
-    latest: pickCurrentRevision(history),
-    intended: pickIntendedRevision(history),
-  });
+  const configState = await getWatcherConfigState(watcher, history);
 
   const logsTotalPages = Math.ceil(eventResult.total / WATCHER_PAGE_SIZE);
 

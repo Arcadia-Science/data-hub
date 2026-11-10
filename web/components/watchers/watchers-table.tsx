@@ -12,7 +12,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ConfigChangeBadge } from "@/components/watchers/watcher-config-status";
+import {
+  ConfigChangeBadge,
+  RestartPendingBadge,
+} from "@/components/watchers/watcher-config-status";
 import { WatcherStatusBadge } from "@/components/watchers/watcher-status-badge";
 import type { WatcherListItem } from "@/lib/api/watchers";
 import { cn } from "@/lib/utils";
@@ -143,6 +146,9 @@ export function WatchersTable({
                         status={row.configRevisionStatus}
                       />
                     )}
+                    {!row.deletedAt && row.pcEditAwaitingRestart ? (
+                      <RestartPendingBadge className="text-xs" />
+                    ) : null}
                   </div>
                 </RowControl>
               </TableCell>

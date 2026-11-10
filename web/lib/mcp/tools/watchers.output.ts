@@ -27,6 +27,7 @@ export const watcherListItemSchema = z.object({
   configRevision: z.number().int().nullable(),
   appliedConfigRevision: z.number().int().nullable(),
   configRevisionStatus: configRevisionStatusSchema.nullable(),
+  pcEditAwaitingRestart: z.boolean(),
   lastHeartbeatAt: isoDateTime.nullable(),
   createdAt: isoDateTime,
   deletedAt: isoDateTime.nullable(),

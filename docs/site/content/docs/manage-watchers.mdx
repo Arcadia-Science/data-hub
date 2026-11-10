@@ -14,6 +14,7 @@ Each watcher sends a [heartbeat](/docs/concepts#heartbeat) every 60 seconds with
 
 - **Status**: **Online**, **Waiting: folder not found** (running, but its watch folder is missing), **Unresponsive** (no heartbeat for more than 5 minutes), **Stopped** (shut down cleanly), or **Registered** (no first heartbeat yet). See [Watcher status](/docs/concepts#watcher-status).
 - **Change pending** or **Change rejected**: the latest config change from the web app hasn’t reached the watcher yet, or the watcher refused it. See [Change a watcher’s config](#change-a-watchers-config).
+- **Edited on PC, restart pending**: someone changed `config.yaml` on the PC while the watcher was running, and the watcher hasn’t loaded it yet. See [Edits made on the PC](#edits-on-the-pc).
 - **Last heartbeat**: a stale value is the first sign of a stopped, disconnected, or crashed watcher
 - **Hostname and instrument assignment**
 - **Events**: per-watcher log (`watcher_started`, `run_reported`, `file_uploaded`, `update_*`, and `error` with a `details.kind` discriminator). Expand an event to read its details. From watcher 1.3.0, a `file_uploaded` event reports `size_bytes`, `part_count`, `prep_seconds` (hashing the file and requesting its upload link), and `upload_seconds` (sending the file to storage). Divide `size_bytes` by `upload_seconds` to get the upload speed.
@@ -49,6 +50,10 @@ After you save:
 If the new settings match more files, the watcher reports files that are already on the PC as detected, but doesn’t upload them. To upload them, use **Upload** on the run page; see [Request uploads](#request-uploads). New files after the change follow the upload mode.
 
 If the watcher is offline, the change waits and is applied when the watcher next starts. If someone also edited `config.yaml` on the PC while it was offline, the newer of the two edits wins and the other stays in the history.
+
+### Edits made on the PC [#edits-on-the-pc]
+
+An edit made on the PC while the watcher is running, such as with `data-hub-watcher config edit`, is saved to `config.yaml` and recorded in the history at once, as **Applied**. The watcher reads `config.yaml` only when it starts, though, so it keeps running its previous settings until it restarts. Until then the **Configuration** tab shows **Edited on the PC** with what will change, and the watcher list shows **Edited on PC, restart pending**. With watcher 1.3.0 and later, **Current settings** shows what the watcher is running, from the revision it reports in its heartbeat.
 
 ### History and restore [#config-history]
 

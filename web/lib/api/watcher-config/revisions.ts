@@ -797,6 +797,7 @@ export async function previewConfigForInstrument(
 }
 
 export interface WatcherConfigState {
+  /** The revision the watcher reports running, from its heartbeat. */
   appliedConfigRevision: number | null;
   /** The settings the form starts from: `latest`, else the pushed YAML. */
   baseSettings: WatcherConfigSettings | null;
@@ -811,6 +812,13 @@ export interface WatcherConfigState {
   latest: ConfigRevision | null;
   /** What the watcher last reported in its pushed YAML. */
   reportedSettings: WatcherConfigSettings | null;
+  /** A PC edit the running watcher hasn't loaded yet (see `pickRestartPending`). */
+  restartPending: ConfigRevision | null;
+  /**
+   * What the watcher is running: the revision it reports applying, else its
+   * pushed YAML. `revision` is null when it comes from the YAML.
+   */
+  running: { revision: number | null; settings: WatcherConfigSettings } | null;
   /**
    * What a save is compared with (see `noChangesBaseline`). The server
    * refuses a save with these settings as "No changes", so the form and
@@ -821,10 +829,33 @@ export interface WatcherConfigState {
 }
 
 /**
+ * A PC edit the running watcher hasn't loaded. Someone edited `config.yaml`
+ * on the PC (for example with `config edit`) while the watcher ran, and the
+ * CLI pushed it, so it's the newest applied revision. But the watcher reads
+ * the file only at startup, so it keeps reporting an older revision until
+ * it restarts. Null while a newer change is pending (applying that replaces
+ * the edit) or when the watcher hasn't reported a revision.
+ */
+export function pickRestartPending(
+  intended: ConfigRevision | null,
+  appliedConfigRevision: number | null
+): ConfigRevision | null {
+  if (
+    intended?.status !== "applied" ||
+    intended.source !== "pc" ||
+    appliedConfigRevision === null
+  ) {
+    return null;
+  }
+  return intended.revision > appliedConfigRevision ? intended : null;
+}
+
+/**
  * What the edit form needs, for the Configuration tab and the dialog.
  * `latest` is the current revision (see `getCurrentConfigRevision`), which
- * the callout describes and the form starts from. Pass `known` when the
- * caller already loaded the revisions.
+ * the callout describes and the form starts from. Pass `history` (newest
+ * first, as `listConfigRevisions` returns it) when the caller already
+ * loaded it.
  */
 export async function getWatcherConfigState(
   watcher: {
@@ -834,22 +865,36 @@ export async function getWatcherConfigState(
     configRevision: number | null;
     appliedConfigRevision: number | null;
   },
-  known?: { latest: ConfigRevision | null; intended: ConfigRevision | null }
+  history?: readonly ConfigRevision[]
 ): Promise<WatcherConfigState> {
-  const [latest, intended] = known
-    ? [known.latest, known.intended]
-    : await Promise.all([
-        getCurrentConfigRevision(watcher.id),
-        getIntendedConfigRevision(watcher.id),
-      ]);
+  const revisions = history ?? (await listConfigRevisions(watcher.id));
+  const latest = pickCurrentRevision(revisions);
+  const intended = pickIntendedRevision(revisions);
+  const applied = watcher.appliedConfigRevision;
+  const runningRevision =
+    applied === null
+      ? null
+      : (revisions.find((rev) => rev.revision === applied) ??
+        (await getConfigRevision(watcher.id, applied)));
   const reportedSettings = parseSettingsFromYaml(watcher.configYaml);
+  let running: WatcherConfigState["running"] = null;
+  if (runningRevision) {
+    running = {
+      revision: runningRevision.revision,
+      settings: runningRevision.settings,
+    };
+  } else if (reportedSettings) {
+    running = { revision: null, settings: reportedSettings };
+  }
   return {
     watcherVersion: watcher.watcherVersion,
     editable: watcherSupportsRemoteConfig(watcher.watcherVersion),
     configRevision: watcher.configRevision,
-    appliedConfigRevision: watcher.appliedConfigRevision,
+    appliedConfigRevision: applied,
     latest,
     reportedSettings,
+    running,
+    restartPending: pickRestartPending(intended, applied),
     baseSettings: latest?.settings ?? reportedSettings,
     savedSettings: noChangesBaseline(latest, intended, reportedSettings),
   };

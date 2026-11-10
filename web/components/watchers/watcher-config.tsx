@@ -4,7 +4,10 @@ import { CopyButton } from "@/components/copy-button";
 import { EmptyState } from "@/components/empty-state";
 import { WatcherConfigForm } from "@/components/watchers/watcher-config-form";
 import { WatcherConfigHistory } from "@/components/watchers/watcher-config-history";
-import { ConfigChangeCallout } from "@/components/watchers/watcher-config-status";
+import {
+  ConfigChangeCallout,
+  RestartPendingCallout,
+} from "@/components/watchers/watcher-config-status";
 import { WatcherYamlDisclosure } from "@/components/watchers/watcher-yaml-disclosure";
 import type {
   ConfigRevision,
@@ -29,7 +32,7 @@ export function WatcherConfig({
   history: ConfigRevision[];
   isAdmin: boolean;
 }) {
-  const reported = state.reportedSettings;
+  const running = state.running;
   const isDeregistered = watcher.deletedAt !== null;
   const canEdit = isAdmin && !isDeregistered;
   const watcherOnline =
@@ -39,23 +42,25 @@ export function WatcherConfig({
   return (
     <div className="flex flex-col gap-6">
       <ConfigChangeCallout
-        current={reported}
+        current={running?.settings ?? null}
         latest={state.latest}
         watcherOnline={watcherOnline}
+      />
+      <RestartPendingCallout
+        revision={state.restartPending}
+        running={running}
       />
 
       <section className="flex flex-col gap-2">
         <h4 className="font-medium text-sm">Current settings</h4>
         <p className="text-muted-foreground text-xs">
-          As last reported by the watcher
-          {state.appliedConfigRevision
-            ? `, running revision ${state.appliedConfigRevision}`
-            : ""}
-          .
+          {running?.revision
+            ? `What the watcher is running: revision ${running.revision}.`
+            : "As last reported by the watcher."}
         </p>
-        {reported ? (
+        {running ? (
           <dl className="grid grid-cols-1 gap-x-6 gap-y-2 rounded-lg border bg-background p-4 text-sm sm:grid-cols-[max-content_1fr] dark:bg-muted">
-            {settingsDisplayRows(reported).map((row) => (
+            {settingsDisplayRows(running.settings).map((row) => (
               <div className="contents" key={row.key}>
                 <dt className="text-muted-foreground">{row.label}</dt>
                 <dd className="break-all font-mono text-[13px]">{row.value}</dd>
@@ -99,6 +104,7 @@ export function WatcherConfig({
         <h4 className="font-medium text-sm">History</h4>
         <WatcherConfigHistory
           canRestore={canEdit && state.editable}
+          restartPendingRevision={state.restartPending?.revision ?? null}
           revisions={history}
           savedSettings={state.savedSettings}
           watcherId={watcher.id}

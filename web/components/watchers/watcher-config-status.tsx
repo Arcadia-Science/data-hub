@@ -1,6 +1,6 @@
 "use client";
 
-import { CircleAlert, CircleCheck, Clock, Undo2 } from "lucide-react";
+import { CircleAlert, CircleCheck, Clock, RotateCw, Undo2 } from "lucide-react";
 import { RelativeTime } from "@/components/dashboard/relative-time";
 import { ActorLabel } from "@/components/token-actor";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import type {
   ConfigRevision,
   ConfigRevisionStatus,
+  WatcherConfigState,
 } from "@/lib/api/watcher-config/revisions";
 import type { WatcherConfigSettings } from "@/lib/api/watcher-config/settings";
 import { describeSettingsChanges } from "@/lib/api/watcher-config/settings";
@@ -57,6 +58,19 @@ export function ConfigRevisionStatusBadge({
   );
 }
 
+const RESTART_CLASSNAME =
+  "bg-slate-100 text-slate-700 dark:bg-slate-950 dark:text-slate-300";
+
+/** List badge for a PC edit that takes effect when the watcher restarts. */
+export function RestartPendingBadge({ className }: { className?: string }) {
+  return (
+    <Badge className={cn(RESTART_CLASSNAME, className)}>
+      <RotateCw />
+      Edited on PC, restart pending
+    </Badge>
+  );
+}
+
 /** List badge for a watcher whose latest change is pending or rejected. */
 export function ConfigChangeBadge({
   status,
@@ -94,7 +108,7 @@ export function ConfigChangeCallout({
   watcherOnline,
 }: {
   latest: ConfigRevision | null;
-  /** What the watcher last reported, to show what the change does. */
+  /** What the watcher is running, to show what the change does. */
   current: WatcherConfigSettings | null;
   watcherOnline: boolean;
 }) {
@@ -145,6 +159,51 @@ export function ConfigChangeCallout({
           The watcher kept its previous settings. Fix the problem and save
           again.
         </span>
+      </AlertDescription>
+    </Alert>
+  );
+}
+
+/**
+ * Explains a PC edit the running watcher hasn't loaded (see
+ * `pickRestartPending`): the history shows it as applied, but the watcher
+ * keeps running its previous settings until it restarts.
+ */
+export function RestartPendingCallout({
+  revision,
+  running,
+}: {
+  revision: ConfigRevision | null;
+  /** What the watcher is running, to show what the edit changes. */
+  running: WatcherConfigState["running"];
+}) {
+  if (!revision) {
+    return null;
+  }
+  const changes = running
+    ? describeSettingsChanges(running.settings, revision.settings)
+    : [];
+  return (
+    <Alert>
+      <RotateCw />
+      <AlertTitle>Edited on the PC (revision {revision.revision})</AlertTitle>
+      <AlertDescription className="flex flex-col gap-2">
+        <span className="flex flex-wrap items-center gap-1.5">
+          Saved <RelativeTime date={revision.createdAt.toISOString()} />
+          {revision.createdBy ? (
+            <span className="inline-flex items-center gap-1.5">
+              by <ActorLabel actor={revision.createdBy} />
+            </span>
+          ) : null}
+          .
+        </span>
+        <span>
+          Takes effect when the watcher restarts.
+          {running?.revision
+            ? ` Until then it keeps running revision ${running.revision}.`
+            : ""}
+        </span>
+        {changes.length > 0 ? <ChangeList changes={changes} /> : null}
       </AlertDescription>
     </Alert>
   );
