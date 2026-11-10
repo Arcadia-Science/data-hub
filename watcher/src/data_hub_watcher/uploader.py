@@ -13,11 +13,12 @@ import mimetypes
 import re
 import threading
 import time
-from collections.abc import Iterator
-from concurrent.futures import ThreadPoolExecutor, wait
+from collections.abc import Callable, Iterator, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TypeVar, cast
 
 import requests as http_requests
 from requests.adapters import HTTPAdapter
@@ -32,19 +33,35 @@ from data_hub_watcher.constants import (
 )
 from data_hub_watcher.events import EventReporter, EventType, WatcherEvent
 from data_hub_watcher.heartbeat import WatcherCounters
-from data_hub_watcher.models import PresignedUploadResponse, UploadQueueFile
+from data_hub_watcher.models import (
+    MultipartPartUrlsResponse,
+    PresignedUploadResponse,
+    UploadQueueFile,
+)
 from data_hub_watcher.run_detector import FileInfo, file_created_at
-from data_hub_watcher.state import StateDB
+from data_hub_watcher.state import PendingUploadRecord, StateDB
 from data_hub_watcher.util import file_digests
 
 logger = logging.getLogger(__name__)
 
 # Part URLs expire with the signing credentials, so fetch a few at a time.
+# Eight is the most the server returns in one call.
 _PART_URL_BATCH = 8
+# A URL fetched longer ago than this is fetched again before it is used.
+_PART_URL_MAX_AGE_SECONDS = 300
 # More tries than a whole-file upload. One short network drop must not
 # cancel a multi-gigabyte file that is already mostly in S3.
 _PART_ATTEMPTS = 6
 _PART_BACKOFF_CAP_SECONDS = 30
+# A worker waiting for an upload slot, or backing off before a retry, looks
+# for a stop (or a failed sibling part) this often. A thread that waits for
+# worker threads wakes this often too, because Python on Windows delivers
+# Ctrl-C to a thread only between timed waits.
+_WAIT_STEP_SECONDS = 0.5
+
+_T = TypeVar("_T")
+# What the shared iterator in `_run_workers` returns once it has no more items.
+_NO_MORE = object()
 
 
 class _UploadStopped(Exception):
@@ -77,6 +94,228 @@ class _FileSlice:
 
     def close(self) -> None:
         self._handle.close()
+
+
+class _UrlFetch:
+    """One part-URL request, which later callers for the same URLs wait on."""
+
+    def __init__(self) -> None:
+        self.done = threading.Event()
+        # Set before ``done``: the URLs the server returned, or what went wrong.
+        self.urls: dict[int, str] = {}
+        self.error: BaseException | None = None
+
+
+class _PartUrls:
+    """Part upload URLs for one multipart upload, shared by its part workers.
+
+    A part that has no URL yet fetches its whole batch: parts 1-8, then 9-16,
+    and so on in steps of ``_PART_URL_BATCH``. Its neighbours are then ready.
+    A retry of a part that has a URL, or a cached URL older than
+    ``_PART_URL_MAX_AGE_SECONDS``, fetches only that part.
+
+    The lock is held only to look at the cache and the requests in flight,
+    never across a request. A fresh cached URL is therefore returned at once,
+    even while another worker's request is slow. Workers that miss on the same
+    URLs together share one request, and a failure of that request is raised
+    to each of them.
+    """
+
+    def __init__(
+        self,
+        fetch: Callable[[list[int]], MultipartPartUrlsResponse],
+        part_count: int,
+        *,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._fetch = fetch
+        self._part_count = part_count
+        self._clock = clock
+        self._lock = threading.Lock()
+        # Part number -> (URL, when it was fetched).
+        self._cache: dict[int, tuple[str, float]] = {}
+        # The part numbers of each request in flight -> that request.
+        self._in_flight: dict[tuple[int, ...], _UrlFetch] = {}
+
+    def get(self, part_number: int, *, refresh: bool = False) -> str:
+        with self._lock:
+            cached = self._cache.get(part_number)
+            if cached is not None and not refresh:
+                url, fetched_at = cached
+                if self._clock() - fetched_at < _PART_URL_MAX_AGE_SECONDS:
+                    return url
+            if cached is None:
+                first = (part_number - 1) // _PART_URL_BATCH * _PART_URL_BATCH + 1
+                last = min(first + _PART_URL_BATCH, self._part_count + 1)
+                numbers = tuple(range(first, last))
+            else:
+                numbers = (part_number,)
+            request = self._in_flight.get(numbers)
+            leader = request is None
+            if request is None:
+                request = self._in_flight[numbers] = _UrlFetch()
+
+        if leader:
+            self._fetch_and_store(numbers, request)
+        else:
+            request.done.wait()
+        if request.error is not None:
+            raise request.error
+        if part_number not in request.urls:
+            raise RuntimeError(f"the server returned no URL for part {part_number}")
+        return request.urls[part_number]
+
+    def _fetch_and_store(self, numbers: tuple[int, ...], request: _UrlFetch) -> None:
+        """Make the request, cache what came back, and wake the workers waiting on it."""
+        try:
+            response = self._fetch(list(numbers))
+            request.urls = {part.part_number: part.upload_url for part in response.parts}
+            now = self._clock()
+            with self._lock:
+                for number, url in request.urls.items():
+                    self._cache[number] = (url, now)
+        except BaseException as exc:
+            request.error = exc
+        finally:
+            # Clear the request on an error too, so the next attempt asks again.
+            with self._lock:
+                del self._in_flight[numbers]
+            request.done.set()
+
+
+class _PartRun:
+    """Which parts of one multipart upload have finished, and the first failure.
+
+    The first real failure sets ``cancel``, so no part that has not started
+    will start.
+    """
+
+    def __init__(self, part_count: int) -> None:
+        self.cancel = threading.Event()
+        self.error: BaseException | None = None
+        self._part_count = part_count
+        self._etags: dict[int, str] = {}
+        self._lock = threading.Lock()
+
+    def finish(self, part_number: int, etag: str) -> None:
+        with self._lock:
+            self._etags[part_number] = etag
+
+    def fail(self, exc: BaseException) -> None:
+        with self._lock:
+            if self.error is None:
+                self.error = exc
+        self.cancel.set()
+
+    @property
+    def complete(self) -> bool:
+        with self._lock:
+            return len(self._etags) == self._part_count
+
+    def parts(self) -> list[dict[str, object]]:
+        """The finished parts in part-number order, as the complete call expects them."""
+        with self._lock:
+            return [{"part_number": n, "etag": self._etags[n]} for n in sorted(self._etags)]
+
+
+class _Transfer:
+    """The span of one file's transfer to S3, for the ``file_uploaded`` event.
+
+    It starts when the first upload slot is taken and ends when the file's
+    bytes are in S3. Hashing and the wait for that first slot are left out;
+    later waits for a slot, and backoff between attempts, count.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._started: float | None = None
+        self._finished: float | None = None
+
+    def start(self) -> None:
+        """Record the first call only. Later calls (other parts, a restart) keep it."""
+        with self._lock:
+            if self._started is None:
+                self._started = time.monotonic()
+
+    def finish(self) -> None:
+        with self._lock:
+            self._finished = time.monotonic()
+
+    @property
+    def seconds(self) -> float:
+        with self._lock:
+            if self._started is None or self._finished is None:
+                return 0.0
+            return self._finished - self._started
+
+
+def _run_workers(
+    items: Sequence[_T],
+    task: Callable[[_T], None],
+    *,
+    workers: int,
+    name: str,
+    halted: Callable[[], bool],
+    on_interrupt: Callable[[], None],
+) -> None:
+    """Run ``task(item)`` for every item, on up to *workers* threads at a time.
+
+    The threads are daemon threads. Python joins ``ThreadPoolExecutor`` threads
+    when the process exits, which would hold the exit until every send in
+    flight ended. A daemon thread is dropped at exit instead, so a shutdown
+    is bounded by the runtime's timed join of the upload worker, not by the
+    sends in flight.
+
+    The threads pull items, in order, from one iterator behind a lock, so each
+    item runs once. No item starts after ``halted()`` turns true; items already
+    running finish. With one worker, or one item, there is no thread: the items
+    run on the calling thread, and a task's error is raised at once.
+    Otherwise a task's error is kept, and the first one is raised after every
+    thread has exited.
+
+    The calling thread waits for the threads in short timed steps. A wait with
+    no timeout cannot be interrupted by Ctrl-C on Windows. If the wait is
+    interrupted, ``on_interrupt()`` runs, so the threads stop starting items,
+    and the interrupt is raised again without waiting for them.
+    """
+    count = min(workers, len(items))
+    if count <= 1:
+        for item in items:
+            if halted():
+                return
+            task(item)
+        return
+
+    pending = iter(items)
+    lock = threading.Lock()
+    errors: list[BaseException] = []
+
+    def pull() -> None:
+        while True:
+            with lock:
+                item = _NO_MORE if halted() else next(pending, _NO_MORE)
+            if item is _NO_MORE:
+                return
+            try:
+                task(cast(_T, item))
+            except BaseException as exc:
+                with lock:
+                    errors.append(exc)
+
+    threads = [
+        threading.Thread(target=pull, name=f"{name}-{n}", daemon=True) for n in range(1, count + 1)
+    ]
+    try:
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            while thread.is_alive():
+                thread.join(_WAIT_STEP_SECONDS)
+    except BaseException:
+        on_interrupt()
+        raise
+    if errors:
+        raise errors[0]
 
 
 def _xml_tag(body: str, tag: str) -> str | None:
@@ -185,10 +424,12 @@ class Uploader:
     watch_directory:
         Root watch directory for resolving relative paths in queue mode.
     upload_parallelism:
-        Maximum number of files to upload concurrently within a single
-        :meth:`upload_files` batch. Defaults to 1 (fully serial) so
-        unit tests and call sites that don't pass an explicit value
-        keep their previous behaviour. Production wiring (see
+        The most S3 PUTs this uploader runs at once, whole files and
+        multipart parts together. It is one budget for every path:
+        :meth:`upload_files`, the upload queue, pending-upload retries,
+        and the parts of a single large file. Defaults to 1 (fully
+        serial) so unit tests and call sites that don't pass an explicit
+        value keep their previous behaviour. Production wiring (see
         ``runtime.build_runtime``) reads this from the per-instrument
         config.
     """
@@ -216,9 +457,11 @@ class Uploader:
         if upload_parallelism < 1:
             raise ValueError(f"upload_parallelism must be >= 1, got {upload_parallelism}")
         self._parallelism = upload_parallelism
-        # When set (by the owning ``UploadQueueWorker``), a shutdown can
-        # interrupt the retry backoff and abort between queued files; ``None``
-        # for the one-shot ``upload`` CLI path, which never races a teardown.
+        # Set by the owning ``UploadQueueWorker`` on shutdown, and by the
+        # one-shot ``upload`` command on Ctrl-C. Once set, no new file or part
+        # starts and a retry backoff or wait for an upload slot ends early;
+        # parts already sending finish. ``None`` when the caller never stops
+        # the uploader (unit tests).
         self._stop_event = stop_event
         # Track consecutive upload-queue poll failures so the watcher
         # surfaces a ``kind=upload_queue_poll_failed`` event on the
@@ -231,14 +474,19 @@ class Uploader:
         # Per-file upload-queue attempt bookkeeping, keyed by server file id.
         # Bounds retries before giving up (see ``_process_queued_file``) and
         # doubles as the emit-once throttle for the missing-file error. Pruned
-        # each poll, so a re-requested id starts fresh. Upload worker thread only.
+        # each poll, so a re-requested id starts fresh. ``poll_upload_queue``
+        # replaces the dict before it starts the file tasks and returns only
+        # after they finish, and each task touches only its own file id.
         self._queue_attempts: dict[int, _QueueAttempt] = {}
         # Single ``requests.Session`` shared across every S3 PUT
         # (parallel or serial). Keeps TLS connections alive between
         # presigned URLs that target the same S3 bucket -- avoids
         # paying the handshake cost on every file in a multi-file
-        # run. ``requests.Session`` is documented as thread-safe for
-        # concurrent ``put`` calls.
+        # run. ``requests`` does not promise that a ``Session`` is
+        # thread-safe. The parts that are unsafe to share are the cookie
+        # jar and adapters changed while threads run. S3 sets no
+        # cookies and the adapters are mounted once below, before any
+        # upload starts, so sharing it across upload threads is fine.
         self._s3_session = http_requests.Session()
         # Size the urllib3 pool to match ``upload_parallelism`` so we
         # never trip the "Connection pool is full, discarding
@@ -252,7 +500,9 @@ class Uploader:
         # leaves room for cross-bucket fan-out if a future config does
         # that. ``pool_block=False`` (the default) preserves the prior
         # behaviour of spinning up a transient connection if the pool
-        # is momentarily exhausted instead of blocking the worker.
+        # is momentarily exhausted instead of blocking the worker. The
+        # upload slots below keep concurrent PUTs at or below the pool
+        # size, so connections are reused rather than discarded.
         adapter = HTTPAdapter(
             pool_connections=upload_parallelism,
             pool_maxsize=upload_parallelism,
@@ -271,6 +521,12 @@ class Uploader:
         # multipart start makes the server abort the first one.
         self._in_flight: set[Path] = set()
         self._in_flight_changed = threading.Condition()
+        # One slot per simultaneous S3 PUT, shared by every file and part this
+        # uploader sends. A slot is held only while a PUT runs (and, for a
+        # part, while its URL is fetched), never during a backoff or while
+        # waiting on another lock or on worker threads, so waiting for a slot
+        # cannot deadlock.
+        self._put_slots = threading.BoundedSemaphore(upload_parallelism)
 
     # ------------------------------------------------------------------
     # Auto-mode: upload a batch of files for a reported run
@@ -283,15 +539,17 @@ class Uploader:
         (auto mode only).  Returns the number of files successfully uploaded.
 
         When ``upload_parallelism > 1`` the per-file
-        :meth:`_upload_single` calls run in a short-lived
-        :class:`~concurrent.futures.ThreadPoolExecutor`. The pool is
-        scoped to a single batch (created and torn down per call) so
-        idle worker threads don't outlive the run -- watcher hosts are
-        long-lived and an always-on pool would just be holding socket
-        FDs and Python frames around for nothing between runs.
+        :meth:`_upload_single` calls run on short-lived daemon threads
+        (see :func:`_run_workers`), and their PUTs share the
+        ``upload_parallelism`` budget with every other upload. The
+        threads are scoped to a single batch (created and ended per
+        call) so idle worker threads don't outlive the run -- watcher
+        hosts are long-lived and an always-on pool would just be
+        holding socket FDs and Python frames around for nothing between
+        runs.
         """
         if not files:
-            # Avoid spinning up a pool for a (rare) empty manifest;
+            # Avoid spinning up threads for a (rare) empty manifest;
             # also preserves the existing "succeeded == len(files)"
             # check below which would mark the run uploaded with
             # zero work.
@@ -302,30 +560,26 @@ class Uploader:
             run_id, [_relative_path(info.path, self._watch_dir) for info in files]
         )
 
-        # Upper-bound parallelism by the actual file count so a small
-        # batch doesn't allocate more threads than it can use.
-        max_workers = min(self._parallelism, len(files))
+        uploaded: list[Path] = []
 
-        if max_workers <= 1:
-            # Fast path: avoid the pool's overhead (thread spin-up,
-            # ``Future`` wrapping) when there's nothing to parallelise.
-            # Behaviour-identical to the previous serial loop.
-            succeeded = sum(1 for info in files if self._upload_pending(info.path, run_id))
-        else:
-            with ThreadPoolExecutor(
-                max_workers=max_workers,
-                thread_name_prefix="uploader",
-            ) as pool:
-                futures = [pool.submit(self._upload_pending, info.path, run_id) for info in files]
-                # ``wait`` (rather than ``as_completed``) keeps the
-                # success count deterministic without caring about
-                # completion order. Any exception raised inside
-                # ``_upload_single`` would already have been caught
-                # and translated into a ``False`` return by the
-                # function's own error-handling, so we can safely
-                # treat ``future.result()`` as boolean.
-                wait(futures)
-                succeeded = sum(1 for f in futures if f.result())
+        def upload(info: FileInfo) -> None:
+            if self._upload_pending(info.path, run_id):
+                uploaded.append(info.path)
+
+        # With one worker, or one file, this is a plain loop on this thread.
+        # A stop starts no further file. The files that did not start, and
+        # one that a stop cut off, keep the ``pending_uploads`` row recorded
+        # above, because only a success clears it, so the next start's
+        # ``retry_pending_uploads`` uploads them.
+        _run_workers(
+            files,
+            upload,
+            workers=self._parallelism,
+            name="uploader",
+            halted=self._stop_requested,
+            on_interrupt=self._request_stop,
+        )
+        succeeded = len(uploaded)
 
         if succeeded == len(files):
             self._state_db.record_run_uploaded(run_id)
@@ -353,52 +607,52 @@ class Uploader:
         reported file as handled and the initial scan skips them, so
         without this a failed or interrupted upload is never tried again.
         Each start counts as one attempt, capped at
-        ``MAX_PENDING_UPLOAD_ATTEMPTS``.
+        ``MAX_PENDING_UPLOAD_ATTEMPTS``. Files run up to ``upload_parallelism``
+        at a time, and the method returns once all of them are done.
         """
-        for pending in self._state_db.pending_uploads():
-            if self._stop_requested():
-                return
-            # The path came from our own state DB, so it is not re-checked
-            # for traversal the way server-supplied queue paths are.
-            path = self._watch_dir / pending.relative_path
-            if not path.is_file():
-                logger.warning(
-                    "Dropping pending upload for missing file: %s", pending.relative_path
-                )
-                self._state_db.clear_pending_upload(pending.relative_path)
-                self._reporter.report_error(
-                    "pending_upload_missing",
-                    f"Stopped retrying {path.name}: the file is no longer on disk",
-                    relative_path=pending.relative_path,
-                    run_id=pending.run_id,
-                )
-                continue
-            try:
-                uploaded = self._upload_pending(path, pending.run_id)
-            except Exception:
-                # Count it as a failed attempt. Otherwise the same file fails
-                # first on every start and the files after it are never retried.
-                logger.exception("Retrying upload of %s failed", pending.relative_path)
-                uploaded = False
-            if uploaded:
-                continue
-            if self._stop_requested():
-                # An interrupted upload is not a failed attempt.
-                return
-            attempts = self._state_db.bump_pending_upload_attempts(pending.relative_path)
-            if attempts < MAX_PENDING_UPLOAD_ATTEMPTS:
-                continue
+        self._for_each(self._state_db.pending_uploads(), self._retry_pending)
+
+    def _retry_pending(self, pending: PendingUploadRecord) -> None:
+        """Retry one pending upload and record the outcome."""
+        # The path came from our own state DB, so it is not re-checked
+        # for traversal the way server-supplied queue paths are.
+        path = self._watch_dir / pending.relative_path
+        if not path.is_file():
+            logger.warning("Dropping pending upload for missing file: %s", pending.relative_path)
             self._state_db.clear_pending_upload(pending.relative_path)
             self._reporter.report_error(
-                "upload_retries_exhausted",
-                (
-                    f"Gave up uploading {path.name} after {attempts} watcher starts; "
-                    "request it from the run page to try again"
-                ),
+                "pending_upload_missing",
+                f"Stopped retrying {path.name}: the file is no longer on disk",
                 relative_path=pending.relative_path,
                 run_id=pending.run_id,
-                attempts=attempts,
             )
+            return
+        try:
+            uploaded = self._upload_pending(path, pending.run_id)
+        except Exception:
+            # Count it as a failed attempt. Otherwise the same file fails
+            # first on every start and the files after it are never retried.
+            logger.exception("Retrying upload of %s failed", pending.relative_path)
+            uploaded = False
+        if uploaded:
+            return
+        if self._stop_requested():
+            # An interrupted upload is not a failed attempt.
+            return
+        attempts = self._state_db.bump_pending_upload_attempts(pending.relative_path)
+        if attempts < MAX_PENDING_UPLOAD_ATTEMPTS:
+            return
+        self._state_db.clear_pending_upload(pending.relative_path)
+        self._reporter.report_error(
+            "upload_retries_exhausted",
+            (
+                f"Gave up uploading {path.name} after {attempts} watcher starts; "
+                "request it from the run page to try again"
+            ),
+            relative_path=pending.relative_path,
+            run_id=pending.run_id,
+            attempts=attempts,
+        )
 
     # ------------------------------------------------------------------
     # Upload queue (both modes)
@@ -406,6 +660,36 @@ class Uploader:
 
     def _stop_requested(self) -> bool:
         return self._stop_event is not None and self._stop_event.is_set()
+
+    def _request_stop(self) -> None:
+        """Set the stop event, if there is one, for a wait that Ctrl-C interrupted."""
+        if self._stop_event is not None:
+            self._stop_event.set()
+
+    def _for_each(self, items: Sequence[_T], fn: Callable[[_T], None]) -> None:
+        """Run *fn* on each item, at most ``upload_parallelism`` at a time.
+
+        Returns when every item is done. With one worker, or one item, it is a
+        plain loop on the calling thread. Otherwise the items run on daemon
+        threads created for this call (see :func:`_run_workers`). No item
+        starts once a stop is requested, and an unexpected error is logged so
+        it cannot end the other items.
+        """
+
+        def run(item: _T) -> None:
+            try:
+                fn(item)
+            except Exception:
+                logger.exception("Upload task failed")
+
+        _run_workers(
+            items,
+            run,
+            workers=self._parallelism,
+            name="uploader",
+            halted=self._stop_requested,
+            on_interrupt=self._request_stop,
+        )
 
     def poll_upload_queue(self) -> None:
         """Fetch the upload queue and process each file.
@@ -420,7 +704,7 @@ class Uploader:
             logger.warning("Failed to fetch upload queue: %s", exc.message)
             # Route through the shared helper so every error increment
             # (whether emitted from the heartbeat thread here or from
-            # an upload-pool worker in ``_upload_single``) goes through
+            # an upload worker thread in ``_upload_single``) goes through
             # the same lock. Inconsistent locking would race the
             # heartbeat reader against parallel-upload writers and
             # surface as off-by-one error totals.
@@ -456,14 +740,15 @@ class Uploader:
             return
 
         logger.info("Upload queue has %d file(s)", len(queue.files))
-        for qf in queue.files:
-            # Bail between files on shutdown so the worker's ``stop()`` can
-            # join promptly instead of draining the whole queue; the
-            # remaining files are picked up on the next start's poll.
-            if self._stop_requested():
-                logger.info("Stop requested; deferring %d queued file(s)", len(queue.files))
-                break
-            self._process_queued_file(qf)
+        if self._stop_requested():
+            logger.info("Stop requested; deferring %d queued file(s)", len(queue.files))
+            return
+        # Files run up to ``upload_parallelism`` at a time, and a file that
+        # starts after a stop is skipped, so the worker's ``stop()`` can join
+        # promptly instead of draining the whole queue; the remaining files
+        # are picked up on the next start's poll. This returns only after
+        # every file task has finished, so the next poll never overlaps them.
+        self._for_each(queue.files, self._process_queued_file)
 
     def _process_queued_file(self, qf: UploadQueueFile) -> None:
         """Attempt one queued file, bounding retries across polls.
@@ -609,7 +894,7 @@ class Uploader:
     def _bump_errors(self) -> None:
         """Increment the shared error counter under ``_counters_lock``.
 
-        Centralised so worker threads inside the parallel-upload pool
+        Centralised so the parallel upload threads
         never race the heartbeat thread reading these values for its
         per-tick payload.
         """
@@ -624,15 +909,61 @@ class Uploader:
     def _backoff(self, attempt: int) -> None:
         self._wait(UPLOAD_RETRY_BASE_DELAY * (2**attempt))
 
-    def _part_backoff(self, attempt: int) -> None:
+    def _part_backoff(self, attempt: int, cancel: threading.Event) -> None:
         delay = min(UPLOAD_RETRY_BASE_DELAY * (2**attempt), _PART_BACKOFF_CAP_SECONDS)
-        self._wait(delay)
+        self._wait(delay, cancel)
 
-    def _wait(self, delay: float) -> None:
+    def _wait(self, delay: float, cancel: threading.Event | None = None) -> None:
+        """Sleep for *delay* seconds. A stop ends the wait early, and so does *cancel* if given."""
+        if cancel is None:
+            self._sleep(delay)
+            return
+        remaining = delay
+        while remaining > 0 and not self._halted(cancel):
+            step = min(remaining, _WAIT_STEP_SECONDS)
+            self._sleep(step)
+            remaining -= step
+
+    def _sleep(self, delay: float) -> None:
         if self._stop_event is not None:
             self._stop_event.wait(delay)
         else:
             time.sleep(delay)
+
+    def _halted(self, cancel: threading.Event | None) -> bool:
+        """Whether the watcher is stopping or the file's other parts were cancelled."""
+        return self._stop_requested() or (cancel is not None and cancel.is_set())
+
+    def _acquire_slot(self, cancel: threading.Event | None = None) -> bool:
+        """Take one of the shared upload slots. Returns False if a stop or *cancel* came first.
+
+        A free slot is granted at once. Callers check for a stop or cancel
+        before they ask, so only a wait needs to look again.
+        """
+        if self._put_slots.acquire(blocking=False):
+            return True
+        while not self._put_slots.acquire(timeout=_WAIT_STEP_SECONDS):
+            if self._halted(cancel):
+                return False
+        if self._halted(cancel):
+            self._put_slots.release()
+            return False
+        return True
+
+    @contextmanager
+    def _slot(self, cancel: threading.Event | None, transfer: _Transfer) -> Iterator[bool]:
+        """Hold an upload slot for the body. Yields whether one was taken.
+
+        The first slot a file takes starts its *transfer* clock.
+        """
+        acquired = self._acquire_slot(cancel)
+        if acquired:
+            transfer.start()
+        try:
+            yield acquired
+        finally:
+            if acquired:
+                self._put_slots.release()
 
     def _fail_upload(self, filename: str, s3_key: str, exc: BaseException) -> None:
         details = s3_error_details(exc)
@@ -653,6 +984,7 @@ class Uploader:
         presigned: PresignedUploadResponse,
         content_type: str | None,
         s3_key: str,
+        transfer: _Transfer,
     ) -> bool:
         url = presigned.upload_url
         if not url:
@@ -662,7 +994,11 @@ class Uploader:
         last_exc: BaseException | None = None
         for attempt in range(UPLOAD_RETRY_MAX):
             try:
-                self._put_to_presigned_url(url, path, content_type)
+                with self._slot(None, transfer) as acquired:
+                    if not acquired:
+                        logger.info("Stop requested mid-upload; deferring %s", path.name)
+                        return False
+                    self._put_to_presigned_url(url, path, content_type)
                 return True
             except Exception as exc:
                 last_exc = exc
@@ -689,6 +1025,7 @@ class Uploader:
         content_type: str | None,
         relative_path: str | None,
         run_id: str,
+        transfer: _Transfer,
     ) -> bool:
         upload = presigned
         if not upload.upload_id or not upload.part_size or not upload.part_count:
@@ -705,14 +1042,15 @@ class Uploader:
             if self._stop_requested():
                 return False
             try:
-                parts = self._put_parts(path, upload, size_bytes)
+                parts = self._put_parts(path, upload, size_bytes, transfer)
             except _UploadStopped:
                 return False
             except Exception as exc:
+                # ``_put_parts`` returns or raises only after every part worker
+                # has exited, so no PUT is still in flight when the upload is
+                # aborted. S3 says to abort only after the parts are done.
                 self._abort_quietly(upload.file_id, upload.upload_id)
                 self._fail_upload(path.name, upload.s3_key, exc)
-                return False
-            if parts is None:
                 return False
             try:
                 self._complete_with_retries(upload, parts, crc64nvme)
@@ -760,24 +1098,56 @@ class Uploader:
         path: Path,
         upload: PresignedUploadResponse,
         size_bytes: int,
-    ) -> list[dict[str, object]] | None:
+        transfer: _Transfer,
+    ) -> list[dict[str, object]]:
+        """Upload every part of *path*, up to ``upload_parallelism`` at a time.
+
+        Returns the finished parts in part-number order. Raises
+        ``_UploadStopped`` when a stop left parts unsent, or the first part's
+        error when a part failed for good. Parts that had not started are never
+        started after a stop or a failure, and this returns or raises only
+        after every part worker has exited. The exception is Ctrl-C, which
+        cancels the parts and raises without waiting for the ones in flight.
+        """
         upload_id, part_size, part_count = self._multipart_plan(upload)
-        finished: list[dict[str, object]] = []
-        part_number = 1
-        while part_number <= part_count:
-            if self._stop_requested():
-                raise _UploadStopped
-            batch_end = min(part_number + _PART_URL_BATCH, part_count + 1)
-            numbers = list(range(part_number, batch_end))
-            urls = self._client.get_part_urls(upload.file_id, upload_id, numbers)
-            by_number = {part.part_number: part.upload_url for part in urls.parts}
-            for number in numbers:
-                start = (number - 1) * part_size
-                length = min(part_size, size_bytes - start)
-                etag = self._put_one_part(path, by_number[number], start, length, upload, number)
-                finished.append({"part_number": number, "etag": etag})
-            part_number = batch_end
-        return finished
+        urls = _PartUrls(
+            lambda numbers: self._client.get_part_urls(upload.file_id, upload_id, numbers),
+            part_count,
+        )
+        run = _PartRun(part_count)
+
+        def put_part(number: int) -> None:
+            try:
+                etag = self._put_one_part(
+                    path, urls, number, part_size, size_bytes, run.cancel, transfer
+                )
+            except _UploadStopped:
+                return
+            except Exception as exc:
+                run.fail(exc)
+                return
+            run.finish(number, etag)
+
+        # Parts start in order, each by one worker, until a stop or a failed
+        # part sets the halt. The call returns after every worker has exited.
+        _run_workers(
+            range(1, part_count + 1),
+            put_part,
+            workers=self._parallelism,
+            name="upload-part",
+            halted=lambda: self._halted(run.cancel),
+            on_interrupt=run.cancel.set,
+        )
+
+        # A stop that arrives while the last parts are in flight still leaves
+        # every part uploaded, so the file is finished rather than deferred.
+        if run.complete:
+            return run.parts()
+        if self._stop_requested():
+            raise _UploadStopped
+        if run.error is not None:
+            raise run.error
+        raise RuntimeError("upload ended before every part finished")
 
     def _multipart_plan(self, upload: PresignedUploadResponse) -> tuple[str, int, int]:
         if not upload.upload_id or not upload.part_size or not upload.part_count:
@@ -787,36 +1157,56 @@ class Uploader:
     def _put_one_part(
         self,
         path: Path,
-        url: str,
-        start: int,
-        length: int,
-        upload: PresignedUploadResponse,
+        urls: _PartUrls,
         part_number: int,
+        part_size: int,
+        size_bytes: int,
+        cancel: threading.Event,
+        transfer: _Transfer,
     ) -> str:
-        upload_id, _part_size, _part_count = self._multipart_plan(upload)
+        """Upload one part and return its ETag.
+
+        Raises ``_UploadStopped`` when the watcher stops, or *cancel* is set,
+        before an attempt starts. Otherwise it raises the last error once the
+        attempts run out. A failed part-URL request counts as an attempt,
+        except a 4xx, which fails the part at once.
+        """
+        start = (part_number - 1) * part_size
+        length = min(part_size, size_bytes - start)
         last_exc: BaseException | None = None
         for attempt in range(_PART_ATTEMPTS):
-            # Refresh on every retry, not only when the error body says the
-            # URL expired. A connection reset mid-body has no body to read,
-            # and the URL may have expired while that body was in flight.
-            current_url = url
             if attempt > 0:
-                refreshed = self._client.get_part_urls(upload.file_id, upload_id, [part_number])
-                current_url = refreshed.parts[0].upload_url
-            slice_reader = _FileSlice(path, start, length)
+                self._part_backoff(attempt - 1, cancel)
+            if self._halted(cancel):
+                raise _UploadStopped
+            slice_reader: _FileSlice | None = None
             try:
-                response = self._s3_session.put(
-                    current_url,
-                    data=slice_reader,
-                    headers={"Content-Length": str(length)},
-                    timeout=300,
-                )
-                response.raise_for_status()
-                etag = response.headers.get("ETag") or response.headers.get("etag")
-                if not etag:
-                    raise RuntimeError(f"part {part_number} response had no ETag")
-                return etag
+                # The slot is held from the URL request through the PUT, so a
+                # URL never waits in line and expires. Refresh on every retry,
+                # not only when the error body says the URL expired. A
+                # connection reset mid-body has no body to read, and the URL
+                # may have expired while that body was in flight.
+                with self._slot(cancel, transfer) as acquired:
+                    if not acquired:
+                        raise _UploadStopped
+                    url = urls.get(part_number, refresh=attempt > 0)
+                    slice_reader = _FileSlice(path, start, length)
+                    response = self._s3_session.put(
+                        url,
+                        data=slice_reader,
+                        headers={"Content-Length": str(length)},
+                        timeout=300,
+                    )
+                    response.raise_for_status()
+                    etag = response.headers.get("ETag") or response.headers.get("etag")
+                    if not etag:
+                        raise RuntimeError(f"part {part_number} response had no ETag")
+                    return etag
+            except _UploadStopped:
+                raise
             except Exception as exc:
+                if isinstance(exc, ApiError) and not exc.is_transient:
+                    raise
                 last_exc = exc
                 logger.warning(
                     "Part %d attempt %d/%d failed for %s: %s",
@@ -826,11 +1216,9 @@ class Uploader:
                     path.name,
                     s3_error_details(exc)["error"],
                 )
-                self._part_backoff(attempt)
             finally:
-                slice_reader.close()
-            if self._stop_requested():
-                raise _UploadStopped
+                if slice_reader is not None:
+                    slice_reader.close()
         raise last_exc or RuntimeError(f"part {part_number} failed")
 
     def _complete_with_retries(
@@ -896,7 +1284,9 @@ class Uploader:
     def _upload_single_unlocked(self, path: Path, run_id: str) -> bool:
         """Upload one file via a presigned URL, notify the API, and record in StateDB.
 
-        Returns `True` on success, `False` after all retries exhausted.
+        Returns `True` on success, `False` after all retries exhausted. It
+        also returns `False`, without recording a failure, when a stop came
+        before the upload started.
 
         Concurrency note
         ----------------
@@ -918,6 +1308,7 @@ class Uploader:
         # implementation, and the request thread blocks on the
         # network. Resolve both before branching so the rest of the
         # method behaves exactly as the old serial version.
+        prep_started = time.monotonic()
         with ThreadPoolExecutor(max_workers=2, thread_name_prefix="upload-prep") as prep:
             sha_future = prep.submit(file_digests, path)
             presign_future = prep.submit(
@@ -969,6 +1360,8 @@ class Uploader:
                     )
                 )
                 return False
+            # The URL request finished above, so this is when both were done.
+            prep_seconds = time.monotonic() - prep_started
 
         s3_key = presigned.s3_key
         s3_bucket = presigned.s3_bucket
@@ -990,7 +1383,18 @@ class Uploader:
             logger.debug("Skipping already-uploaded file: %s", path.name)
             return True
 
-        if presigned.upload_type == "multipart":
+        # A stop that came while the file was being hashed. Nothing has been
+        # sent or recorded, and this is not an error: an auto-mode file keeps
+        # its ``pending_uploads`` row and a queued file stays in the server's
+        # queue, so the next start uploads it. Checking here, before any PUT,
+        # is what lets ``_acquire_slot`` grant a free slot without looking.
+        if self._stop_requested():
+            logger.info("Stop requested; deferring %s", path.name)
+            return False
+
+        transfer = _Transfer()
+        is_multipart = presigned.upload_type == "multipart"
+        if is_multipart:
             if not self._upload_multipart(
                 path,
                 presigned,
@@ -999,11 +1403,14 @@ class Uploader:
                 content_type,
                 rel_path,
                 run_id,
+                transfer,
             ):
                 return False
+            transfer.finish()
         else:
-            if not self._upload_single_put(path, presigned, content_type, s3_key):
+            if not self._upload_single_put(path, presigned, content_type, s3_key, transfer):
                 return False
+            transfer.finish()
             # Notify API — treat a failed PATCH as an upload failure so the file
             # is not recorded in the dedup DB and will be retried next time. The
             # server derives the S3 location itself, so we only send status/type.
@@ -1041,7 +1448,18 @@ class Uploader:
             WatcherEvent(
                 event_type=EventType.FILE_UPLOADED,
                 message=f"Uploaded {path.name}",
-                details={"s3_key": s3_key, "sha256": sha},
+                details={
+                    "s3_key": s3_key,
+                    "sha256": sha,
+                    "size_bytes": stat.st_size,
+                    # Hashing and the upload-URL request, which run together.
+                    "prep_seconds": round(prep_seconds, 3),
+                    # The transfer to S3: until the single PUT succeeds, or the
+                    # multipart complete call returns. The file-status PATCH
+                    # that follows a single PUT is not counted.
+                    "upload_seconds": round(transfer.seconds, 3),
+                    "part_count": (presigned.part_count or 1) if is_multipart else 1,
+                },
             )
         )
         logger.info("Uploaded %s → s3://%s/%s", path.name, s3_bucket, s3_key)

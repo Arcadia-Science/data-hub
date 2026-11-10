@@ -7,6 +7,7 @@ import re
 import signal
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -1232,6 +1233,9 @@ def upload(ctx: click.Context, file_path: str | None, run_id: str | None, dry_ru
     state_db = StateDB(db_path)
     counters = WatcherCounters()
     reporter = EventReporter(client, cfg.watcher_id)
+    # Set on Ctrl-C, so upload threads that are still running start no more
+    # files or parts before the process exits.
+    stop_event = threading.Event()
     uploader = Uploader(
         client=client,
         state_db=state_db,
@@ -1240,6 +1244,8 @@ def upload(ctx: click.Context, file_path: str | None, run_id: str | None, dry_ru
         instrument_id=inst.id,
         watcher_id=cfg.watcher_id,
         watch_directory=inst.watch_directory,
+        upload_parallelism=inst.upload_parallelism,
+        stop_event=stop_event,
     )
 
     if file_path:
@@ -1254,7 +1260,11 @@ def upload(ctx: click.Context, file_path: str | None, run_id: str | None, dry_ru
             return
 
         click.echo(f"Uploading {fp.name}…")
-        ok = uploader._upload_single(fp, run_id)
+        try:
+            ok = uploader._upload_single(fp, run_id)
+        except KeyboardInterrupt:
+            stop_event.set()
+            raise
         state_db.close()
         if not ok:
             raise click.ClickException(f"Upload failed for {fp.name}")
@@ -1281,7 +1291,11 @@ def upload(ctx: click.Context, file_path: str | None, run_id: str | None, dry_ru
             state_db.close()
             return
 
-        uploader.poll_upload_queue()
+        try:
+            uploader.poll_upload_queue()
+        except KeyboardInterrupt:
+            stop_event.set()
+            raise
         reporter.flush()
         click.echo(click.style(f"✓ Processed {len(queue.files)} file(s).", fg="green"))
         state_db.close()

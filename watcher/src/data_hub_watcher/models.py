@@ -48,13 +48,14 @@ class InstrumentConfig(BaseModel):
     # MAX_STABILITY_WAIT_SECONDS so existing YAMLs keep today's 5-minute
     # behaviour; raise for instruments that write large files for longer.
     max_stability_wait_seconds: int = Field(default=MAX_STABILITY_WAIT_SECONDS, ge=1, le=86400)
-    # Maximum number of files to upload concurrently for a single
-    # detected run (auto mode) or queue poll. The default of 4 balances
-    # S3 throughput against lab-PC network and CPU budgets; instruments
-    # on slow shared uplinks can dial it down to 1 and high-bandwidth
-    # microscopy hosts can push toward the cap. New field, defaulted
-    # for backward compatibility -- existing config YAMLs need no
-    # migration.
+    # The most S3 uploads the watcher runs at once. Whole files and the parts
+    # of a large file share this one budget, across auto mode, the upload
+    # queue, pending-upload retries and the one-shot `upload` command (parts
+    # count from watcher 1.3.0; before that it only limited files). The
+    # default of 4 balances S3 throughput against lab-PC network and CPU
+    # budgets; instruments on slow shared uplinks can dial it down to 1 and
+    # PCs with fast links can push toward the cap. Defaulted, so existing
+    # config YAMLs need no migration.
     upload_parallelism: int = Field(default=4, ge=1, le=32)
     run_detection: RunDetectionConfig
 
