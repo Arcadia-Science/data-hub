@@ -100,7 +100,7 @@ Subcommands for managing the YAML config file:
 | Subcommand | Description |
 | --- | --- |
 | `config show` | Pretty-print the current config |
-| `config validate` | Validate the config file (offline). Also fails when the watch folder is missing or unreadable, although the watcher itself still starts and waits for it |
+| `config validate` | Validate the config file (offline). Also fails when the watch folder is missing or unreadable, although the watcher itself still starts and waits for it, and warns when Data Hub can't read the settings (see [Settings Data Hub can't read](#settings-data-hub-cant-read)) |
 | `config set-environment ENV` | Switch the active API environment (see [Switching environments](#switching-environments)) |
 | `config edit` | Re-prompt each field with current values as defaults |
 | `config open` | Open the config in your editor, then re-validate |
@@ -247,13 +247,15 @@ An admin can change these fields: `watch_directory`, `file_patterns`, `run_detec
 - Every heartbeat sends `config_revision`, the highest revision this watcher has applied.
 - The heartbeat reply carries `config_revision`, the server's latest revision.
 - If the reply's number is higher than the last revision this watcher has seen, the heartbeat thread signals the supervisor. "Seen" covers revisions the watcher applied, rejected, or found already resolved, so a rejected revision is never fetched again.
-- The supervisor calls `GET /watchers/:id/config-revisions/latest`. A revision that isn't `pending` is only recorded as seen. It is also recorded as applied if its status is `applied` and its settings match the running config, as with a revision the server made from this watcher's own push.
+- The seen and applied numbers are stored with the watcher ID they belong to. If `init` registers a new watcher on a PC that keeps its state DB, they are dropped, because the new watcher's revisions start again at 1.
+- The supervisor calls `GET /watchers/:id/config-revisions/latest`, which returns the pending revision if there is one, else the highest. A revision that isn't `pending` is only recorded as seen. It is also recorded as applied if its status is `applied` and its settings match the running config, as with a revision the server made from this watcher's own push.
 - A pending revision is merged into the running config and checked with the same rules as the server. The watcher also checks that the folder exists and can be listed, which only the PC can do.
 - If a check fails, the watcher posts `rejected` with the reason to `POST /watchers/:id/config-revisions/:revision/result`, logs a warning, and keeps running unchanged.
 - If the checks pass, the watcher saves `config.yaml`, rebuilds its loops (below), posts `applied`, and pushes the new YAML through `PUT /watchers/:id/config` with `based_on_revision`.
-- A result the server didn't receive (no connection or a 5xx) is kept in `meta` and retried after each successful heartbeat, including after a restart. A 404 or 409 isn't retried.
+- The saved file keeps the folder exactly as the revision has it. The resolved form can differ in slashes, a trailing separator, letter case, or a mapped drive shown as a UNC path, and the server would record a push with it as a new edit on the PC. Loading the file resolves the folder again.
+- A result the server didn't receive (no connection, a 5xx, or a reply the watcher couldn't read) is kept in `meta` and retried after each successful heartbeat, including after a restart. A 404 or 409 isn't retried.
 
-One case needs the revision history. If the PC's config file changed while the watcher was offline and the newer web change won, the server keeps the web revision pending and stores the PC's edit after it as `superseded`. The latest revision is then the superseded one, so the watcher looks up the pending revision with `GET /watchers/:id/config-revisions`.
+After an offline conflict that the web change won, the server keeps the web revision pending and stores the PC's edit after it as a higher `superseded` revision. Heartbeat replies then announce the superseded number, but `…/latest` returns the pending web revision first, so the watcher applies that. The next fetch returns the superseded revision, which is only recorded as seen: the watcher never applies it or reports a result for it, and stops fetching.
 
 Applying runs on the main thread, in `WatcherSupervisor.poll`, never on the heartbeat thread, because the rebuild has to stop and join the heartbeat.
 
@@ -276,7 +278,9 @@ Applying a revision doesn't restart the process:
 2. The file monitor and the heartbeat are stopped. The heartbeat sends no `stopped` status and no `watcher_stopped` event is queued, because the watcher never actually stops.
 3. `build_runtime` and `start_runtime` run again with the new config. The new runtime shares the supervisor's event reporter and shutdown events, so queued events and a pending auto-update restart carry over.
 
-If the new runtime fails to start, the watcher restores the previous `config.yaml`, starts the previous config again, and reports the revision as `rejected`.
+The post-upgrade marker check (`report_upgrade_outcome`) runs only for the first runtime or waiting state of a process, never on a rebuild. If the updater has just written a marker for the restart it requested, a rebuild would otherwise consume it, report a false failure, and delete the Windows worker's request sentinel before the worker reads it.
+
+If anything fails after the old loops stop, the watcher writes the previous `config.yaml` back byte for byte, starts the previous config again, and reports the revision as `rejected`.
 
 Before saving, the watcher re-reads the environment, watcher ID and instrument ID from `config.yaml`. If `config set-environment` switched the file to something else while the watcher was running, it rejects the revision instead of undoing the switch.
 
@@ -284,12 +288,14 @@ The Windows service still exits with code 1 only for an auto-update restart, so 
 
 ### Reporting newly matching files
 
-A revision can widen what the watcher sees: a new file pattern, recursion turned on, a new run-detection regex, or a new folder. The first scan after such a change is a report-only scan. A file found by that scan is reported as detected without being uploaded when both of these are true:
+A revision can widen what the watcher sees: a new file pattern, recursion turned on, a new run-detection regex, or a new folder. The scan after such a change is a report-only scan. A file found by that scan is reported as detected without being uploaded when both of these are true:
 
 - it isn't in `uploaded_files`, `detected_files` or `baseline_files`
 - the old config wouldn't have reported it, and it was last modified before the change was applied
 
-Admins upload these files with the existing **Request upload** buttons. Files written after the change, and files the old config also matched (such as a file that arrived during the rebuild), follow `upload_mode` as usual. `FileMonitor` takes the `report_only` predicate and sends those files to `RunDetector.on_stable_file(path, upload=False)`. A report-only file never reaches the upload callback, even when later files in the same run upload.
+Admins upload these files with the existing **Request upload** buttons. Files written after the change, and files the old config also matched (such as a file that arrived during the rebuild), follow `upload_mode` as usual. So does a picked-out file that is written to again before it becomes stable, since its data is newer than the change. `FileMonitor` takes the `report_only` predicate and sends those files to `RunDetector.on_stable_file(path, upload=False)`. A report-only file never reaches the upload callback, even when later files in the same run upload.
+
+The supervisor keeps each widening change's predicate for the life of the process and scans with all of them on every later rebuild. Otherwise a second revision that arrived before the first scan had reported every file would rebuild without the first predicate and upload those files. A predicate only matches files modified before its change that no state row covers, so keeping it doesn't affect anything already handled or written later.
 
 State rows are keyed by the path relative to the watch folder, so after a folder change a file is still skipped if an old row has the same relative path, size and modification time. That only happens when the new folder holds a copy of the old one's files, where skipping them is what we want. `pending_uploads` rows are dropped on a folder change, though, because retrying them against the new folder could upload a different file that sits at the same relative path. The server also cancels pending upload requests when the folder changes.
 
@@ -306,6 +312,10 @@ If the folder is missing or unreadable at startup, the watcher starts in the wai
 
 The waiting state replaces the old behavior of exiting at startup, which made the Windows service restart in a loop.
 
+### Settings Data Hub can't read
+
+The server reads the editable settings out of each pushed `config.yaml` with the same rules it applies to web edits. The watcher runs some configs those rules refuse: more than 50 file patterns, a pattern longer than 200 characters, or a Python-style named group such as `(?P<run>…)` in the run regex. For such a config the server records no revision for edits made on the PC, and the web form has nothing to start from. `init` and `config edit` refuse those values, `config validate` warns about them without failing, and the watcher logs a warning at startup. Existing configs still load.
+
 ### Older servers
 
 The new request fields are ignored by servers that don't know them. A server without config revisions leaves `config_revision` out of its replies, so the watcher never fetches anything. A 404 from a config-revision endpoint means either no revisions yet or an older server. Either way there is nothing to apply, and it is logged once per process. An older server rejects the `waiting` heartbeat status, so a waiting watcher shows as offline there.
@@ -319,7 +329,7 @@ The watcher maintains one SQLite database per environment at `~/.data-hub/watche
 - `detected_files` — the file manifest for every reported run, keyed on `(run_id, relative_path)`. Lets the initial scan skip files that are already part of a reported run even in manual mode (where `uploaded_files` stays empty), and lets the run detector hydrate its in-memory state on startup so a restart doesn't re-POST runs the API has already seen.
 - `baseline_files` — files that already existed on disk when a `new-only` environment was first entered, keyed on `relative_path`. A baseline row means "skip" (never uploaded), as opposed to `uploaded_files` which means "sent". Unlike `uploaded_files`, baseline rows are never pruned. Empty in `full`-scan (production) environments.
 - `pending_uploads` — auto-mode uploads that have not succeeded yet, keyed on `relative_path`. A row is added when the run detector hands a file to the uploader and removed when the file is uploaded by any path. On startup the upload worker retries every row once. Each start counts as one attempt, including a retry that raised an unexpected error; after `MAX_PENDING_UPLOAD_ATTEMPTS` (3) the row is dropped with an `upload_retries_exhausted` event. A row whose file is no longer on disk is dropped with a `pending_upload_missing` event. `detected_files` can't serve this purpose: hydration treats every reported file as handled, and `uploaded_files` is pruned while `detected_files` is not, so "detected but not uploaded" would also match every file uploaded more than 90 days ago.
-- `meta` — a small key/value store. Holds the preview deployment URL the database was seeded against, so the watcher can reset local state when a preview is redeployed to a new URL. From 1.3.0 it also holds the config revision bookkeeping described in [Config revisions from the web app](#config-revisions-from-the-web-app): `config_revision_seen`, `config_revision_applied`, `config_synced_checksum`, and `config_revision_unsent_result`.
+- `meta` — a small key/value store. Holds the preview deployment URL the database was seeded against, so the watcher can reset local state when a preview is redeployed to a new URL. From 1.3.0 it also holds the config revision bookkeeping described in [Config revisions from the web app](#config-revisions-from-the-web-app): `config_revision_seen`, `config_revision_applied`, `config_synced_checksum`, and `config_revision_unsent_result`, plus `config_revision_watcher_id`, the watcher those belong to.
 
 Logs are written to `C:\ProgramData\DataHubWatcher\watcher.log` on Windows and `~/.data-hub/watcher.log` on macOS/Linux (10 MB rotating, 5 backups). Both the CLI `watch` command and the Windows service write to the same file so a single `Get-Content -Wait` (or `tail -F`) covers all entry points.
 
