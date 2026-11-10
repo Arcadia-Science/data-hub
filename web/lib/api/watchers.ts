@@ -9,6 +9,7 @@ import {
   isNotNull,
   isNull,
   or,
+  sql,
 } from "drizzle-orm";
 import { cache } from "react";
 import {
@@ -25,6 +26,7 @@ import {
   decideWatcherBinding,
   isBoundToOtherToken,
 } from "@/lib/api/watcher-binding";
+import type { ConfigRevisionStatus } from "@/lib/api/watcher-config/revisions";
 import { type DbExecutor, db } from "@/lib/db";
 import {
   files,
@@ -32,6 +34,7 @@ import {
   instruments,
   personalAccessTokens,
   users,
+  watcherConfigRevisions,
   watcherEvents,
   watcherEventTypeEnum,
   watcherHeartbeats,
@@ -282,7 +285,12 @@ interface WatcherLike {
   status: string;
 }
 
-export type EffectiveStatus = "registered" | "watching" | "stopped" | "stale";
+export type EffectiveStatus =
+  | "registered"
+  | "watching"
+  | "stopped"
+  | "waiting"
+  | "stale";
 
 /**
  * Derives the display status from stored status + heartbeat recency.
@@ -310,6 +318,10 @@ export function computeEffectiveStatus(watcher: WatcherLike): EffectiveStatus {
 // ---------------------------------------------------------------------------
 
 export interface WatcherListItem {
+  appliedConfigRevision: number | null;
+  configRevision: number | null;
+  /** Status of the current config revision, for the list badges. */
+  configRevisionStatus: ConfigRevisionStatus | null;
   createdAt: Date;
   deletedAt: Date | null;
   effectiveStatus: EffectiveStatus;
@@ -318,8 +330,23 @@ export interface WatcherListItem {
   instrumentDisplayName: string | null;
   instrumentId: string;
   lastHeartbeatAt: Date | null;
+  /** Why the watcher is waiting; null for every other status. */
+  statusReason: string | null;
   watcherVersion: string | null;
 }
+
+// Status of the watcher's current config revision: the newest one that
+// wasn't superseded. A pending change can sit below a higher superseded PC
+// edit (when Data Hub wins an offline conflict), so this skips superseded
+// rows rather than reading the highest revision.
+const currentRevisionStatus = sql<ConfigRevisionStatus | null>`(
+  select ${watcherConfigRevisions.status}
+  from ${watcherConfigRevisions}
+  where ${watcherConfigRevisions.watcherId} = ${watchers.id}
+    and ${watcherConfigRevisions.status} <> 'superseded'
+  order by ${watcherConfigRevisions.revision} desc
+  limit 1
+)`;
 
 // Fetches all watchers (optionally including soft-deleted ones) with their
 // parent instrument's display name. The total count is small enough that we
@@ -337,6 +364,10 @@ export async function getWatcherList(opts: {
       hostname: watchers.hostname,
       watcherVersion: watchers.watcherVersion,
       status: watchers.status,
+      statusReason: watchers.statusReason,
+      configRevision: watchers.configRevision,
+      appliedConfigRevision: watchers.appliedConfigRevision,
+      configRevisionStatus: currentRevisionStatus,
       lastHeartbeatAt: watchers.lastHeartbeatAt,
       createdAt: watchers.createdAt,
       deletedAt: watchers.deletedAt,
@@ -355,6 +386,10 @@ export async function getWatcherList(opts: {
     // Deregistered watchers always show as "stopped" regardless of their
     // last DB status — they can no longer heartbeat so staleness is moot.
     effectiveStatus: row.deletedAt ? "stopped" : computeEffectiveStatus(row),
+    statusReason: row.statusReason,
+    configRevision: row.configRevision,
+    appliedConfigRevision: row.appliedConfigRevision,
+    configRevisionStatus: row.configRevisionStatus,
     lastHeartbeatAt: row.lastHeartbeatAt,
     createdAt: row.createdAt,
     deletedAt: row.deletedAt,
@@ -388,6 +423,10 @@ export const getWatcherById = cache(async function getWatcherById(
       osInfo: watchers.osInfo,
       watcherVersion: watchers.watcherVersion,
       status: watchers.status,
+      statusReason: watchers.statusReason,
+      configRevision: watchers.configRevision,
+      appliedConfigRevision: watchers.appliedConfigRevision,
+      configRevisionStatus: currentRevisionStatus,
       lastHeartbeatAt: watchers.lastHeartbeatAt,
       configYaml: watchers.configYaml,
       configChecksum: watchers.configChecksum,
@@ -428,6 +467,10 @@ export const getWatcherById = cache(async function getWatcherById(
     osInfo: row.osInfo,
     watcherVersion: row.watcherVersion,
     effectiveStatus: row.deletedAt ? "stopped" : computeEffectiveStatus(row),
+    statusReason: row.statusReason,
+    configRevision: row.configRevision,
+    appliedConfigRevision: row.appliedConfigRevision,
+    configRevisionStatus: row.configRevisionStatus,
     lastHeartbeatAt: row.lastHeartbeatAt,
     configYaml: row.configYaml,
     configChecksum: row.configChecksum,

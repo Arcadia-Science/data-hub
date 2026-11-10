@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { watcherConfigSettingsSchema } from "@/lib/api/watcher-config/settings";
 import {
   isoDateTime,
   uploadModeSchema,
@@ -15,6 +16,12 @@ export const registerWatcherBody = z.object({
 export const watcherConfigBody = z.object({
   config_checksum: z.string().min(1),
   config_yaml: z.string().min(1),
+  // The highest config revision the watcher had applied when it read the
+  // file. Sent by watcher 1.3.0 and later.
+  based_on_revision: z.number().int().nonnegative().nullable().optional(),
+  // The local file's modification time, used to settle a conflict between
+  // an offline edit on the PC and a change waiting in Data Hub.
+  modified_at: isoDateTime.optional(),
 });
 
 const watcherEventItem = z.object({
@@ -29,7 +36,11 @@ export const watcherEventBody = z.object({
 });
 
 export const heartbeatBody = z.object({
-  status: z.enum(["registered", "watching", "stopped"]),
+  status: z.enum(["registered", "watching", "stopped", "waiting"]),
+  // Why the watcher is `waiting`, for example a missing watch folder.
+  status_reason: z.string().max(500).optional(),
+  // The highest config revision this watcher has applied.
+  config_revision: z.number().int().nonnegative().nullable().optional(),
   timestamp: z.string().optional(),
   watcher_version: z.string().optional(),
   upload_mode: uploadModeSchema.optional(),
@@ -56,6 +67,9 @@ export const watcherDetail = z
     status: watcherStatusSchema,
     config_yaml: z.string().nullable().optional(),
     config_checksum: z.string().nullable().optional(),
+    config_revision: z.number().int().nullable().optional(),
+    applied_config_revision: z.number().int().nullable().optional(),
+    status_reason: z.string().nullable().optional(),
     last_heartbeat_at: isoDateTime.nullable(),
     created_at: isoDateTime,
     updated_at: isoDateTime,
@@ -76,9 +90,14 @@ export const watcherDeleted = z.object({
   deleted_at: isoDateTime,
 });
 
-// Both `PUT /config` and `GET /config-checksum` return only the checksum.
 export const watcherChecksumResponse = z.object({
   config_checksum: z.string(),
+});
+
+export const watcherConfigPushResponse = z.object({
+  config_checksum: z.string(),
+  // The highest config revision after this push, or null when there are none.
+  config_revision: z.number().int().nullable(),
 });
 
 export const watcherEventCreated = z.object({
@@ -100,6 +119,9 @@ export const watcherEventsListResponse = z.object({
 
 export const watcherHeartbeatAck = z.object({
   ok: z.literal(true),
+  // The latest config revision for this watcher, or null when there are none.
+  // A watcher that has seen a lower number fetches the latest revision.
+  config_revision: z.number().int().nullable(),
 });
 
 const watcherHeartbeat = z.object({
@@ -135,4 +157,63 @@ export const watcherUpdateCheckResponse = z.object({
   latest_version: z.string().nullable(),
   mandatory: z.boolean(),
   min_supported_version: z.string().nullable(),
+});
+
+// ---------------------------------------------------------------------------
+// Config revisions
+// ---------------------------------------------------------------------------
+
+// The watcher settings that can be edited from Data Hub. Key names match the
+// YAML keys under `instrument:` in the watcher's config file. Used as is,
+// without `.openapi()`: the schema lives outside this module, and the
+// production server bundle can load it with a Zod copy the registry never
+// extended.
+export const watcherConfigSettings = watcherConfigSettingsSchema;
+
+export const watcherConfigRevision = z
+  .object({
+    revision: z.number().int().positive(),
+    source: z.enum(["web", "pc"]),
+    status: z.enum(["pending", "applied", "rejected", "superseded"]),
+    status_reason: z.string().nullable(),
+    settings: watcherConfigSettings,
+    created_at: isoDateTime,
+    resolved_at: isoDateTime.nullable(),
+    created_by: z
+      .object({ id: z.string(), name: z.string(), email: z.string() })
+      .nullable(),
+    created_by_token: z.object({ id: z.string(), name: z.string() }).nullable(),
+  })
+  .openapi("WatcherConfigRevision");
+
+export const watcherConfigRevisionsListResponse = z.object({
+  data: z.array(watcherConfigRevision),
+});
+
+export const createWatcherConfigRevisionBody = z.object({
+  // The latest revision number the change was based on, or null when the
+  // watcher has none. A stale value gets 409.
+  base_revision: z.number().int().positive().nullable(),
+  settings: watcherConfigSettings,
+});
+
+export const watcherConfigRevisionResultBody = z.object({
+  status: z.enum(["applied", "rejected"]),
+  reason: z.string().max(1000).optional(),
+});
+
+// UI-only (not registered as a path), so plain schemas are enough.
+export const watcherConfigPreviewBody = z.object({
+  settings: watcherConfigSettingsSchema,
+});
+
+export const watcherConfigPreviewResponse = z.object({
+  sample_size: z.number().int(),
+  files: z.array(
+    z.object({
+      relative_path: z.string(),
+      matches: z.boolean(),
+      run_id: z.string().nullable(),
+    })
+  ),
 });

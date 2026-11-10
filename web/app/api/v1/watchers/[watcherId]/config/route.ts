@@ -1,10 +1,12 @@
 import { eq } from "drizzle-orm";
 import type { NextRequest } from "next/server";
+import { actorRefFromAuth } from "@/lib/api/actor";
 import { authorizeToken } from "@/lib/api/auth";
 import { apiError, NOT_FOUND, VALIDATION_ERROR } from "@/lib/api/errors";
 import { extractWatchDirectory } from "@/lib/api/instruments";
 import { readJsonBody, watcherConfigBody } from "@/lib/api/openapi";
 import { isValidUUID } from "@/lib/api/validators";
+import { recordWatcherConfigPush } from "@/lib/api/watcher-config/revisions";
 import {
   enforceWatcherBinding,
   findActiveWatcher,
@@ -78,5 +80,19 @@ export async function PUT(
     }
   }
 
-  return Response.json({ config_checksum: body.config_checksum });
+  // Record the pushed settings in the revision history. An edit made on the
+  // PC becomes a `pc` revision; a push that matches a pending change proves
+  // the watcher applied it.
+  const configRevision = await recordWatcherConfigPush({
+    watcherId,
+    configYaml: body.config_yaml,
+    basedOnRevision: body.based_on_revision ?? null,
+    modifiedAt: body.modified_at ? new Date(body.modified_at) : null,
+    tokenActor: actorRefFromAuth(authResult),
+  });
+
+  return Response.json({
+    config_checksum: body.config_checksum,
+    config_revision: configRevision,
+  });
 }

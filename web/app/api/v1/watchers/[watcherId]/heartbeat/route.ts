@@ -114,6 +114,13 @@ export async function POST(
       .set({
         lastHeartbeatAt: new Date(),
         status,
+        // Only a waiting watcher has a reason; any other status clears it.
+        statusReason:
+          status === "waiting" ? body.status_reason?.trim() || null : null,
+        // Watchers older than 1.3.0 don't send this, so leave it alone.
+        ...(body.config_revision === undefined
+          ? {}
+          : { appliedConfigRevision: body.config_revision }),
         // Older watchers (pre-version-reporting) won't include this field —
         // fall back to the existing value rather than nulling it out so the
         // dashboard keeps the last-known version visible.
@@ -146,5 +153,10 @@ export async function POST(
     }
   }
 
-  return Response.json({ ok: true });
+  // A watcher that has seen a lower revision fetches the latest one. Older
+  // watchers ignore the extra field.
+  return Response.json({
+    ok: true,
+    config_revision: watcher.configRevision ?? null,
+  });
 }

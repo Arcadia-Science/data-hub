@@ -37,7 +37,10 @@ export async function GET(request: NextRequest) {
     );
   } else if (statusFilter) {
     conditions.push(
-      eq(watchers.status, statusFilter as "registered" | "watching" | "stopped")
+      eq(
+        watchers.status,
+        statusFilter as "registered" | "watching" | "stopped" | "waiting"
+      )
     );
   }
 
@@ -49,6 +52,9 @@ export async function GET(request: NextRequest) {
       hostname: watchers.hostname,
       os_info: watchers.osInfo,
       status: watchers.status,
+      status_reason: watchers.statusReason,
+      config_revision: watchers.configRevision,
+      applied_config_revision: watchers.appliedConfigRevision,
       last_heartbeat_at: watchers.lastHeartbeatAt,
       created_at: watchers.createdAt,
       updated_at: watchers.updatedAt,
