@@ -800,6 +800,10 @@ class WatcherSupervisor:
     def start(self) -> None:
         """Sync config, apply a pending revision, then start watching or waiting."""
         self._state = StateDB(self.db_path)
+        if self._state.claim_config_revisions(self.watcher_id):
+            logger.info(
+                "Dropped config revision bookkeeping from a different watcher registration"
+            )
         self._seen = self._state.config_revision_seen()
         self._applied = self._state.config_revision_applied()
         self._unsent_result = self._load_unsent_result()

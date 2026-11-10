@@ -460,6 +460,7 @@ class TestWaitingState:
 class TestStartupSync:
     def test_push_sends_based_on_revision_and_modified_at(self, env: _Env) -> None:
         state = env.state()
+        state.claim_config_revisions(WATCHER_ID)
         state.record_config_revision_applied(3)
         state.close()
         sup = env.supervisor()
@@ -470,6 +471,35 @@ class TestStartupSync:
         assert kwargs["based_on_revision"] == 3
         mtime = env.config_path.stat().st_mtime
         assert kwargs["modified_at"] == datetime.fromtimestamp(mtime, tz=timezone.utc)
+
+    def test_revisions_of_a_previous_registration_are_forgotten(self, env: _Env) -> None:
+        # The watcher was deregistered and `init` registered a new one, which
+        # kept the state DB. The old watcher had reached revision 12.
+        state = env.state()
+        state.claim_config_revisions("w-previous")
+        state.record_config_revision_applied(12)
+        state.close()
+        sup = env.supervisor()
+        sup.start()
+
+        assert sup.applied_revision is None and sup.seen_revision is None
+        assert sup.rt is not None
+        assert sup.rt.heartbeat._build_payload("watching")["config_revision"] is None
+        assert env.client.push_config.call_args.kwargs["based_on_revision"] is None
+
+        # The new watcher's second revision is picked up and applied.
+        env.client.get_latest_config_revision.return_value = _revision(
+            2, _settings(env.watch_dir, file_patterns=["*.txt"])
+        )
+        _deliver(sup, 2)
+
+        assert sup.cfg.instrument.file_patterns == ["*.txt"]
+        assert env.results() == [(WATCHER_ID, 2, "applied", None)]
+        state = env.state()
+        try:
+            assert state.get_meta("config_revision_watcher_id") == WATCHER_ID
+        finally:
+            state.close()
 
     def test_pending_revision_is_applied_before_monitoring(
         self, env: _Env, monkeypatch: pytest.MonkeyPatch

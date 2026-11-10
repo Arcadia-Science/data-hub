@@ -51,6 +51,16 @@ CONFIG_SYNCED_CHECKSUM_META_KEY = "config_synced_checksum"
 # A revision result (`applied` or `rejected`) that couldn't be sent yet, as
 # JSON, so it is retried instead of leaving the revision pending forever.
 CONFIG_REVISION_UNSENT_RESULT_META_KEY = "config_revision_unsent_result"
+# The watcher ID the keys above belong to. Revisions are numbered per watcher,
+# and re-running `init` after a deregister keeps this database but registers
+# a new watcher whose revisions start again at 1.
+CONFIG_REVISION_WATCHER_META_KEY = "config_revision_watcher_id"
+_CONFIG_REVISION_META_KEYS = (
+    CONFIG_REVISION_SEEN_META_KEY,
+    CONFIG_REVISION_APPLIED_META_KEY,
+    CONFIG_SYNCED_CHECKSUM_META_KEY,
+    CONFIG_REVISION_UNSENT_RESULT_META_KEY,
+)
 
 
 class _PerThreadHandle:
@@ -693,6 +703,29 @@ class StateDB:
     # ------------------------------------------------------------------
     # remote config revisions
     # ------------------------------------------------------------------
+
+    def claim_config_revisions(self, watcher_id: str) -> bool:
+        """Tie the config revision keys to *watcher_id*. Returns whether they were reset.
+
+        Keys recorded for another watcher, or before the owner was recorded,
+        are dropped. Otherwise a watcher registered again on the same PC would
+        compare its new revisions (1, 2, …) against the old watcher's numbers
+        and ignore every change until it caught up.
+        """
+        owner = self.get_meta(CONFIG_REVISION_WATCHER_META_KEY)
+        if owner == watcher_id:
+            return False
+        reset = False
+        with self._write_lock:
+            for key in _CONFIG_REVISION_META_KEYS:
+                cur = self._conn.execute("DELETE FROM meta WHERE key = ?", (key,))
+                reset = reset or cur.rowcount > 0
+            self._conn.execute(
+                "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
+                (CONFIG_REVISION_WATCHER_META_KEY, watcher_id),
+            )
+            self._conn.commit()
+        return reset
 
     def config_revision_seen(self) -> int | None:
         return self._get_int_meta(CONFIG_REVISION_SEEN_META_KEY)
