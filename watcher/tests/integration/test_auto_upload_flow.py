@@ -9,7 +9,11 @@ instrument:
 """
 
 from __future__ import annotations
+import random
+import threading
 from pathlib import Path
+from typing import Any, cast
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 
@@ -420,6 +424,8 @@ class TestMultipartUpload:
                 instrument_id=instrument_id,
                 watcher_id=watcher_id,
                 watch_directory=tmp_path,
+                # One PUT at a time, so the parts go one after another.
+                upload_parallelism=1,
             )
             assert uploader._upload_single(path, "PARTS-001") is True
         finally:
@@ -437,3 +443,90 @@ class TestMultipartUpload:
             f"/tmp/data-hub-integration-s3/data-hub-test-raw/{instrument_id}/PARTS-001/stack.bin"
         )
         assert stored.read_bytes() == payload
+
+    def test_large_file_is_uploaded_in_parallel_parts(
+        self,
+        client: DataHubClient,
+        instrument_id: str,
+        integration_env: IntegrationEnv,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        watcher_id, _run_id = _register_and_report(client, instrument_id, run_id="PARTS-001")
+        # The test server cuts parts at 1024 bytes, so this is 21 parts, which
+        # take three part-URL requests of up to eight. Every part differs, so
+        # a part sent in the wrong place changes the stored bytes.
+        payload = random.Random(0).randbytes(21 * 1024)
+        path = tmp_path / "stack.bin"
+        path.write_bytes(payload)
+        state = StateDB(tmp_path / "state.db")
+        try:
+            reporter = EventReporter(client, watcher_id)
+            uploader = Uploader(
+                client=client,
+                state_db=state,
+                event_reporter=reporter,
+                counters=WatcherCounters(),
+                instrument_id=instrument_id,
+                watcher_id=watcher_id,
+                watch_directory=tmp_path,
+                upload_parallelism=4,
+            )
+            # Hold part 1 until another part is in S3, so the parts finish out
+            # of order and the server must be given them sorted. The stub only
+            # records what happened, and the test checks it after the upload.
+            # A failed assert in here would be a failed part attempt, which
+            # the uploader retries, so a regression would show up as a slow
+            # failure. If the parts were sent one at a time, part 1 would wait
+            # out the timeout, and the check below would fail within seconds.
+            real_put = uploader._s3_session.put
+            later_part_stored = threading.Event()
+            part_one_saw_a_later_part: list[bool] = []
+            stored_order: list[int] = []
+
+            def put(url: str, **kwargs: Any) -> Any:
+                part_number = int(parse_qs(urlparse(url).query)["partNumber"][0])
+                if part_number == 1:
+                    part_one_saw_a_later_part.append(later_part_stored.wait(timeout=3))
+                response = real_put(url, **kwargs)
+                stored_order.append(part_number)
+                if part_number != 1:
+                    later_part_stored.set()
+                return response
+
+            monkeypatch.setattr(uploader._s3_session, "put", put)
+            uploaded = uploader._upload_single(path, "PARTS-001")
+            reporter.flush()
+        finally:
+            state.close()
+
+        assert uploaded is True
+        assert part_one_saw_a_later_part == [True]
+        assert stored_order.index(1) > 0
+        assert sorted(stored_order) == list(range(1, 22))
+
+        # The server checked the whole-file CRC when it assembled the parts.
+        rows = db_query(
+            integration_env.db_dsn,
+            """SELECT f.status, f.multipart_upload_id FROM files f
+               JOIN instrument_runs r ON f.instrument_run_id = r.id
+               WHERE r.run_id = %s AND f.filename = %s""",
+            ("PARTS-001", "stack.bin"),
+        )
+        assert rows[0] == ("uploaded", None)
+        stored = Path(
+            f"/tmp/data-hub-integration-s3/data-hub-test-raw/{instrument_id}/PARTS-001/stack.bin"
+        )
+        assert stored.read_bytes() == payload
+
+        events = db_query(
+            integration_env.db_dsn,
+            "SELECT details FROM watcher_events WHERE watcher_id = %s AND event_type = %s",
+            (watcher_id, "file_uploaded"),
+        )
+        assert len(events) == 1
+        details = cast(dict[str, Any], events[0][0])
+        assert details["part_count"] == 21
+        assert details["size_bytes"] == len(payload)
+        assert details["prep_seconds"] >= 0
+        assert details["upload_seconds"] > 0

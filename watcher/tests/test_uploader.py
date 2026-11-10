@@ -1,10 +1,13 @@
 """Unit tests for the presigned-URL upload flow in Uploader."""
 
 from __future__ import annotations
+import _thread
+import hashlib
+import signal
 import threading
 import time
-from collections.abc import Generator
-from contextlib import nullcontext
+from collections.abc import Callable, Generator, Iterator
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import cast
 from unittest.mock import MagicMock, patch
@@ -15,7 +18,7 @@ from requests.adapters import HTTPAdapter
 
 from data_hub_watcher.api_client import ApiError
 from data_hub_watcher.constants import MAX_PENDING_UPLOAD_ATTEMPTS, MAX_QUEUE_FILE_ATTEMPTS
-from data_hub_watcher.events import EventReporter
+from data_hub_watcher.events import EventReporter, EventType
 from data_hub_watcher.heartbeat import WatcherCounters
 from data_hub_watcher.models import (
     MultipartPartUrl,
@@ -29,7 +32,12 @@ from data_hub_watcher.state import StateDB
 from data_hub_watcher.uploader import (
     Uploader,
     UploadQueueWorker,
+    _FileSlice,
     _guess_content_type,
+    _PartUrls,
+    _run_workers,
+    _Transfer,
+    _UploadStopped,
     s3_error_details,
 )
 
@@ -274,7 +282,7 @@ class TestUploadFilesParallelism:
     """Tests that ``upload_files`` actually parallelises per-file uploads.
 
     The optimisation moves ``Uploader.upload_files`` from a serial
-    ``for info in files`` loop onto a small ``ThreadPoolExecutor``
+    ``for info in files`` loop onto short-lived daemon threads
     sized by ``InstrumentConfig.upload_parallelism``. These tests
     verify both correctness (every file still records as uploaded
     and the run is marked uploaded only when all succeed) and that
@@ -868,7 +876,6 @@ class TestUploaderStopEvent:
         tmp_path: Path,
     ) -> None:
         stop = threading.Event()
-        stop.set()  # already stopping when the first attempt fails
         up = self._uploader_with_stop(mock_client, state_db, tmp_path, stop)
         mock_client.request_upload_url.return_value = PresignedUploadResponse(
             upload_url="https://s3.example.com/presigned",
@@ -879,8 +886,12 @@ class TestUploaderStopEvent:
             already_uploaded=False,
         )
 
+        def fail_as_the_stop_arrives(*args: object, **kwargs: object) -> None:
+            stop.set()
+            raise ConnectionError("network down")
+
         with patch.object(
-            Uploader, "_put_to_presigned_url", side_effect=ConnectionError("network down")
+            Uploader, "_put_to_presigned_url", side_effect=fail_as_the_stop_arrives
         ) as mock_put:
             result = up._upload_single(tmp_file, "RUN-001")
 
@@ -924,6 +935,74 @@ class TestUploaderStopEvent:
             up.poll_upload_queue()
 
         mock_process.assert_not_called()
+
+
+class TestStopDuringPrep:
+    """A stop that arrives while a file is being hashed starts no upload."""
+
+    @staticmethod
+    def _stopped_during_prep(
+        mock_client: MagicMock,
+        state_db: StateDB,
+        tmp_path: Path,
+        presigned: PresignedUploadResponse,
+    ) -> tuple[Uploader, Path]:
+        path = tmp_path / "big.bin"
+        path.write_bytes(bytes(range(16)))
+        stop = threading.Event()
+        up = _make_uploader(mock_client, state_db, tmp_path, parallelism=2, stop_event=stop)
+
+        def request_url(*args: object, **kwargs: object) -> PresignedUploadResponse:
+            stop.set()
+            return presigned
+
+        mock_client.request_upload_url.side_effect = request_url
+        mock_client.get_part_urls.side_effect = _part_urls
+        return up, path
+
+    @pytest.mark.parametrize("multipart", [False, True])
+    def test_no_put_starts_and_nothing_is_reported(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path, multipart: bool
+    ) -> None:
+        presigned = (
+            _multipart_presigned(part_size=4, part_count=4)
+            if multipart
+            else _single_presigned("big.bin")
+        )
+        up, path = self._stopped_during_prep(mock_client, state_db, tmp_path, presigned)
+
+        with (
+            patch.object(Uploader, "_put_to_presigned_url") as put_file,
+            patch.object(up._s3_session, "put") as put_part,
+        ):
+            assert up._upload_single(path, "RUN-001") is False
+
+        put_file.assert_not_called()
+        put_part.assert_not_called()
+        mock_client.get_part_urls.assert_not_called()
+        mock_client.abort_multipart_upload.assert_not_called()
+        mock_client.complete_multipart_upload.assert_not_called()
+        mock_client.mark_file_uploaded.assert_not_called()
+        # Deferred, not failed: no error count and no event.
+        assert up._counters.errors == 0
+        cast(MagicMock, up._reporter).queue_event.assert_not_called()
+        stat = path.stat()
+        assert not state_db.has_stat_match("big.bin", stat.st_size, stat.st_mtime)
+
+    def test_the_file_stays_pending_for_the_next_start(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path
+    ) -> None:
+        up, path = self._stopped_during_prep(
+            mock_client, state_db, tmp_path, _single_presigned("big.bin")
+        )
+
+        with patch.object(Uploader, "_put_to_presigned_url") as put_file:
+            assert up.upload_files("RUN-001", [_file_info(path)]) == 0
+
+        put_file.assert_not_called()
+        assert [p.relative_path for p in state_db.pending_uploads()] == ["big.bin"]
+        run = state_db.get_run("RUN-001")
+        assert run is None or run.uploaded_at is None
 
 
 class TestUploadQueueWorker:
@@ -1108,6 +1187,34 @@ class TestPendingUploads:
             assert uploader.upload_files("RUN-1", [_file_info(ok), _file_info(bad)]) == 1
 
         assert [p.relative_path for p in state_db.pending_uploads()] == ["RUN-1/bad.csv"]
+
+    def test_a_stop_leaves_the_files_that_did_not_start_pending(
+        self, mock_client: MagicMock, state_db: StateDB, run_dir: Path
+    ) -> None:
+        stop = threading.Event()
+        up = _make_uploader(mock_client, state_db, run_dir.parent, parallelism=1, stop_event=stop)
+        files = []
+        for name in ("a.csv", "b.csv", "c.csv"):
+            (run_dir / name).write_text("x")
+            files.append(_file_info(run_dir / name))
+        attempted: list[str] = []
+
+        def upload(path: Path, run_id: str) -> bool:
+            attempted.append(path.name)
+            stop.set()
+            return False
+
+        with patch.object(up, "_upload_single", side_effect=upload):
+            assert up.upload_files("RUN-1", files) == 0
+
+        # The first file was cut off, and the others never started. All three
+        # keep their rows, which the next start's retry picks up.
+        assert attempted == ["a.csv"]
+        assert [p.relative_path for p in state_db.pending_uploads()] == [
+            "RUN-1/a.csv",
+            "RUN-1/b.csv",
+            "RUN-1/c.csv",
+        ]
 
     def test_retry_uploads_a_pending_file_and_clears_it(
         self, uploader: Uploader, state_db: StateDB, run_dir: Path
@@ -1474,3 +1581,1342 @@ def test_single_put_records_the_s3_error_body(
         assert uploader._upload_single(tmp_file, "RUN-001") is False
     event = cast(MagicMock, uploader._reporter).queue_event.call_args.args[0]
     assert event.details["s3_code"] == "EntityTooLarge"
+
+
+# ---------------------------------------------------------------------------
+# Parallel uploads: one budget of simultaneous PUTs for files and parts
+# ---------------------------------------------------------------------------
+
+
+def _make_uploader(
+    mock_client: MagicMock,
+    state_db: StateDB,
+    watch_dir: Path,
+    *,
+    parallelism: int,
+    stop_event: threading.Event | None = None,
+) -> Uploader:
+    return Uploader(
+        client=mock_client,
+        state_db=state_db,
+        event_reporter=MagicMock(spec=EventReporter),
+        counters=WatcherCounters(),
+        instrument_id="test-instrument",
+        watcher_id="watcher-123",
+        watch_directory=watch_dir,
+        upload_parallelism=parallelism,
+        stop_event=stop_event,
+    )
+
+
+def _multipart_presigned(*, part_size: int, part_count: int) -> PresignedUploadResponse:
+    return PresignedUploadResponse(
+        upload_type="multipart",
+        upload_id="abc123",
+        part_size=part_size,
+        part_count=part_count,
+        s3_bucket="test-bucket",
+        s3_key="test-instrument/RUN-001/test_data.csv",
+        file_id=42,
+        expires_in=900,
+        already_uploaded=False,
+    )
+
+
+def _single_presigned(name: str) -> PresignedUploadResponse:
+    return PresignedUploadResponse(
+        upload_url=f"https://s3.example.com/single/{name}",
+        s3_bucket="test-bucket",
+        s3_key=f"test-instrument/RUN-001/{name}",
+        file_id=7,
+        expires_in=3600,
+        already_uploaded=False,
+    )
+
+
+def _part_urls(file_id: int, upload_id: str, numbers: list[int]) -> MultipartPartUrlsResponse:
+    return MultipartPartUrlsResponse(
+        expires_in=900,
+        parts=[
+            MultipartPartUrl(part_number=n, upload_url=f"https://s3.example/part/{n}")
+            for n in numbers
+        ],
+    )
+
+
+def _part_number(url: str) -> int:
+    return int(url.rsplit("/", 1)[1])
+
+
+def _etag_response(part_number: int) -> MagicMock:
+    response = MagicMock()
+    response.headers = {"ETag": f'"etag-{part_number}"'}
+    return response
+
+
+def _write_parts_file(directory: Path, name: str, *, part_count: int, part_size: int) -> bytes:
+    payload = bytes(i % 251 for i in range(part_count * part_size))
+    (directory / name).write_bytes(payload)
+    return payload
+
+
+@pytest.fixture()
+def ctrl_c_is_delivered() -> Iterator[None]:
+    """Make Python turn SIGINT into `KeyboardInterrupt` for the test.
+
+    A shell starts a background job with SIGINT ignored, and `interrupt_main`
+    does nothing then. Signal handlers can only be set on the main thread,
+    which is where pytest runs a test.
+    """
+    previous = signal.signal(signal.SIGINT, signal.default_int_handler)
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGINT, previous)
+
+
+def _press_ctrl_c() -> None:
+    """Call from a worker thread to deliver Ctrl-C to the main thread, which waits for the workers.
+
+    Tests that use this need the `ctrl_c_is_delivered` fixture. The pause lets
+    the main thread reach its wait first. `interrupt_main` does not wake a
+    thread that is blocked with no timeout: the interrupt shows up only when
+    that wait ends, so a wait with no timeout fails the tests that use this.
+    """
+    time.sleep(0.2)
+    _thread.interrupt_main()
+
+
+def _wait_until_no_threads(prefix: str, timeout: float = 5) -> None:
+    """Wait for the worker threads whose names start with *prefix* to exit."""
+    deadline = time.monotonic() + timeout
+    while any(t.name.startswith(prefix) for t in threading.enumerate()):
+        assert time.monotonic() < deadline, f"{prefix} threads are still running"
+        time.sleep(0.01)
+
+
+class _Concurrency:
+    """Counts how many tracked calls run at the same time."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self.running = 0
+        self.peak = 0
+
+    @contextmanager
+    def track(self) -> Iterator[None]:
+        with self._lock:
+            self.running += 1
+            self.peak = max(self.peak, self.running)
+        try:
+            yield
+        finally:
+            with self._lock:
+                self.running -= 1
+
+
+class TestParallelParts:
+    """The parts of one large file upload at the same time, up to the budget."""
+
+    def test_parts_overlap_up_to_the_budget(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path
+    ) -> None:
+        payload = _write_parts_file(tmp_path, "big.bin", part_count=8, part_size=4)
+        mock_client.request_upload_url.return_value = _multipart_presigned(
+            part_size=4, part_count=8
+        )
+        mock_client.get_part_urls.side_effect = _part_urls
+        up = _make_uploader(mock_client, state_db, tmp_path, parallelism=4)
+        # Four PUTs must be inside the stub together. Serial parts would break
+        # the barrier and the part would fail.
+        barrier = threading.Barrier(4, timeout=3)
+        tracker = _Concurrency()
+        sent: dict[int, bytes] = {}
+
+        def put(url: str, data: _FileSlice, headers: dict[str, str], timeout: int) -> MagicMock:
+            number = _part_number(url)
+            with tracker.track():
+                barrier.wait()
+                sent[number] = data.read()
+            return _etag_response(number)
+
+        with (
+            patch.object(up._s3_session, "put", side_effect=put),
+            patch("data_hub_watcher.uploader.time.sleep"),
+        ):
+            assert up._upload_single(tmp_path / "big.bin", "RUN-001") is True
+
+        assert tracker.peak == 4
+        # Every part sent its own byte range.
+        assert b"".join(sent[n] for n in sorted(sent)) == payload
+        parts = mock_client.complete_multipart_upload.call_args.args[2]
+        assert parts == [{"part_number": n, "etag": f'"etag-{n}"'} for n in range(1, 9)]
+
+    def test_parts_that_finish_out_of_order_complete_in_order(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path
+    ) -> None:
+        _write_parts_file(tmp_path, "big.bin", part_count=4, part_size=4)
+        mock_client.request_upload_url.return_value = _multipart_presigned(
+            part_size=4, part_count=4
+        )
+        mock_client.get_part_urls.side_effect = _part_urls
+        up = _make_uploader(mock_client, state_db, tmp_path, parallelism=4)
+        part_four_done = threading.Event()
+        finished: list[int] = []
+
+        def put(url: str, **kwargs: object) -> MagicMock:
+            number = _part_number(url)
+            if number == 1:
+                assert part_four_done.wait(timeout=2)
+            finished.append(number)
+            if number == 4:
+                part_four_done.set()
+            return _etag_response(number)
+
+        with (
+            patch.object(up._s3_session, "put", side_effect=put),
+            patch("data_hub_watcher.uploader.time.sleep"),
+        ):
+            assert up._upload_single(tmp_path / "big.bin", "RUN-001") is True
+
+        assert finished.index(4) < finished.index(1)
+        parts = mock_client.complete_multipart_upload.call_args.args[2]
+        assert [part["part_number"] for part in parts] == [1, 2, 3, 4]
+        assert [part["etag"] for part in parts] == [f'"etag-{n}"' for n in range(1, 5)]
+
+    def test_part_urls_come_in_batches_of_eight(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path
+    ) -> None:
+        _write_parts_file(tmp_path, "big.bin", part_count=21, part_size=4)
+        mock_client.request_upload_url.return_value = _multipart_presigned(
+            part_size=4, part_count=21
+        )
+        mock_client.get_part_urls.side_effect = _part_urls
+        up = _make_uploader(mock_client, state_db, tmp_path, parallelism=4)
+
+        def put(url: str, **kwargs: object) -> MagicMock:
+            return _etag_response(_part_number(url))
+
+        with patch.object(up._s3_session, "put", side_effect=put):
+            assert up._upload_single(tmp_path / "big.bin", "RUN-001") is True
+
+        requested = sorted(call.args[2] for call in mock_client.get_part_urls.call_args_list)
+        assert requested == [list(range(1, 9)), list(range(9, 17)), list(range(17, 22))]
+
+    def test_a_failed_part_stops_the_parts_that_have_not_started(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path
+    ) -> None:
+        _write_parts_file(tmp_path, "big.bin", part_count=6, part_size=4)
+        mock_client.request_upload_url.return_value = _multipart_presigned(
+            part_size=4, part_count=6
+        )
+        up = _make_uploader(mock_client, state_db, tmp_path, parallelism=2)
+        started: list[int] = []
+        workers_alive_at_abort: list[list[str]] = []
+
+        def fake_put_one_part(
+            self_: Uploader,
+            path: Path,
+            urls: _PartUrls,
+            part_number: int,
+            part_size: int,
+            size_bytes: int,
+            cancel: threading.Event,
+            transfer: object,
+        ) -> str:
+            started.append(part_number)
+            if part_number == 2:
+                raise RuntimeError("part 2 ran out of retries")
+            # Part 1 is in flight. It ends only after the failure cancels the
+            # file, and it takes a moment to wind down.
+            assert cancel.wait(timeout=5)
+            time.sleep(0.2)
+            raise _UploadStopped
+
+        def record_abort(file_id: int, upload_id: str) -> None:
+            workers_alive_at_abort.append(
+                [t.name for t in threading.enumerate() if t.name.startswith("upload-part")]
+            )
+
+        mock_client.abort_multipart_upload.side_effect = record_abort
+
+        with patch.object(Uploader, "_put_one_part", new=fake_put_one_part):
+            assert up._upload_single(tmp_path / "big.bin", "RUN-001") is False
+
+        assert sorted(started) == [1, 2]
+        mock_client.abort_multipart_upload.assert_called_once_with(42, "abc123")
+        # The abort came after every part worker had exited.
+        assert workers_alive_at_abort == [[]]
+        mock_client.complete_multipart_upload.assert_not_called()
+        reporter = cast(MagicMock, up._reporter)
+        reporter.queue_event.assert_called_once()
+        assert reporter.queue_event.call_args.args[0].event_type == EventType.UPLOAD_FAILED
+        assert up._counters.errors == 1
+
+    def test_a_refused_part_url_request_fails_the_file_once_after_the_parts_in_flight_end(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path
+    ) -> None:
+        _write_parts_file(tmp_path, "big.bin", part_count=3, part_size=4)
+        mock_client.request_upload_url.return_value = _multipart_presigned(
+            part_size=4, part_count=3
+        )
+        up = _make_uploader(mock_client, state_db, tmp_path, parallelism=3)
+        all_in_flight = threading.Barrier(3, timeout=5)
+        refused = threading.Event()
+        events: list[str] = []
+        events_lock = threading.Lock()
+        url_requests: list[list[int]] = []
+        part_three_puts = [0]
+
+        def note(what: str) -> None:
+            with events_lock:
+                events.append(what)
+
+        def get_part_urls(
+            file_id: int, upload_id: str, numbers: list[int]
+        ) -> MultipartPartUrlsResponse:
+            url_requests.append(list(numbers))
+            if numbers == [3]:
+                # Part 3's retry asks for a URL of its own, and is refused.
+                refused.set()
+                raise ApiError("not found", status_code=404)
+            return _part_urls(file_id, upload_id, numbers)
+
+        def put(url: str, **kwargs: object) -> MagicMock:
+            number = _part_number(url)
+            all_in_flight.wait()
+            if number == 3:
+                part_three_puts[0] += 1
+                raise requests.ConnectionError("reset")
+            # Parts 1 and 2 are still sending when part 3 fails.
+            refused.wait(timeout=5)
+            time.sleep(0.1)
+            note(f"part {number} done")
+            return _etag_response(number)
+
+        mock_client.get_part_urls.side_effect = get_part_urls
+        mock_client.abort_multipart_upload.side_effect = lambda *args: note("abort")
+
+        with (
+            patch.object(up._s3_session, "put", side_effect=put),
+            patch.object(Uploader, "_part_backoff"),
+        ):
+            assert up._upload_single(tmp_path / "big.bin", "RUN-001") is False
+
+        # Part 3 was not retried after the 4xx, and the file failed once.
+        assert part_three_puts == [1]
+        assert url_requests.count([3]) == 1
+        reporter = cast(MagicMock, up._reporter)
+        reporter.queue_event.assert_called_once()
+        assert reporter.queue_event.call_args.args[0].event_type == EventType.UPLOAD_FAILED
+        assert up._counters.errors == 1
+        # The abort came once, after the parts in flight had finished.
+        assert sorted(events[:2]) == ["part 1 done", "part 2 done"]
+        assert events[2:] == ["abort"]
+        mock_client.complete_multipart_upload.assert_not_called()
+
+    def test_a_stop_lets_parts_in_flight_finish_and_defers_the_file(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path
+    ) -> None:
+        _write_parts_file(tmp_path, "big.bin", part_count=6, part_size=4)
+        mock_client.request_upload_url.return_value = _multipart_presigned(
+            part_size=4, part_count=6
+        )
+        mock_client.get_part_urls.side_effect = _part_urls
+        stop = threading.Event()
+        up = _make_uploader(mock_client, state_db, tmp_path, parallelism=2, stop_event=stop)
+        both_in_flight = threading.Barrier(2, timeout=3)
+        sent: list[int] = []
+        sent_lock = threading.Lock()
+
+        def put(url: str, **kwargs: object) -> MagicMock:
+            number = _part_number(url)
+            with sent_lock:
+                sent.append(number)
+            both_in_flight.wait()
+            stop.set()
+            return _etag_response(number)
+
+        with patch.object(up._s3_session, "put", side_effect=put):
+            assert up._upload_single(tmp_path / "big.bin", "RUN-001") is False
+
+        # Parts 1 and 2 were in flight and finished. No other part started.
+        assert sorted(sent) == [1, 2]
+        mock_client.abort_multipart_upload.assert_not_called()
+        mock_client.complete_multipart_upload.assert_not_called()
+        mock_client.mark_file_uploaded.assert_not_called()
+        assert up._counters.errors == 0
+        cast(MagicMock, up._reporter).queue_event.assert_not_called()
+
+    def test_a_stop_after_the_last_part_still_completes_the_file(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path
+    ) -> None:
+        _write_parts_file(tmp_path, "big.bin", part_count=1, part_size=4)
+        mock_client.request_upload_url.return_value = _multipart_presigned(
+            part_size=4, part_count=1
+        )
+        mock_client.get_part_urls.side_effect = _part_urls
+        stop = threading.Event()
+        up = _make_uploader(mock_client, state_db, tmp_path, parallelism=2, stop_event=stop)
+
+        def put(url: str, **kwargs: object) -> MagicMock:
+            stop.set()
+            return _etag_response(1)
+
+        with patch.object(up._s3_session, "put", side_effect=put):
+            assert up._upload_single(tmp_path / "big.bin", "RUN-001") is True
+
+        mock_client.complete_multipart_upload.assert_called_once()
+
+    @pytest.mark.usefixtures("ctrl_c_is_delivered")
+    def test_ctrl_c_while_parts_are_in_flight_stops_new_parts(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path
+    ) -> None:
+        _write_parts_file(tmp_path, "big.bin", part_count=6, part_size=4)
+        mock_client.request_upload_url.return_value = _multipart_presigned(
+            part_size=4, part_count=6
+        )
+        up = _make_uploader(mock_client, state_db, tmp_path, parallelism=2)
+        started: list[int] = []
+        saw_cancel: list[bool] = []
+
+        def fake_put_one_part(
+            self_: Uploader,
+            path: Path,
+            urls: _PartUrls,
+            part_number: int,
+            part_size: int,
+            size_bytes: int,
+            cancel: threading.Event,
+            transfer: object,
+        ) -> str:
+            started.append(part_number)
+            if part_number == 1:
+                _press_ctrl_c()
+            saw_cancel.append(cancel.wait(timeout=5))
+            return f'"etag-{part_number}"'
+
+        with (
+            patch.object(Uploader, "_put_one_part", new=fake_put_one_part),
+            pytest.raises(KeyboardInterrupt),
+        ):
+            up._upload_single(tmp_path / "big.bin", "RUN-001")
+        _wait_until_no_threads("upload-part")
+
+        # The wait was interrupted, so the parts were cancelled. A worker that
+        # had claimed a part saw the cancel and claimed no more.
+        assert len(started) <= 2
+        assert saw_cancel
+        assert all(saw_cancel)
+        mock_client.complete_multipart_upload.assert_not_called()
+        # An interrupt is not a failed part, so nothing aborts the upload.
+        mock_client.abort_multipart_upload.assert_not_called()
+
+
+class TestPartStopsWhileWaiting:
+    """A part whose sibling failed stops without another PUT, wherever it is waiting."""
+
+    @staticmethod
+    def _part(
+        mock_client: MagicMock, state_db: StateDB, tmp_path: Path
+    ) -> tuple[Uploader, Callable[[threading.Event], None], MagicMock]:
+        """Return an uploader with one slot, a way to run part 1, and the URL request mock."""
+        _write_parts_file(tmp_path, "big.bin", part_count=2, part_size=4)
+        up = _make_uploader(mock_client, state_db, tmp_path, parallelism=1)
+        fetch = MagicMock(side_effect=lambda numbers: _part_urls(42, "abc123", numbers))
+        urls = _PartUrls(fetch, 2)
+
+        def run(cancel: threading.Event) -> None:
+            up._put_one_part(tmp_path / "big.bin", urls, 1, 4, 8, cancel, _Transfer())
+
+        return up, run, fetch
+
+    @staticmethod
+    def _start_waiting_part(
+        up: Uploader, run: Callable[[threading.Event], None], cancel: threading.Event
+    ) -> tuple[threading.Thread, list[str]]:
+        """Run the part on its own thread and return once it is waiting for a slot."""
+        waiting = threading.Event()
+        acquire_slot = up._acquire_slot
+
+        def acquire_and_note(cancel: threading.Event | None = None) -> bool:
+            waiting.set()
+            return acquire_slot(cancel)
+
+        outcome: list[str] = []
+
+        def target() -> None:
+            try:
+                run(cancel)
+            except _UploadStopped:
+                outcome.append("stopped")
+
+        with patch.object(up, "_acquire_slot", side_effect=acquire_and_note):
+            thread = threading.Thread(target=target)
+            thread.start()
+            assert waiting.wait(timeout=5)
+            time.sleep(0.1)
+        return thread, outcome
+
+    def test_cancel_while_waiting_for_a_slot(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path
+    ) -> None:
+        up, run, fetch = self._part(mock_client, state_db, tmp_path)
+        cancel = threading.Event()
+        # Another file holds the only slot.
+        assert up._put_slots.acquire(blocking=False)
+        try:
+            with (
+                patch.object(up._s3_session, "put") as put,
+                patch("data_hub_watcher.uploader._WAIT_STEP_SECONDS", 0.02),
+            ):
+                thread, outcome = self._start_waiting_part(up, run, cancel)
+                cancel.set()
+                thread.join(timeout=5)
+                assert not thread.is_alive()
+        finally:
+            up._put_slots.release()
+
+        assert outcome == ["stopped"]
+        put.assert_not_called()
+        fetch.assert_not_called()
+
+    def test_cancel_as_the_slot_frees_up(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path
+    ) -> None:
+        up, run, fetch = self._part(mock_client, state_db, tmp_path)
+        cancel = threading.Event()
+        assert up._put_slots.acquire(blocking=False)
+        with patch.object(up._s3_session, "put") as put:
+            thread, outcome = self._start_waiting_part(up, run, cancel)
+            # The sibling failed, and the slot it held comes free just after.
+            cancel.set()
+            up._put_slots.release()
+            thread.join(timeout=5)
+            assert not thread.is_alive()
+
+        assert outcome == ["stopped"]
+        put.assert_not_called()
+        fetch.assert_not_called()
+        # The part gave the slot back, so another upload can take it.
+        assert up._put_slots.acquire(blocking=False)
+        up._put_slots.release()
+
+    def test_cancel_during_the_backoff_before_a_retry(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path
+    ) -> None:
+        up, run, fetch = self._part(mock_client, state_db, tmp_path)
+        cancel = threading.Event()
+        sleeps: list[float] = []
+
+        def sleep_while_a_sibling_fails(delay: float) -> None:
+            sleeps.append(delay)
+            cancel.set()
+
+        with (
+            patch.object(
+                up._s3_session, "put", side_effect=requests.ConnectionError("reset")
+            ) as put,
+            patch("data_hub_watcher.uploader.time.sleep", side_effect=sleep_while_a_sibling_fails),
+            pytest.raises(_UploadStopped),
+        ):
+            run(cancel)
+
+        # One PUT failed. The backoff is 1 s in 0.5 s steps, and the cancel
+        # ended it after the first step. No second PUT started.
+        assert put.call_count == 1
+        assert sleeps == [0.5]
+        assert fetch.call_count == 1
+
+
+class TestPartUrlFetchErrors:
+    """A failed part-URL request counts against the part's attempts."""
+
+    def _upload(
+        self, uploader: Uploader, mock_client: MagicMock, tmp_file: Path, put: MagicMock
+    ) -> bool:
+        payload = tmp_file.read_bytes()
+        mock_client.request_upload_url.return_value = _multipart_presigned(
+            part_size=len(payload), part_count=1
+        )
+        with (
+            patch.object(uploader._s3_session, "put", put),
+            patch("data_hub_watcher.uploader.time.sleep"),
+        ):
+            return uploader._upload_single(tmp_file, "RUN-001")
+
+    def test_a_503_on_the_first_request_is_retried(
+        self, uploader: Uploader, mock_client: MagicMock, tmp_file: Path
+    ) -> None:
+        mock_client.get_part_urls.side_effect = [
+            ApiError("unavailable", status_code=503),
+            _part_urls(42, "abc123", [1]),
+        ]
+        put = MagicMock(return_value=_etag_response(1))
+
+        assert self._upload(uploader, mock_client, tmp_file, put) is True
+
+        assert mock_client.get_part_urls.call_count == 2
+        put.assert_called_once()
+        mock_client.abort_multipart_upload.assert_not_called()
+
+    def test_a_502_on_a_refresh_no_longer_ends_the_file(
+        self, uploader: Uploader, mock_client: MagicMock, tmp_file: Path
+    ) -> None:
+        mock_client.get_part_urls.side_effect = [
+            MultipartPartUrlsResponse(
+                expires_in=900,
+                parts=[MultipartPartUrl(part_number=1, upload_url="https://s3.example/part/old")],
+            ),
+            ApiError("bad gateway", status_code=502),
+            MultipartPartUrlsResponse(
+                expires_in=900,
+                parts=[MultipartPartUrl(part_number=1, upload_url="https://s3.example/part/new")],
+            ),
+        ]
+        put = MagicMock(side_effect=[requests.ConnectionError("reset"), _etag_response(1)])
+
+        assert self._upload(uploader, mock_client, tmp_file, put) is True
+
+        assert mock_client.get_part_urls.call_count == 3
+        # The failed refresh used up an attempt. The next attempt refreshed
+        # again, and its URL carried the second PUT.
+        assert [call.args[0] for call in put.call_args_list] == [
+            "https://s3.example/part/old",
+            "https://s3.example/part/new",
+        ]
+
+    def test_a_404_fails_the_file_after_one_request(
+        self, uploader: Uploader, mock_client: MagicMock, tmp_file: Path
+    ) -> None:
+        mock_client.get_part_urls.side_effect = ApiError("not found", status_code=404)
+        put = MagicMock()
+
+        assert self._upload(uploader, mock_client, tmp_file, put) is False
+
+        mock_client.get_part_urls.assert_called_once()
+        put.assert_not_called()
+        mock_client.abort_multipart_upload.assert_called_once_with(42, "abc123")
+        reporter = cast(MagicMock, uploader._reporter)
+        reporter.queue_event.assert_called_once()
+        assert reporter.queue_event.call_args.args[0].event_type == EventType.UPLOAD_FAILED
+
+    def test_a_response_without_the_part_counts_as_a_failed_attempt(
+        self, uploader: Uploader, mock_client: MagicMock, tmp_file: Path
+    ) -> None:
+        mock_client.get_part_urls.side_effect = [
+            MultipartPartUrlsResponse(expires_in=900, parts=[]),
+            _part_urls(42, "abc123", [1]),
+        ]
+        put = MagicMock(return_value=_etag_response(1))
+
+        assert self._upload(uploader, mock_client, tmp_file, put) is True
+
+        assert mock_client.get_part_urls.call_count == 2
+
+
+class TestPartUrlCache:
+    """`_PartUrls` fetches in batches and refreshes one part at a time."""
+
+    @staticmethod
+    def _cache(
+        part_count: int, clock: Callable[[], float] = time.monotonic
+    ) -> tuple[_PartUrls, list[list[int]]]:
+        calls: list[list[int]] = []
+
+        def fetch(numbers: list[int]) -> MultipartPartUrlsResponse:
+            calls.append(list(numbers))
+            return _part_urls(42, "abc123", numbers)
+
+        return _PartUrls(fetch, part_count, clock=clock), calls
+
+    def test_a_miss_fetches_the_next_batch_and_neighbours_hit(self) -> None:
+        cache, calls = self._cache(20)
+
+        assert cache.get(1) == "https://s3.example/part/1"
+        assert cache.get(2) == "https://s3.example/part/2"
+        assert cache.get(8) == "https://s3.example/part/8"
+        assert calls == [list(range(1, 9))]
+
+        cache.get(9)
+        assert calls[-1] == list(range(9, 17))
+
+    def test_the_last_batch_stops_at_the_part_count(self) -> None:
+        cache, calls = self._cache(10)
+
+        cache.get(9)
+
+        assert calls == [[9, 10]]
+
+    def test_a_batch_does_not_depend_on_which_part_asks_first(self) -> None:
+        cache, calls = self._cache(20)
+
+        cache.get(12)
+
+        assert calls == [list(range(9, 17))]
+
+    def test_a_refresh_fetches_only_that_part(self) -> None:
+        cache, calls = self._cache(20)
+        cache.get(1)
+
+        cache.get(3, refresh=True)
+
+        assert calls == [list(range(1, 9)), [3]]
+
+    def test_a_url_older_than_five_minutes_is_fetched_again_alone(self) -> None:
+        now = [1000.0]
+        cache, calls = self._cache(20, clock=lambda: now[0])
+        cache.get(1)
+
+        now[0] += 299
+        cache.get(2)
+        assert calls == [list(range(1, 9))]
+
+        now[0] += 2
+        cache.get(2)
+        assert calls == [list(range(1, 9)), [2]]
+
+    def test_workers_that_miss_together_share_one_request(self) -> None:
+        calls: list[list[int]] = []
+
+        def slow_fetch(numbers: list[int]) -> MultipartPartUrlsResponse:
+            calls.append(list(numbers))
+            time.sleep(0.1)
+            return _part_urls(42, "abc123", numbers)
+
+        cache = _PartUrls(slow_fetch, 8)
+        start = threading.Barrier(4, timeout=3)
+        urls: dict[int, str] = {}
+
+        def worker(number: int) -> None:
+            start.wait()
+            urls[number] = cache.get(number)
+
+        threads = [threading.Thread(target=worker, args=(n,)) for n in (1, 2, 3, 4)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=5)
+
+        assert calls == [list(range(1, 9))]
+        # Each worker got its own part's URL from the shared request.
+        assert urls == {n: f"https://s3.example/part/{n}" for n in (1, 2, 3, 4)}
+
+    def test_a_hung_refresh_does_not_block_other_parts(self) -> None:
+        refresh_started = threading.Event()
+        release_refresh = threading.Event()
+
+        def fetch(numbers: list[int]) -> MultipartPartUrlsResponse:
+            if numbers == [3]:
+                refresh_started.set()
+                release_refresh.wait(timeout=5)
+            return _part_urls(42, "abc123", numbers)
+
+        cache = _PartUrls(fetch, 20)
+        cache.get(1)
+        refresher = threading.Thread(target=lambda: cache.get(3, refresh=True))
+        refresher.start()
+        assert refresh_started.wait(timeout=5)
+        urls: list[str] = []
+
+        def read() -> None:
+            # A cached URL, and a miss that needs a batch of its own.
+            urls.append(cache.get(2))
+            urls.append(cache.get(9))
+
+        reader = threading.Thread(target=read)
+        reader.start()
+        try:
+            reader.join(timeout=2)
+            assert not reader.is_alive(), "a hung refresh of part 3 blocked other parts"
+            assert urls == ["https://s3.example/part/2", "https://s3.example/part/9"]
+        finally:
+            release_refresh.set()
+            refresher.join(timeout=5)
+            reader.join(timeout=5)
+
+    def test_a_failed_batch_request_reaches_every_waiter_and_is_asked_again(self) -> None:
+        calls: list[list[int]] = []
+
+        def fetch(numbers: list[int]) -> MultipartPartUrlsResponse:
+            calls.append(list(numbers))
+            if len(calls) == 1:
+                # Long enough for the other workers to arrive and wait on it.
+                time.sleep(0.2)
+                raise ApiError("unavailable", status_code=503)
+            return _part_urls(42, "abc123", numbers)
+
+        cache = _PartUrls(fetch, 8)
+        start = threading.Barrier(4, timeout=3)
+        outcomes: list[object] = []
+
+        def worker(number: int) -> None:
+            start.wait()
+            try:
+                outcomes.append(cache.get(number))
+            except ApiError as exc:
+                outcomes.append(exc)
+
+        threads = [threading.Thread(target=worker, args=(n,)) for n in (1, 2, 3, 4)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=5)
+
+        # One request, and every worker that waited on it saw its failure.
+        assert calls == [list(range(1, 9))]
+        assert len(outcomes) == 4
+        assert all(isinstance(outcome, ApiError) for outcome in outcomes)
+        # The failed request is not left in flight, so the next attempt asks again.
+        assert cache.get(1) == "https://s3.example/part/1"
+        assert calls == [list(range(1, 9)), list(range(1, 9))]
+
+    def test_a_refresh_that_returns_no_url_for_the_part_is_an_error(self) -> None:
+        responses = [
+            _part_urls(42, "abc123", list(range(1, 9))),
+            MultipartPartUrlsResponse(expires_in=900, parts=[]),
+        ]
+        cache = _PartUrls(lambda numbers: responses.pop(0), 8)
+        cache.get(1)
+
+        # The old URL is still cached, but the refresh was asked to replace it.
+        with pytest.raises(RuntimeError, match="no URL for part 1"):
+            cache.get(1, refresh=True)
+
+
+class TestSharedUploadBudget:
+    """`upload_parallelism` caps simultaneous PUTs across files and parts together."""
+
+    def test_files_and_parts_never_exceed_the_budget(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path
+    ) -> None:
+        names = ["big-a.bin", "big-b.bin", "small-a.csv", "small-b.csv"]
+        for name in names:
+            if name.startswith("big"):
+                _write_parts_file(tmp_path, name, part_count=6, part_size=8)
+            else:
+                (tmp_path / name).write_text("a,b\n1,2\n")
+
+        def presign(
+            instrument_id: str, run_id: str, filename: str, **kwargs: object
+        ) -> PresignedUploadResponse:
+            if filename.startswith("big"):
+                return _multipart_presigned(part_size=8, part_count=6)
+            return _single_presigned(filename)
+
+        mock_client.request_upload_url.side_effect = presign
+        mock_client.get_part_urls.side_effect = _part_urls
+        up = _make_uploader(mock_client, state_db, tmp_path, parallelism=3)
+
+        tracker = _Concurrency()
+        first_three = threading.Barrier(3, timeout=5)
+        started = [0]
+        started_lock = threading.Lock()
+
+        def hold() -> None:
+            with tracker.track():
+                with started_lock:
+                    started[0] += 1
+                    index = started[0]
+                # The budget must let three PUTs run together, so the first
+                # three wait for each other. Later ones only overlap briefly.
+                if index <= 3:
+                    first_three.wait()
+                time.sleep(0.02)
+
+        def put_part(url: str, **kwargs: object) -> MagicMock:
+            hold()
+            return _etag_response(_part_number(url))
+
+        def put_file(self_: Uploader, url: str, path: Path, content_type: str | None) -> None:
+            hold()
+
+        files = [_file_info(tmp_path / name) for name in names]
+        with (
+            patch.object(up._s3_session, "put", side_effect=put_part),
+            patch.object(Uploader, "_put_to_presigned_url", new=put_file),
+        ):
+            assert up.upload_files("RUN-001", files) == 4
+
+        assert tracker.peak == 3
+        assert mock_client.complete_multipart_upload.call_count == 2
+
+    def test_waiting_for_a_slot_ends_when_the_watcher_stops(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path
+    ) -> None:
+        stop = threading.Event()
+        up = _make_uploader(mock_client, state_db, tmp_path, parallelism=1, stop_event=stop)
+        assert up._put_slots.acquire(blocking=False)
+        timer = threading.Timer(0.1, stop.set)
+        timer.start()
+        try:
+            assert up._acquire_slot() is False
+        finally:
+            timer.cancel()
+            up._put_slots.release()
+
+    def test_waiting_for_a_slot_ends_when_the_file_is_cancelled(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path
+    ) -> None:
+        up = _make_uploader(mock_client, state_db, tmp_path, parallelism=1)
+        cancel = threading.Event()
+        assert up._put_slots.acquire(blocking=False)
+        timer = threading.Timer(0.1, cancel.set)
+        timer.start()
+        try:
+            assert up._acquire_slot(cancel) is False
+        finally:
+            timer.cancel()
+            up._put_slots.release()
+
+
+class TestParallelQueue:
+    """Queued files, and pending retries, run through the same budget."""
+
+    @staticmethod
+    def _queue(directory: Path, count: int) -> UploadQueueResponse:
+        files = []
+        for i in range(1, count + 1):
+            (directory / f"q-{i}.csv").write_text("x")
+            files.append(
+                UploadQueueFile(
+                    id=i,
+                    instrument_id="test-instrument",
+                    run_id="RUN-Q",
+                    filename=f"q-{i}.csv",
+                    relative_path=f"q-{i}.csv",
+                )
+            )
+        return UploadQueueResponse(files=files)
+
+    def test_queued_files_upload_at_the_same_time(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path
+    ) -> None:
+        mock_client.get_upload_queue.return_value = self._queue(tmp_path, 3)
+        up = _make_uploader(mock_client, state_db, tmp_path, parallelism=3)
+        barrier = threading.Barrier(3, timeout=3)
+        uploaded: list[str] = []
+
+        def upload(path: Path, run_id: str) -> bool:
+            barrier.wait()
+            uploaded.append(path.name)
+            return True
+
+        with patch.object(up, "_upload_single", side_effect=upload):
+            up.poll_upload_queue()
+
+        assert sorted(uploaded) == ["q-1.csv", "q-2.csv", "q-3.csv"]
+        mock_client.cancel_upload_request.assert_not_called()
+
+    def test_the_poll_returns_only_after_every_file_finishes(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path
+    ) -> None:
+        mock_client.get_upload_queue.return_value = self._queue(tmp_path, 3)
+        up = _make_uploader(mock_client, state_db, tmp_path, parallelism=3)
+        finished: list[str] = []
+
+        def upload(path: Path, run_id: str) -> bool:
+            time.sleep(0.1)
+            finished.append(path.name)
+            return True
+
+        with patch.object(up, "_upload_single", side_effect=upload):
+            up.poll_upload_queue()
+            assert len(finished) == 3
+
+    def test_the_attempt_cap_cancels_each_file(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path
+    ) -> None:
+        mock_client.get_upload_queue.return_value = UploadQueueResponse(
+            files=[
+                UploadQueueFile(
+                    id=i,
+                    instrument_id="test-instrument",
+                    run_id="RUN-X",
+                    filename=f"ghost-{i}.csv",
+                    relative_path=f"ghost-{i}.csv",
+                )
+                for i in (1, 2, 3)
+            ]
+        )
+        up = _make_uploader(mock_client, state_db, tmp_path, parallelism=3)
+
+        for _ in range(MAX_QUEUE_FILE_ATTEMPTS):
+            up.poll_upload_queue()
+
+        cancelled = sorted(c.args[0] for c in mock_client.cancel_upload_request.call_args_list)
+        assert cancelled == [1, 2, 3]
+        report_error = cast(MagicMock, up._reporter).report_error
+        assert [c.args[0] for c in report_error.call_args_list] == ["upload_request_cancelled"] * 3
+        # Each file reported its missing file once.
+        assert up._counters.errors == 3
+
+    def test_an_unexpected_error_in_one_file_does_not_end_the_others(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path
+    ) -> None:
+        mock_client.get_upload_queue.return_value = self._queue(tmp_path, 3)
+        up = _make_uploader(mock_client, state_db, tmp_path, parallelism=3)
+        uploaded: list[str] = []
+
+        def upload(path: Path, run_id: str) -> bool:
+            if path.name == "q-1.csv":
+                raise ValueError("unexpected response")
+            uploaded.append(path.name)
+            return True
+
+        with patch.object(up, "_upload_single", side_effect=upload):
+            up.poll_upload_queue()
+
+        assert sorted(uploaded) == ["q-2.csv", "q-3.csv"]
+
+    @pytest.mark.usefixtures("ctrl_c_is_delivered")
+    def test_ctrl_c_during_a_queue_poll_sets_the_stop_event(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path
+    ) -> None:
+        mock_client.get_upload_queue.return_value = self._queue(tmp_path, 3)
+        stop = threading.Event()
+        up = _make_uploader(mock_client, state_db, tmp_path, parallelism=2, stop_event=stop)
+        started: list[str] = []
+        saw_stop: list[bool] = []
+
+        def upload(path: Path, run_id: str) -> bool:
+            started.append(path.name)
+            if path.name == "q-1.csv":
+                _press_ctrl_c()
+            saw_stop.append(stop.wait(timeout=5))
+            return True
+
+        with (
+            patch.object(up, "_upload_single", side_effect=upload),
+            pytest.raises(KeyboardInterrupt),
+        ):
+            up.poll_upload_queue()
+        _wait_until_no_threads("uploader")
+
+        assert stop.is_set()
+        # Both workers saw the stop, and the third file never started.
+        assert sorted(started) == ["q-1.csv", "q-2.csv"]
+        assert saw_stop == [True, True]
+
+    def test_pending_uploads_retry_at_the_same_time(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path
+    ) -> None:
+        run_dir = tmp_path / "RUN-1"
+        run_dir.mkdir()
+        paths = []
+        for i in range(3):
+            (run_dir / f"p-{i}.csv").write_text("x")
+            paths.append(f"RUN-1/p-{i}.csv")
+        state_db.record_pending_uploads("RUN-1", paths)
+        up = _make_uploader(mock_client, state_db, tmp_path, parallelism=3)
+        barrier = threading.Barrier(3, timeout=3)
+
+        def upload(path: Path, run_id: str) -> bool:
+            barrier.wait()
+            return True
+
+        with patch.object(up, "_upload_single", side_effect=upload):
+            up.retry_pending_uploads()
+
+        assert state_db.pending_uploads() == []
+
+
+class TestRunWorkers:
+    """The helper behind the file workers and the part workers."""
+
+    @staticmethod
+    def _run(
+        items: list[int],
+        task: Callable[[int], None],
+        *,
+        workers: int,
+        halted: Callable[[], bool] = lambda: False,
+        on_interrupt: Callable[[], None] = lambda: None,
+        name: str = "test-worker",
+    ) -> None:
+        _run_workers(
+            items,
+            task,
+            workers=workers,
+            name=name,
+            halted=halted,
+            on_interrupt=on_interrupt,
+        )
+
+    def test_every_item_runs_exactly_once(self) -> None:
+        seen: list[int] = []
+        seen_lock = threading.Lock()
+
+        def task(item: int) -> None:
+            time.sleep(0.001)
+            with seen_lock:
+                seen.append(item)
+
+        self._run(list(range(60)), task, workers=4)
+
+        assert sorted(seen) == list(range(60))
+
+    def test_the_threads_are_named_daemon_threads(self) -> None:
+        threads: list[threading.Thread] = []
+        all_started = threading.Barrier(4, timeout=5)
+
+        def task(item: int) -> None:
+            threads.append(threading.current_thread())
+            all_started.wait()
+
+        self._run([1, 2, 3, 4], task, workers=4)
+
+        # A daemon thread does not hold the process open at exit. A pool
+        # thread would be joined, so the exit would wait for every send.
+        assert len(threads) == 4
+        assert all(thread.daemon for thread in threads)
+        assert {thread.name for thread in threads} == {f"test-worker-{n}" for n in range(1, 5)}
+
+    @pytest.mark.parametrize(("count", "workers"), [(5, 1), (1, 4)])
+    def test_one_worker_or_one_item_runs_on_the_calling_thread(
+        self, count: int, workers: int
+    ) -> None:
+        threads: list[threading.Thread] = []
+
+        self._run(
+            list(range(count)),
+            lambda item: threads.append(threading.current_thread()),
+            workers=workers,
+        )
+
+        assert threads == [threading.current_thread()] * count
+
+    def test_the_caller_waits_in_timed_steps(self) -> None:
+        caller = threading.current_thread()
+        timeouts: list[float | None] = []
+        real_join = threading.Thread.join
+
+        def join(self_: threading.Thread, timeout: float | None = None) -> None:
+            if threading.current_thread() is caller:
+                timeouts.append(timeout)
+            real_join(self_, timeout)
+
+        with (
+            patch("data_hub_watcher.uploader._WAIT_STEP_SECONDS", 0.02),
+            patch.object(threading.Thread, "join", join),
+        ):
+            self._run([1, 2], lambda item: time.sleep(0.15), workers=2)
+
+        # A wait with no timeout cannot be interrupted by Ctrl-C on Windows.
+        assert len(timeouts) >= 3
+        assert set(timeouts) == {0.02}
+
+    @pytest.mark.usefixtures("ctrl_c_is_delivered")
+    def test_ctrl_c_during_the_wait_calls_on_interrupt_and_raises_again(self) -> None:
+        interrupted = threading.Event()
+        workers: list[threading.Thread] = []
+        saw_interrupt: list[bool] = []
+
+        def task(item: int) -> None:
+            workers.append(threading.current_thread())
+            if item == 1:
+                _press_ctrl_c()
+            saw_interrupt.append(interrupted.wait(timeout=5))
+
+        with pytest.raises(KeyboardInterrupt):
+            self._run([1, 2], task, workers=2, on_interrupt=interrupted.set)
+        for worker in workers:
+            worker.join(timeout=5)
+
+        # The workers were told within the timed step, not after their 5 s.
+        assert saw_interrupt == [True, True]
+
+    def test_a_halt_starts_no_new_items_and_lets_running_ones_finish(self) -> None:
+        halt = threading.Event()
+        both_started = threading.Barrier(2, timeout=5)
+        started: list[int] = []
+        finished: list[int] = []
+        lock = threading.Lock()
+
+        def task(item: int) -> None:
+            with lock:
+                started.append(item)
+            both_started.wait()
+            halt.set()
+            time.sleep(0.05)
+            with lock:
+                finished.append(item)
+
+        self._run(list(range(1, 7)), task, workers=2, halted=halt.is_set)
+
+        assert sorted(started) == [1, 2]
+        assert sorted(finished) == [1, 2]
+
+    def test_a_halt_starts_no_item_on_the_calling_thread_either(self) -> None:
+        ran: list[int] = []
+
+        self._run([1, 2, 3], ran.append, workers=1, halted=lambda: bool(ran))
+
+        assert ran == [1]
+
+    def test_with_one_worker_a_task_error_is_raised_at_once(self) -> None:
+        ran: list[int] = []
+
+        def task(item: int) -> None:
+            ran.append(item)
+            raise ValueError("boom")
+
+        with pytest.raises(ValueError, match="boom"):
+            self._run([1, 2, 3], task, workers=1)
+
+        assert ran == [1]
+
+    def test_with_threads_the_first_error_is_raised_after_every_item_is_done(self) -> None:
+        finished: list[int] = []
+
+        def task(item: int) -> None:
+            if item == 1:
+                raise ValueError("first")
+            if item == 2:
+                time.sleep(0.05)
+                raise ValueError("second")
+            time.sleep(0.05)
+            finished.append(item)
+
+        with pytest.raises(ValueError, match="first"):
+            self._run([1, 2, 3, 4], task, workers=2, name="test-errors")
+
+        # The error was raised once the work was over, not when it happened.
+        assert sorted(finished) == [3, 4]
+        assert not any(t.name.startswith("test-errors") for t in threading.enumerate())
+
+
+class TestWorkerThreads:
+    """Each call site runs its workers on daemon threads that are named for it."""
+
+    @staticmethod
+    def _check(threads: list[threading.Thread], prefix: str, count: int) -> None:
+        assert len(threads) == count
+        assert all(thread.daemon for thread in threads)
+        assert all(thread.name.startswith(prefix) for thread in threads)
+
+    def test_part_workers(self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path) -> None:
+        _write_parts_file(tmp_path, "big.bin", part_count=4, part_size=4)
+        mock_client.request_upload_url.return_value = _multipart_presigned(
+            part_size=4, part_count=4
+        )
+        mock_client.get_part_urls.side_effect = _part_urls
+        up = _make_uploader(mock_client, state_db, tmp_path, parallelism=4)
+        threads: list[threading.Thread] = []
+        all_in_flight = threading.Barrier(4, timeout=5)
+
+        def put(url: str, **kwargs: object) -> MagicMock:
+            threads.append(threading.current_thread())
+            all_in_flight.wait()
+            return _etag_response(_part_number(url))
+
+        with patch.object(up._s3_session, "put", side_effect=put):
+            assert up._upload_single(tmp_path / "big.bin", "RUN-001") is True
+
+        self._check(threads, "upload-part-", 4)
+
+    def test_auto_mode_file_workers(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path
+    ) -> None:
+        up = _make_uploader(mock_client, state_db, tmp_path, parallelism=3)
+        files = []
+        for i in range(3):
+            (tmp_path / f"f-{i}.csv").write_text("x")
+            files.append(_file_info(tmp_path / f"f-{i}.csv"))
+        threads: list[threading.Thread] = []
+        all_started = threading.Barrier(3, timeout=5)
+
+        def upload(path: Path, run_id: str) -> bool:
+            threads.append(threading.current_thread())
+            all_started.wait()
+            return True
+
+        with patch.object(up, "_upload_single", side_effect=upload):
+            assert up.upload_files("RUN-001", files) == 3
+
+        self._check(threads, "uploader-", 3)
+
+    def test_queue_file_workers(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path
+    ) -> None:
+        mock_client.get_upload_queue.return_value = TestParallelQueue._queue(tmp_path, 3)
+        up = _make_uploader(mock_client, state_db, tmp_path, parallelism=3)
+        threads: list[threading.Thread] = []
+        all_started = threading.Barrier(3, timeout=5)
+
+        def upload(path: Path, run_id: str) -> bool:
+            threads.append(threading.current_thread())
+            all_started.wait()
+            return True
+
+        with patch.object(up, "_upload_single", side_effect=upload):
+            up.poll_upload_queue()
+
+        self._check(threads, "uploader-", 3)
+
+
+class TestFileUploadedDetails:
+    """The `file_uploaded` event carries the size and where the time went."""
+
+    def test_single_put_details(
+        self, uploader: Uploader, mock_client: MagicMock, tmp_file: Path
+    ) -> None:
+        content = tmp_file.read_bytes()
+
+        def request_url(*args: object, **kwargs: object) -> PresignedUploadResponse:
+            time.sleep(0.05)
+            return _single_presigned(tmp_file.name)
+
+        def slow_notify(*args: object, **kwargs: object) -> MagicMock:
+            time.sleep(0.3)
+            return MagicMock()
+
+        def slow_put(self_: Uploader, url: str, path: Path, content_type: str | None) -> None:
+            time.sleep(0.05)
+
+        mock_client.request_upload_url.side_effect = request_url
+        mock_client.mark_file_uploaded.side_effect = slow_notify
+
+        with patch.object(Uploader, "_put_to_presigned_url", new=slow_put):
+            assert uploader._upload_single(tmp_file, "RUN-001") is True
+
+        event = cast(MagicMock, uploader._reporter).queue_event.call_args.args[0]
+        assert event.event_type == EventType.FILE_UPLOADED
+        details = event.details
+        assert details["s3_key"] == f"test-instrument/RUN-001/{tmp_file.name}"
+        assert details["sha256"] == hashlib.sha256(content).hexdigest()
+        assert details["size_bytes"] == len(content)
+        assert details["part_count"] == 1
+        assert details["prep_seconds"] >= 0.05
+        # The transfer ends when the PUT succeeds, before the API is told.
+        assert 0.05 <= details["upload_seconds"] < 0.3
+
+    def test_multipart_details(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path
+    ) -> None:
+        _write_parts_file(tmp_path, "big.bin", part_count=8, part_size=4)
+
+        def request_url(*args: object, **kwargs: object) -> PresignedUploadResponse:
+            time.sleep(0.05)
+            return _multipart_presigned(part_size=4, part_count=8)
+
+        def put(url: str, **kwargs: object) -> MagicMock:
+            time.sleep(0.02)
+            return _etag_response(_part_number(url))
+
+        mock_client.request_upload_url.side_effect = request_url
+        mock_client.get_part_urls.side_effect = _part_urls
+        up = _make_uploader(mock_client, state_db, tmp_path, parallelism=4)
+
+        with patch.object(up._s3_session, "put", side_effect=put):
+            assert up._upload_single(tmp_path / "big.bin", "RUN-001") is True
+
+        event = cast(MagicMock, up._reporter).queue_event.call_args.args[0]
+        assert event.event_type == EventType.FILE_UPLOADED
+        details = event.details
+        assert details["size_bytes"] == 32
+        assert details["part_count"] == 8
+        assert details["prep_seconds"] >= 0.05
+        # Eight 20 ms parts, four at a time, take at least two rounds.
+        assert details["upload_seconds"] >= 0.04
+        assert isinstance(details["upload_seconds"], float)
