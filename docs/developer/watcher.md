@@ -252,6 +252,7 @@ An admin can change these fields: `watch_directory`, `file_patterns`, `run_detec
 - A pending revision is merged into the running config and checked with the same rules as the server. The watcher also checks that the folder exists and can be listed, which only the PC can do.
 - If a check fails, the watcher posts `rejected` with the reason to `POST /watchers/:id/config-revisions/:revision/result`, logs a warning, and keeps running unchanged.
 - If the checks pass, the watcher saves `config.yaml`, rebuilds its loops (below), posts `applied`, and pushes the new YAML through `PUT /watchers/:id/config` with `based_on_revision`.
+- A revision whose settings the watcher already runs needs no rebuild. If `config.yaml` differs, as after `config edit` on a running PC (the watcher reads the file only at startup), the watcher still saves the revision over it, so a restart doesn't bring the edit back.
 - The saved file keeps the folder exactly as the revision has it. The resolved form can differ in slashes, a trailing separator, letter case, or a mapped drive shown as a UNC path, and the server would record a push with it as a new edit on the PC. Loading the file resolves the folder again.
 - A result the server didn't receive (no connection, a 5xx, or a reply the watcher couldn't read) is kept in `meta` and retried after each successful heartbeat, including after a restart. A 404 or 409 isn't retried.
 
