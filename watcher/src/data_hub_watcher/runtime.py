@@ -267,8 +267,8 @@ def build_runtime(
         instrument_id=inst.id,
         watcher_id=watcher_id,
         watch_directory=inst.watch_directory,
-        # Per-instrument knob, defaulted on the model so older configs
-        # transparently inherit the new parallel-upload behaviour.
+        # The most S3 PUTs (files and parts) this watcher runs at once.
+        # Defaulted on the model, so older configs inherit it.
         upload_parallelism=inst.upload_parallelism,
         stop_event=upload_stop_event,
     )
@@ -570,6 +570,9 @@ def stop_runtime(rt: WatcherRuntime, *, stopped_message: str) -> None:
     # ``StateDB.close`` assumes writer threads have joined; a large upload
     # outliving the join once wrote post-close. Stop the worker first, and if
     # it won't stop in time, skip the close rather than race it (the OS reaps).
+    # The worker's file and part threads are daemon threads, so a PUT still in
+    # flight does not hold the process open past this join. That file is
+    # retried at the next start, from ``pending_uploads`` or the server's queue.
     upload_worker_stopped = True
     if rt.upload_worker is not None:
         upload_worker_stopped = rt.upload_worker.stop(timeout=UPLOAD_WORKER_STOP_TIMEOUT_SECONDS)
