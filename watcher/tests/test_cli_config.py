@@ -79,7 +79,6 @@ class TestConfigEdit:
         assert result.exit_code != 0
         assert "watch_directory not found" in result.output
 
-
     def test_rejects_more_patterns_than_data_hub_can_read(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, client: MagicMock
     ) -> None:

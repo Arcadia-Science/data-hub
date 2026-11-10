@@ -839,9 +839,7 @@ class WatcherSupervisor:
         """Sync config, apply a pending revision, then start watching or waiting."""
         self._state = StateDB(self.db_path)
         if self._state.claim_config_revisions(self.watcher_id):
-            logger.info(
-                "Dropped config revision bookkeeping from a different watcher registration"
-            )
+            logger.info("Dropped config revision bookkeeping from a different watcher registration")
         self._seen = self._state.config_revision_seen()
         self._applied = self._state.config_revision_applied()
         self._unsent_result = self._load_unsent_result()
@@ -1312,9 +1310,7 @@ class WatcherSupervisor:
         check_marker = not self._upgrade_marker_checked
         self._upgrade_marker_checked = True
         try:
-            start_runtime(
-                rt, started_message=started_message, check_upgrade_marker=check_marker
-            )
+            start_runtime(rt, started_message=started_message, check_upgrade_marker=check_marker)
         except Exception:
             # Leave nothing half-started behind, then let the caller decide.
             self.rt = rt

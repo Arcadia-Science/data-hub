@@ -212,9 +212,7 @@ class TestApplyInProcess:
         assert sup.rt is not None
         assert sup.rt.monitor._report_only_paths == {old_txt}
 
-    def test_next_rebuild_keeps_reporting_files_the_earlier_change_matched(
-        self, env: _Env
-    ) -> None:
+    def test_next_rebuild_keeps_reporting_files_the_earlier_change_matched(self, env: _Env) -> None:
         sup = env.supervisor()
         sup.start()
         old_txt = env.watch_dir / "RUN002_old.txt"
@@ -438,9 +436,7 @@ class TestRejectMissingFolder:
         assert sup._unsent_result is None
         env.client.get_latest_config_revision.assert_called_once()
 
-    def test_unreadable_result_reply_is_retried_and_the_push_still_happens(
-        self, env: _Env
-    ) -> None:
+    def test_unreadable_result_reply_is_retried_and_the_push_still_happens(self, env: _Env) -> None:
         sup = env.supervisor()
         sup.start()
         env.client.get_latest_config_revision.return_value = _revision(
@@ -517,7 +513,6 @@ class TestRejectMissingFolder:
         assert (number, status) == (2, "rejected")
         assert "cannot watch" in reason
         assert sup.applied_revision is None
-
 
     def test_error_after_teardown_rolls_back_instead_of_going_silent(
         self, env: _Env, monkeypatch: pytest.MonkeyPatch
@@ -751,9 +746,10 @@ class TestStartupSync:
         assert sup.applied_revision == 4
         assert sup.cfg.instrument.file_patterns == ["*.txt"]
         assert env.results() == [(WATCHER_ID, 4, "applied", None)]
-        assert sup.rt is not None and sup.rt.heartbeat._build_payload("watching")[
-            "config_revision"
-        ] == 4
+        assert (
+            sup.rt is not None
+            and sup.rt.heartbeat._build_payload("watching")["config_revision"] == 4
+        )
 
         # Later heartbeats that still announce 5 don't fetch it again.
         env.client.get_latest_config_revision.reset_mock()

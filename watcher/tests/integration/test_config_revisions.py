@@ -52,9 +52,7 @@ class _Admin:
         self._session.headers["Authorization"] = f"Bearer {token}"
 
     def revisions(self, watcher_id: str) -> list[dict[str, Any]]:
-        resp = self._session.get(
-            f"{self._base}/watchers/{watcher_id}/config-revisions", timeout=30
-        )
+        resp = self._session.get(f"{self._base}/watchers/{watcher_id}/config-revisions", timeout=30)
         resp.raise_for_status()
         return list(resp.json()["data"])
 
@@ -252,9 +250,7 @@ class TestAdminRevision:
             time.sleep(0.25)
         assert rows == [("RUN002_notes.txt", "detected")]
 
-    def test_folder_typed_differently_leaves_no_pc_revision(
-        self, pc: _Pc, admin: _Admin
-    ) -> None:
+    def test_folder_typed_differently_leaves_no_pc_revision(self, pc: _Pc, admin: _Admin) -> None:
         sup = pc.start()
         # The admin types the folder with a trailing separator. The watcher
         # resolves it, but must push it back as typed.
@@ -299,7 +295,7 @@ class TestRejectedRevision:
             (pc.watcher_id,),
         )
         assert kind == "config_revision_rejected"
-        assert "watch_directory not found" in reason
+        assert isinstance(reason, str) and "watch_directory not found" in reason
 
         # Later heartbeats don't fetch or report it again.
         _heartbeat(sup)
