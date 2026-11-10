@@ -394,26 +394,16 @@ def build_runtime(
     )
 
 
-def start_runtime(rt: WatcherRuntime, *, started_message: str) -> None:
-    """Queue the started event, recover unreported runs, then start threads.
+def report_upgrade_outcome(reporter: EventReporter, config_dir: Path) -> None:
+    """Report how the last self-update went, from the on-disk upgrade marker.
 
-    The `started_message` varies by entry point (`"Watcher started on …"`
-    from the CLI vs `"Service started on …"` from the Windows service)
-    so operators can tell from the event log which code path launched.
-
-    Also inspects the on-disk upgrade marker before any threads start so
-    a recently-attempted self-update is reported as
-    ``UPDATE_SUCCEEDED`` / ``UPDATE_FAILED`` from this fresh process,
-    not from the doomed old process that asked for the restart.
+    Reads and clears the marker and the Windows worker's sentinels, so it
+    must run once per process, at its start. Running it again later (for
+    example in an in-process rebuild) would consume a marker the updater just
+    wrote for the restart it requested: it would report a bogus failure and
+    delete the request sentinel before the upgrade worker read it.
     """
-    rt.reporter.queue_event(
-        WatcherEvent(
-            event_type=EventType.WATCHER_STARTED,
-            message=started_message,
-        )
-    )
-
-    outcome = evaluate_upgrade_marker(rt.config_dir)
+    outcome = evaluate_upgrade_marker(config_dir)
     if outcome.found:
         # Out-of-process upgrades (the Windows uv-tool worker) drop a
         # ``.upgrade-result.json`` sentinel alongside the marker. The
@@ -425,7 +415,7 @@ def start_runtime(rt: WatcherRuntime, *, started_message: str) -> None:
         # and the actual installer error never surfaced to the
         # dashboard. Trust the worker's ``succeeded`` flag whenever
         # it's present.
-        worker_result = read_upgrade_result(rt.config_dir)
+        worker_result = read_upgrade_result(config_dir)
 
         worker_failed = worker_result is not None and not worker_result.succeeded
         worker_warned = (
@@ -458,7 +448,7 @@ def start_runtime(rt: WatcherRuntime, *, started_message: str) -> None:
                 "marker_succeeded": outcome.succeeded,
                 "marker_reason": outcome.reason,
             }
-            rt.reporter.queue_event(
+            reporter.queue_event(
                 WatcherEvent(
                     event_type=EventType.UPDATE_FAILED,
                     message=f"Watcher upgrade to {outcome.target_version} failed: {reason}",
@@ -484,7 +474,7 @@ def start_runtime(rt: WatcherRuntime, *, started_message: str) -> None:
                 # without being paged.
                 if worker_warned:
                     details["worker_warning"] = True
-            rt.reporter.queue_event(
+            reporter.queue_event(
                 WatcherEvent(
                     event_type=EventType.UPDATE_SUCCEEDED,
                     message=(
@@ -518,7 +508,7 @@ def start_runtime(rt: WatcherRuntime, *, started_message: str) -> None:
                 # or never started. Surface that explicitly so an
                 # operator knows to check ``upgrade-worker.log``.
                 details["worker_result_missing"] = True
-            rt.reporter.queue_event(
+            reporter.queue_event(
                 WatcherEvent(
                     event_type=EventType.UPDATE_FAILED,
                     message=f"Watcher upgrade did not take effect: {outcome.reason}",
@@ -530,8 +520,35 @@ def start_runtime(rt: WatcherRuntime, *, started_message: str) -> None:
         # inspection so a stale result from a prior upgrade can't
         # leak into the next one. Mirrors the marker's "consumed on
         # read" lifecycle in ``evaluate_upgrade_marker``.
-        clear_upgrade_result(rt.config_dir)
-        clear_upgrade_request(rt.config_dir)
+        clear_upgrade_result(config_dir)
+        clear_upgrade_request(config_dir)
+
+
+def start_runtime(
+    rt: WatcherRuntime, *, started_message: str, check_upgrade_marker: bool = True
+) -> None:
+    """Queue the started event, recover unreported runs, then start threads.
+
+    The `started_message` varies by entry point (`"Watcher started on …"`
+    from the CLI vs `"Service started on …"` from the Windows service)
+    so operators can tell from the event log which code path launched.
+
+    Also inspects the on-disk upgrade marker before any threads start so
+    a recently-attempted self-update is reported as
+    ``UPDATE_SUCCEEDED`` / ``UPDATE_FAILED`` from this fresh process,
+    not from the doomed old process that asked for the restart. A rebuild
+    inside a running process passes ``check_upgrade_marker=False`` (see
+    :func:`report_upgrade_outcome`).
+    """
+    rt.reporter.queue_event(
+        WatcherEvent(
+            event_type=EventType.WATCHER_STARTED,
+            message=started_message,
+        )
+    )
+
+    if check_upgrade_marker:
+        report_upgrade_outcome(rt.reporter, rt.config_dir)
 
     # Rebuild in-memory run state from the local DB before any file
     # events fire. Without this, every restart starts with an empty
@@ -788,6 +805,9 @@ class WatcherSupervisor:
         self._revision_due = threading.Event()
         self._folder_check_due = threading.Event()
         self._result_retry_due = threading.Event()
+        # Whether this process has checked the post-upgrade marker yet. Only
+        # the first runtime or waiting state may (see `report_upgrade_outcome`).
+        self._upgrade_marker_checked = False
         # One `report_only_predicate` per widening revision applied in this
         # process. Every runtime built afterwards scans with all of them, not
         # just the newest: a second change that arrives before the first
@@ -1238,8 +1258,12 @@ class WatcherSupervisor:
             config_revision=lambda: self._applied,
             on_config_revision=self._on_heartbeat_revision,
         )
+        check_marker = not self._upgrade_marker_checked
+        self._upgrade_marker_checked = True
         try:
-            start_runtime(rt, started_message=started_message)
+            start_runtime(
+                rt, started_message=started_message, check_upgrade_marker=check_marker
+            )
         except Exception:
             # Leave nothing half-started behind, then let the caller decide.
             self.rt = rt
@@ -1294,6 +1318,11 @@ class WatcherSupervisor:
         self.reporter.queue_event(
             WatcherEvent(event_type=EventType.WATCHER_STARTED, message=started_message)
         )
+        if not self._upgrade_marker_checked:
+            # A process that restarted into a new version and found its folder
+            # missing still reports how the update went.
+            self._upgrade_marker_checked = True
+            report_upgrade_outcome(self.reporter, self.config_dir)
         self.reporter.report_error(
             "watch_directory_unavailable",
             f"Waiting: {reason}",

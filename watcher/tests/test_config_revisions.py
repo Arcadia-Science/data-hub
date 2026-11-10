@@ -283,6 +283,56 @@ class TestApplyInProcess:
         env.client.get_latest_config_revision.assert_not_called()
 
 
+class TestUpgradeMarker:
+    """The post-upgrade marker is checked once per process, never on a rebuild."""
+
+    def _event_types(self, env: _Env) -> list[str]:
+        return [e["event_type"] for c in env.client.send_events.call_args_list for e in c.args[1]]
+
+    def test_rebuild_leaves_a_freshly_written_marker_alone(self, env: _Env) -> None:
+        from data_hub_watcher.updater import upgrade_marker_path, write_upgrade_marker
+        from data_hub_watcher.upgrade_worker import upgrade_request_path, write_upgrade_request
+
+        sup = env.supervisor()
+        sup.start()
+        # The updater dispatched an upgrade to the Windows worker on the same
+        # heartbeat tick that announced a new revision.
+        write_upgrade_marker(env.tmp_path, target_version="9.9.9", previous_version="1.3.0")
+        write_upgrade_request(
+            env.tmp_path,
+            target_version="9.9.9",
+            pkg_spec="data-hub-watcher==9.9.9",
+            uv_executable="uv",
+            index_url="https://example.test/simple",
+            previous_version="1.3.0",
+            install_method="uv-tool",
+        )
+        env.client.get_latest_config_revision.return_value = _revision(
+            2, _settings(env.watch_dir, file_patterns=["*.txt"])
+        )
+
+        _deliver(sup, 2)
+        assert sup.rt is not None
+        sup.rt.reporter.flush()
+
+        assert upgrade_marker_path(env.tmp_path).exists()
+        assert upgrade_request_path(env.tmp_path).exists()
+        assert EventType.UPDATE_FAILED.value not in self._event_types(env)
+
+    def test_waiting_at_startup_still_reports_the_update(self, env: _Env) -> None:
+        from data_hub_watcher.constants import WATCHER_VERSION
+        from data_hub_watcher.updater import upgrade_marker_path, write_upgrade_marker
+
+        write_upgrade_marker(env.tmp_path, target_version=WATCHER_VERSION, previous_version="1.2.3")
+        sup = env.supervisor(env.write_config(_cfg(env.tmp_path / "later")))
+        sup.start()
+        sup.reporter.flush()
+
+        assert sup.waiting_reason is not None
+        assert not upgrade_marker_path(env.tmp_path).exists()
+        assert EventType.UPDATE_SUCCEEDED.value in self._event_types(env)
+
+
 class TestRejectMissingFolder:
     def test_missing_folder_is_rejected_and_old_config_keeps_running(self, env: _Env) -> None:
         sup = env.supervisor()
@@ -395,11 +445,11 @@ class TestRejectMissingFolder:
         real_start = runtime.start_runtime
         attempts: list[list[str]] = []
 
-        def flaky_start(rt: Any, *, started_message: str) -> None:
+        def flaky_start(rt: Any, **kwargs: Any) -> None:
             attempts.append(list(rt.monitor._patterns))
             if len(attempts) == 1:
                 raise OSError("cannot watch")
-            real_start(rt, started_message=started_message)
+            real_start(rt, **kwargs)
 
         monkeypatch.setattr(runtime, "start_runtime", flaky_start)
         env.client.get_latest_config_revision.return_value = _revision(
@@ -532,9 +582,9 @@ class TestStartupSync:
         calls: list[Any] = []
         real_start = runtime.start_runtime
 
-        def record_start(rt: Any, *, started_message: str) -> None:
+        def record_start(rt: Any, **kwargs: Any) -> None:
             calls.append(("start", list(rt.monitor._patterns)))
-            real_start(rt, started_message=started_message)
+            real_start(rt, **kwargs)
 
         monkeypatch.setattr(runtime, "start_runtime", record_start)
         env.client.push_config.side_effect = lambda *a, **k: (

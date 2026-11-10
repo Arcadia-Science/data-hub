@@ -1107,7 +1107,7 @@ class _LoopHarness:
         monkeypatch.setattr(
             runtime,
             "start_runtime",
-            lambda rt, started_message="": self.start_calls.append((rt, started_message)),
+            lambda rt, started_message="", **_kw: self.start_calls.append((rt, started_message)),
         )
         monkeypatch.setattr(
             runtime,
