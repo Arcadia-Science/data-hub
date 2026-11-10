@@ -45,7 +45,7 @@ After you save:
 1. The change shows as **Change pending**.
 2. Within about a minute, the watcher’s next heartbeat tells it a change is waiting. The watcher fetches it.
 3. The watcher checks the change, including that the new folder exists and can be read. If a check fails, it keeps its current settings and the change shows as **Change rejected** with the reason, both on the **Configuration** tab and as an `error` event.
-4. Otherwise it saves the new settings to `config.yaml`, lets uploads in progress finish, and restarts its watching with the new settings. The change shows as **Applied**.
+4. Otherwise it saves the new settings to `config.yaml`, waits up to two minutes for the uploads it’s sending, and restarts its watching with the new settings. The change shows as **Applied**. A file that hadn’t finished uploading, such as a large file partway through, uploads again from the start after the change, unless the change moved the watch folder or switched to manual uploads.
 
 If the new settings match more files, the watcher reports files that are already on the PC as detected, but doesn’t upload them. To upload them, use **Upload** on the run page; see [Request uploads](#request-uploads). New files after the change follow the upload mode.
 
