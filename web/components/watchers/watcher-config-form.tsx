@@ -268,8 +268,10 @@ export function WatcherConfigForm({
         </Alert>
       )}
 
+      {/* A fieldset defaults to `min-width: min-content`, which lets a long
+          preset label push the inputs past the card on a phone. */}
       <fieldset
-        className="flex flex-col gap-5"
+        className="flex min-w-0 flex-col gap-5"
         disabled={!editable || isSaving}
       >
         <Field
@@ -347,7 +349,7 @@ export function WatcherConfigForm({
           <Field htmlFor={id("preset")} label="Run detection">
             <Select onValueChange={choosePreset} value={presetKey}>
               <SelectTrigger
-                className="w-full data-[size=default]:h-9"
+                className="w-full min-w-0 data-[size=default]:h-9"
                 id={id("preset")}
               >
                 <SelectValue />
@@ -406,7 +408,7 @@ export function WatcherConfigForm({
               value={state.uploadMode}
             >
               <SelectTrigger
-                className="w-full data-[size=default]:h-9"
+                className="w-full min-w-0 data-[size=default]:h-9"
                 id={id("mode")}
               >
                 <SelectValue />
