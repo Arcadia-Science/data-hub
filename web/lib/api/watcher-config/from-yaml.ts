@@ -9,27 +9,34 @@ import {
   watcherConfigSettingsSchema,
 } from "./settings";
 
+export type YamlSettingsResult =
+  | { ok: true; settings: WatcherConfigSettings }
+  /** Why Data Hub can't use the file, for the Configuration tab. */
+  | { ok: false; reason: string };
+
 /**
  * Reads the editable settings out of a watcher's `config.yaml`, filling in
- * the watcher's defaults for missing keys. Returns null when the YAML can't
- * be parsed or the settings fail the rules above.
+ * the watcher's defaults for missing keys. Fails with a short reason when
+ * the YAML can't be parsed or the settings break the rules in `settings.ts`
+ * (which can be stricter than an older watcher's own checks).
  */
-export function parseSettingsFromYaml(
-  configYaml: string | null
-): WatcherConfigSettings | null {
-  if (!configYaml) {
-    return null;
-  }
+export function readSettingsFromYaml(configYaml: string): YamlSettingsResult {
   let doc: unknown;
   try {
     doc = YAML.parse(configYaml);
-  } catch {
-    return null;
+  } catch (err) {
+    const detail = err instanceof Error ? err.message.split("\n")[0] : "";
+    return {
+      ok: false,
+      reason: detail
+        ? `It isn't valid YAML: ${detail}`
+        : "It isn't valid YAML.",
+    };
   }
   const instrument = (doc as { instrument?: Record<string, unknown> } | null)
     ?.instrument;
   if (!instrument || typeof instrument !== "object") {
-    return null;
+    return { ok: false, reason: "It has no instrument section." };
   }
   const runDetection = (instrument.run_detection ?? {}) as Record<
     string,
@@ -53,5 +60,27 @@ export function parseSettingsFromYaml(
       instrument.upload_parallelism ?? WATCHER_DEFAULTS.upload_parallelism,
   };
   const parsed = watcherConfigSettingsSchema.safeParse(candidate);
-  return parsed.success ? canonicalSettings(parsed.data) : null;
+  if (parsed.success) {
+    return { ok: true, settings: canonicalSettings(parsed.data) };
+  }
+  // Name each field by its key in the file, such as
+  // `instrument.run_detection.pattern`, so it can be found and fixed there.
+  const problems = parsed.error.issues.map(
+    (issue) => `instrument.${issue.path.join(".")}: ${issue.message}`
+  );
+  return { ok: false, reason: problems.join("; ") };
+}
+
+/**
+ * The editable settings from a watcher's `config.yaml`, or null when there
+ * is none or it can't be used (see `readSettingsFromYaml` for why).
+ */
+export function parseSettingsFromYaml(
+  configYaml: string | null
+): WatcherConfigSettings | null {
+  if (!configYaml) {
+    return null;
+  }
+  const result = readSettingsFromYaml(configYaml);
+  return result.ok ? result.settings : null;
 }

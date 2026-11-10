@@ -7,6 +7,7 @@ import { WatcherConfigHistory } from "@/components/watchers/watcher-config-histo
 import {
   ConfigChangeCallout,
   RestartPendingCallout,
+  UnreadableConfigCallout,
 } from "@/components/watchers/watcher-config-status";
 import { WatcherYamlDisclosure } from "@/components/watchers/watcher-yaml-disclosure";
 import type {
@@ -41,6 +42,10 @@ export function WatcherConfig({
 
   return (
     <div className="flex flex-col gap-6">
+      <UnreadableConfigCallout
+        hasSettings={state.baseSettings !== null}
+        problem={state.reportedProblem}
+      />
       <ConfigChangeCallout
         current={running?.settings ?? null}
         latest={state.latest}
@@ -70,7 +75,7 @@ export function WatcherConfig({
         ) : (
           <EmptyState icon={FileText} size="compact">
             {watcher.configYaml
-              ? "The watcher's config couldn't be read. The raw YAML is below."
+              ? "The watcher's config file couldn't be read. The raw YAML is below."
               : "No config pushed yet."}
           </EmptyState>
         )}

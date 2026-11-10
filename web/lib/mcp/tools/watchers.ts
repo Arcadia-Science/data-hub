@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import { actorToken, actorUser } from "@/lib/api/actor";
-import { parseSettingsFromYaml } from "@/lib/api/watcher-config/from-yaml";
+import { readSettingsFromYaml } from "@/lib/api/watcher-config/from-yaml";
 import {
   type ConfigRevision,
   createWebConfigRevision,
@@ -183,11 +183,16 @@ export function registerWatcherTools(server: McpServer) {
       // change isn't carried along: the caller confirmed only the settings
       // it names.
       const intended = await getIntendedConfigRevision(watcherId);
+      const reported = watcher.configYaml
+        ? readSettingsFromYaml(watcher.configYaml)
+        : null;
       const base =
-        intended?.settings ?? parseSettingsFromYaml(watcher.configYaml);
+        intended?.settings ?? (reported?.ok ? reported.settings : null);
       if (!base) {
         return errorResult(
-          "This watcher hasn't reported a readable config yet, so there are no settings to change."
+          reported && !reported.ok
+            ? `Data Hub can't read this watcher's config file, so there are no settings to change. Fix config.yaml on the instrument PC. ${reported.reason}`
+            : "This watcher hasn't reported its config yet, so there are no settings to change."
         );
       }
 

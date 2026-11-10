@@ -594,7 +594,7 @@ describe("Watcher config revisions", () => {
       expect(row.appliedConfigRevision).toBe(1);
     });
 
-    it("skips the revision logic when the YAML can't be parsed", async () => {
+    it("skips the revision logic when the YAML can't be parsed, and says why", async () => {
       const res = await api(`${base()}/config`, {
         method: "PUT",
         token: watcherToken,
@@ -605,6 +605,16 @@ describe("Watcher config revisions", () => {
         config_revision: null,
       });
       expect(await revisions()).toHaveLength(0);
+
+      // The Configuration tab explains it instead of an empty form.
+      const state = await getWatcherConfigState(await watcherRow());
+      expect(state.baseSettings).toBeNull();
+      expect(state.reportedProblem).toMatch(/^instrument\.watch_directory: /);
+
+      await pushConfig(BASE);
+      expect(
+        (await getWatcherConfigState(await watcherRow())).reportedProblem
+      ).toBeNull();
     });
 
     it("does nothing when the settings match the latest revision", async () => {

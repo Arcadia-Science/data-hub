@@ -49,6 +49,12 @@ Older watchers exit at startup instead, with an error that the watch directory d
 
 The watcher checked a change made in the web app and refused it, so it kept its previous settings. The reason shows on the watcher’s **Configuration** tab and as an `error` event with `details.kind` set to `config_revision_rejected`. The most common reason is a folder that doesn’t exist or can’t be read on the PC. Fix the cause, then save the change again or **Restore** an earlier version from the history.
 
+## “Data Hub can’t read the watcher’s config file” [#config-file-unreadable]
+
+The watcher’s **Configuration** tab shows this when the `config.yaml` the watcher sent breaks the rules the web app checks, for example a relative watch folder, more than 50 file patterns, or a run detection pattern with Python-only syntax such as `(?P<name>…)`. The notice names each field that needs fixing, by its key in the file.
+
+Until it’s fixed, edits made on the PC aren’t recorded in the history, and if Data Hub has no earlier revision of the settings, there are none to edit there. Fix the file on the instrument PC, for example with `data-hub-watcher config edit`.
+
 ## A config change stays on “Change pending” [#change-pending]
 
 The watcher picks up a change after its next heartbeat, within about a minute. If it stays pending:

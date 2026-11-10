@@ -12,6 +12,7 @@ import { WatcherConfigForm } from "@/components/watchers/watcher-config-form";
 import {
   ConfigChangeCallout,
   RestartPendingCallout,
+  UnreadableConfigCallout,
 } from "@/components/watchers/watcher-config-status";
 import type { WatcherConfigState } from "@/lib/api/watcher-config/revisions";
 
@@ -51,6 +52,10 @@ export function EditWatcherConfigDialog({
             .
           </DialogDescription>
         </DialogHeader>
+        <UnreadableConfigCallout
+          hasSettings={state.baseSettings !== null}
+          problem={state.reportedProblem}
+        />
         <ConfigChangeCallout
           current={state.running?.settings ?? null}
           latest={state.latest}
@@ -71,10 +76,10 @@ export function EditWatcherConfigDialog({
             watcherId={watcherId}
             watcherVersion={state.watcherVersion}
           />
-        ) : (
+        ) : state.reportedProblem ? null : (
           <p className="text-muted-foreground text-sm">
-            The watcher hasn&apos;t reported a config Data Hub can read yet, so
-            there&apos;s nothing to edit.
+            The watcher hasn&apos;t reported its config yet, so there&apos;s
+            nothing to edit.
           </p>
         )}
       </DialogContent>

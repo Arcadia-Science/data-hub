@@ -24,7 +24,7 @@ import {
   watcherEvents,
   watchers,
 } from "@/lib/db/schema";
-import { parseSettingsFromYaml } from "./from-yaml";
+import { parseSettingsFromYaml, readSettingsFromYaml } from "./from-yaml";
 import { type PreviewFile, previewSettings } from "./preview";
 import {
   canonicalSettings,
@@ -810,6 +810,11 @@ export interface WatcherConfigState {
    * can fix them and save again.
    */
   latest: ConfigRevision | null;
+  /**
+   * Why Data Hub can't read the watcher's pushed YAML, or null when it can
+   * (or nothing was pushed). While it's set, pushes record no revisions.
+   */
+  reportedProblem: string | null;
   /** What the watcher last reported in its pushed YAML. */
   reportedSettings: WatcherConfigSettings | null;
   /** A PC edit the running watcher hasn't loaded yet (see `pickRestartPending`). */
@@ -876,7 +881,10 @@ export async function getWatcherConfigState(
       ? null
       : (revisions.find((rev) => rev.revision === applied) ??
         (await getConfigRevision(watcher.id, applied)));
-  const reportedSettings = parseSettingsFromYaml(watcher.configYaml);
+  const reported = watcher.configYaml
+    ? readSettingsFromYaml(watcher.configYaml)
+    : null;
+  const reportedSettings = reported?.ok ? reported.settings : null;
   let running: WatcherConfigState["running"] = null;
   if (runningRevision) {
     running = {
@@ -893,6 +901,7 @@ export async function getWatcherConfigState(
     appliedConfigRevision: applied,
     latest,
     reportedSettings,
+    reportedProblem: reported && !reported.ok ? reported.reason : null,
     running,
     restartPending: pickRestartPending(intended, applied),
     baseSettings: latest?.settings ?? reportedSettings,

@@ -209,6 +209,41 @@ export function RestartPendingCallout({
   );
 }
 
+/**
+ * Explains why Data Hub can't read the config file the watcher pushed. The
+ * fix is at the PC: until then, edits made there aren't recorded, and the
+ * form has no settings to start from unless a revision exists.
+ */
+export function UnreadableConfigCallout({
+  problem,
+  hasSettings,
+}: {
+  problem: string | null;
+  /** Whether the form still has settings to start from. */
+  hasSettings: boolean;
+}) {
+  if (!problem) {
+    return null;
+  }
+  return (
+    <Alert>
+      <CircleAlert />
+      <AlertTitle>
+        Data Hub can&apos;t read the watcher&apos;s config file
+      </AlertTitle>
+      <AlertDescription className="flex flex-col gap-2">
+        <span className="break-words font-mono text-xs">{problem}</span>
+        <span>
+          Fix <code>config.yaml</code> on the instrument PC, for example with{" "}
+          <code>data-hub-watcher config edit</code>. Until then, edits made on
+          the PC aren&apos;t recorded here
+          {hasSettings ? "." : ", and there are no settings to edit here."}
+        </span>
+      </AlertDescription>
+    </Alert>
+  );
+}
+
 export function ChangeList({
   changes,
 }: {

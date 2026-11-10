@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { parseSettingsFromYaml } from "@/lib/api/watcher-config/from-yaml";
+import {
+  parseSettingsFromYaml,
+  readSettingsFromYaml,
+} from "@/lib/api/watcher-config/from-yaml";
 import {
   checkRunDetectionPattern,
   describeSettingsChanges,
@@ -279,6 +282,34 @@ describe("parseSettingsFromYaml", () => {
     expect(parseSettingsFromYaml("instrument: {}\n")).toBeNull();
     expect(parseSettingsFromYaml("instrument: [unclosed")).toBeNull();
     expect(parseSettingsFromYaml("just a string")).toBeNull();
+  });
+
+  it("says why it can't use a file, naming each field by its YAML key", () => {
+    expect(readSettingsFromYaml("instrument: [unclosed")).toEqual({
+      ok: false,
+      reason: expect.stringMatching(/^It isn't valid YAML: /),
+    });
+    expect(readSettingsFromYaml("just a string")).toEqual({
+      ok: false,
+      reason: "It has no instrument section.",
+    });
+    const result = readSettingsFromYaml(
+      [
+        "instrument:",
+        "  watch_directory: ~/exports",
+        "  file_patterns: ['*.csv']",
+        "  run_detection:",
+        "    pattern: '^(?P<run>[^_]+)'",
+      ].join("\n")
+    );
+    expect(result.ok).toBe(false);
+    const reason = result.ok ? "" : result.reason;
+    expect(reason).toMatch(
+      /instrument\.watch_directory: Must be an absolute path/
+    );
+    expect(reason).toMatch(
+      /instrument\.run_detection\.pattern: Python-style named groups/
+    );
   });
 });
 
