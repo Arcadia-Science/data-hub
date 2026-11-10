@@ -76,6 +76,12 @@ UPLOAD_POLL_INTERVAL_SECONDS = 60
 # Bounded so a service stop doesn't hang on a large in-flight PUT; past this,
 # shutdown stops waiting for the worker and leaves the state DB open.
 UPLOAD_WORKER_STOP_TIMEOUT_SECONDS = 30
+# How long applying a config revision from the web app waits for in-progress
+# uploads to finish before rebuilding the runtime. Each upload file finishes
+# and the rest of the batch is retried by the new runtime, so this only has
+# to cover a single large file on a slow link. Past the limit the rebuild goes
+# ahead and the old upload keeps running on its own thread until it ends.
+CONFIG_APPLY_DRAIN_TIMEOUT_SECONDS = 120
 DEFAULT_STABILITY_PERIOD_SECONDS = 5
 
 # Built-in presets for the ``init`` / ``config edit`` wizard.

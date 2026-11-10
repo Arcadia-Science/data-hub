@@ -47,6 +47,10 @@ class HeartbeatLoop:
         upload_mode: str,
         counters: WatcherCounters | None = None,
         on_tick: Callable[[], None] | None = None,
+        status: str = "watching",
+        status_reason: str | None = None,
+        config_revision: Callable[[], int | None] | None = None,
+        on_config_revision: Callable[[int | None], None] | None = None,
     ) -> None:
         self._client = client
         self._watcher_id = watcher_id
@@ -57,6 +61,16 @@ class HeartbeatLoop:
         self._upload_mode = upload_mode
         self.counters = counters or WatcherCounters()
         self._on_tick = on_tick
+        # "watching" normally. "waiting" while the watch folder is missing, in
+        # which case `status_reason` says why and only this loop runs.
+        self._status = status
+        self._status_reason = status_reason
+        # Returns the highest config revision this watcher has applied, sent
+        # as `config_revision`. `None` leaves the field out (older callers).
+        self._config_revision = config_revision
+        # Called with the reply's `config_revision` (the server's latest) after
+        # every successful heartbeat, so the runtime can fetch a new revision.
+        self._on_config_revision = on_config_revision
 
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
@@ -96,18 +110,21 @@ class HeartbeatLoop:
         # unreachable still proceeds — the next loop tick will retry
         # and emit the standard ``heartbeat_recovered`` event when the
         # link comes back.
-        self._send_heartbeat(status="watching")
+        self._send_heartbeat(status=self._status)
         self._event_reporter.flush()
         self._thread = threading.Thread(target=self._run, daemon=True, name="heartbeat")
         self._thread.start()
 
-    def stop(self) -> None:
+    def stop(self, *, send_stopped: bool = True) -> None:
         self._stop_event.set()
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=self._interval + 5)
         # Send a final "stopped" heartbeat so the server knows the watcher
-        # shut down gracefully rather than silently disappearing.
-        self._send_heartbeat(status="stopped")
+        # shut down gracefully rather than silently disappearing. Skipped when
+        # the runtime is being rebuilt for a new config, because a new loop
+        # starts straight away and the watcher never actually stops.
+        if send_stopped:
+            self._send_heartbeat(status="stopped")
 
     def _run(self) -> None:
         # Event.wait() returns True when set (stop requested) and False on timeout,
@@ -118,7 +135,7 @@ class HeartbeatLoop:
     def _tick(self) -> None:
         # Heartbeat first, then flush events — the heartbeat tells the server
         # the watcher is alive, and flushing piggybacks on that liveness signal.
-        self._send_heartbeat(status="watching")
+        self._send_heartbeat(status=self._status)
         self._event_reporter.flush()
         if self._on_tick is not None:
             self._on_tick()
@@ -126,7 +143,7 @@ class HeartbeatLoop:
     def _send_heartbeat(self, status: str = "watching") -> None:
         payload = self._build_payload(status)
         try:
-            self._client.send_heartbeat(self._watcher_id, payload)
+            response = self._client.send_heartbeat(self._watcher_id, payload)
         except (ApiError, Exception) as exc:
             logger.warning("Heartbeat failed: %s", exc)
             if self._consecutive_heartbeat_failures == 0:
@@ -153,6 +170,14 @@ class HeartbeatLoop:
                 )
                 self._consecutive_heartbeat_failures = 0
                 self._first_failure_at = None
+            if self._on_config_revision is not None and status != "stopped":
+                # Older servers leave `config_revision` out of the reply, so
+                # anything but an int means "no revision".
+                latest = getattr(response, "config_revision", None)
+                try:
+                    self._on_config_revision(latest if isinstance(latest, int) else None)
+                except Exception:
+                    logger.exception("Config revision callback failed")
 
         # Snapshot the just-sent values into the `last_*` fields so post-reset
         # consumers (e.g. the updater) can still see the most recent interval's
@@ -166,7 +191,7 @@ class HeartbeatLoop:
         self.counters.errors = 0
 
     def _build_payload(self, status: str) -> dict[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             "status": status,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "instrument_id": self._instrument_id,
@@ -178,3 +203,9 @@ class HeartbeatLoop:
             "errors_since_last_heartbeat": self.counters.errors,
             "uptime_seconds": int(time.monotonic() - self._start_time),
         }
+        if status == "waiting" and self._status_reason:
+            # The server caps `status_reason` at 500 characters.
+            payload["status_reason"] = self._status_reason[:500]
+        if self._config_revision is not None:
+            payload["config_revision"] = self._config_revision()
+        return payload

@@ -39,6 +39,19 @@ logger = logging.getLogger(__name__)
 # empty-at-first-start watch directory. See `StateDB.baseline_established`.
 BASELINE_SEEDED_META_KEY = "baseline_seeded"
 
+# `meta` keys for remote config revisions (see `runtime.WatcherSupervisor`).
+# "Seen" is the highest revision this watcher has handled, whether it applied,
+# rejected or skipped it, so a rejected revision is never fetched again.
+# "Applied" is the highest revision the running config matches.
+CONFIG_REVISION_SEEN_META_KEY = "config_revision_seen"
+CONFIG_REVISION_APPLIED_META_KEY = "config_revision_applied"
+# Checksum of the config file the last time it was pushed to the server, so
+# startup can tell whether the file was edited on the PC since then.
+CONFIG_SYNCED_CHECKSUM_META_KEY = "config_synced_checksum"
+# A revision result (`applied` or `rejected`) that couldn't be sent yet, as
+# JSON, so it is retried instead of leaving the revision pending forever.
+CONFIG_REVISION_UNSENT_RESULT_META_KEY = "config_revision_unsent_result"
+
 
 class _PerThreadHandle:
     """Owns a single ``sqlite3.Connection`` for the thread that opened it.
@@ -661,6 +674,60 @@ class StateDB:
                 (key, value),
             )
             self._conn.commit()
+
+    def delete_meta(self, key: str) -> None:
+        with self._write_lock:
+            self._conn.execute("DELETE FROM meta WHERE key = ?", (key,))
+            self._conn.commit()
+
+    def _get_int_meta(self, key: str) -> int | None:
+        value = self.get_meta(key)
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except ValueError:
+            logger.warning("Ignoring non-integer state value %s=%r", key, value)
+            return None
+
+    # ------------------------------------------------------------------
+    # remote config revisions
+    # ------------------------------------------------------------------
+
+    def config_revision_seen(self) -> int | None:
+        return self._get_int_meta(CONFIG_REVISION_SEEN_META_KEY)
+
+    def config_revision_applied(self) -> int | None:
+        return self._get_int_meta(CONFIG_REVISION_APPLIED_META_KEY)
+
+    def record_config_revision_seen(self, revision: int) -> None:
+        """Raise the last-seen revision to *revision*. Never lowers it."""
+        current = self.config_revision_seen()
+        if current is None or revision > current:
+            self.set_meta(CONFIG_REVISION_SEEN_META_KEY, str(revision))
+
+    def record_config_revision_applied(self, revision: int) -> None:
+        """Record *revision* as applied, which also counts as seen."""
+        self.set_meta(CONFIG_REVISION_APPLIED_META_KEY, str(revision))
+        self.record_config_revision_seen(revision)
+
+    def synced_config_checksum(self) -> str | None:
+        return self.get_meta(CONFIG_SYNCED_CHECKSUM_META_KEY)
+
+    def record_synced_config_checksum(self, checksum: str) -> None:
+        self.set_meta(CONFIG_SYNCED_CHECKSUM_META_KEY, checksum)
+
+    def clear_pending_uploads(self) -> int:
+        """Delete every `pending_uploads` row. Returns rows removed.
+
+        Used when the watch folder changes: the rows are relative to the old
+        folder, and retrying them against the new one could upload a different
+        file that happens to sit at the same relative path.
+        """
+        with self._write_lock:
+            cur = self._conn.execute("DELETE FROM pending_uploads")
+            self._conn.commit()
+        return cur.rowcount
 
     # ------------------------------------------------------------------
     # runs
