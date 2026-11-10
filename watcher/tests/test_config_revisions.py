@@ -250,6 +250,29 @@ class TestApplyInProcess:
         assert sup.rt.monitor._report_only is None
         assert sup.rt.monitor._stability_period == 10
 
+    def test_folder_is_saved_as_typed_in_the_web_app(self, env: _Env) -> None:
+        sup = env.supervisor()
+        sup.start()
+        # A trailing separator, as an admin might type it. Resolving the path
+        # drops it, and the server would then see the pushed YAML as a new
+        # edit made on the PC.
+        typed = str(env.watch_dir) + os.sep
+        env.client.get_latest_config_revision.return_value = _revision(
+            2, _settings(env.watch_dir, watch_directory=typed, file_patterns=["*.txt"])
+        )
+        env.client.push_config.reset_mock()
+
+        _deliver(sup, 2)
+
+        assert env.saved_instrument()["watch_directory"] == typed
+        pushed = yaml.safe_load(env.client.push_config.call_args.args[1])
+        assert pushed["instrument"]["watch_directory"] == typed
+        # The running config, and the file once loaded, use the resolved path.
+        assert sup.cfg.instrument.watch_directory == env.watch_dir.resolve()
+        from data_hub_watcher.config_io import load_config
+
+        assert load_config(env.config_path).instrument.watch_directory == env.watch_dir.resolve()
+
     def test_non_editable_fields_are_kept(self, env: _Env) -> None:
         sup = env.supervisor()
         sup.start()
@@ -441,6 +464,9 @@ class TestRejectMissingFolder:
         self, env: _Env, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         sup = env.supervisor()
+        # The file on the PC has a comment, which re-saving the config drops.
+        original = b"# Plate reader, set up by the lab\n" + env.config_path.read_bytes()
+        env.config_path.write_bytes(original)
         sup.start()
         real_start = runtime.start_runtime
         attempts: list[list[str]] = []
@@ -461,7 +487,8 @@ class TestRejectMissingFolder:
         assert attempts == [["*.txt"], ["*.csv"]]
         assert sup.rt is not None
         assert sup.cfg.instrument.file_patterns == ["*.csv"]
-        assert env.saved_instrument()["file_patterns"] == ["*.csv"]
+        # Restored byte for byte, so its checksum still matches the server's.
+        assert env.config_path.read_bytes() == original
         [(_, number, status, reason)] = env.results()
         assert (number, status) == (2, "rejected")
         assert "cannot watch" in reason

@@ -1001,9 +1001,16 @@ class WatcherSupervisor:
         if widens_scope(old_inst, new_inst):
             rules.append(report_only_predicate(old_inst, new_inst, cutoff=time.time()))
 
+        previous_file = self._read_config_file()
         try:
-            config_io.save_config(new_cfg, self.config_path)
+            config_io.save_config(
+                new_cfg,
+                self.config_path,
+                # As typed in the web app, so the push below matches the revision.
+                watch_directory_text=str(revision.settings["watch_directory"]),
+            )
         except OSError as exc:
+            self._restore_config_file(previous_file, old_cfg)
             self._reject(number, f"Could not write {self.config_path}: {exc}")
             return False
 
@@ -1024,7 +1031,7 @@ class WatcherSupervisor:
                 )
             except Exception as exc:
                 logger.exception("Could not start with config revision %d", number)
-                self._roll_back(old_cfg)
+                self._roll_back(old_cfg, previous_file)
                 self._reject(number, f"Could not start with the new config: {exc}")
                 return False
         # Kept only once the new config runs. When called from `start`, before
@@ -1036,9 +1043,8 @@ class WatcherSupervisor:
         self._report_result(number, "applied")
         sync = self._push_config(trigger="config_revision")
         if running and sync.config_revision is not None:
-            # The push may have created a `pc` revision (for example when the
-            # folder was stored in a different form) or crossed a newer web
-            # change. Either way the next poll sorts it out.
+            # The push may have crossed a newer web change or an edit made on
+            # the PC. Either way the next poll sorts it out.
             if sync.config_revision > self._known_revision():
                 self._latest_hint = sync.config_revision
                 self._revision_due.set()
@@ -1071,17 +1077,34 @@ class WatcherSupervisor:
         self._record_seen(number)
         self._report_result(number, "rejected", reason)
 
-    def _roll_back(self, old_cfg: WatcherConfig) -> None:
+    def _roll_back(self, old_cfg: WatcherConfig, previous_file: bytes | None) -> None:
         """Restore the previous config after the new one failed to start."""
         self._teardown_for_rebuild()
         self.cfg = old_cfg
-        try:
-            config_io.save_config(old_cfg, self.config_path)
-        except OSError:
-            logger.exception("Could not restore %s", self.config_path)
+        self._restore_config_file(previous_file, old_cfg)
         self._start_or_wait_on_error(
             started_message=f"{self.role} restarted on {self.host} with its previous config"
         )
+
+    def _read_config_file(self) -> bytes | None:
+        try:
+            return self.config_path.read_bytes()
+        except OSError:
+            return None
+
+    def _restore_config_file(self, previous_file: bytes | None, old_cfg: WatcherConfig) -> None:
+        """Put ``config.yaml`` back as it was before a revision was saved.
+
+        Writes the original bytes, so the checksum, comments and folder text
+        are unchanged and the next startup has nothing new to push.
+        """
+        try:
+            if previous_file is None:
+                config_io.save_config(old_cfg, self.config_path)
+            else:
+                self.config_path.write_bytes(previous_file)
+        except OSError:
+            logger.exception("Could not restore %s", self.config_path)
 
     def _start_or_wait_on_error(self, *, started_message: str) -> None:
         """Start watching, falling back to the waiting state if that fails.

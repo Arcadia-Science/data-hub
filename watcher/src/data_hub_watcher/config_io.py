@@ -45,12 +45,24 @@ def load_config(path: Path) -> WatcherConfig:
         raise click.ClickException("\n".join(lines)) from exc
 
 
-def save_config(config: WatcherConfig, path: Path) -> None:
-    """Serialize *config* to YAML and write to *path*."""
+def save_config(
+    config: WatcherConfig, path: Path, *, watch_directory_text: str | None = None
+) -> None:
+    """Serialize *config* to YAML and write to *path*.
+
+    *watch_directory_text* replaces the resolved folder in the file. A config
+    revision from the web app passes the folder as the admin typed it, so the
+    YAML pushed back afterwards matches the revision. The resolved form can
+    differ in slashes, a trailing separator, letter case, or a mapped drive
+    shown as a UNC path, and the server would record that as a new edit.
+    Loading the file resolves the folder again.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
 
     data = config.model_dump(mode="python")
     _convert_paths(data)
+    if watch_directory_text is not None:
+        data["instrument"]["watch_directory"] = watch_directory_text
 
     raw = yaml.dump(data, default_flow_style=False, sort_keys=False, allow_unicode=True)
     path.write_text(raw, encoding="utf-8")
