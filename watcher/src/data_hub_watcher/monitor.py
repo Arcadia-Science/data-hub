@@ -129,6 +129,17 @@ class FileMonitor:
         it. Set by `runtime.build_runtime` on the first start of a `new-only`
         environment so the pre-existing backlog is suppressed in a single
         directory walk rather than a separate seeding pass plus a scan.
+    report_only:
+        Optional ``(relative_path, mtime) -> bool`` predicate for the initial
+        scan. A file it returns `True` for (and that isn't already in the
+        uploaded, detected or baseline state) goes to `on_report_only_file`
+        instead of `on_stable_file` once stable. Set after a config revision
+        widens what the watcher sees, so files already on disk that only the
+        new config matches are reported as detected without being uploaded.
+        Files that arrive later are not affected.
+    on_report_only_file:
+        Called instead of `on_stable_file` for files picked out by
+        `report_only`. Falls back to `on_stable_file` when unset.
     """
 
     def __init__(
@@ -143,10 +154,17 @@ class FileMonitor:
         seed_baseline: bool = False,
         max_stability_wait_seconds: int = MAX_STABILITY_WAIT_SECONDS,
         on_tick: Callable[[], None] | None = None,
+        report_only: Callable[[str, float], bool] | None = None,
+        on_report_only_file: Callable[[Path], None] | None = None,
     ) -> None:
         self._watch_dir = watch_directory
         self._patterns = file_patterns
         self._seed_baseline = seed_baseline
+        self._report_only = report_only
+        self._on_report_only = on_report_only_file or on_stable_file
+        # Paths the initial scan picked out with `report_only`. Removed once
+        # the file is dispatched, times out or disappears.
+        self._report_only_paths: set[Path] = set()
         # Compile the patterns once and reuse for both the initial scan
         # and the watchdog event handler. Hot-path scans of large
         # directories used to do ``len(file_patterns)`` fnmatch calls
@@ -194,14 +212,23 @@ class FileMonitor:
             self._recursive,
         )
 
-    def stop(self) -> None:
-        """Stop the observer and stability-checker thread."""
+    def stop(self, timeout: float = 5.0) -> bool:
+        """Stop the observer and stability-checker thread.
+
+        *timeout* bounds the wait for the stability checker, which may be in
+        the middle of an auto-mode upload. Returns whether it exited in time.
+        """
         self._checker_stop.set()
         self._observer.stop()
-        self._observer.join(timeout=5)
+        # Not started when `start()` failed partway, e.g. in a rebuild that is
+        # being rolled back, and joining an unstarted thread raises.
+        if self._observer.is_alive():
+            self._observer.join(timeout=5)
         if self._checker_thread and self._checker_thread.is_alive():
-            self._checker_thread.join(timeout=5)
+            self._checker_thread.join(timeout=timeout)
+        stopped = self._checker_thread is None or not self._checker_thread.is_alive()
         logger.info("FileMonitor stopped")
+        return stopped
 
     # ------------------------------------------------------------------
     # initial scan
@@ -327,6 +354,7 @@ class FileMonitor:
         total = 0
         queued = 0
         skipped = 0
+        report_only = 0
         for entry in self._iter_dir_entries(self._watch_dir):
             try:
                 if not entry.is_file(follow_symlinks=False):
@@ -355,6 +383,10 @@ class FileMonitor:
             if _stat_in_dedup_index(dedup_index, rel_path, st.st_size, st.st_mtime):
                 skipped += 1
                 continue
+            if self._report_only is not None and self._report_only(rel_path, st.st_mtime):
+                with self._lock:
+                    self._report_only_paths.add(entry_path)
+                report_only += 1
             # Pass `st` through so `_enqueue` doesn't issue a redundant
             # stat() syscall. ``DirEntry.stat()`` returns the same
             # ``os.stat_result`` shape as ``Path.stat()`` so the call
@@ -375,6 +407,12 @@ class FileMonitor:
             queued,
             skipped,
         )
+        if report_only:
+            logger.info(
+                "%d of the queued file(s) were already on disk and only match the "
+                "new config; they will be reported as detected without uploading",
+                report_only,
+            )
 
     def _seed_baseline_scan(self) -> int:
         """Record every matching file on disk as baseline, enqueue nothing.
@@ -462,7 +500,7 @@ class FileMonitor:
         files that are continuously appended to (e.g. active log streams).
         """
         now = time.monotonic()
-        stable: list[Path] = []
+        stable: list[tuple[Path, bool]] = []
         timed_out: list[Path] = []
         max_wait = self._max_stability_wait_seconds
 
@@ -472,6 +510,7 @@ class FileMonitor:
                     stat = path.stat()
                 except OSError:
                     del self._pending[path]
+                    self._report_only_paths.discard(path)
                     continue
 
                 if stat.st_size != pf.size or stat.st_mtime != pf.mtime:
@@ -482,10 +521,13 @@ class FileMonitor:
 
                 elapsed_since_change = now - pf.last_changed
                 if elapsed_since_change >= self._stability_period:
-                    stable.append(path)
+                    is_report_only = path in self._report_only_paths
+                    self._report_only_paths.discard(path)
+                    stable.append((path, is_report_only))
                     del self._pending[path]
                 elif (now - pf.first_seen) >= max_wait:
                     timed_out.append(path)
+                    self._report_only_paths.discard(path)
                     del self._pending[path]
 
         for path in timed_out:
@@ -502,10 +544,13 @@ class FileMonitor:
                     max_wait_seconds=max_wait,
                 )
 
-        for path in stable:
-            logger.info("File stable: %s", path)
+        for path, is_report_only in stable:
+            logger.info("File stable: %s%s", path, " (report only)" if is_report_only else "")
             try:
-                self._on_stable(path)
+                if is_report_only:
+                    self._on_report_only(path)
+                else:
+                    self._on_stable(path)
             except Exception as exc:
                 logger.exception("Callback failed for %s", path)
                 if self._reporter is not None:
