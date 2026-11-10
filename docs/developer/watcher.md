@@ -59,8 +59,9 @@ The initial scan mode defaults by environment: a fresh `init` on `production` up
 Starts the file monitoring loop. Before entering the loop it:
 
 - Validates the config and checks that the instrument is active (not pending).
-- Syncs the config checksum with the API.
 - Initializes the local state database for the active environment (`~/.data-hub/watcher-<environment>.db`).
+- Syncs the config with the API, and applies a config revision that an admin saved in the web app while the watcher was stopped (watcher 1.3.0). See [Config revisions from the web app](#config-revisions-from-the-web-app).
+- Checks that the watch folder exists and can be listed. If it can't, the watcher starts in the [waiting state](#the-waiting-state) instead of exiting.
 - Hydrates in-memory run state from the local DB so the initial scan skips files that were already reported in a previous session.
 
 While running:
@@ -69,7 +70,7 @@ While running:
 - **Run detector** groups stable files into runs by applying the configured regex to each file's relative path. The first file for a run triggers `POST /instruments/:id/runs`; subsequent files for the same run incrementally `PATCH` only the new entries onto the manifest. A POST or PATCH that fails with a connection error, a 5xx, or a response the client can't read is retried in process until it succeeds (watcher 1.2.2), so a single-file run isn't stranded until the next restart. The delay starts at `RUN_REPORT_RETRY_BASE_DELAY_SECONDS` and doubles up to `RUN_REPORT_RETRY_MAX_DELAY_SECONDS`, then stays there. `RunDetector.retry_failed_reports` runs from the monitor's once-per-second tick and sends at most one request per tick. A new stable file in the run is still sent right away, and a failure there keeps doubling the same delay. Replaying a POST is safe because the server inserts a run only when `(instrument_id, run_id)` is new. A 4xx is never retried; a new file or a restart tries again, because the initial scan queues any file the server never accepted. Files inside the watch tree that don't match the pattern emit a `pattern_mismatch` event (throttled to one per parent directory) so misconfigured patterns surface in the dashboard.
 - **Uploader** requests a presigned S3 URL from the API and uploads each file via HTTP PUT right after run detection (auto mode), and processes the server's upload queue (both modes from watcher 1.2.1; manual mode only before that). The watcher does not need AWS credentials. Only one thread uploads a given file at a time, because a second multipart start makes the server abort the first; a thread that had to wait skips the file if the other thread uploaded it. Files of 100 MB or more (watcher 1.2.0) are uploaded as 64 MB parts: the server starts the multipart upload, the watcher fetches a few part URLs at a time, and the server finishes the upload after checking a CRC64NVME checksum of the whole file. A failed part is retried on its own, up to 6 attempts, and a failed part-URL request counts as one of them (a 4xx fails the file at once). Each upload retries up to 3 times with exponential backoff (1, 2, 4 s) and is recorded locally with its SHA-256 so retries and restarts don't re-upload the same bytes. A restart in the middle of a multipart upload starts that file over. From 1.3.0, `upload_parallelism` (default 4, 1–32) is one budget of simultaneous S3 PUTs, whole files and parts together, shared by auto mode, the upload queue, pending-upload retries, and the one-shot `upload` command. A slot is held only while a PUT runs, and for a part from fetching its URL through the PUT, so a URL never waits in line and expires. The parts of one file upload on daemon threads started for that file. A lock-protected cache hands out part URLs in batches of 8 (one part is refreshed alone on a retry, or when its URL is over 5 minutes old). The lock is never held across a request, so a slow request for one part's URL doesn't hold up the cached URLs of the others, and parts that miss on the same batch share one request. The first part to fail for good stops the file's parts that have not started. A part fails for good when it runs out of retries, or when its part-URL request gets a 4xx, which isn't retried. The multipart upload is aborted only after every part in flight has returned. A stop starts no new file or part, and lets the parts in flight finish; a file that was still being hashed when the stop came is deferred before its first PUT. Auto-mode batches, queue polls and pending-upload retries run their files on daemon threads started for that call, and return once every file is done. With one worker, or one file, nothing is started and the work runs on the calling thread. The calling thread waits for these threads in 0.5 s steps, because Python on Windows can't deliver Ctrl-C to a thread that waits with no timeout. Daemon threads are dropped when the process exits, so a PUT in flight doesn't hold up shutdown the way a thread pool's join would. The file is retried at the next start, from its `pending_uploads` row in auto mode or from the server's queue. Queue-poll failures are throttled (1st failure, then every 10th) to keep a sustained outage visible without flooding the events stream. Failed uploads record S3's error code and message. Error text replaces the query string of a signed S3 URL with `?<redacted>`, since that query string holds temporary AWS credentials.
 - **Upload worker** polls the server's upload queue on its own long-lived thread every 60 seconds, decoupled from the heartbeat so a slow or large upload can't delay heartbeats and make a busy watcher look offline. It runs in both modes, so **Request upload** on a run page reaches auto-mode watchers too. In auto mode it first retries uploads the previous process left unfinished (see `pending_uploads` under [Local state](#local-state)). On shutdown it is stopped and joined before the state DB is closed. Auto-mode uploads of newly detected files still run on the monitor's stability-checker thread via the run detector's upload callback. They share the worker's stop signal, so a shutdown also stops them between parts and retries; an interrupted file keeps its `pending_uploads` row and is retried at the next start.
-- **Heartbeat loop** sends periodic heartbeats (every 60 seconds) to the API. The payload includes the watcher version, instrument ID, watch directory, upload mode, per-interval activity counters, and process uptime; a final `status="stopped"` heartbeat is sent on graceful shutdown. From 1.1.0 the same version is also sent on every request as `X-Data-Hub-Watcher-Version`. The server uses that header, not the version stored from the last heartbeat, when a request has no watcher id (an upload-link request does not). A missing header means a watcher older than 1.1.0, and the server keeps the behavior that watcher was built for.
+- **Heartbeat loop** sends periodic heartbeats (every 60 seconds) to the API. The payload includes the watcher version, instrument ID, watch directory, upload mode, per-interval activity counters, process uptime, and from 1.3.0 the highest config revision the watcher has applied (`config_revision`); a final `status="stopped"` heartbeat is sent on graceful shutdown. The reply carries the server's latest config revision, which is how the watcher learns about a change from the web app. From 1.1.0 the same version is also sent on every request as `X-Data-Hub-Watcher-Version`. The server uses that header, not the version stored from the last heartbeat, when a request has no watcher id (an upload-link request does not). A missing header means a watcher older than 1.1.0, and the server keeps the behavior that watcher was built for.
 - **Event reporter** batches and flushes lifecycle events (started, stopped, file uploaded, errors) to the API. See [Observability](#observability) for the full taxonomy.
 - **Auto-updater** runs from the same heartbeat tick on every platform — not only Windows services. It polls `GET /watchers/:id/update-check` roughly hourly and applies new releases when the watcher has been idle long enough not to clobber an in-flight run. The full activity-window guard, mandatory-update behavior, and rollback flow are documented in [Roll out watcher releases](https://datahub.arcadiascience.com/docs/watcher-releases); auto-update is hard-disabled in the `preview` environment.
 
@@ -99,7 +100,7 @@ Subcommands for managing the YAML config file:
 | Subcommand | Description |
 | --- | --- |
 | `config show` | Pretty-print the current config |
-| `config validate` | Validate the config file (offline) |
+| `config validate` | Validate the config file (offline). Also fails when the watch folder is missing or unreadable, although the watcher itself still starts and waits for it |
 | `config set-environment ENV` | Switch the active API environment (see [Switching environments](#switching-environments)) |
 | `config edit` | Re-prompt each field with current values as defaults |
 | `config open` | Open the config in your editor, then re-validate |
@@ -165,6 +166,7 @@ instrument:
   upload_mode: auto              # "auto" or "manual"
   stability_period_seconds: 5    # 1–300
   max_stability_wait_seconds: 300  # 1–86400; must be >= stability_period_seconds
+  upload_parallelism: 4          # 1–32 files uploaded at once
   run_detection:
     pattern: '^([^/]+)/'         # regex with one capture group (run ID)
     recursive: true
@@ -234,6 +236,80 @@ Queued files are resolved against the current `watch_directory` (each queue entr
 - **On `watch_directory` change**: the server reverts every pending upload request for that instrument back to `detected` (clearing `upload_requested_at`) as soon as the new config is pushed, so the queue drains immediately. The reverted files remain re-requestable detections; an operator can queue them again from their new location.
 - **Per-file 3-try cap (`MAX_QUEUE_FILE_ATTEMPTS`)**: a queued file that keeps failing — missing on disk or failing to upload — is retried on at most three upload-queue polls. After that the watcher cancels the request server-side (revert to `detected`) so the file leaves the queue instead of re-erroring each poll. The attempt count resets on watcher restart, so a transient outage longer than three polls is recovered on the next start.
 
+## Config revisions from the web app
+
+From watcher 1.3.0, admins can edit a watcher's config in the web app. The server stores each change as a numbered config revision, and the watcher applies it without a restart. The code lives in `WatcherSupervisor` in `runtime.py`, with the validation and merge helpers in `remote_config.py`. The CLI `watch` command and the Windows service both run a `WatcherSupervisor`.
+
+An admin can change these fields: `watch_directory`, `file_patterns`, `run_detection.pattern`, `run_detection.recursive`, `upload_mode`, `stability_period_seconds`, `max_stability_wait_seconds`, and `upload_parallelism`. The environment, API URLs, watcher IDs, `initial_scan`, the instrument ID and `enabled` always come from the file on the PC.
+
+### The revision protocol
+
+- Every heartbeat sends `config_revision`, the highest revision this watcher has applied.
+- The heartbeat reply carries `config_revision`, the server's latest revision.
+- If the reply's number is higher than the last revision this watcher has seen, the heartbeat thread signals the supervisor. "Seen" covers revisions the watcher applied, rejected, or found already resolved, so a rejected revision is never fetched again.
+- The supervisor calls `GET /watchers/:id/config-revisions/latest`. A revision that isn't `pending` is only recorded as seen. It is also recorded as applied if its status is `applied` and its settings match the running config, as with a revision the server made from this watcher's own push.
+- A pending revision is merged into the running config and checked with the same rules as the server. The watcher also checks that the folder exists and can be listed, which only the PC can do.
+- If a check fails, the watcher posts `rejected` with the reason to `POST /watchers/:id/config-revisions/:revision/result`, logs a warning, and keeps running unchanged.
+- If the checks pass, the watcher saves `config.yaml`, rebuilds its loops (below), posts `applied`, and pushes the new YAML through `PUT /watchers/:id/config` with `based_on_revision`.
+- A result the server didn't receive (no connection or a 5xx) is kept in `meta` and retried after each successful heartbeat, including after a restart. A 404 or 409 isn't retried.
+
+One case needs the revision history. If the PC's config file changed while the watcher was offline and the newer web change won, the server keeps the web revision pending and stores the PC's edit after it as `superseded`. The latest revision is then the superseded one, so the watcher looks up the pending revision with `GET /watchers/:id/config-revisions`.
+
+Applying runs on the main thread, in `WatcherSupervisor.poll`, never on the heartbeat thread, because the rebuild has to stop and join the heartbeat.
+
+### Startup sync
+
+At startup the watcher pushes its config, if the checksum differs from the server's, with two extra fields:
+
+- `based_on_revision`: the highest revision it had applied.
+- `modified_at`: the config file's modification time.
+
+The server uses them to settle a conflict between an edit made on the PC while offline and a pending web change. The newer one wins, and the other stays in the history. The watcher also records the checksum it pushed (`config_synced_checksum`) and logs when the file was edited on the PC since the last sync.
+
+If the push reply's `config_revision` is higher than anything the watcher has seen, or if nothing was pushed, the watcher fetches the latest revision and applies it before the monitor starts. `config edit`, `config open` and `init` send `modified_at` on their pushes too.
+
+### The in-process rebuild
+
+Applying a revision doesn't restart the process:
+
+1. The upload worker is stopped. Its stop signal is shared with auto-mode uploads, so a file that is uploading finishes, and the rest of its batch keeps its `pending_uploads` row for the new runtime to retry. The wait is capped at `CONFIG_APPLY_DRAIN_TIMEOUT_SECONDS` (120 s). Past that the rebuild goes ahead and leaves the old upload to finish on its own thread, without closing that runtime's state DB handle.
+2. The file monitor and the heartbeat are stopped. The heartbeat sends no `stopped` status and no `watcher_stopped` event is queued, because the watcher never actually stops.
+3. `build_runtime` and `start_runtime` run again with the new config. The new runtime shares the supervisor's event reporter and shutdown events, so queued events and a pending auto-update restart carry over.
+
+If the new runtime fails to start, the watcher restores the previous `config.yaml`, starts the previous config again, and reports the revision as `rejected`.
+
+Before saving, the watcher re-reads the environment, watcher ID and instrument ID from `config.yaml`. If `config set-environment` switched the file to something else while the watcher was running, it rejects the revision instead of undoing the switch.
+
+The Windows service still exits with code 1 only for an auto-update restart, so the SCM recovery actions are unchanged.
+
+### Reporting newly matching files
+
+A revision can widen what the watcher sees: a new file pattern, recursion turned on, a new run-detection regex, or a new folder. The first scan after such a change is a report-only scan. A file found by that scan is reported as detected without being uploaded when both of these are true:
+
+- it isn't in `uploaded_files`, `detected_files` or `baseline_files`
+- the old config wouldn't have reported it, and it was last modified before the change was applied
+
+Admins upload these files with the existing **Request upload** buttons. Files written after the change, and files the old config also matched (such as a file that arrived during the rebuild), follow `upload_mode` as usual. `FileMonitor` takes the `report_only` predicate and sends those files to `RunDetector.on_stable_file(path, upload=False)`. A report-only file never reaches the upload callback, even when later files in the same run upload.
+
+State rows are keyed by the path relative to the watch folder, so after a folder change a file is still skipped if an old row has the same relative path, size and modification time. That only happens when the new folder holds a copy of the old one's files, where skipping them is what we want. `pending_uploads` rows are dropped on a folder change, though, because retrying them against the new folder could upload a different file that sits at the same relative path. The server also cancels pending upload requests when the folder changes.
+
+### The waiting state
+
+A missing or unreadable watch folder no longer stops the config from loading. `config validate`, `init` and `config edit` still report it, so an operator at the PC hears about it.
+
+If the folder is missing or unreadable at startup, the watcher starts in the waiting state:
+
+- Only the heartbeat and the auto-updater run. Heartbeats send `status: "waiting"` with a `status_reason` such as `watch_directory not found: D:\Exports`.
+- The watcher queues a `watch_directory_unavailable` error event.
+- On each heartbeat tick it checks the folder again and starts watching once the folder can be listed.
+- A config revision can also fix the folder. The waiting heartbeat checks for revisions like the normal one.
+
+The waiting state replaces the old behavior of exiting at startup, which made the Windows service restart in a loop.
+
+### Older servers
+
+The new request fields are ignored by servers that don't know them. A server without config revisions leaves `config_revision` out of its replies, so the watcher never fetches anything. A 404 from a config-revision endpoint means either no revisions yet or an older server. Either way there is nothing to apply, and it is logged once per process. An older server rejects the `waiting` heartbeat status, so a waiting watcher shows as offline there.
+
 ## Local state
 
 The watcher maintains one SQLite database per environment at `~/.data-hub/watcher-<environment>.db` (e.g. `watcher-production.db`). `watch` and `upload` use that folder even when started with `--config`. The Windows service keeps the database beside the config file stored in its registry key instead; `state_db_dir` in `constants.py` holds both rules. Isolating state per environment is what lets a PC switch back and forth without one environment's uploads being recorded against another. A pre-multi-environment `~/.data-hub/watcher.db` is renamed to the active environment's file on first start. Each database has the following tables:
@@ -243,7 +319,7 @@ The watcher maintains one SQLite database per environment at `~/.data-hub/watche
 - `detected_files` — the file manifest for every reported run, keyed on `(run_id, relative_path)`. Lets the initial scan skip files that are already part of a reported run even in manual mode (where `uploaded_files` stays empty), and lets the run detector hydrate its in-memory state on startup so a restart doesn't re-POST runs the API has already seen.
 - `baseline_files` — files that already existed on disk when a `new-only` environment was first entered, keyed on `relative_path`. A baseline row means "skip" (never uploaded), as opposed to `uploaded_files` which means "sent". Unlike `uploaded_files`, baseline rows are never pruned. Empty in `full`-scan (production) environments.
 - `pending_uploads` — auto-mode uploads that have not succeeded yet, keyed on `relative_path`. A row is added when the run detector hands a file to the uploader and removed when the file is uploaded by any path. On startup the upload worker retries every row once. Each start counts as one attempt, including a retry that raised an unexpected error; after `MAX_PENDING_UPLOAD_ATTEMPTS` (3) the row is dropped with an `upload_retries_exhausted` event. A row whose file is no longer on disk is dropped with a `pending_upload_missing` event. `detected_files` can't serve this purpose: hydration treats every reported file as handled, and `uploaded_files` is pruned while `detected_files` is not, so "detected but not uploaded" would also match every file uploaded more than 90 days ago.
-- `meta` — a small key/value store. Currently holds the preview deployment URL the database was seeded against, so the watcher can reset local state when a preview is redeployed to a new URL.
+- `meta` — a small key/value store. Holds the preview deployment URL the database was seeded against, so the watcher can reset local state when a preview is redeployed to a new URL. From 1.3.0 it also holds the config revision bookkeeping described in [Config revisions from the web app](#config-revisions-from-the-web-app): `config_revision_seen`, `config_revision_applied`, `config_synced_checksum`, and `config_revision_unsent_result`.
 
 Logs are written to `C:\ProgramData\DataHubWatcher\watcher.log` on Windows and `~/.data-hub/watcher.log` on macOS/Linux (10 MB rotating, 5 backups). Both the CLI `watch` command and the Windows service write to the same file so a single `Get-Content -Wait` (or `tail -F`) covers all entry points.
 
@@ -288,7 +364,7 @@ The watcher's primary observability surface is the per-watcher event log served 
 | Event type | When |
 | --- | --- |
 | `watcher_started` / `watcher_stopped` | Process lifecycle. The stopped message distinguishes a normal stop from an upgrade-driven restart. `watcher_stopped` is also emitted in the *old* environment as a breadcrumb when the watcher switches environments. |
-| `config_synced` | Local config differed from the remote checksum and was pushed. Triggered by `init`, `config edit`, `config open`, and on watcher startup. The server also emits one with `details.kind="upload_requests_cancelled"` (and `cancelled_count`) when a `watch_directory` change drained pending upload requests. |
+| `config_synced` | Local config differed from the remote checksum and was pushed. Triggered by `init`, `config edit`, `config open`, on watcher startup, and after applying a config revision (`trigger=config_revision`). The server writes one with `details.kind="config_revision_applied"` when the watcher reports a revision as applied; a rejected revision becomes an `error` event with `details.kind="config_revision_rejected"`, also written by the server. The server also emits one with `details.kind="upload_requests_cancelled"` (and `cancelled_count`) when a `watch_directory` change drained pending upload requests. |
 | `run_reported` | A run was POSTed to the API for the first time. |
 | `file_uploaded` / `upload_failed` | Per-file upload outcome. `file_uploaded` details carry `s3_key` and `sha256` and, from 1.3.0, `size_bytes`, `prep_seconds` (hashing and the upload-URL request, which run together), `upload_seconds` (from the first upload slot taken until the single PUT succeeds or the multipart complete call returns, so later waits for a slot and retry backoff count), and `part_count` (1 for a single PUT). `upload_failed` carries the S3 key and last error. |
 | `update_started` / `update_succeeded` / `update_failed` | Auto-update lifecycle. `update_succeeded` is emitted from the *next* process startup once the new version is confirmed to be loaded. |
@@ -313,6 +389,7 @@ The watcher's primary observability surface is the per-watcher event log served 
 | `upload_retries_exhausted` | An auto-mode upload still failed after `MAX_PENDING_UPLOAD_ATTEMPTS` watcher starts and is no longer retried. It can still be requested from the run page. `details` includes `relative_path`, `run_id`, `attempts`. |
 | `pending_upload_missing` | An auto-mode upload waiting for a retry was no longer on disk when the watcher started, so the retry was dropped. `details` includes `relative_path`, `run_id`. |
 | `update_check_failed` | `GET /watchers/:id/update-check` failed for 3 consecutive attempts (~3 hours of going dark on the update channel). |
+| `watch_directory_unavailable` | The watch folder was missing or unreadable, so the watcher entered the [waiting state](#the-waiting-state). `details` includes `watch_directory`, `reason`. |
 
 ### File timestamps
 
