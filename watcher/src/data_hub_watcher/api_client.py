@@ -11,7 +11,6 @@ from data_hub_watcher.constants import WATCHER_VERSION, WATCHER_VERSION_HEADER
 from data_hub_watcher.models import (
     ApiErrorDetail,
     ConfigChecksumResponse,
-    ConfigRevisionListResponse,
     ConfigRevisionResponse,
     EventsResponse,
     FileResponse,
@@ -210,23 +209,6 @@ class DataHubClient:
                 return None
             raise
         return ConfigRevisionResponse.model_validate(resp.json())
-
-    def list_config_revisions(
-        self, watcher_id: str, *, limit: int = 20
-    ) -> list[ConfigRevisionResponse]:
-        """Return the watcher's config revisions, newest first (`[]` on 404)."""
-        try:
-            resp = self._request(
-                "GET",
-                f"/watchers/{watcher_id}/config-revisions",
-                params={"limit": limit},
-            )
-        except ApiError as exc:
-            if exc.status_code == 404:
-                self._note_remote_config_missing()
-                return []
-            raise
-        return ConfigRevisionListResponse.model_validate(resp.json()).data
 
     def report_config_revision_result(
         self,

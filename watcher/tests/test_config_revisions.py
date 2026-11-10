@@ -70,7 +70,6 @@ def _client() -> MagicMock:
     client.get_config_checksum.return_value = None
     client.push_config.return_value = ConfigChecksumResponse(config_checksum="sha256:x")
     client.get_latest_config_revision.return_value = None
-    client.list_config_revisions.return_value = []
     client.send_heartbeat.return_value = HeartbeatResponse(ok=True)
     return client
 
@@ -695,26 +694,48 @@ class TestStartupSync:
         assert sup.cfg.instrument.file_patterns == ["*.txt"]
         assert sup.applied_revision == 5
 
-    def test_offline_conflict_won_by_web_finds_the_pending_revision(self, env: _Env) -> None:
-        # The server kept the web revision (4) pending and stored the PC's
-        # edit after it (5) as superseded.
+    def test_offline_conflict_won_by_web_applies_it_and_settles_on_the_superseded_number(
+        self, env: _Env
+    ) -> None:
+        # The PC's file changed while offline, and the newer web change (4)
+        # won. The server stored the PC's edit after it (5) as superseded,
+        # so the push reply and every heartbeat announce 5, while
+        # `…/config-revisions/latest` returns the pending revision first.
         env.client.push_config.return_value = ConfigChecksumResponse(
             config_checksum="sha256:x", config_revision=5
         )
-        env.client.get_latest_config_revision.return_value = _revision(
-            5, _settings(env.watch_dir), status="superseded", source="pc"
-        )
         web = _revision(4, _settings(env.watch_dir, file_patterns=["*.txt"]))
-        env.client.list_config_revisions.return_value = [
-            _revision(5, _settings(env.watch_dir), status="superseded", source="pc"),
-            web,
-        ]
+        env.client.get_latest_config_revision.return_value = web
         sup = env.supervisor()
 
         sup.start()
 
         assert sup.cfg.instrument.file_patterns == ["*.txt"]
-        assert (WATCHER_ID, 4, "applied", None) in env.results()
+        assert env.results() == [(WATCHER_ID, 4, "applied", None)]
+        assert sup.applied_revision == 4
+
+        # Nothing is pending any more, so the server returns the superseded
+        # PC edit. It is recorded as seen, never applied or reported.
+        env.client.get_latest_config_revision.reset_mock()
+        env.client.get_latest_config_revision.return_value = _revision(
+            5, _settings(env.watch_dir), status="superseded", source="pc"
+        )
+        _deliver(sup, 5)
+
+        env.client.get_latest_config_revision.assert_called_once()
+        assert sup.seen_revision == 5
+        assert sup.applied_revision == 4
+        assert sup.cfg.instrument.file_patterns == ["*.txt"]
+        assert env.results() == [(WATCHER_ID, 4, "applied", None)]
+        assert sup.rt is not None and sup.rt.heartbeat._build_payload("watching")[
+            "config_revision"
+        ] == 4
+
+        # Later heartbeats that still announce 5 don't fetch it again.
+        env.client.get_latest_config_revision.reset_mock()
+        _deliver(sup, 5)
+        _deliver(sup, 5)
+        env.client.get_latest_config_revision.assert_not_called()
 
 
 class TestOldServer:
@@ -736,7 +757,6 @@ class TestOldServer:
         with caplog.at_level(logging.DEBUG, logger="data_hub_watcher.api_client"):
             assert client.get_latest_config_revision("w-1") is None
             assert client.get_latest_config_revision("w-1") is None
-            assert client.list_config_revisions("w-1") == []
 
         records = [r for r in caplog.records if r.name == "data_hub_watcher.api_client"]
         assert len(records) == 1

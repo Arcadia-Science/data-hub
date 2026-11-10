@@ -352,12 +352,6 @@ class ConfigRevisionResponse(BaseModel):
     resolved_at: datetime | None = None
 
 
-class ConfigRevisionListResponse(BaseModel):
-    model_config = _API_MODEL_CONFIG
-
-    data: list[ConfigRevisionResponse]
-
-
 class EventsResponse(BaseModel):
     model_config = _API_MODEL_CONFIG
 

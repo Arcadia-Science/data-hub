@@ -950,19 +950,17 @@ class WatcherSupervisor:
     ) -> tuple[ConfigRevisionResponse | None, ConfigRevisionResponse | None]:
         """Return ``(latest, pending)``, where *pending* is the revision to apply.
 
-        Usually the latest revision is the pending one. The exception is an
-        offline conflict the web change won: the server keeps the web revision
-        pending and stores the PC's edit after it as ``superseded``, so the
-        pending revision is found in the history instead.
+        The server returns its pending revision if there is one, else its
+        highest. So after an offline conflict that the web change won, this
+        gets the pending web revision even though the PC's edit is stored
+        after it, as a higher ``superseded`` revision. The heartbeat keeps
+        announcing that higher number; once the web revision is applied, the
+        next fetch returns the superseded one, which is only recorded as seen.
         """
         latest = self.client.get_latest_config_revision(self.watcher_id)
-        if latest is None or latest.status == "pending":
+        if latest is not None and latest.status == "pending":
             return latest, latest
-        if latest.status != "superseded":
-            return latest, None
-        revisions = self.client.list_config_revisions(self.watcher_id)
-        pending = [r for r in revisions if r.status == "pending"]
-        return latest, max(pending, key=lambda r: r.revision, default=None)
+        return latest, None
 
     def _note_resolved_revision(self, revision: ConfigRevisionResponse) -> None:
         """Record a revision that needs no action as seen.
