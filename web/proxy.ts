@@ -22,9 +22,6 @@ const publicPrefixes = [
   "/consent",
   "/api/auth",
   "/api/v1",
-  // Local S3 mirror. Neither caller has a session (the View fetches from a
-  // sandbox, the watcher PUTs), and the route 404s in production anyway.
-  "/api/local-s3",
   // MCP authenticates via OAuth, never a session cookie — a redirect to
   // `/login` would surface as opaque HTML instead of a 401 +
   // WWW-Authenticate challenge.
@@ -104,10 +101,15 @@ export const config = {
   //     `/icon.svg` — so the exclusion must be the bare prefix. Matching
   //     `icon\..+` missed `/icon`, which redirected unfurlers/browsers to
   //     `/login` and broke the favicon and OG images on link previews.
+  //   - `api/local-s3/` — the dev-only S3 stand-in. Neither caller has a
+  //     session (the MCP View fetches from a sandbox, the watcher PUTs), and
+  //     the route 404s on every deployment. When the proxy runs, Next.js
+  //     copies the request body into memory and cuts it off at 10 MB, so a
+  //     watcher's 64 MiB upload part arrives truncated and fails its checksum.
   //
   // Excluding instead of allow-listing also avoids running auth checks on
   // every asset fetch.
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|images/|robots.txt|sitemap.xml|icon|apple-icon|opengraph-image|twitter-image).*)",
+    "/((?!_next/static|_next/image|favicon.ico|images/|robots.txt|sitemap.xml|icon|apple-icon|opengraph-image|twitter-image|api/local-s3/).*)",
   ],
 };
