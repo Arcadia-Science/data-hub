@@ -1,11 +1,13 @@
 """Unit tests for `hina_microscope.process_file`.
 
-These verify the orchestration logic — specifically that run-level metadata
-is parsed and stored only on the first file to arrive in a given run — by
-mocking S3 I/O, the API client, the ND2 processor, and the metadata parser.
+These verify the orchestration logic — that run-level metadata is parsed
+and stored only on the first file to arrive in a given run, and that a
+timelapse also gets a registered MP4 — by mocking S3 I/O, the API client,
+the ND2 processor, and the metadata parser.
 """
 
 from __future__ import annotations
+from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -13,6 +15,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from data_hub_lambda.deadline import ProcessingDeadlineError
+from data_hub_lambda.hina_microscope.image_processing import TimelapseVideo
+from data_hub_lambda.hina_microscope.process_file import TimelapseVideoError
 from data_hub_lambda.models import FileResponse, RunResponse
 
 
@@ -97,6 +102,7 @@ def patched_processor(patched_jpg_path: Path) -> MagicMock:
     processor.image = MagicMock()
     processor.load.return_value = None
     processor.export_jpg.return_value = patched_jpg_path
+    processor.export_mp4.return_value = None
     return processor
 
 
@@ -111,7 +117,7 @@ class TestProcessFileRunMetadataGate:
 
         with (
             patch("data_hub_lambda.hina_microscope.process_file.get_client", return_value=client),
-            patch("data_hub_lambda.hina_microscope.process_file.s3_utils") as s3_mock,
+            patch("data_hub_lambda.processed_files.s3_utils") as s3_mock,
             patch(
                 "data_hub_lambda.hina_microscope.process_file.ND2Processor",
                 return_value=patched_processor,
@@ -154,7 +160,7 @@ class TestProcessFileRunMetadataGate:
 
         with (
             patch("data_hub_lambda.hina_microscope.process_file.get_client", return_value=client),
-            patch("data_hub_lambda.hina_microscope.process_file.s3_utils") as s3_mock,
+            patch("data_hub_lambda.processed_files.s3_utils") as s3_mock,
             patch(
                 "data_hub_lambda.hina_microscope.process_file.ND2Processor",
                 return_value=patched_processor,
@@ -191,7 +197,7 @@ class TestProcessFileFailure:
 
         with (
             patch("data_hub_lambda.hina_microscope.process_file.get_client", return_value=client),
-            patch("data_hub_lambda.hina_microscope.process_file.s3_utils"),
+            patch("data_hub_lambda.processed_files.s3_utils"),
             patch(
                 "data_hub_lambda.hina_microscope.process_file.ND2Processor",
                 return_value=failing_processor,
@@ -294,7 +300,7 @@ class TestProcessFileFromMount:
             patch("data_hub_lambda.raw_access.MOUNT_READ_MIN_BYTES", 1),
             patch("data_hub_shared.s3_utils.download_file") as download,
             patch("data_hub_lambda.hina_microscope.process_file.get_client", return_value=client),
-            patch("data_hub_lambda.hina_microscope.process_file.s3_utils"),
+            patch("data_hub_lambda.processed_files.s3_utils"),
             patch(
                 "data_hub_lambda.hina_microscope.process_file.ND2Processor",
                 return_value=patched_processor,
@@ -314,3 +320,159 @@ class TestProcessFileFromMount:
             output_dir=output_dir / "hina-microscope" / "run-xyz"
         )
         assert mounted.exists()
+
+
+_OUTPUT_DIR_NAME = "processed"
+
+
+def _writing_processor(
+    video_frames: int | None, encode_error: Exception | None = None
+) -> MagicMock:
+    """A stand-in `ND2Processor` that writes its previews into the output folder.
+
+    *video_frames* of `None` stands for a file with one time point.
+    """
+    processor = MagicMock()
+
+    def _export_jpg(*, output_dir: Path) -> Path:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        path = output_dir / "sample.jpg"
+        path.write_bytes(b"jpg")
+        return path
+
+    def _export_mp4(*, output_dir: Path) -> TimelapseVideo | None:
+        if video_frames is None and encode_error is None:
+            return None
+        path = output_dir / "sample.mp4"
+        path.write_bytes(b"mp4-bytes")
+        if encode_error is not None:
+            raise encode_error
+        assert video_frames is not None
+        return TimelapseVideo(
+            path=path, frames=video_frames, frame_interval_ms=500.16, playback_fps=10.0
+        )
+
+    processor.export_jpg.side_effect = _export_jpg
+    processor.export_mp4.side_effect = _export_mp4
+    return processor
+
+
+def _run(client: MagicMock, processor: MagicMock) -> MagicMock:
+    with (
+        patch("data_hub_lambda.hina_microscope.process_file.get_client", return_value=client),
+        patch("data_hub_lambda.processed_files.s3_utils") as s3_mock,
+        patch("data_hub_lambda.hina_microscope.process_file.ND2Processor", return_value=processor),
+        patch(
+            "data_hub_lambda.hina_microscope.process_file.parse_metadata",
+            return_value={"sizes": {"T": 53}},
+        ),
+    ):
+        from data_hub_lambda.hina_microscope.process_file import process_file
+
+        process_file(instrument_id="hina-microscope", run_id="run-xyz", filename="sample.nd2")
+    return s3_mock
+
+
+def _timelapse_client() -> MagicMock:
+    client = _build_client_mock(run_metadata=None)
+    client.create_file.side_effect = [_file_response(file_id) for file_id in (10, 11, 12)]
+    return client
+
+
+def _created(client: MagicMock, filename: str) -> dict[str, Any]:
+    return next(
+        call.kwargs
+        for call in client.create_file.call_args_list
+        if call.kwargs["filename"] == filename
+    )
+
+
+def _status_updates(client: MagicMock) -> list[dict[str, Any]]:
+    return [call.kwargs for call in client.update_file.call_args_list if "status" in call.kwargs]
+
+
+class TestProcessFileTimelapse:
+    def test_mp4_is_registered_and_the_timing_stored_on_the_raw_file(self, tmp_path: Path) -> None:
+        client = _timelapse_client()
+
+        s3_mock = _run(client, _writing_processor(video_frames=53))
+
+        mp4 = _created(client, "sample.mp4")
+        assert mp4["category"] == "processed"
+        assert mp4["s3_key"] == "hina-microscope/run-xyz/sample.mp4"
+        assert _created(client, "sample.jpg")["category"] == "processed"
+        client.update_file.assert_any_call(
+            12, size_bytes=len(b"mp4-bytes"), content_type="video/mp4"
+        )
+        client.update_file.assert_any_call(11, size_bytes=len(b"jpg"), content_type="image/jpeg")
+        assert _status_updates(client)[-1] == {
+            "status": "completed",
+            "metadata": {"frames": 53, "frame_interval_ms": 500.16, "playback_fps": 10.0},
+        }
+        uploaded = [call.args[1] for call in s3_mock.upload_file.call_args_list]
+        assert [uri.rsplit("/", 1)[-1] for uri in uploaded] == ["sample.jpg", "sample.mp4"]
+
+    def test_a_single_time_point_gets_only_the_jpg(self) -> None:
+        client = _timelapse_client()
+
+        _run(client, _writing_processor(video_frames=None))
+
+        assert [call.kwargs["filename"] for call in client.create_file.call_args_list] == [
+            "sample.nd2",
+            "sample.jpg",
+        ]
+        assert _status_updates(client)[-1] == {"status": "completed"}
+
+    @pytest.mark.parametrize(
+        ("error", "message"),
+        [
+            (
+                RuntimeError("ffmpeg encode failed: broken pipe"),
+                "Couldn't make the timelapse video: ffmpeg encode failed: broken pipe. "
+                "The still preview is still available.",
+            ),
+            (
+                ProcessingDeadlineError(
+                    "Stopped before the time limit during encoding (12 of 53 frames done). "
+                    "The raw file is stored and can be downloaded."
+                ),
+                "Couldn't make the timelapse video: Stopped before the time limit during "
+                "encoding (12 of 53 frames done). The raw file is stored and can be "
+                "downloaded. The still preview is still available.",
+            ),
+        ],
+        ids=["ffmpeg", "deadline"],
+    )
+    def test_failed_encode_marks_the_file_failed_and_keeps_the_jpg(
+        self, error: Exception, message: str
+    ) -> None:
+        client = _timelapse_client()
+
+        with pytest.raises(TimelapseVideoError):
+            _run(client, _writing_processor(video_frames=53, encode_error=error))
+
+        assert _created(client, "sample.jpg")["category"] == "processed"
+        client.update_file.assert_any_call(11, size_bytes=len(b"jpg"), content_type="image/jpeg")
+        assert all(
+            call.kwargs["filename"] != "sample.mp4" for call in client.create_file.call_args_list
+        )
+        assert _status_updates(client)[-1] == {"status": "failed", "error_message": message}
+
+    @pytest.mark.parametrize(
+        "encode_error",
+        [None, RuntimeError("ffmpeg encode failed")],
+        ids=["completed", "failed"],
+    )
+    def test_local_previews_are_removed(
+        self, tmp_path: Path, encode_error: Exception | None
+    ) -> None:
+        output_dir = tmp_path / _OUTPUT_DIR_NAME / "hina-microscope" / "run-xyz"
+
+        raises: AbstractContextManager[object] = (
+            pytest.raises(TimelapseVideoError) if encode_error else nullcontext()
+        )
+        with raises:
+            _run(_timelapse_client(), _writing_processor(53, encode_error))
+
+        assert output_dir.is_dir()
+        assert list(output_dir.iterdir()) == []

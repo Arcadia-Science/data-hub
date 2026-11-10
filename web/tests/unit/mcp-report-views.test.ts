@@ -140,6 +140,57 @@ describe("report_view tools (authenticated)", () => {
     });
   });
 
+  it("report_view_items passes a video's poster id through for media", async () => {
+    vi.mocked(getReportItemsPage).mockResolvedValue({
+      data: [
+        { id: 7, filename: "well.mp4", poster_id: 6 },
+        { id: 8, filename: "still.jpg", poster_id: null },
+      ],
+      pagination: { limit: 50, offset: 0, total: 2 },
+    });
+    vi.mocked(getActiveFilesByIds).mockResolvedValue([
+      {
+        id: 7,
+        contentType: "video/mp4",
+        filename: "well.mp4",
+        s3Bucket: "p",
+        s3Key: "well.mp4",
+      },
+      {
+        id: 8,
+        contentType: "image/jpeg",
+        filename: "still.jpg",
+        s3Bucket: "p",
+        s3Key: "still.jpg",
+      },
+    ]);
+
+    const result = await client.callTool({
+      name: "report_view_items",
+      arguments: { ...RUN_ARGS, kind: "media" },
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect(getReportItemsPage).toHaveBeenCalledWith(
+      MOCK_RUN_UUID,
+      expect.objectContaining({ kind: "media" })
+    );
+    expect(parseStructured(result).data).toEqual([
+      {
+        id: 7,
+        filename: "well.mp4",
+        poster_id: 6,
+        downloadUrl: "https://s3.example.com/signed",
+      },
+      {
+        id: 8,
+        filename: "still.jpg",
+        poster_id: null,
+        downloadUrl: "https://s3.example.com/signed",
+      },
+    ]);
+  });
+
   it("report_view_file_url signs a file looked up by id", async () => {
     vi.mocked(getActiveFileById).mockResolvedValue({
       id: 42,

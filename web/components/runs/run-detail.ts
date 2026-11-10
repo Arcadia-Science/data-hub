@@ -1,4 +1,5 @@
 import { ImageCarouselReport } from "@/components/runs/image-carousel-report";
+import { MediaCarouselReport } from "@/components/runs/media-carousel-report";
 import { PdfCarouselReport } from "@/components/runs/pdf-carousel-report";
 import { RamanReportSection } from "@/components/runs/raman-report-section";
 import { RunFilesMetadataLayout } from "@/components/runs/run-files-metadata-layout";
@@ -26,6 +27,7 @@ export const RunDetail = {
   FilesMetadataLayout: RunFilesMetadataLayout,
   Report: RunReportSection,
   ImageCarousel: ImageCarouselReport,
+  MediaCarousel: MediaCarouselReport,
   PdfCarousel: PdfCarouselReport,
   RamanReport: RamanReportSection,
   VideoCarousel: VideoCarouselReport,

@@ -3008,7 +3008,7 @@
     {
       "name": "report_view_items",
       "title": "Report View Items",
-      "description": "Return a paginated window of run report items (images, PDFs, spectra, or videos) with download URLs. Used by the Data Hub run report view. Call `get_run_report` instead.",
+      "description": "Return a paginated window of run report items (images, PDFs, spectra, videos, or media) with download URLs. Used by the Data Hub run report view. Call `get_run_report` instead.",
       "group": "runs",
       "scope": "files:read",
       "annotations": {
@@ -3030,11 +3030,12 @@
             "type": "string",
             "enum": [
               "image",
+              "media",
               "pdf",
               "spectrum",
               "video"
             ],
-            "description": "Report item kind: image, pdf, spectrum, or video"
+            "description": "Report item kind: image, media, pdf, spectrum, or video. `media` lists videos and images together, without the image that is a video's poster"
           },
           "offset": {
             "description": "Window start index (default: 0)",
@@ -3082,6 +3083,18 @@
                 },
                 "filename": {
                   "type": "string"
+                },
+                "poster_id": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 },
                 "downloadUrl": {
                   "type": "string"

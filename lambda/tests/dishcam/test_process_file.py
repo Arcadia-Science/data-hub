@@ -24,8 +24,8 @@ from data_hub_lambda.deadline import (
     check_deadline,
     set_deadline_from_remaining_ms,
 )
-from data_hub_lambda.dishcam.parse_metadata import MIN_PLAYBACK_FPS
 from data_hub_lambda.models import FileResponse, RunDetailFile, RunDetailResponse, RunResponse
+from data_hub_lambda.video import MIN_PLAYBACK_FPS
 
 
 @pytest.fixture(autouse=True)
@@ -1723,7 +1723,7 @@ class TestEncodeTiffDeadline:
             patch("data_hub_shared.s3_utils.download_file", side_effect=_download),
             patch("data_hub_lambda.dishcam.encode_video.resolve_ffmpeg", return_value="ffmpeg"),
             patch("data_hub_lambda.dishcam.encode_video._write_jpeg", side_effect=_poster),
-            patch("data_hub_lambda.dishcam.encode_video._pipe_ffmpeg", side_effect=_partial_encode),
+            patch("data_hub_lambda.video.pipe_ffmpeg", side_effect=_partial_encode),
             patch("data_hub_lambda.dishcam.encode_video.check_deadline", _stop_after(1)),
             pytest.raises(ProcessingDeadlineError, match=r"1 of 3 frames done"),
         ):
@@ -1762,7 +1762,7 @@ class TestEncodeTiffDeadline:
                 "data_hub_shared.s3_utils.download_file",
                 side_effect=lambda _uri, local_path, **_k: _write_tiff(local_path, frames=16),
             ),
-            patch("data_hub_lambda.dishcam.encode_video.subprocess.Popen", side_effect=_record),
+            patch("data_hub_lambda.video.subprocess.Popen", side_effect=_record),
             patch(
                 "data_hub_lambda.dishcam.encode_video.check_deadline",
                 _stop_after(12, _wait_for_partial_mp4),

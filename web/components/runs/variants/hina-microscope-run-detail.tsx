@@ -16,7 +16,7 @@ export function HinaMicroscopeRunDetail(props: RunDetailProps) {
         hasHinaMetadata(metadata) ? <HinaRunBadges metadata={metadata} /> : null
       }
     >
-      <RunDetail.ImageCarousel initialPage={props.reportItems} />
+      <RunDetail.MediaCarousel initialPage={props.reportItems} />
     </RunDetailLayout>
   );
 }

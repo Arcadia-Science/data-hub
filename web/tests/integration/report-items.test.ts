@@ -17,11 +17,39 @@ describe("Report Items API", () => {
   const runId = "report-items-test-run";
   const imageCount = 250;
 
+  // A timelapse well has `{stem}.mp4` and its poster `{stem}.jpg`.
+  const mediaRunId = "report-items-media-run";
+  const otherRunId = "report-items-other-run";
+
   let token: string;
   let runInternalId: string;
+  const mediaIds = new Map<string, number>();
 
-  function path(query: string): string {
-    return `/api/v1/instruments/${instrumentId}/runs/${runId}/report-items?${query}`;
+  function path(query: string, run = runId): string {
+    return `/api/v1/instruments/${instrumentId}/runs/${run}/report-items?${query}`;
+  }
+
+  function mediaFile(
+    runInternal: string,
+    run: string,
+    filename: string,
+    overrides: Partial<typeof files.$inferInsert> = {}
+  ): typeof files.$inferInsert {
+    const contentType = filename.endsWith(".mp4")
+      ? "video/mp4"
+      : filename.endsWith(".jpg")
+        ? "image/jpeg"
+        : null;
+    return {
+      instrumentRunId: runInternal,
+      relativePath: filename,
+      filename,
+      contentType,
+      status: "completed" as const,
+      s3Bucket: "test-bucket",
+      s3Key: `${instrumentId}/${run}/${filename}`,
+      ...overrides,
+    };
   }
 
   beforeAll(async () => {
@@ -98,6 +126,53 @@ describe("Report Items API", () => {
         status: "detected" as const,
       },
     ]);
+
+    const [mediaRun, otherRun] = await db
+      .insert(instrumentRuns)
+      .values([
+        { instrumentId, runId: mediaRunId, source: "watcher" },
+        { instrumentId, runId: otherRunId, source: "watcher" },
+      ])
+      .returning({ id: instrumentRuns.id });
+    const media = (filename: string, overrides = {}) =>
+      mediaFile(mediaRun.id, mediaRunId, filename, overrides);
+    const inserted = await db
+      .insert(files)
+      .values([
+        media("well_A1.nd2"),
+        media("well_A1.jpg"),
+        media("well_A1.mp4"),
+        // A still with no video stays an item.
+        media("well_A2.jpg"),
+        // A video with no still plays without a poster.
+        media("well_A3.mp4"),
+        // A deleted or not yet uploaded video does not hide its still.
+        media("well_A4.jpg"),
+        media("well_A4.mp4", { deletedAt: new Date() }),
+        media("well_A5.jpg"),
+        media("well_A5.mp4", {
+          s3Bucket: null,
+          s3Key: null,
+          status: "detected",
+        }),
+        // A deleted still is not a poster.
+        media("well_A6.jpg", { deletedAt: new Date() }),
+        media("well_A6.mp4"),
+        media("well_A10.jpg"),
+        media("well_A10.mp4"),
+        // A video in another run does not hide this run's still.
+        mediaFile(otherRun.id, otherRunId, "well_A2.mp4"),
+      ])
+      .returning({
+        id: files.id,
+        filename: files.filename,
+        run: files.instrumentRunId,
+      });
+    for (const row of inserted) {
+      if (row.run === mediaRun.id && !mediaIds.has(row.filename)) {
+        mediaIds.set(row.filename, row.id);
+      }
+    }
   });
 
   afterAll(async () => {
@@ -240,5 +315,74 @@ describe("Report Items API", () => {
     const res = await api(path("kind=image&search=not-uploaded"), { token });
     expect(res.status).toBe(200);
     expect((await res.json()).pagination.total).toBe(0);
+  });
+
+  describe("media", () => {
+    it("lists one item per source file, with each video's poster", async () => {
+      const res = await api(path("kind=media", mediaRunId), { token });
+      expect(res.status).toBe(200);
+
+      const body = await res.json();
+      expect(reportItemsResponse.safeParse(body).success).toBe(true);
+      expect(body.pagination.total).toBe(7);
+      expect(body.data).toEqual([
+        {
+          id: mediaIds.get("well_A1.mp4"),
+          filename: "well_A1.mp4",
+          poster_id: mediaIds.get("well_A1.jpg"),
+        },
+        {
+          id: mediaIds.get("well_A2.jpg"),
+          filename: "well_A2.jpg",
+          poster_id: null,
+        },
+        {
+          id: mediaIds.get("well_A3.mp4"),
+          filename: "well_A3.mp4",
+          poster_id: null,
+        },
+        {
+          id: mediaIds.get("well_A4.jpg"),
+          filename: "well_A4.jpg",
+          poster_id: null,
+        },
+        {
+          id: mediaIds.get("well_A5.jpg"),
+          filename: "well_A5.jpg",
+          poster_id: null,
+        },
+        {
+          id: mediaIds.get("well_A6.mp4"),
+          filename: "well_A6.mp4",
+          poster_id: null,
+        },
+        {
+          id: mediaIds.get("well_A10.mp4"),
+          filename: "well_A10.mp4",
+          poster_id: mediaIds.get("well_A10.jpg"),
+        },
+      ]);
+    });
+
+    it("leaves the poster field off the other kinds", async () => {
+      const res = await api(path("kind=image", mediaRunId), { token });
+      const body = await res.json();
+
+      expect(body.pagination.total).toBe(5);
+      expect(body.data.every((item: object) => !("poster_id" in item))).toBe(
+        true
+      );
+    });
+
+    it("starts at the first item when the anchor is a poster", async () => {
+      const anchor = mediaIds.get("well_A10.jpg");
+      const res = await api(path(`kind=media&anchor=${anchor}`, mediaRunId), {
+        token,
+      });
+      const body = await res.json();
+
+      expect(body.pagination.anchor_index).toBeNull();
+      expect(body.pagination.offset).toBe(0);
+    });
   });
 });

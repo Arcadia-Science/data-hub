@@ -8,9 +8,11 @@ from typing import Any
 from data_hub_lambda.api_client import ApiError, DataHubClient, get_client
 from data_hub_lambda.dishcam.encode_video import encode_tiff_stack
 from data_hub_lambda.dishcam.filenames import RUN_JSON_NAME, is_run_json, is_tiff, matches_filename
-from data_hub_lambda.dishcam.parse_metadata import encode_fps, parse_run_json, playback_fps
+from data_hub_lambda.dishcam.parse_metadata import encode_fps, parse_run_json
 from data_hub_lambda.models import FileResponse, RunDetailFile, RunDetailResponse
+from data_hub_lambda.processed_files import upload_processed
 from data_hub_lambda.raw_access import local_raw_file
+from data_hub_lambda.video import playback_fps
 from data_hub_shared import s3_utils
 from data_hub_shared.config import config
 
@@ -459,7 +461,7 @@ def _encode_tiff(
             encode_tiff_stack(tiff_path, mp4_path, poster_path, fps)
 
             processed_bucket = config.AWS_S3_PROCESSED_DATA_BUCKET or ""
-            _upload_processed(
+            upload_processed(
                 client,
                 instrument_id,
                 run_id,
@@ -467,7 +469,7 @@ def _encode_tiff(
                 mp4_path,
                 "video/mp4",
             )
-            _upload_processed(
+            upload_processed(
                 client,
                 instrument_id,
                 run_id,
@@ -526,31 +528,6 @@ def _fail_file(client: DataHubClient, record: FileResponse, error_message: str) 
     if record.status != "processing":
         _update_file_status(client, record.id, "processing")
     _update_file_status(client, record.id, "failed", error_message=error_message)
-
-
-def _upload_processed(
-    client: DataHubClient,
-    instrument_id: str,
-    run_id: str,
-    processed_bucket: str,
-    local_path: Path,
-    content_type: str,
-) -> None:
-    s3_key = f"{instrument_id}/{run_id}/{local_path.name}"
-    s3_utils.upload_file(local_path, f"s3://{processed_bucket}/{s3_key}")
-    processed = client.create_file(
-        instrument_id=instrument_id,
-        run_id=run_id,
-        s3_bucket=processed_bucket,
-        s3_key=s3_key,
-        filename=local_path.name,
-        category="processed",
-    )
-    client.update_file(
-        processed.id,
-        size_bytes=local_path.stat().st_size,
-        content_type=content_type,
-    )
 
 
 def _update_file_status(

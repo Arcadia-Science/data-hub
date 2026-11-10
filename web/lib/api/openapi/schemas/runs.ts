@@ -111,6 +111,10 @@ export const runCreated = z
     instrument_id: z.string(),
     run_id: z.string(),
     source: runSourceSchema,
+    metadata: metadataObject.openapi({
+      description:
+        "The run's stored metadata. Empty for a new run; an existing run returns what processing has written so far.",
+    }),
   })
   .openapi("RunCreated");
 
@@ -339,7 +343,8 @@ export const commentDeleted = z.object({
 
 export const reportItemsQuery = z.object({
   kind: z.enum(REPORT_ITEM_KINDS).openapi({
-    description: "Which renderable artifacts to list.",
+    description:
+      "Which renderable artifacts to list. `media` lists videos and images together, and leaves out an image whose video has the same name, because that image is the video's poster.",
   }),
   search: z.string().optional().openapi({
     description: "Case-insensitive filename substring filter.",
@@ -356,6 +361,10 @@ export const reportItem = z
   .object({
     id: z.number().int(),
     filename: z.string(),
+    poster_id: z.number().int().nullable().optional().openapi({
+      description:
+        "Only for `kind=media`. The file id of the image with the same name as this video, used as its poster. Null for an image, or for a video without one.",
+    }),
   })
   .openapi("ReportItem");
 

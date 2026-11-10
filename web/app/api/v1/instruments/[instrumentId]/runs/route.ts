@@ -164,12 +164,15 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     });
   }
 
+  // `metadata` lets a processor that writes run metadata once, such as Hina
+  // Microscope, see that an earlier file already wrote it.
   return Response.json(
     {
       id: run.id,
       instrument_id: run.instrumentId,
       run_id: run.runId,
       source: run.source,
+      metadata: run.metadata,
     },
     { status: isNew ? 201 : 200 }
   );
