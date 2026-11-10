@@ -1,6 +1,6 @@
 "use client";
 
-import { Clock, Power, Radio, Unplug, WifiOff } from "lucide-react";
+import { Clock, FolderX, Power, Radio, Unplug, WifiOff } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
   Tooltip,
@@ -39,6 +39,9 @@ const OFFLINE_CLASSNAME =
 
 const MUTED_FILLED_CLASSNAME = "bg-muted text-muted-foreground";
 
+const WARNING_CLASSNAME =
+  "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300";
+
 const MUTED_NEUTRAL_CLASSNAME =
   "bg-slate-100 text-slate-700 dark:bg-slate-950 dark:text-slate-300";
 
@@ -73,6 +76,14 @@ const STATUS_CONFIG: Record<
   // Distinct from `stale`: someone (or the host) shut the watcher down
   // gracefully, so it's expected to be silent and shouldn't read as an alarm.
   stopped: { label: "Stopped", Icon: Power, className: MUTED_FILLED_CLASSNAME },
+  // Running and heartbeating, but the watch folder is missing, so nothing is
+  // being watched. The watcher keeps checking for the folder and for config
+  // changes from Data Hub.
+  waiting: {
+    label: "Waiting: folder not found",
+    Icon: FolderX,
+    className: WARNING_CLASSNAME,
+  },
   // Registered but hasn't sent its first heartbeat yet — transient.
   registered: {
     label: "Registered",
@@ -89,10 +100,13 @@ const TOOLTIP_STATUSES = new Set<WatcherBadgeStatus>(["offline", "stale"]);
 export function WatcherStatusBadge({
   status,
   lastOnlineAt,
+  reason,
   verbose = false,
   className,
 }: {
   status: WatcherBadgeStatus;
+  /** Why a `waiting` watcher is waiting, shown in its tooltip. */
+  reason?: string | null;
   /**
    * Most recent watcher heartbeat. When the badge is in an "unexpected
    * silence" state (`offline` / `stale`) and this is provided, the tooltip
@@ -121,6 +135,22 @@ export function WatcherStatusBadge({
       {fullLabel}
     </Badge>
   );
+
+  if (status === "waiting") {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>{badge}</TooltipTrigger>
+        <TooltipContent className="flex max-w-80 flex-col items-start gap-1">
+          {reason ? <p className="break-all font-medium">{reason}</p> : null}
+          <p>
+            The watcher is running but can&apos;t find its watch folder. Fix the
+            folder on the PC, or change it from the watcher&apos;s Configuration
+            tab.
+          </p>
+        </TooltipContent>
+      </Tooltip>
+    );
+  }
 
   if (!TOOLTIP_STATUSES.has(status)) {
     return badge;

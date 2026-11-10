@@ -3,7 +3,10 @@
 import { FolderOpen } from "lucide-react";
 import Link from "next/link";
 import { FilePatterns } from "@/components/instruments/file-patterns";
-import { InstrumentActions } from "@/components/instruments/instrument-actions";
+import {
+  InstrumentActions,
+  type InstrumentWatcherConfig,
+} from "@/components/instruments/instrument-actions";
 import { InstrumentStatusBadge } from "@/components/instruments/instrument-status-badge";
 import { InstrumentNotificationPill } from "@/components/notifications/instrument-notification-toggle";
 import { RecordInstrumentVisit } from "@/components/recent-instrument-visit";
@@ -113,8 +116,11 @@ export function InstrumentHeader({
   instrument,
   notifications,
   isAdmin = false,
+  watcherConfig = null,
 }: {
   instrument: InstrumentDetail;
+  /** Admins only: the live watcher's config, for the edit dialog. */
+  watcherConfig?: InstrumentWatcherConfig | null;
   /** Admins get the actions menu (edit, watcher, retire / reactivate). */
   isAdmin?: boolean;
   /**
@@ -215,7 +221,11 @@ export function InstrumentHeader({
             />
           ) : null}
           {isAdmin ? (
-            <InstrumentActions instrument={instrument} variant="expanded" />
+            <InstrumentActions
+              instrument={instrument}
+              variant="expanded"
+              watcherConfig={watcherConfig}
+            />
           ) : null}
         </div>
       </div>

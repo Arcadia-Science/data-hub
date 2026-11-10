@@ -11,6 +11,11 @@ import {
   WatcherHeaderSkeleton,
 } from "@/components/watchers/watcher-header";
 import {
+  getWatcherConfigState,
+  listConfigRevisions,
+  pickCurrentRevision,
+} from "@/lib/api/watcher-config/revisions";
+import {
   getAllWatcherHeartbeats,
   getWatcherById,
   getWatcherEvents,
@@ -78,7 +83,11 @@ export default async function WatcherDetailPage({
         <WatcherHeaderSection isAdmin={isAdmin} watcherId={watcherId} />
       </Suspense>
       <Suspense fallback={<WatcherDetailTabsSkeleton />}>
-        <WatcherTabsSection filters={filters} watcherId={watcherId} />
+        <WatcherTabsSection
+          filters={filters}
+          isAdmin={isAdmin}
+          watcherId={watcherId}
+        />
       </Suspense>
     </div>
   );
@@ -101,9 +110,11 @@ async function WatcherHeaderSection({
 async function WatcherTabsSection({
   watcherId,
   filters,
+  isAdmin,
 }: {
   watcherId: string;
   filters: WatcherDetailFilters;
+  isAdmin: boolean;
 }) {
   const timeZone = await getViewerTimeZone();
   const effectiveSince = filters.since ?? todayDateString(timeZone);
@@ -115,7 +126,7 @@ async function WatcherTabsSection({
 
   // `getWatcherById` is `cache()`-deduped, so this shares the header section's
   // fetch rather than issuing a second query for `configYaml`.
-  const [watcher, heartbeats, eventResult] = await Promise.all([
+  const [watcher, heartbeats, eventResult, history] = await Promise.all([
     getWatcherById(watcherId),
     // Up to 5000 rows, and only the Status tab draws them. The tab lives in the
     // URL, so the other tabs skip the query and the payload.
@@ -128,17 +139,31 @@ async function WatcherTabsSection({
         filters.event_type.length > 0 ? filters.event_type : undefined,
       page: filters.logs_page,
     }),
+    listConfigRevisions(watcherId),
   ]);
 
   if (!watcher) {
     notFound();
   }
 
+  // `history` is newest first, so the current revision is in it.
+  const configState = await getWatcherConfigState(
+    watcher,
+    pickCurrentRevision(history)
+  );
+
   const logsTotalPages = Math.ceil(eventResult.total / WATCHER_PAGE_SIZE);
 
   return (
     <WatcherDetailTabs
-      configTab={<WatcherConfig configYaml={watcher.configYaml} />}
+      configTab={
+        <WatcherConfig
+          history={history}
+          isAdmin={isAdmin}
+          state={configState}
+          watcher={watcher}
+        />
+      }
       events={eventResult.rows}
       eventsPage={filters.logs_page}
       eventsTotal={eventResult.total}
