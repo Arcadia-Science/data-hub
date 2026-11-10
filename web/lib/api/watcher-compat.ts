@@ -16,6 +16,10 @@ export const WATCHER_FEATURES = {
   // Files of 100 MB or more are uploaded as parts. Older watchers still get
   // one URL, and files over 5 GB are refused until the watcher is updated.
   multipartUpload: "1.2.0",
+  // Admins can edit the watcher's config from Data Hub. Gated on the stored
+  // `watchers.watcher_version` (from the heartbeat), not the request header,
+  // because the edit comes from an admin rather than the watcher.
+  remoteConfig: "1.3.0",
 } as const satisfies Record<string, string>;
 
 export type WatcherFeature = keyof typeof WATCHER_FEATURES;
