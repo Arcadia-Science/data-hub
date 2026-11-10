@@ -4,7 +4,7 @@ import { parseSettingsFromYaml } from "@/lib/api/watcher-config/from-yaml";
 import {
   type ConfigRevision,
   createWebConfigRevision,
-  getCurrentConfigRevision,
+  getIntendedConfigRevision,
   getPendingConfigRevision,
 } from "@/lib/api/watcher-config/revisions";
 import {
@@ -179,9 +179,12 @@ export function registerWatcherTools(server: McpServer) {
         return errorResult(`Watcher '${watcherId}' not found.`);
       }
 
-      const current = await getCurrentConfigRevision(watcherId);
+      // Merge over what the watcher runs or is about to run. A rejected
+      // change isn't carried along: the caller confirmed only the settings
+      // it names.
+      const intended = await getIntendedConfigRevision(watcherId);
       const base =
-        current?.settings ?? parseSettingsFromYaml(watcher.configYaml);
+        intended?.settings ?? parseSettingsFromYaml(watcher.configYaml);
       if (!base) {
         return errorResult(
           "This watcher hasn't reported a readable config yet, so there are no settings to change."

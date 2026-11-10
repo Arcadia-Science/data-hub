@@ -60,6 +60,7 @@ export function EditWatcherConfigDialog({
             initialSettings={state.baseSettings}
             key={state.configRevision ?? "none"}
             onSaved={() => onOpenChange(false)}
+            savedSettings={state.savedSettings}
             watcherId={watcherId}
             watcherVersion={state.watcherVersion}
           />

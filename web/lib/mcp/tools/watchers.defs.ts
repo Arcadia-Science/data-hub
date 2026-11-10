@@ -121,7 +121,7 @@ export const updateWatcherConfigTool = {
   name: "update_watcher_config",
   title: "Update Watcher Config",
   description:
-    "Change a watcher's settings from Data Hub. Admins only. Before calling, call get_watcher, show the user exactly which settings will change (old and new values), and get their confirmation. Pass baseRevision as get_watcher's configRevision. Settings you leave out keep their values from the latest revision. The change is stored as pending and the watcher applies it within about a minute of its next heartbeat; if the watcher can't (for example the folder doesn't exist), it rejects the change and keeps its old settings. Needs watcher 1.3.0 or later. watch_directory can point at any folder on the instrument PC.",
+    "Change a watcher's settings from Data Hub. Admins only. Before calling, call get_watcher, show the user exactly which settings will change (old and new values), and get their confirmation. Pass baseRevision as get_watcher's configRevision. Settings you leave out keep their current values: the pending change if there is one, otherwise the settings the watcher last applied. A rejected change isn't carried over; to retry it, pass its settings again. The change is stored as pending and the watcher applies it within about a minute of its next heartbeat; if the watcher can't (for example the folder doesn't exist), it rejects the change and keeps its old settings. Needs watcher 1.3.0 or later. watch_directory can point at any folder on the instrument PC.",
   group: "watchers",
   scope: "watchers:admin",
   inputSchema: {

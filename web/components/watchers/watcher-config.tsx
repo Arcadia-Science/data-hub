@@ -87,6 +87,7 @@ export function WatcherConfig({
               editable={state.editable}
               initialSettings={state.baseSettings}
               key={state.configRevision ?? "none"}
+              savedSettings={state.savedSettings}
               watcherId={watcher.id}
               watcherVersion={state.watcherVersion}
             />
@@ -99,6 +100,7 @@ export function WatcherConfig({
         <WatcherConfigHistory
           canRestore={canEdit && state.editable}
           revisions={history}
+          savedSettings={state.savedSettings}
           watcherId={watcher.id}
         />
       </section>

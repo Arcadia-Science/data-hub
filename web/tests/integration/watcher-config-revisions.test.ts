@@ -109,6 +109,18 @@ describe("Watcher config revisions", () => {
     });
   }
 
+  async function reportResult(
+    revision: number,
+    body: { status: "applied" | "rejected"; reason?: string }
+  ) {
+    const res = await api(`${base()}/config-revisions/${revision}/result`, {
+      method: "POST",
+      token: watcherToken,
+      body,
+    });
+    expect(res.status).toBe(200);
+  }
+
   async function revisions() {
     return await db()
       .select()
@@ -337,6 +349,29 @@ describe("Watcher config revisions", () => {
       const res = await saveFromWeb(BASE, 1);
       expect(res.status).toBe(400);
       expect((await res.json()).error.message).toBe("No changes");
+    });
+
+    it("lets a rejected change be saved again, comparing with what the watcher runs", async () => {
+      const moved = { ...BASE, watch_directory: "/data/new-plate" };
+      expect((await saveFromWeb(moved, 1)).status).toBe(201);
+      await reportResult(2, {
+        status: "rejected",
+        reason: "watch_directory not found: /data/new-plate",
+      });
+
+      // The watcher kept revision 1, so that's what "No changes" means.
+      const same = await saveFromWeb(BASE, 2);
+      expect(same.status).toBe(400);
+      expect((await same.json()).error.message).toBe("No changes");
+
+      // Once the folder exists, the rejected settings can be saved again.
+      const retry = await saveFromWeb(moved, 2);
+      expect(retry.status).toBe(201);
+      expect(watcherConfigRevision.parse(await retry.json())).toMatchObject({
+        revision: 3,
+        status: "pending",
+        settings: moved,
+      });
     });
 
     it("supersedes an older pending web revision", async () => {
@@ -703,6 +738,21 @@ describe("Watcher config revisions", () => {
         [2, "web", "superseded"],
         [3, "pc", "superseded"],
         [4, "pc", "applied"],
+      ]);
+    });
+
+    it("records nothing when a push after a rejection matches what the watcher runs", async () => {
+      await pushConfig(BASE);
+      await saveFromWeb({ ...BASE, watch_directory: "/data/missing" }, 1);
+      await reportResult(2, { status: "rejected", reason: "not found" });
+
+      // For example the watcher restarts and pushes its unchanged file.
+      const body = await pushConfig(BASE, { based_on_revision: 1 });
+      expect(body.config_revision).toBe(2);
+      const rows = await revisions();
+      expect(rows.map((r) => [r.revision, r.status])).toEqual([
+        [1, "applied"],
+        [2, "rejected"],
       ]);
     });
 

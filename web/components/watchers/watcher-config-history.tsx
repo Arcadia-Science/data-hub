@@ -23,6 +23,7 @@ import type { ConfigRevision } from "@/lib/api/watcher-config/revisions";
 import {
   describeSettingsChanges,
   settingsEqual,
+  type WatcherConfigSettings,
 } from "@/lib/api/watcher-config/settings";
 import { ChangeList, ConfigRevisionStatusBadge } from "./watcher-config-status";
 
@@ -33,10 +34,16 @@ import { ChangeList, ConfigRevisionStatusBadge } from "./watcher-config-status";
 export function WatcherConfigHistory({
   watcherId,
   revisions,
+  savedSettings,
   canRestore,
 }: {
   watcherId: string;
   revisions: ConfigRevision[];
+  /**
+   * What the watcher runs or is about to run. Restoring a revision with the
+   * same settings would be refused as "No changes", so it gets no button.
+   */
+  savedSettings: WatcherConfigSettings | null;
   canRestore: boolean;
 }) {
   const [restoring, setRestoring] = useState<ConfigRevision | null>(null);
@@ -60,10 +67,12 @@ export function WatcherConfigHistory({
           const changes = previous
             ? describeSettingsChanges(previous.settings, rev.settings)
             : [];
+          // Any revision can be restored, including a rejected one once its
+          // cause is fixed, unless it matches what the watcher already runs
+          // or is about to run.
           const restorable =
             canRestore &&
-            rev.revision !== latest.revision &&
-            !settingsEqual(rev.settings, latest.settings);
+            !(savedSettings && settingsEqual(rev.settings, savedSettings));
           return (
             <li className="flex flex-col gap-2 p-3 text-sm" key={rev.revision}>
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1">

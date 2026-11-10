@@ -932,6 +932,27 @@ describe("MCP Server (HTTP)", () => {
     const stale = await callTool("update_watcher_config", args, adminAToken);
     expect(stale.isError).toBe(true);
     expect(stale.content[0].text).toMatch(/stale_revision/);
+
+    // A rejected change isn't carried into the next partial update: the
+    // merge starts from the settings the watcher kept.
+    await db
+      .update(schema.watcherConfigRevisions)
+      .set({ status: "rejected", resolvedAt: new Date() })
+      .where(eq(schema.watcherConfigRevisions.watcherId, watcher.id));
+    const next = await callTool(
+      "update_watcher_config",
+      {
+        watcherId: watcher.id,
+        baseRevision: 1,
+        settings: { upload_mode: "manual" },
+      },
+      adminAToken
+    );
+    expect(next.isError).toBeFalsy();
+    expect(JSON.parse(next.content[0].text).revision).toMatchObject({
+      revision: 2,
+      settings: { file_patterns: ["*.csv"], upload_mode: "manual" },
+    });
   });
 
   // ---- OAuth scope enforcement (coarse read / write) ----------------------

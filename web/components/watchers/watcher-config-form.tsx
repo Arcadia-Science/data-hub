@@ -130,6 +130,7 @@ export function WatcherConfigForm({
   watcherId,
   baseRevision,
   initialSettings,
+  savedSettings,
   editable,
   watcherVersion,
   onSaved,
@@ -138,6 +139,12 @@ export function WatcherConfigForm({
   /** The latest revision number, sent back so stale saves are refused. */
   baseRevision: number | null;
   initialSettings: WatcherConfigSettings;
+  /**
+   * What the watcher runs or is about to run. Saving these settings again
+   * is refused as "No changes". It differs from `initialSettings` when the
+   * form starts from a rejected change, which can be saved again as is.
+   */
+  savedSettings: WatcherConfigSettings | null;
   /** False below watcher 1.3.0: the form shows but can't be changed. */
   editable: boolean;
   watcherVersion: string | null;
@@ -158,7 +165,10 @@ export function WatcherConfigForm({
     [state]
   );
   const unchanged =
-    settings !== null && settingsEqual(settings, initialSettings);
+    settings !== null &&
+    savedSettings !== null &&
+    settingsEqual(settings, savedSettings);
+  const edited = settings === null || !settingsEqual(settings, initialSettings);
   const presetKey =
     RUN_DETECTION_PRESETS.find((p) => p.pattern === state.runPattern)?.key ??
     CUSTOM_PRESET;
@@ -461,7 +471,7 @@ export function WatcherConfigForm({
           )}
           Preview with recent files
         </Button>
-        {editable && !unchanged ? (
+        {editable && edited ? (
           <Button
             disabled={isSaving}
             onClick={() => {

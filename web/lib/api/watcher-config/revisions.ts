@@ -4,7 +4,7 @@
 // the instrument PC arrive through `PUT /watchers/:id/config` and are
 // recorded as `pc` revisions, so every change lands in one history.
 
-import { and, desc, eq, isNull, ne, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import {
   type Actor,
   type ActorRef,
@@ -105,7 +105,7 @@ async function selectRevisions(
   opts: {
     revision?: number;
     limit: number;
-    status?: ConfigRevisionStatus;
+    statuses?: readonly ConfigRevisionStatus[];
     excludeSuperseded?: boolean;
   },
   executor: DbExecutor = db
@@ -114,8 +114,8 @@ async function selectRevisions(
   if (opts.revision !== undefined) {
     conditions.push(eq(watcherConfigRevisions.revision, opts.revision));
   }
-  if (opts.status !== undefined) {
-    conditions.push(eq(watcherConfigRevisions.status, opts.status));
+  if (opts.statuses !== undefined) {
+    conditions.push(inArray(watcherConfigRevisions.status, [...opts.statuses]));
   }
   if (opts.excludeSuperseded) {
     conditions.push(ne(watcherConfigRevisions.status, "superseded"));
@@ -190,10 +190,44 @@ export async function getPendingConfigRevision(
 ): Promise<ConfigRevision | null> {
   const [pending] = await selectRevisions(
     watcherId,
-    { limit: 1, status: "pending" },
+    { limit: 1, statuses: ["pending"] },
     executor
   );
   return pending ?? null;
+}
+
+// A rejected revision was never run (the watcher kept its settings), and a
+// superseded one was replaced by a newer change, so neither describes what
+// the watcher runs or is about to run.
+const INTENDED_STATUSES = ["pending", "applied"] as const;
+
+/**
+ * The revision whose settings the watcher runs or is about to run: the
+ * newest `pending` or `applied` one. Saves and pushes are compared with it,
+ * so a rejected change can be saved again once its cause is fixed, and a
+ * partial MCP update doesn't carry a rejected change along.
+ */
+export async function getIntendedConfigRevision(
+  watcherId: string,
+  executor: DbExecutor = db
+): Promise<ConfigRevision | null> {
+  const [intended] = await selectRevisions(
+    watcherId,
+    { limit: 1, statuses: INTENDED_STATUSES },
+    executor
+  );
+  return intended ?? null;
+}
+
+/** Same rule as `getIntendedConfigRevision`, over a newest-first list. */
+export function pickIntendedRevision(
+  revisions: readonly ConfigRevision[]
+): ConfigRevision | null {
+  return (
+    revisions.find((rev) =>
+      (INTENDED_STATUSES as readonly string[]).includes(rev.status)
+    ) ?? null
+  );
 }
 
 /**
@@ -378,13 +412,15 @@ export async function createWebConfigRevision(opts: {
       } satisfies Failure;
     }
 
-    // Compare against the watcher's intended settings (skipping superseded
-    // history). With no revisions yet, its own pushed YAML is the baseline.
-    const current = latest
-      ? await getCurrentConfigRevision(opts.watcherId, tx)
+    // Compare against what the watcher runs or is about to run, skipping
+    // superseded and rejected history, so a rejected change can be saved
+    // again once its cause is fixed. With no such revision, the watcher's
+    // own pushed YAML is the baseline.
+    const intended = latest
+      ? await getIntendedConfigRevision(opts.watcherId, tx)
       : null;
-    const baseline = current
-      ? current.settings
+    const baseline = intended
+      ? intended.settings
       : parseSettingsFromYaml(watcher.configYaml);
     if (baseline && settingsEqual(baseline, opts.settings)) {
       return {
@@ -455,11 +491,12 @@ export async function recordWatcherConfigPush(opts: {
     }
 
     const basedOn = opts.basedOnRevision ?? 0;
-    // `latest` numbers the next revision. `current` is what the watcher is
-    // meant to run: a pending change, or the last applied or rejected one.
-    // Superseded revisions are history only, so they never count as current.
-    const current = latest
-      ? await getCurrentConfigRevision(opts.watcherId, tx)
+    // `latest` numbers the next revision. `intended` is what the watcher runs
+    // or is about to run: a pending change, else the last applied one.
+    // Superseded and rejected revisions are history only (the watcher never
+    // ran them), so a push is never compared with them.
+    const intended = latest
+      ? await getIntendedConfigRevision(opts.watcherId, tx)
       : null;
     let next = (latest?.revision ?? 0) + 1;
     let applied: number | null = null;
@@ -490,36 +527,36 @@ export async function recordWatcherConfigPush(opts: {
       applied = next;
     };
 
-    if (!(latest && current)) {
+    if (!(latest && intended)) {
       await insertAppliedPcRevision();
-    } else if (settingsEqual(pushed, current.settings)) {
+    } else if (settingsEqual(pushed, intended.settings)) {
       // The watcher already runs this revision. If its result call was
       // lost, the push is the proof that it applied it.
-      if (current.status === "pending" && basedOn >= current.revision) {
+      if (intended.status === "pending" && basedOn >= intended.revision) {
         await resolveRevision(
           tx,
           opts.watcherId,
-          current.revision,
+          intended.revision,
           "applied",
           null
         );
-        applied = current.revision;
+        applied = intended.revision;
       }
       next = latest.revision;
     } else if (
-      current.status === "pending" &&
-      current.source === "web" &&
-      current.revision > basedOn
+      intended.status === "pending" &&
+      intended.source === "web" &&
+      intended.revision > basedOn
     ) {
       // Offline conflict: the PC file changed while a web change waited.
       // The newer edit wins and the other stays in history.
       const pcIsNewer =
         opts.modifiedAt !== null &&
-        opts.modifiedAt.getTime() > current.createdAt.getTime();
+        opts.modifiedAt.getTime() > intended.createdAt.getTime();
       if (pcIsNewer) {
         await insertAppliedPcRevision();
       } else if (
-        await hasRecordedPcEdit(tx, opts.watcherId, current.revision, pushed)
+        await hasRecordedPcEdit(tx, opts.watcherId, intended.revision, pushed)
       ) {
         // The same offline edit was pushed before (the watcher restarted
         // before applying the web change). It's already in the history.
@@ -533,7 +570,7 @@ export async function recordWatcherConfigPush(opts: {
           revision: next,
           source: "pc",
           status: "superseded",
-          statusReason: `Edited on the instrument PC while offline. The newer change from Data Hub (revision ${current.revision}) wins.`,
+          statusReason: `Edited on the instrument PC while offline. The newer change from Data Hub (revision ${intended.revision}) wins.`,
           settings: pushed,
           actor: opts.tokenActor,
         });
@@ -541,11 +578,11 @@ export async function recordWatcherConfigPush(opts: {
     } else {
       // A pending revision the watcher has already moved past was applied
       // before this edit, even if its result call never arrived.
-      if (current.status === "pending") {
+      if (intended.status === "pending") {
         await resolveRevision(
           tx,
           opts.watcherId,
-          current.revision,
+          intended.revision,
           "applied",
           null
         );
@@ -728,18 +765,28 @@ export interface WatcherConfigState {
   /** The highest revision number, sent as `base_revision` on save. */
   configRevision: number | null;
   editable: boolean;
-  /** The current revision: a pending change, else the last applied one. */
+  /**
+   * The current revision: a pending change, else the last applied or
+   * rejected one. A rejected one keeps its settings in the form so the admin
+   * can fix them and save again.
+   */
   latest: ConfigRevision | null;
   /** What the watcher last reported in its pushed YAML. */
   reportedSettings: WatcherConfigSettings | null;
+  /**
+   * What a save is compared with (see `getIntendedConfigRevision`), else the
+   * pushed YAML. The server refuses a save with these settings as "No
+   * changes", so the form and Restore do too.
+   */
+  savedSettings: WatcherConfigSettings | null;
   watcherVersion: string | null;
 }
 
 /**
  * What the edit form needs, for the Configuration tab and the dialog.
  * `latest` is the current revision (see `getCurrentConfigRevision`), which
- * the callout describes and the form starts from. Pass it when the caller
- * already loaded it.
+ * the callout describes and the form starts from. Pass `known` when the
+ * caller already loaded the revisions.
  */
 export async function getWatcherConfigState(
   watcher: {
@@ -749,12 +796,14 @@ export async function getWatcherConfigState(
     configRevision: number | null;
     appliedConfigRevision: number | null;
   },
-  knownLatest?: ConfigRevision | null
+  known?: { latest: ConfigRevision | null; intended: ConfigRevision | null }
 ): Promise<WatcherConfigState> {
-  const latest =
-    knownLatest === undefined
-      ? await getCurrentConfigRevision(watcher.id)
-      : knownLatest;
+  const [latest, intended] = known
+    ? [known.latest, known.intended]
+    : await Promise.all([
+        getCurrentConfigRevision(watcher.id),
+        getIntendedConfigRevision(watcher.id),
+      ]);
   const reportedSettings = parseSettingsFromYaml(watcher.configYaml);
   return {
     watcherVersion: watcher.watcherVersion,
@@ -764,5 +813,6 @@ export async function getWatcherConfigState(
     latest,
     reportedSettings,
     baseSettings: latest?.settings ?? reportedSettings,
+    savedSettings: intended?.settings ?? reportedSettings,
   };
 }
