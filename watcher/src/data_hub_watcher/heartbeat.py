@@ -115,6 +115,10 @@ class HeartbeatLoop:
         self._thread = threading.Thread(target=self._run, daemon=True, name="heartbeat")
         self._thread.start()
 
+    def set_status_reason(self, reason: str | None) -> None:
+        """Change the ``status_reason`` sent from the next heartbeat on."""
+        self._status_reason = reason
+
     def stop(self, *, send_stopped: bool = True) -> None:
         self._stop_event.set()
         if self._thread and self._thread.is_alive():

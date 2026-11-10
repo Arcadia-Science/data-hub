@@ -33,6 +33,7 @@ from data_hub_watcher.constants import (
     HEARTBEAT_INTERVAL_SECONDS,
     PRUNE_DAYS,
     UPLOAD_WORKER_STOP_TIMEOUT_SECONDS,
+    WAITING_START_RETRY_MAX_SECONDS,
 )
 from data_hub_watcher.events import EventReporter, EventType, WatcherEvent
 from data_hub_watcher.heartbeat import HeartbeatLoop, WatcherCounters
@@ -527,7 +528,7 @@ def report_upgrade_outcome(reporter: EventReporter, config_dir: Path) -> None:
 
 
 def start_runtime(
-    rt: WatcherRuntime, *, started_message: str, check_upgrade_marker: bool = True
+    rt: WatcherRuntime, *, started_message: str | None, check_upgrade_marker: bool = True
 ) -> None:
     """Queue the started event, recover unreported runs, then start threads.
 
@@ -540,14 +541,16 @@ def start_runtime(
     ``UPDATE_SUCCEEDED`` / ``UPDATE_FAILED`` from this fresh process,
     not from the doomed old process that asked for the restart. A rebuild
     inside a running process passes ``check_upgrade_marker=False`` (see
-    :func:`report_upgrade_outcome`).
+    :func:`report_upgrade_outcome`). With ``started_message=None`` no started
+    event is queued; the caller queues one once the start has succeeded.
     """
-    rt.reporter.queue_event(
-        WatcherEvent(
-            event_type=EventType.WATCHER_STARTED,
-            message=started_message,
+    if started_message is not None:
+        rt.reporter.queue_event(
+            WatcherEvent(
+                event_type=EventType.WATCHER_STARTED,
+                message=started_message,
+            )
         )
-    )
 
     if check_upgrade_marker:
         report_upgrade_outcome(rt.reporter, rt.config_dir)
@@ -807,6 +810,16 @@ class WatcherSupervisor:
         self._revision_due = threading.Event()
         self._folder_check_due = threading.Event()
         self._result_retry_due = threading.Event()
+        # The reason last reported in a `watch_directory_unavailable` event for
+        # the current stretch of waiting, or None while watching. Re-entering
+        # the waiting state with the same reason (a retry that failed the same
+        # way) queues no events.
+        self._waiting_event_reason: str | None = None
+        # Consecutive failed starts while the folder is present, and when the
+        # next attempt is due (`time.monotonic()`); see
+        # `WAITING_START_RETRY_MAX_SECONDS`.
+        self._start_failures = 0
+        self._next_start_attempt = 0.0
         # Whether this process has checked the post-upgrade marker yet. Only
         # the first runtime or waiting state may (see `report_upgrade_outcome`).
         self._upgrade_marker_checked = False
@@ -1163,18 +1176,39 @@ class WatcherSupervisor:
         except OSError:
             logger.exception("Could not restore %s", self.config_path)
 
-    def _start_or_wait_on_error(self, *, started_message: str) -> None:
+    def _start_or_wait_on_error(self, *, started_message: str, retry: bool = False) -> None:
         """Start watching, falling back to the waiting state if that fails.
 
         The fallback keeps heartbeats going, so the dashboard shows what
         happened and another config change can still reach this PC.
+
+        *retry* is set when the waiting state tries again: the started event
+        is then queued only once watching has started, so a failed attempt
+        leaves none behind. A failure for the same reason as the last one
+        reported queues no events and logs one line instead of a traceback,
+        and each failure pushes the waiting state's next attempt further out.
         """
         try:
-            self._start_watching_or_wait(started_message=started_message)
+            self._start_watching_or_wait(started_message=started_message, announce_late=retry)
         except Exception as exc:
-            logger.exception("Could not start watching")
+            reason = f"could not start watching: {exc}"
+            self._start_failures += 1
+            delay = min(
+                HEARTBEAT_INTERVAL_SECONDS * 2 ** (self._start_failures - 1),
+                WAITING_START_RETRY_MAX_SECONDS,
+            )
+            self._next_start_attempt = time.monotonic() + delay
+            if reason == self._waiting_event_reason:
+                logger.warning(
+                    "Still could not start watching after %d attempts (%s); trying again in %ds",
+                    self._start_failures,
+                    exc,
+                    delay,
+                )
+            else:
+                logger.exception("Could not start watching; trying again in %ds", delay)
             self._teardown_for_rebuild()
-            self._enter_waiting(f"could not start watching: {exc}", started_message=started_message)
+            self._enter_waiting(reason, started_message=started_message)
 
     def _forget_old_folder_uploads(self) -> None:
         if self._state is None:
@@ -1327,11 +1361,14 @@ class WatcherSupervisor:
         *,
         started_message: str,
         report_only_rules: list[Callable[[str, float], bool]] | None = None,
+        announce_late: bool = False,
     ) -> None:
         """Build and start a runtime for `self.cfg`, or wait if its folder is missing.
 
         *report_only_rules* defaults to the rules of the revisions applied so
-        far (see `_report_only_rules`).
+        far (see `_report_only_rules`). With *announce_late*, the started
+        event is queued after the runtime has started rather than by
+        `start_runtime`, so an attempt that fails leaves no event behind.
         """
         rules = self._report_only_rules if report_only_rules is None else report_only_rules
         problem = watch_directory_problem(self.cfg.instrument.watch_directory)
@@ -1353,20 +1390,41 @@ class WatcherSupervisor:
         check_marker = not self._upgrade_marker_checked
         self._upgrade_marker_checked = True
         try:
-            start_runtime(rt, started_message=started_message, check_upgrade_marker=check_marker)
+            start_runtime(
+                rt,
+                started_message=None if announce_late else started_message,
+                check_upgrade_marker=check_marker,
+            )
         except Exception:
             # Leave nothing half-started behind, then let the caller decide.
             self.rt = rt
             self._teardown_for_rebuild()
             raise
         self.rt = rt
+        if announce_late:
+            self.reporter.queue_event(
+                WatcherEvent(event_type=EventType.WATCHER_STARTED, message=started_message)
+            )
+        self._waiting_event_reason = None
+        self._start_failures = 0
+        self._next_start_attempt = 0.0
 
     def _enter_waiting(self, reason: str, *, started_message: str) -> None:
-        logger.warning(
-            "%s. Waiting: heartbeats continue, and watching starts once the folder "
-            "exists or a config change from Data Hub fixes it.",
-            reason,
-        )
+        """Run only the heartbeat and the updater until the folder can be watched.
+
+        Events are queued when waiting starts (`watcher_started` and a
+        `watch_directory_unavailable` error) and when the reason changes (the
+        error only). Coming back with the same reason, after a retry failed
+        the same way or a revision was rolled back, queues nothing.
+        """
+        new_stretch = self._waiting_event_reason is None
+        reason_changed = reason != self._waiting_event_reason
+        if reason_changed:
+            logger.warning(
+                "%s. Waiting: heartbeats continue, and watching starts once the folder "
+                "exists or a config change from Data Hub fixes it.",
+                reason,
+            )
         assert self._state is not None
         counters = WatcherCounters()
         updater = Updater(
@@ -1405,34 +1463,55 @@ class WatcherSupervisor:
             config_revision=lambda: self._applied,
             on_config_revision=self._on_heartbeat_revision,
         )
-        self.reporter.queue_event(
-            WatcherEvent(event_type=EventType.WATCHER_STARTED, message=started_message)
-        )
+        if new_stretch:
+            self.reporter.queue_event(
+                WatcherEvent(event_type=EventType.WATCHER_STARTED, message=started_message)
+            )
         if not self._upgrade_marker_checked:
             # A process that restarted into a new version and found its folder
             # missing still reports how the update went.
             self._upgrade_marker_checked = True
             report_upgrade_outcome(self.reporter, self.config_dir)
-        self.reporter.report_error(
-            "watch_directory_unavailable",
-            f"Waiting: {reason}",
-            watch_directory=str(inst.watch_directory),
-            reason=reason,
-        )
+        if reason_changed:
+            self._report_waiting_reason(reason)
         self._waiting = _WaitingMode(reason=reason, heartbeat=heartbeat, updater=updater)
         heartbeat.start()
 
+    def _report_waiting_reason(self, reason: str) -> None:
+        self.reporter.report_error(
+            "watch_directory_unavailable",
+            f"Waiting: {reason}",
+            watch_directory=str(self.cfg.instrument.watch_directory),
+            reason=reason,
+        )
+        self._waiting_event_reason = reason
+
     def _check_waiting_folder(self) -> None:
-        if self._waiting is None:
+        waiting = self._waiting
+        if waiting is None:
             return
-        if watch_directory_problem(self.cfg.instrument.watch_directory) is not None:
+        problem = watch_directory_problem(self.cfg.instrument.watch_directory)
+        if problem is not None:
+            if problem != waiting.reason:
+                # For example the folder went away while starts were failing.
+                logger.warning("%s. Still waiting.", problem)
+                waiting.reason = problem
+                waiting.heartbeat.set_status_reason(problem)
+                self._report_waiting_reason(problem)
+            # Once the folder is back, try straight away.
+            self._start_failures = 0
+            self._next_start_attempt = 0.0
+            return
+        if time.monotonic() < self._next_start_attempt:
             return
         logger.info(
-            "Watch folder %s is available again; starting to watch",
+            "Watch folder %s is available; starting to watch",
             self.cfg.instrument.watch_directory,
         )
         self._teardown_for_rebuild()
-        self._start_or_wait_on_error(started_message=f"{self.role} resumed on {self.host}")
+        self._start_or_wait_on_error(
+            started_message=f"{self.role} resumed on {self.host}", retry=True
+        )
 
     def _teardown_for_rebuild(self) -> None:
         """Stop the running loops without reporting the watcher as stopped.

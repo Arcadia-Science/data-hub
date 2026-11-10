@@ -636,6 +636,98 @@ class TestWaitingState:
         assert env.saved_instrument()["watch_directory"] == str(env.watch_dir.resolve())
         assert env.results() == [(WATCHER_ID, 1, "applied", None)]
 
+    def test_start_that_keeps_failing_queues_events_only_when_the_reason_changes(
+        self, env: _Env, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from data_hub_watcher.monitor import FileMonitor
+
+        def events() -> list[tuple[str, str | None]]:
+            """Started events and waiting errors flushed so far, in order."""
+            sup.reporter.flush()
+            flushed = [e for c in env.client.send_events.call_args_list for e in c.args[1]]
+            return [
+                (e["event_type"], (e.get("details") or {}).get("reason"))
+                for e in flushed
+                if e["event_type"] == "watcher_started"
+                or (e.get("details") or {}).get("kind") == "watch_directory_unavailable"
+            ]
+
+        def tick() -> None:
+            waiting = sup._waiting
+            assert waiting is not None
+            waiting.heartbeat._on_tick()  # type: ignore[misc]
+            sup.poll(timeout=0)
+
+        def heartbeat_reason() -> str | None:
+            waiting = sup._waiting
+            assert waiting is not None
+            return waiting.heartbeat._build_payload("waiting").get("status_reason")
+
+        sup = env.supervisor(self._missing_cfg(env))
+        sup.start()
+        assert events() == [
+            ("watcher_started", None),
+            ("error", sup.waiting_reason),
+        ]
+
+        # The folder appears, but watching it fails every time.
+        failure = OSError("inotify watch limit reached")
+        attempts: list[int] = []
+
+        def failing_start(_self: FileMonitor) -> None:
+            attempts.append(1)
+            raise failure
+
+        monkeypatch.setattr(FileMonitor, "start", failing_start)
+        (env.tmp_path / "later").mkdir()
+        tick()
+        assert len(attempts) == 1  # tried straight away
+        reason = "could not start watching: inotify watch limit reached"
+        assert sup.waiting_reason == reason
+        assert heartbeat_reason() == reason
+        assert events()[2:] == [("error", reason)]
+
+        # The next ticks fall inside the backoff, so nothing is retried.
+        tick()
+        tick()
+        assert len(attempts) == 1
+
+        # Retries that fail the same way queue nothing, not even the started
+        # event the attempt would have queued.
+        for _ in range(3):
+            sup._next_start_attempt = 0.0
+            tick()
+        assert len(attempts) == 4
+        assert events()[3:] == []
+
+        # A different failure is a new reason, reported once.
+        failure = OSError("permission denied")
+        sup._next_start_attempt = 0.0
+        tick()
+        assert events()[3:] == [("error", "could not start watching: permission denied")]
+
+        # The folder goes away: the reason changes, and once it is back the
+        # watcher tries again at once.
+        (env.tmp_path / "later").rmdir()
+        tick()
+        assert sup.waiting_reason is not None
+        assert "watch_directory not found" in sup.waiting_reason
+        assert heartbeat_reason() == sup.waiting_reason
+        assert events()[4:] == [("error", sup.waiting_reason)]
+        (env.tmp_path / "later").mkdir()
+        monkeypatch.undo()
+        tick()
+
+        assert sup.rt is not None
+        assert events()[5:] == [("watcher_started", None)]
+        started = [
+            e["message"]
+            for c in env.client.send_events.call_args_list
+            for e in c.args[1]
+            if e["event_type"] == "watcher_started"
+        ]
+        assert started[-1] == "Watcher resumed on test-host"
+
     def test_config_still_loads_with_a_missing_folder(self, env: _Env) -> None:
         from data_hub_watcher.config_io import load_config
 

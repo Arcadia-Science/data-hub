@@ -82,6 +82,11 @@ UPLOAD_WORKER_STOP_TIMEOUT_SECONDS = 30
 # to cover a single large file on a slow link. Past the limit the rebuild goes
 # ahead and the old upload keeps running on its own thread until it ends.
 CONFIG_APPLY_DRAIN_TIMEOUT_SECONDS = 120
+# While waiting with the watch folder present, a start that keeps failing is
+# retried after 1, 2, 4 and 8 heartbeat intervals, then every 15 minutes, so a
+# persistent failure doesn't rebuild the runtime and log a traceback every
+# minute. A missing folder is still checked on every heartbeat.
+WAITING_START_RETRY_MAX_SECONDS = 15 * 60
 DEFAULT_STABILITY_PERIOD_SECONDS = 5
 
 # Built-in presets for the ``init`` / ``config edit`` wizard.

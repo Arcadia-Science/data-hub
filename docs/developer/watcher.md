@@ -311,6 +311,8 @@ If the folder is missing or unreadable at startup, the watcher starts in the wai
 - On each heartbeat tick it checks the folder again and starts watching once the folder can be listed.
 - A config revision can also fix the folder. The waiting heartbeat checks for revisions like the normal one.
 
+The watcher also waits, with a `status_reason` such as `could not start watching: …`, when the folder is there but starting fails. It then tries again after 1, 2, 4 and 8 minutes, then every 15 minutes (`WAITING_START_RETRY_MAX_SECONDS`), and at once if the folder goes away and comes back. Events are queued only when waiting starts (`watcher_started` and the error) and when the reason changes (the error only). A retry that fails the same way logs one line and queues nothing, and a retry that succeeds queues a `watcher_started` event saying the watcher resumed.
+
 The waiting state replaces the old behavior of exiting at startup, which made the Windows service restart in a loop.
 
 ### Settings Data Hub can't read
