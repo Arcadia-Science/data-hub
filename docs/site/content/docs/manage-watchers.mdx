@@ -60,7 +60,7 @@ Members can see the current settings, any pending change, and the history, but o
 
 ### Change a config with the API or an AI assistant
 
-- **API**: `POST /api/v1/watchers/:watcherId/config-revisions` with `base_revision` and the full `settings`. Signed-in callers must be admins; tokens need `watchers:admin`. `GET /api/v1/watchers/:watcherId/config-revisions` lists the history. See the [generated API docs](/docs/api).
+- **API**: `POST /api/v1/watchers/:watcherId/config-revisions` with `base_revision` and the full `settings`. Signed-in callers must be admins; tokens must list `watchers:admin` explicitly (legacy `*` and `watchers:write` tokens are refused). `GET /api/v1/watchers/:watcherId/config-revisions` lists the history. See the [generated API docs](/docs/api).
 - **MCP**: the `update_watcher_config` tool, for admins. It changes only the settings you name. The assistant shows you the change and asks you to confirm before it saves.
 
 ## Deregister a watcher [#deregister-a-watcher]

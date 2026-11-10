@@ -95,7 +95,7 @@ export const SCOPE_METADATA: Record<Scope, ScopeMeta> = {
   "watchers:admin": {
     label: "Administer watchers",
     description:
-      "Delete watchers and change their config, including which folder on the instrument PC they upload from.",
+      "Delete watchers and change their config, including which folder on the instrument PC they upload from. Changing config needs this scope listed explicitly; legacy * and watchers:write tokens can't.",
     destructive: true,
   },
   "archive-jobs:read": {

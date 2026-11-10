@@ -62,6 +62,8 @@ describe("Watcher config revisions", () => {
   let watcherTokenId: string;
   let otherWatcherToken: string;
   let adminScopeToken: string;
+  let legacyWriteToken: string;
+  let wildcardToken: string;
   let readOnlyToken: string;
   let adminCookie: string;
   let memberCookie: string;
@@ -149,6 +151,11 @@ describe("Watcher config revisions", () => {
     ({ token: adminScopeToken } = await seedTestUser({
       scopes: ["watchers:admin"],
     }));
+    // Old watcher PCs carry these; `hasScope` reads both as watchers:admin.
+    ({ token: legacyWriteToken } = await seedTestUser({
+      scopes: ["watchers:write"],
+    }));
+    ({ token: wildcardToken } = await seedTestUser({ scopes: ["*"] }));
     ({ token: readOnlyToken } = await seedTestUser({
       scopes: ["watchers:read"],
     }));
@@ -288,6 +295,26 @@ describe("Watcher config revisions", () => {
       const body = watcherConfigRevision.parse(await res.json());
       expect(body.created_by).toBeNull();
       expect(body.created_by_token).not.toBeNull();
+    });
+
+    it("refuses legacy tokens that only imply watchers:admin", async () => {
+      for (const token of [legacyWriteToken, wildcardToken]) {
+        const res = await saveFromWeb({ ...BASE, upload_mode: "manual" }, 1, {
+          token,
+        });
+        expect(res.status).toBe(403);
+        expect((await res.json()).error.message).toMatch(
+          /lists watchers:admin explicitly/
+        );
+      }
+      expect(await revisions()).toHaveLength(1);
+
+      // Deregistering keeps accepting them.
+      const deleted = await api(base(), {
+        method: "DELETE",
+        token: legacyWriteToken,
+      });
+      expect(deleted.status).toBe(200);
     });
 
     it("refuses a token without watchers:admin", async () => {
@@ -901,6 +928,15 @@ describe("Watcher config revisions", () => {
 
     it("is for admins only", async () => {
       expect((await preview(BASE, memberCookie)).status).toBe(403);
+      const call = async (token: string) =>
+        await api(`${base()}/config-preview`, {
+          method: "POST",
+          token,
+          body: { settings: BASE },
+        });
+      expect((await call(adminScopeToken)).status).toBe(200);
+      expect((await call(legacyWriteToken)).status).toBe(403);
+      expect((await call(wildcardToken)).status).toBe(403);
     });
   });
 

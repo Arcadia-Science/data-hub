@@ -1,6 +1,10 @@
 import type { NextRequest } from "next/server";
 import { actorRefFromAuth } from "@/lib/api/actor";
-import { authorize, requireAdminForSession } from "@/lib/api/auth";
+import {
+  authorize,
+  requireAdminForSession,
+  requireExplicitTokenScope,
+} from "@/lib/api/auth";
 import {
   apiError,
   apiErrorFromResult,
@@ -70,9 +74,12 @@ export async function POST(
   if (authResult instanceof Response) {
     return authResult;
   }
-  // Browser sessions must also belong to an admin. Tokens pass on the
-  // `watchers:admin` scope alone.
-  const adminGate = await requireAdminForSession(authResult);
+  // Browser sessions must belong to an admin. Tokens must list
+  // `watchers:admin` themselves: the legacy `watchers:write` and `*` that old
+  // watcher PCs carry imply it, but must not let them repoint other watchers.
+  const adminGate =
+    (await requireAdminForSession(authResult)) ??
+    requireExplicitTokenScope(authResult, "watchers:admin");
   if (adminGate) {
     return adminGate;
   }

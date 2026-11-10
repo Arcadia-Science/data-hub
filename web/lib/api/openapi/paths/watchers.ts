@@ -220,7 +220,7 @@ registry.registerPath({
   operationId: "createWatcherConfigRevision",
   summary: "Change a watcher's config",
   description:
-    "Requires scope `watchers:admin`. Browser sessions must belong to an admin. Stores a pending revision that the watcher applies after its next heartbeat. Returns 409 when `base_revision` isn't the latest revision (`details.reason: stale_revision`) or the watcher runs a version older than 1.3.0 (`details.reason: watcher_update_required`).",
+    "Requires a token that lists `watchers:admin` explicitly; legacy tokens with `*` or `watchers:write` get 403. Browser sessions must belong to an admin. Stores a pending revision that the watcher applies after its next heartbeat. Returns 409 when `base_revision` isn't the latest revision (`details.reason: stale_revision`) or the watcher runs a version older than 1.3.0 (`details.reason: watcher_update_required`).",
   tags: ["Watchers"],
   security: bearerSecurity,
   request: {
