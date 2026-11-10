@@ -75,6 +75,17 @@ describe("checkRunDetectionPattern", () => {
     expect(checkRunDetectionPattern("").ok).toBe(false);
   });
 
+  it("rejects a trailing backslash that the appended `|` would hide", () => {
+    // `(x)||\` plus `|` compiles and counts one group, but the pattern alone
+    // doesn't compile in JavaScript or Python.
+    for (const pattern of ["(x)||\\", "(a)\\"]) {
+      expect(checkRunDetectionPattern(pattern), pattern).toEqual({
+        ok: false,
+        message: expect.stringMatching(/^Invalid regular expression: /),
+      });
+    }
+  });
+
   it("accepts every built-in preset", () => {
     for (const preset of RUN_DETECTION_PRESETS) {
       expect(checkRunDetectionPattern(preset.pattern), preset.key).toEqual({

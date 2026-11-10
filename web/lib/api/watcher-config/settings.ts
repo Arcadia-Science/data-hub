@@ -83,6 +83,8 @@ export type RegexCheck =
  * Compiles a run-detection pattern the way the server can and counts its
  * capture groups. Appending `|` makes the regex match the empty string, so
  * the result array always exists and its length is the group count plus one.
+ * The pattern is compiled on its own first, because the appended `|` can
+ * hide a syntax error: a trailing `\` would escape it.
  */
 export function checkRunDetectionPattern(pattern: string): RegexCheck {
   if (pattern.length === 0) {
@@ -104,6 +106,7 @@ export function checkRunDetectionPattern(pattern: string): RegexCheck {
   }
   let match: RegExpExecArray | null;
   try {
+    new RegExp(pattern);
     match = new RegExp(`${pattern}|`).exec("");
   } catch (err) {
     // Engines prefix the message with the whole regex; keep only the reason.
