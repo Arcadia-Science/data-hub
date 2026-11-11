@@ -107,9 +107,19 @@ hard-code a path.
 
 **The server environment.** The harness sets `CRON_SECRET`, so a test can call
 `/api/cron/upload-queue-sweep` with `Authorization: Bearer <cron_secret>`. It
-removes `LAMBDA_FUNCTION_URL`, `STALLED_PROCESSING_AFTER_MINUTES` and `VERCEL`
-from the environment it inherits, so a developer's local settings can't change
-what the tests see. The S3 stand-in turns itself off when `VERCEL` is set.
+sets `BETTER_AUTH_URL` to the server's own `http://127.0.0.1:<port>` address, so
+the session cookie from `seed_admin_session` has the name the server expects. It
+sets `AWS_ROLE_ARN`, `LAMBDA_FUNCTION_URL`, `STALLED_PROCESSING_AFTER_MINUTES`,
+`VERCEL` and `VERCEL_PROJECT_PRODUCTION_URL` to empty strings, because a
+developer's local value of any of them would change what the tests see. The
+S3 stand-in turns itself off when `VERCEL` is set, and an https production URL
+changes Better Auth's cookie name. The harness blanks these variables instead
+of removing them. `next build` and `next start` read `web/.env`,
+`web/.env.local` and the other `web/.env*` files for any variable that is
+missing from the process environment, so a removed `VERCEL` would come back from
+a `web/.env.local` made by `vercel env pull`. A variable that is set to an empty
+string is left alone, and the server treats it as unset. Variables that the
+harness doesn't set still come from your `web/.env*` files.
 
 **Teardown.** `next start` runs in its own process group (its own session on
 POSIX, `CREATE_NEW_PROCESS_GROUP` on Windows), because `npx` starts the real

@@ -417,34 +417,73 @@ def test_run_npx_runs_the_resolved_path_and_reports_output_on_failure(
 # ---------------------------------------------------------------------------
 
 
-def _server_env(base: dict[str, str], mirror: Path = Path("/mirror")) -> dict[str, str]:
-    return testing._build_server_env(base, database_url="postgres://db/x", s3_mirror_root=mirror)
+_BASE_URL = "http://127.0.0.1:4321"
 
 
-def test_server_env_drops_the_variables_that_change_server_behavior() -> None:
-    env = _server_env(
-        {
-            "LAMBDA_FUNCTION_URL": "https://lambda.example.test",
-            "STALLED_PROCESSING_AFTER_MINUTES": "5",
-            "VERCEL": "1",
-            "PATH": "/usr/bin",
-            "SOMETHING_ELSE": "kept",
-        }
+def _server_env(
+    base: dict[str, str], mirror: Path = Path("/mirror"), base_url: str = _BASE_URL
+) -> dict[str, str]:
+    return testing._build_server_env(
+        base, database_url="postgres://db/x", s3_mirror_root=mirror, base_url=base_url
     )
 
-    assert "LAMBDA_FUNCTION_URL" not in env
-    assert "STALLED_PROCESSING_AFTER_MINUTES" not in env
-    assert "VERCEL" not in env
+
+_BLANKED = [
+    "AWS_ROLE_ARN",
+    "LAMBDA_FUNCTION_URL",
+    "STALLED_PROCESSING_AFTER_MINUTES",
+    "VERCEL",
+    "VERCEL_PROJECT_PRODUCTION_URL",
+]
+
+
+def test_the_list_of_blanked_variables_is_what_these_tests_expect() -> None:
+    assert sorted(testing._BLANKED_SERVER_ENV) == _BLANKED
+
+
+@pytest.mark.parametrize("name", _BLANKED)
+def test_server_env_blanks_the_variables_that_change_server_behavior(name: str) -> None:
+    # Present in the inherited environment, the variable is emptied...
+    inherited = _server_env({name: "from-the-developers-shell", "PATH": "/usr/bin"})
+    # ...and absent from it, the variable is still there, empty. `next build` and
+    # `next start` fill in a variable that is missing from `web/.env.local`, but leave one
+    # alone that is set to an empty string.
+    absent = _server_env({"PATH": "/usr/bin"})
+
+    assert inherited[name] == ""
+    assert absent[name] == ""
+    assert inherited["PATH"] == "/usr/bin"
+
+
+def test_server_env_keeps_the_other_inherited_variables() -> None:
+    env = _server_env({"PATH": "/usr/bin", "SOMETHING_ELSE": "kept", "HOME": "/home/dev"})
+
     assert env["PATH"] == "/usr/bin"
     assert env["SOMETHING_ELSE"] == "kept"
+    assert env["HOME"] == "/home/dev"
+
+
+def test_server_env_points_better_auth_at_the_servers_own_http_address() -> None:
+    inherited = _server_env({"BETTER_AUTH_URL": "https://data-hub.example.test"})
+
+    assert inherited["BETTER_AUTH_URL"] == _BASE_URL
+    assert _server_env({}, base_url="http://127.0.0.1:55555")["BETTER_AUTH_URL"] == (
+        "http://127.0.0.1:55555"
+    )
+    # A `https` origin would make Better Auth look for a `__Secure-` session cookie.
+    assert inherited["BETTER_AUTH_URL"].startswith("http://")
 
 
 def test_server_env_does_not_change_the_environment_it_was_given() -> None:
-    base = {"VERCEL": "1", "AUTH_SECRET": "mine"}
+    base = {"VERCEL": "1", "AUTH_SECRET": "mine", "BETTER_AUTH_URL": "https://x.example.test"}
 
     _server_env(base)
 
-    assert base == {"VERCEL": "1", "AUTH_SECRET": "mine"}
+    assert base == {
+        "VERCEL": "1",
+        "AUTH_SECRET": "mine",
+        "BETTER_AUTH_URL": "https://x.example.test",
+    }
 
 
 def test_server_env_sets_the_test_secrets_and_stand_in_settings(tmp_path: Path) -> None:

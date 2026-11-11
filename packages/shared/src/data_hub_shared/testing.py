@@ -69,14 +69,28 @@ CRON_SECRET = "test-cron-secret"
 # server's is http.
 _SESSION_COOKIE_NAME = "better-auth.session_token"
 
-# Variables dropped from the inherited environment so a developer's local
-# settings can't change what the tests see. `VERCEL` is on the list because
-# the S3 stand-in turns itself off when it is set. `global-setup.ts` in the web
-# suite drops the first two as well.
-_SCRUBBED_SERVER_ENV = (
+# Variables set to an empty string in the server's environment, so nothing a developer has
+# set locally can change what the tests see. They are blanked, not deleted. `next build`
+# and `next start` read `web/.env`, `web/.env.local` and `web/.env.production` for every
+# variable that is missing from the process environment, so a deleted variable would be
+# filled in again from a `web/.env.local` made by `vercel env pull`. Next.js leaves a
+# variable alone when it is set, even to "", and everything in `web/` that reads these
+# treats "" like unset.
+#
+# - `VERCEL`: the S3 stand-in turns itself off when it is set.
+# - `LAMBDA_FUNCTION_URL`: switches on the paths that call the Lambda function.
+# - `STALLED_PROCESSING_AFTER_MINUTES`: changes when a file counts as stalled.
+# - `AWS_ROLE_ARN`: makes the server try to assume a role instead of using the test keys.
+# - `VERCEL_PROJECT_PRODUCTION_URL`: gives the app an https origin. Better Auth then
+#   expects a `__Secure-` cookie name, and the cookie from `seed_admin_session` is refused.
+#
+# `BETTER_AUTH_URL` gets the same treatment by being set to the server's own URL.
+_BLANKED_SERVER_ENV = (
+    "AWS_ROLE_ARN",
     "LAMBDA_FUNCTION_URL",
     "STALLED_PROCESSING_AFTER_MINUTES",
     "VERCEL",
+    "VERCEL_PROJECT_PRODUCTION_URL",
 )
 
 # How long the server process tree gets to exit after SIGTERM before SIGKILL.
@@ -380,9 +394,16 @@ def _build_server_env(
     *,
     database_url: str,
     s3_mirror_root: Path,
+    base_url: str,
 ) -> dict[str, str]:
-    """Build the environment for ``next build`` and ``next start``."""
-    env = {k: v for k, v in base_env.items() if k not in _SCRUBBED_SERVER_ENV}
+    """Build the environment for ``next build`` and ``next start``.
+
+    *base_url* is the origin the server will listen on, for example
+    ``http://127.0.0.1:54321``. It becomes ``BETTER_AUTH_URL``, so the app's idea of its
+    own address is the one the tests use, and plain http.
+    """
+    env = dict(base_env)
+    env.update(dict.fromkeys(_BLANKED_SERVER_ENV, ""))
     env.update(
         {
             "DATABASE_URL": database_url,
@@ -400,6 +421,7 @@ def _build_server_env(
             "MULTIPART_THRESHOLD_BYTES": "1024",
             "MULTIPART_PART_SIZE_BYTES": "1024",
             "CRON_SECRET": CRON_SECRET,
+            "BETTER_AUTH_URL": base_url,
             # Watcher release defaults are seeded into watcher_release_config
             # (see seed_watcher_release); the env-var fallback is gone.
         }
@@ -680,7 +702,7 @@ def start_test_server() -> Generator[IntegrationEnv, None, None]:
     base_url = f"http://127.0.0.1:{port}"
 
     server_env = _build_server_env(
-        os.environ, database_url=database_url, s3_mirror_root=s3_mirror_root
+        os.environ, database_url=database_url, s3_mirror_root=s3_mirror_root, base_url=base_url
     )
     _run_npx(npx, ["next", "build"], what="Next.js build", env=server_env)
 
