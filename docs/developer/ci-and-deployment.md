@@ -73,24 +73,34 @@ The `linux` job (`ubuntu-latest`, 45-minute limit):
 
 A release commit runs the suite twice: once when it is pushed to `production`, and again when the `watcher-v*` tag on it starts `publish-watcher.yml`, whose `e2e` job is a release gate. That is intended, because the tag run tests the wheel it is about to publish. Don't tag before the push run has finished unless you want the suite to run twice at once.
 
-The `windows` job (`windows-latest`, 90-minute limit) runs the same suite against the real Windows service, with `DATA_HUB_E2E_DRIVER=service`. The suite installs the watcher with `uv tool install`, sets it up with `init` and `service install`, and drives the service from outside. It has the same triggers and inputs as the `linux` job. Its steps:
+The `windows` job (`windows-latest`, 90-minute limit) runs the same suite against the real Windows service, with `DATA_HUB_E2E_DRIVER=service`. The suite installs the watcher with `uv tool install`, sets it up with `init` and `service install`, and drives the service from outside. It has the same triggers and inputs as the `linux` job.
+
+The job is a matrix of three shards that run at the same time, each on its own runner (and so with its own Service Control Manager). A single runner would need longer than the step's limit: the service tests wait for the SCM's 60 and 120 second restarts, and every upgrade runs `uv` as `LocalSystem`. `fail-fast` is off, so a failure in one shard doesn't cancel the others. Every test file runs in exactly one shard:
+
+| Shard | Runs |
+| --- | --- |
+| `service` | `test_windows_service.py`, what only a Windows service has |
+| `updates-uploads` | `test_self_update.py`, `test_upload_auto.py` and `test_upload_queue.py`, the slow shared files |
+| `rest` | everything else in `watcher/e2e`: it ignores the files the other two name, so a new test file is picked up here and can't be left out. A file that is renamed makes the shard that names it fail with "file or directory not found" |
+
+Each shard's steps are:
 
 1. Starts PostgreSQL. Windows runners cannot run service containers, so the job uses the PostgreSQL that the runner image ships. The readme for the Windows 2025 image, which `windows-latest` points to, lists it as version 17.11, a Windows service named `postgresql-x64-17` with start type Disabled, and a `PGBIN` folder with the client tools (see [the image readme](https://github.com/actions/runner-images/blob/main/images/windows/Windows2025-Readme.md)). The readme gives no command to start it. The `Start PostgreSQL` step (PowerShell) finds the service by the `postgresql-x64-*` name, sets its start type to Manual, starts it, and waits up to 90 seconds for `pg_isready` to succeed on port 5432. The readme gives the `postgres` password as `root`. The step uses that password once to set a random one for this run, masks it in the log, and passes it to later steps through `GITHUB_ENV`. If the image has no such service, the step fails with a message that says so.
 2. Installs Node.js 24, `uv`, the web packages (`npm ci`) and the Python packages with `uv sync --all-packages --extra windows-service`. The extra adds pywin32, which installs only on Windows.
 3. Downloads the wheel artifact, when one is named.
-4. Runs `uv run pytest watcher/e2e -m e2e -v -o faulthandler_timeout=300`, the same command as `make py-test-e2e`. The job calls pytest directly because the image is not guaranteed to have `make`. The step has a 75-minute limit of its own, so a hung test fails the step and the steps after it still run.
-5. If the tests fail or the job is cancelled, exports the last three hours of Application and System event log entries from the service control manager, Python and DataHub to `event-log.txt`, then uploads the folder as the `watcher-e2e-windows-artifacts` artifact (kept 14 days). The suite writes its failure files to that folder, as it does for the `linux` job.
+4. Runs `uv run pytest <the shard's files> -m e2e -v --durations=50 -o faulthandler_timeout=300`, the same command as `make py-test-e2e` with the shard's files. The job calls pytest directly because the image is not guaranteed to have `make`. `--durations=50` lists the 50 slowest tests at the end of the log, which shows where a shard's time goes. The step has a 75-minute limit of its own, so a hung test fails the step and the steps after it still run.
+5. If the tests fail or the job is cancelled, exports the Event Log entries of the last three hours that are about the service to `event-log.txt`: the Application log's `DataHubWatcher` and `Python Service` entries, and the Service Control Manager's entries that name the service. The providers are in the query, so a busy log can't push the entries out before they are filtered. Then it uploads the folder as the `watcher-e2e-windows-<shard>-artifacts` artifact (kept 14 days). The suite writes its failure files to that folder, as it does for the `linux` job.
 
 The harness reads its database settings from `DATA_HUB_TEST_PGHOST`, `DATA_HUB_TEST_PGPORT`, `DATA_HUB_TEST_PGUSER`, `DATA_HUB_TEST_PGPASSWORD` and `DATA_HUB_TEST_PGDATABASE`, and ignores the standard `PG*` variables. The job sets the first, second, third and fifth in its `env:` block, and step 1 sets the password.
 
-The steps run in Git Bash, and the runner runs as an administrator, which `service install` needs. The target for the whole job is under an hour.
+The steps run in Git Bash, and the runner runs as an administrator, which `service install` needs. The target for each shard is under an hour.
 
 ### Publish watcher (`publish-watcher.yml`)
 
 Triggered on `watcher-v*` tag pushes and manual `workflow_dispatch` from `production`. The `build` job's `if:` guard refuses dispatches from any other branch so a feature branch can't accidentally publish whatever version is in its `pyproject.toml`. Builds the `data-hub-watcher` package, tests it end to end, publishes it to PyPI via OIDC trusted publishing, and verifies the upload by installing the freshly published wheel into a clean venv. Four sequential jobs (a manual dispatch runs all of them again, the end-to-end tests included. To retry after a PyPI outage, use "Re-run failed jobs" on the failed run, which runs only the jobs that didn't pass):
 
 1. **build** — Verifies the git tag matches `watcher/pyproject.toml` (`make py-check-watcher-version`), builds the wheel and sdist with `uv build --package data-hub-watcher`, and uploads them as a workflow artifact.
-2. **e2e** — Calls [`watcher-e2e.yml`](#watcher-end-to-end-tests-watcher-e2eyml) with the `dist` artifact, so the end-to-end suite installs the wheel that is about to be published. It is a release gate: `publish` needs it, and both the `linux` and `windows` jobs of `watcher-e2e.yml` must pass, so a failing test stops the release before the `pypi` environment asks for approval.
+2. **e2e** — Calls [`watcher-e2e.yml`](#watcher-end-to-end-tests-watcher-e2eyml) with the `dist` artifact, so the end-to-end suite installs the wheel that is about to be published. It is a release gate: `publish` needs it, and the `linux` job and all three `windows` shards of `watcher-e2e.yml` must pass, so a failing test stops the release before the `pypi` environment asks for approval.
 3. **publish** — Downloads the artifact and uploads it to PyPI with [`pypa/gh-action-pypi-publish`](https://github.com/pypa/gh-action-pypi-publish) using OIDC trusted publishing. Gated on the `pypi` GitHub deployment environment so reviewer-required releases can be enforced from the GitHub UI without editing the workflow file.
 4. **verify** — In a fresh `uv venv`, installs `data-hub-watcher==<tag-version>` from PyPI and runs `data-hub-watcher --version` plus `python -c "import data_hub_watcher"` as a smoke test. Catches stale-mirror shadows and module-level import side-effect crashes.
 

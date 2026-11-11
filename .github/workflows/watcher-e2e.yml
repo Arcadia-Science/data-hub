@@ -13,7 +13,8 @@ name: Watcher end-to-end tests
 #     as built and not rebuilt from the checkout.
 #
 # Two jobs run the suite: `linux` (the `watch` process) and `windows` (the real Windows
-# service, on `windows-latest`). They share these triggers and inputs.
+# service, on `windows-latest`, as three parallel shards). They share these triggers and
+# inputs.
 on:
   push:
     branches:
@@ -106,11 +107,41 @@ jobs:
   # The real Windows service, on `windows-latest`. It runs the same suite as `linux`, with
   # DATA_HUB_E2E_DRIVER=service. Windows runners cannot run service containers, so Postgres is
   # the one the runner image ships. The `Start PostgreSQL` step starts it.
+  #
+  # The suite is split over three runners that run at the same time, because the service
+  # tests wait for the Service Control Manager (a 60 s and a 120 s restart, every upgrade) and
+  # one runner would need longer than the step allows. Each runner has its own SCM, so the
+  # shards don't get in each other's way. Every test file runs in exactly one shard:
+  #   * `service` and `updates-uploads` name their files,
+  #   * `rest` is everything in watcher/e2e except those files, so a new test file is picked up
+  #     by `rest` and can't be left out. A renamed file makes the shard that names it fail
+  #     with "file or directory not found".
   # See docs/developer/ci-and-deployment.md.
   windows:
-    name: Windows (watcher service)
+    name: Windows (${{ matrix.shard }})
     runs-on: windows-latest
     timeout-minutes: 90
+
+    strategy:
+      # A failure in one shard must not cancel the others: their logs are what shows whether
+      # the rest of the suite is healthy.
+      fail-fast: false
+      matrix:
+        include:
+          - shard: service
+            targets: watcher/e2e/test_windows_service.py
+          - shard: updates-uploads
+            targets: >-
+              watcher/e2e/test_self_update.py
+              watcher/e2e/test_upload_auto.py
+              watcher/e2e/test_upload_queue.py
+          - shard: rest
+            targets: >-
+              watcher/e2e
+              --ignore=watcher/e2e/test_windows_service.py
+              --ignore=watcher/e2e/test_self_update.py
+              --ignore=watcher/e2e/test_upload_auto.py
+              --ignore=watcher/e2e/test_upload_queue.py
 
     env:
       DATA_HUB_TEST_PGHOST: "127.0.0.1"
@@ -226,21 +257,28 @@ jobs:
           path: ${{ runner.temp }}/wheel
 
       # The same command as `make py-test-e2e`, called directly because the image is not
-      # guaranteed to have `make`. The step has a limit of its own, under the job's, so a hung
-      # test fails the step and the steps below still run. `-o faulthandler_timeout=300` prints
-      # the stacks of a test that takes over 5 minutes.
+      # guaranteed to have `make`, with the files of this shard. The step has a limit of its
+      # own, under the job's, so a hung test fails the step and the steps below still run.
+      # `-o faulthandler_timeout=300` prints the stacks of a test that takes over 5 minutes,
+      # and `--durations=50` lists the 50 slowest tests, to show where the time goes.
       - name: Run the end-to-end tests
-        run: uv run pytest watcher/e2e -m e2e -v -o faulthandler_timeout=300
+        run: |
+          # The targets are several words on purpose.
+          # shellcheck disable=SC2086
+          uv run pytest $PYTEST_TARGETS -m e2e -v --durations=50 -o faulthandler_timeout=300
         timeout-minutes: 75
         env:
+          PYTEST_TARGETS: ${{ matrix.targets }}
           DATA_HUB_E2E_DRIVER: service
           DATA_HUB_E2E_ARTIFACTS: ${{ runner.temp }}/e2e-artifacts
           DATA_HUB_E2E_WHEEL: ${{ inputs.wheel-artifact != '' && format('{0}/wheel', runner.temp) || '' }}
 
       # The service writes to the Windows Event Log as well as its own log file. This exports the
-      # last three hours of Application and System entries from the service control manager,
-      # Python and DataHub providers, so a service that failed to start leaves its reason in the
-      # artifact. It is best effort, so a failure here does not hide the test result.
+      # entries of the last three hours that are about the service, so a service that failed to
+      # start leaves its reason in the artifact: the Application log's `DataHubWatcher` and
+      # `Python Service` entries, and the Service Control Manager's entries that name the
+      # service. The providers are in the query, so a busy log can't push them out before they
+      # are filtered. It is best effort, so a failure here does not hide the test result.
       - name: Export the Windows Event Log
         if: failure() || cancelled()
         continue-on-error: true
@@ -250,18 +288,31 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path $env:DATA_HUB_E2E_ARTIFACTS | Out-Null
           $since = (Get-Date).AddHours(-3)
-          Get-WinEvent -FilterHashtable @{ LogName = 'Application', 'System'; StartTime = $since } -MaxEvents 5000 -ErrorAction SilentlyContinue |
-            Where-Object { $_.ProviderName -match 'DataHub|Service Control Manager|Python' } |
+          # One query per provider, so one that this image doesn't know can't hide the others.
+          function Get-ProviderEvents($log, $provider) {
+            Get-WinEvent -ErrorAction SilentlyContinue -MaxEvents 2000 -FilterHashtable @{
+              LogName = $log
+              ProviderName = $provider
+              StartTime = $since
+            }
+          }
+          $found = @()
+          $found += Get-ProviderEvents 'Application' 'DataHubWatcher'
+          $found += Get-ProviderEvents 'Application' 'Python Service'
+          $found += Get-ProviderEvents 'System' 'Service Control Manager' |
+            Where-Object { $_.Message -match 'Data Hub Watcher|DataHubWatcher' }
+          $found |
+            Sort-Object TimeCreated |
             Select-Object TimeCreated, LogName, ProviderName, Id, LevelDisplayName, Message |
             Format-List |
             Out-File -FilePath (Join-Path $env:DATA_HUB_E2E_ARTIFACTS 'event-log.txt') -Encoding utf8
 
-      # The same folder as the linux job, plus event-log.txt.
+      # The same folder as the linux job, plus event-log.txt. One artifact per shard.
       - name: Upload failure artifacts
         if: failure() || cancelled()
         uses: actions/upload-artifact@v7
         with:
-          name: watcher-e2e-windows-artifacts
+          name: watcher-e2e-windows-${{ matrix.shard }}-artifacts
           path: ${{ runner.temp }}/e2e-artifacts
           if-no-files-found: ignore
           retention-days: 14
