@@ -15,8 +15,9 @@ TRANSITIONS: tuple[Transition, ...] = (
     covered(
         MACHINE,
         "init.prompts->config_saved",
-        "The real `init --show-key` wizard registers the watcher, saves config.yaml and the "
-        "API key file, and pushes the config to the server.",
+        "The real `init --show-key` wizard registers the watcher (a `registered` watcher "
+        "bound to the key's token, with its hostname), saves config.yaml and the API key "
+        "file, and pushes the config to the server.",
     ),
     covered(
         MACHINE,
@@ -46,7 +47,8 @@ TRANSITIONS: tuple[Transition, ...] = (
         MACHINE,
         "init.instrument_taken->refused",
         "`init` for an instrument that already has an active watcher fails with the "
-        "existing watcher's id and the deregister hint, and saves no config.",
+        "existing watcher's id and the deregister hint, and saves no config. (This is "
+        "`registration.live_watcher->refused` seen from the PC: one test shows both.)",
     ),
     covered(
         MACHINE,
@@ -64,7 +66,10 @@ TRANSITIONS: tuple[Transition, ...] = (
         MACHINE,
         "startup.dry_run->validated",
         "`watch --dry-run` validates the config, checks the API and the instrument, lists "
-        "what it would scan, and exits 0 without starting any loop or sending a heartbeat.",
+        "what it would scan, and exits 0 without starting any loop or sending a heartbeat, "
+        "an event or a run. It does change one thing on the server: when the server's copy "
+        "of config.yaml differs from the file, it pushes the file, which creates a `pc` "
+        "config revision. With the copy up to date it pushes nothing.",
     ),
     covered(
         MACHINE,
@@ -76,7 +81,9 @@ TRANSITIONS: tuple[Transition, ...] = (
         MACHINE,
         "startup.watcher_id_missing->refused",
         "A config with no watcher id for its environment makes `watch` exit and say to run "
-        "`init` first.",
+        "`init` first, without a heartbeat, an event, a config push or a run. (It may have "
+        "asked the server about the instrument: the Windows service does that before it "
+        "checks for the id.)",
     ),
     covered(
         MACHINE,

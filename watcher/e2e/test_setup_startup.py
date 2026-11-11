@@ -9,9 +9,11 @@ file can run against the Windows service driver.
 
 from __future__ import annotations
 import hashlib
+import re
 import shutil
 import uuid
 from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -29,6 +31,14 @@ pytestmark = pytest.mark.e2e
 
 # A key that looks right and that the server does not know.
 UNKNOWN_KEY = "dhub_" + "0" * 40
+
+# How long the watcher's state database waits for a lock before it gives up (`PRAGMA
+# busy_timeout=5000` in state.py). A start that fails because the database is locked spends this
+# long on each attempt.
+STATE_DB_BUSY_TIMEOUT_SECONDS = 5.0
+
+_LOG_TIME = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}) ")
+_START_FAILED = re.compile(r"[Cc]ould not start watching.*trying again in (\d+)s")
 
 
 # ---------------------------------------------------------------------------
@@ -69,6 +79,21 @@ def reporting_requests(proxy: FaultProxy) -> list[str]:
     ]
 
 
+def config_pushes(proxy: FaultProxy, watcher_id: str) -> int:
+    """How many times the watcher pushed config.yaml (``PUT /watchers/<id>/config``)."""
+    return sum(
+        1
+        for r in proxy.requests
+        if r.method == "PUT" and r.path.split("?", 1)[0].endswith(f"/watchers/{watcher_id}/config")
+    )
+
+
+def requests_about_the_watcher(proxy: FaultProxy) -> list[str]:
+    """``METHOD path`` of every request that is about a watcher: heartbeats, events, config,
+    queue polls. A start that is refused before it begins reports to none of them."""
+    return [f"{r.method} {r.path}" for r in proxy.requests if "/watchers/" in r.path]
+
+
 def refused_start(pc: WatcherDriver) -> str:
     """Start the watcher, which must exit with an error, and return everything it printed."""
     pc.start()
@@ -97,15 +122,29 @@ def count_events(
     return len(server.events(watcher_id, event_type=event_type, kind=kind))
 
 
+def failed_start_attempts(pc: WatcherDriver) -> list[tuple[float, int]]:
+    """``(time, delay)`` of each failed attempt to start watching, from the log: when it was
+    logged (seconds since the epoch) and the number of seconds the line says it waits."""
+    attempts: list[tuple[float, int]] = []
+    for line in pc.log_text().splitlines():
+        stamp = _LOG_TIME.match(line)
+        failure = _START_FAILED.search(line)
+        if stamp and failure:
+            logged = datetime.strptime(stamp.group(1), "%Y-%m-%d %H:%M:%S,%f").timestamp()
+            attempts.append((logged, int(failure.group(1))))
+    return attempts
+
+
 # ---------------------------------------------------------------------------
 # init
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.covers("init.prompts->config_saved")
+@pytest.mark.covers("init.prompts->config_saved", "watcher.none->registered")
 def test_init_registers_the_watcher_and_saves_what_was_typed(
     watcher: WatcherFactory,
     server: ServerView,
+    admin: Admin,
     proxy: FaultProxy,
     watch_dir: Path,
     watcher_token: str,
@@ -145,9 +184,14 @@ def test_init_registers_the_watcher_and_saves_what_was_typed(
     # file as it is on disk.
     registered = server.watcher(pc.watcher_id)
     assert registered.instrument_id == instrument_id
-    assert (registered.status, registered.last_heartbeat_at) == ("registered", None)
-    assert registered.registered_by_token is not None
+    assert (registered.status, registered.last_heartbeat_at, registered.deleted_at) == (
+        "registered",
+        None,
+        None,
+    )
+    assert registered.registered_by_token == admin.token_id(watcher_token)
     assert registered.hostname
+    assert server.effective_status(pc.watcher_id) == "registered"
     assert registered.config_yaml == pc.config_path.read_text()
     digest = hashlib.sha256(pc.config_path.read_bytes()).hexdigest()
     assert registered.config_checksum == f"sha256:{digest}"
@@ -246,27 +290,6 @@ def test_init_can_register_a_new_instrument_for_the_watcher(
     assert "still pending activation" in refused_start(pc)
 
 
-@pytest.mark.covers("init.instrument_taken->refused")
-def test_init_for_an_instrument_that_has_a_watcher_names_it(
-    watcher: WatcherFactory,
-    server: ServerView,
-    proxy: FaultProxy,
-    watch_dir: Path,
-    watcher_token: str,
-) -> None:
-    existing = watcher()
-    new_pc = watcher(configure=False)
-
-    result = new_pc.init_interactive(wizard_answers(new_pc, proxy, watch_dir, watcher_token))
-
-    assert result.returncode != 0
-    assert "already has an active watcher" in result.output
-    assert existing.watcher_id in result.output
-    assert "deregister" in result.output.lower()
-    assert not new_pc.config_path.exists()
-    assert watcher_count(server) == 1
-
-
 @pytest.mark.covers("init.missing_watch_directory->refused")
 def test_init_refuses_a_watch_directory_that_does_not_exist(
     watcher: WatcherFactory,
@@ -325,6 +348,7 @@ def test_start_syncs_the_config_and_reports_watching(
 def test_dry_run_checks_everything_and_starts_nothing(
     watcher: WatcherFactory,
     server: ServerView,
+    admin: Admin,
     proxy: FaultProxy,
     watch_dir: Path,
     instrument_id: str,
@@ -358,6 +382,22 @@ def test_dry_run_checks_everything_and_starts_nothing(
     assert server.runs(instrument_id) == []
     assert not pc.state_db_path().exists()
     assert not pc.is_running()
+
+    # What it does change on the server: it pushes config.yaml when the server's copy differs
+    # (the registration left it empty), which makes the first `pc` revision.
+    assert "Syncing config to Data Hub" in result.stdout
+    assert config_pushes(proxy, pc.watcher_id) == 1
+    assert row.config_yaml == pc.config_path.read_text(encoding="utf-8")
+    [revision] = admin.config_revisions(pc.watcher_id)
+    assert (revision["revision"], revision["source"]) == (1, "pc")
+
+    # With the server's copy up to date, a second dry run pushes nothing.
+    proxy.clear_log()
+    again = pc.run_cli("watch", "--dry-run")
+    assert again.returncode == 0, again.output
+    assert "Syncing config to Data Hub" not in again.stdout
+    assert config_pushes(proxy, pc.watcher_id) == 0
+    assert len(admin.config_revisions(pc.watcher_id)) == 1
 
 
 @pytest.mark.covers("startup.config_invalid->refused")
@@ -396,7 +436,10 @@ def test_start_without_a_watcher_id_says_to_run_init(
 
     assert "No watcher_id in config" in output
     assert "Run 'data-hub-watcher init' first." in output
-    assert proxy.requests == []
+    # It may ask about the instrument (the Windows service does, before it checks for the id),
+    # but it never reports as a watcher: no heartbeat, no events, no config, no runs.
+    assert requests_about_the_watcher(proxy) == []
+    assert not any("/runs" in r.path for r in proxy.requests)
 
 
 @pytest.mark.covers("startup.api_unreachable->refused")
@@ -615,6 +658,17 @@ def test_a_start_that_keeps_failing_backs_off_and_then_succeeds(
         assert reasons[0].startswith("watch_directory not found")
         assert reasons[1] == row.status_reason
         assert count_events(server, pc.watcher_id, "watcher_started") == 1
+
+        # The waits really grow. An attempt is made once the delay of the one before has passed,
+        # and then spends the database's busy timeout before it fails, so two failures are at
+        # least the delay plus that timeout apart.
+        attempts = failed_start_attempts(pc)
+        assert [delay for _, delay in attempts[:4]] == [1, 2, 4, 8]
+        for (earlier, delay), (later, _) in zip(attempts, attempts[1:], strict=False):
+            gap = later - earlier
+            assert gap >= delay + STATE_DB_BUSY_TIMEOUT_SECONDS - 0.5, (
+                f"the next attempt came {gap:.1f} s after one that waits {delay} s"
+            )
 
     # With the database free again, the next attempt starts watching and says it resumed.
     row = server.wait_for_watcher_status(pc.watcher_id, "watching", timeout=60)

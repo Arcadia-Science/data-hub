@@ -52,8 +52,9 @@ TRANSITIONS: tuple[Transition, ...] = (
         MACHINE,
         "watcher.registered->deregistered",
         "Deregistering soft-deletes the watcher: `GET /watchers/:id` answers 404, its "
-        "heartbeats and events are refused with 404, and its instrument can register a new "
-        "watcher.",
+        "heartbeats and events are refused with 404, and deregistering it again is a "
+        "conflict. (That its instrument can register a new watcher is "
+        "`watcher.deregistered->reregistered_by_init`.)",
     ),
     covered(
         MACHINE,
@@ -78,15 +79,24 @@ TRANSITIONS: tuple[Transition, ...] = (
     xfail_bug(
         MACHINE,
         "watcher.deregistered->process_exits",
-        "A running watcher that finds out it was deregistered stops uploading, logs a clear "
-        "error and exits with a non-zero code, instead of running on with 404s.",
+        "A running watcher that finds out it was deregistered (from the 404 of its heartbeat) "
+        "stops uploading, logs a clear error and stops, instead of running on with 404s. "
+        "(Today it still reports and uploads a new file of a run the server already has: "
+        "only the report of a new run names the watcher, so only that is refused.) "
+        "Under the CLI it exits with a non-zero code. Under the Windows service the intended "
+        "outcome is that it stops and stays stopped: a deregistered watcher can never "
+        "recover, so the SCM's recovery actions, which restart a service that exits with a "
+        "failure, must not keep bringing it back. The shared test checks the stop and the "
+        "uploads, a CLI test the exit code, and the SCM side belongs to "
+        "`test_windows_service.py` in PR 3.",
         "bug-08-deregistered-watcher-keeps-running",
     ),
     xfail_bug(
         MACHINE,
         "startup.deregistered->refused",
         "Starting a watcher whose registration was deleted exits with a clear message that "
-        "says to run `init` again.",
+        "says to run `init` again. (A service start that is refused exits with a failure, and "
+        "the SCM's recovery restarts it twice before it stays down.)",
         "bug-08-deregistered-watcher-keeps-running",
     ),
 )

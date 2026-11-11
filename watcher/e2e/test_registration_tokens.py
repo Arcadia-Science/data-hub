@@ -5,11 +5,15 @@ Each scenario registers a watcher through ``init`` or the API, or runs a real
 token, deregisters a watcher or retires the instrument, or a request arrives with another
 token. The transitions are in ``catalog/registration_tokens.py``.
 
-The two ``xfail`` tests are known bug 08: a watcher whose registration was deleted keeps
-running with 404s, and starting one does not refuse. They assert the intended behavior.
+The ``xfail`` tests at the end are known bug 08: a watcher whose registration was deleted keeps
+running and uploading with 404s, and starting one does not refuse. They assert the intended
+behavior. Under the CLI that is a failure exit. Under the Windows service it is a stop that
+stays stopped (see ``catalog/registration_tokens.py``), so the exit code is checked by a test of
+its own that is marked ``platforms("cli")``.
 """
 
 from __future__ import annotations
+import hashlib
 import re
 from pathlib import Path
 
@@ -30,16 +34,28 @@ pytestmark = pytest.mark.e2e
 # watcher reacts within a few ticks.
 REACTION_SECONDS = 20.0
 
+# How long a watcher that must stop because it was deregistered may take. It learns of it from
+# its next heartbeat, 2 s away.
+EXIT_SECONDS = 10.0
 
-def _post(server: ServerView, path: str, token: str, body: object) -> ApiResult:
-    """``POST`` a watcher route as ``token``, and return the answer whatever it is."""
+
+def _send(server: ServerView, method: str, path: str, token: str, body: object) -> ApiResult:
+    """Call a watcher route as ``token``, and return the answer whatever it is."""
     return call(
         new_session(),
-        "POST",
+        method,
         f"{server.env.base_url}{path}",
         headers={"Authorization": f"Bearer {token}"},
         json=body,
     )
+
+
+def _post(server: ServerView, path: str, token: str, body: object) -> ApiResult:
+    return _send(server, "POST", path, token, body)
+
+
+def _put(server: ServerView, path: str, token: str, body: object) -> ApiResult:
+    return _send(server, "PUT", path, token, body)
 
 
 def _init_answers(
@@ -100,30 +116,7 @@ def _start_with_queued_upload(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.covers("watcher.none->registered")
-def test_init_registers_a_watcher_bound_to_the_key_it_was_given(
-    watcher: WatcherFactory,
-    server: ServerView,
-    admin: Admin,
-    proxy: FaultProxy,
-    watch_dir: Path,
-    watcher_token: str,
-    instrument_id: str,
-) -> None:
-    pc = watcher(configure=False)
-
-    result = pc.init_interactive(_init_answers(pc, proxy, watch_dir, api_key=watcher_token))
-    assert result.returncode == 0, result.output
-
-    row = server.watcher(pc.watcher_id)
-    assert (row.status, row.last_heartbeat_at, row.deleted_at) == ("registered", None, None)
-    assert row.instrument_id == instrument_id
-    assert row.hostname
-    assert row.registered_by_token == admin.token_id(watcher_token)
-    assert server.effective_status(pc.watcher_id) == "registered"
-
-
-@pytest.mark.covers("registration.live_watcher->refused")
+@pytest.mark.covers("registration.live_watcher->refused", "init.instrument_taken->refused")
 def test_a_second_registration_for_an_instrument_with_a_live_watcher_is_refused(
     watcher: WatcherFactory,
     server: ServerView,
@@ -137,9 +130,11 @@ def test_a_second_registration_for_an_instrument_with_a_live_watcher_is_refused(
 
     result = second.init_interactive(_init_answers(second, proxy, watch_dir, api_key=watcher_token))
 
+    # `init` fails, names the watcher that holds the instrument and says how to free it.
     assert result.returncode != 0, result.output
     assert "already has an active watcher" in result.output
     assert first.watcher_id in result.output
+    assert "deregister" in result.output.lower()
     # The refused PC writes no config, and the instrument still has only the first watcher.
     assert not second.config_path.exists()
     live = server.query(
@@ -147,6 +142,18 @@ def test_a_second_registration_for_an_instrument_with_a_live_watcher_is_refused(
         (instrument_id,),
     )
     assert live == [(first.watcher_id,)]
+
+    # The route `init` calls says so with a 409 that names the existing watcher.
+    refused = _post(
+        server,
+        "/api/v1/watchers/register",
+        watcher_token,
+        {"instrument_id": instrument_id, "hostname": "another-pc"},
+    )
+    assert refused.status_code == 409, refused
+    assert refused.error_code == "CONFLICT"
+    assert refused.body["error"]["details"]["existing_watcher_id"] == first.watcher_id
+    assert server.query("SELECT count(*) FROM watchers") == [(1,)]
 
 
 # ---------------------------------------------------------------------------
@@ -247,8 +254,12 @@ def test_a_token_not_bound_to_the_watcher_gets_403_on_every_watcher_call(
     pc = watcher()
     other = admin.new_token()
     base = f"/api/v1/watchers/{pc.watcher_id}"
+    pushed_config = pc.config_path.read_text(encoding="utf-8")
+    pushed_checksum = "sha256:" + hashlib.sha256(pushed_config.encode()).hexdigest()
 
-    # Some of the routes the watcher calls, each of which checks the binding.
+    # Every route the watcher calls for itself checks the binding. The two that write its config
+    # matter most: a copied key must not be able to change what an admin sees, or answer for a
+    # revision.
     refused = {
         "GET upload-queue": server.get(f"{base}/upload-queue", token=other),
         "GET config-checksum": server.get(f"{base}/config-checksum", token=other),
@@ -256,13 +267,25 @@ def test_a_token_not_bound_to_the_watcher_gets_403_on_every_watcher_call(
         "GET update-check": server.get(f"{base}/update-check", token=other),
         "POST heartbeat": _post(server, f"{base}/heartbeat", other, {"status": "watching"}),
         "POST events": _post(server, f"{base}/events", other, {"events": []}),
+        "PUT config": _put(
+            server,
+            f"{base}/config",
+            other,
+            {"config_yaml": pushed_config, "config_checksum": pushed_checksum},
+        ),
+        "POST config-revisions/1/result": _post(
+            server, f"{base}/config-revisions/1/result", other, {"status": "applied"}
+        ),
     }
     assert {name: r.status_code for name, r in refused.items()} == {name: 403 for name in refused}
 
-    # The refused calls changed nothing, and the bound token still works.
+    # The refused calls changed nothing (the pushed file was not stored), and the bound token
+    # still works.
     assert server.get(f"{base}/upload-queue", token=watcher_token).status_code == 200
     row = server.watcher(pc.watcher_id)
     assert (row.status, row.last_heartbeat_at) == ("registered", None)
+    assert (row.config_yaml, row.config_checksum) == (None, None)
+    assert admin.config_revisions(pc.watcher_id) == []
     assert row.registered_by_token == admin.token_id(watcher_token)
 
 
@@ -398,10 +421,67 @@ def test_init_after_deregistration_registers_a_new_watcher_and_keeps_the_upload_
     raises=KnownBugStillPresent,
     reason=(
         "bug-08-deregistered-watcher-keeps-running: a running watcher that is deregistered "
-        "keeps running with 404s instead of stopping with an error"
+        "keeps uploading and running with 404s instead of stopping with an error"
     ),
 )
-def test_a_running_watcher_exits_with_an_error_once_it_is_deregistered(
+def test_a_running_watcher_stops_uploading_and_stops_once_it_is_deregistered(
+    watcher: WatcherFactory,
+    server: ServerView,
+    admin: Admin,
+    proxy: FaultProxy,
+    watch_dir: Path,
+    instrument_id: str,
+) -> None:
+    # A long stability period, so that a file written after the watcher has been told is not
+    # stable yet when a watcher that stops on the news has stopped.
+    pc = watcher(stability_period_seconds=4)
+    pc.start()
+    server.wait_for_watcher_status(pc.watcher_id, "watching")
+    # The run is known to the server before the watcher is deregistered. The server refuses a
+    # new run from a watcher that is gone, but not an update to a run it already has, and an
+    # upload URL doesn't ask for the watcher at all.
+    write_file(watch_dir / "RUN001" / "before.csv", SMALL)
+    server.wait_for_uploaded(instrument_id, "RUN001", "RUN001/before.csv")
+
+    admin.deregister_watcher(pc.watcher_id).raise_for_status()
+    # The watcher is told by the 404 of its next heartbeat.
+    proxy.wait_for_request(
+        lambda r: r.method == "POST" and r.path.endswith("/heartbeat") and r.upstream_status == 404,
+        timeout=REACTION_SECONDS,
+    )
+    write_file(watch_dir / "RUN001" / "after.csv", SMALL)
+
+    with known_bug():
+        stays_true(
+            lambda: server.file(instrument_id, "RUN001", "RUN001/after.csv") is None,
+            8,
+            lambda: server.dump(pc.watcher_id, instrument_id),
+            what="no report or upload after the watcher was told it is deregistered",
+        )
+        wait_until(
+            lambda: not pc.is_running(),
+            EXIT_SECONDS,
+            pc.log_tail,
+            what="the deregistered watcher to stop",
+        )
+        assert re.search(r"(?i)deregister", pc.log_text()), "no log line says it was deregistered"
+
+
+# Under the service the intended outcome is not a failure exit: a deregistered watcher can never
+# recover, so the service must stop and stay stopped, and the SCM's recovery actions (which
+# restart a service that exits with a failure) must not bring it back every minute. The
+# service-side check belongs to test_windows_service.py (PR 3).
+@pytest.mark.platforms("cli")
+@pytest.mark.covers("watcher.deregistered->process_exits")
+@pytest.mark.xfail(
+    strict=True,
+    raises=KnownBugStillPresent,
+    reason=(
+        "bug-08-deregistered-watcher-keeps-running: a running watcher that is deregistered "
+        "keeps running with 404s instead of exiting with a failure code"
+    ),
+)
+def test_a_deregistered_watcher_exits_with_a_failure_code(
     watcher: WatcherFactory, server: ServerView, admin: Admin
 ) -> None:
     pc = watcher()
@@ -413,12 +493,11 @@ def test_a_running_watcher_exits_with_an_error_once_it_is_deregistered(
     with known_bug():
         wait_until(
             lambda: not pc.is_running(),
-            REACTION_SECONDS,
+            EXIT_SECONDS,
             pc.log_tail,
             what="the deregistered watcher to exit",
         )
         assert pc.exit_code not in (None, 0), f"the watcher exited with {pc.exit_code}"
-        assert re.search(r"(?i)deregister", pc.log_text()), "no log line says it was deregistered"
 
 
 @pytest.mark.covers("startup.deregistered->refused")
