@@ -15,12 +15,18 @@ Two behaviours are exercised here:
    full ``interval`` of silence — and, in particular, before the
    ``FileMonitor.start()`` call that runs the (potentially multi-minute)
    initial directory scan on the same thread.
+
+3. The stop path: ``stop()`` must wait for a tick that is still running
+   before it sends the final ``stopped`` heartbeat, however short the
+   heartbeat interval is.
 """
 
 from __future__ import annotations
 import threading
 import time
 from unittest.mock import MagicMock
+
+import pytest
 
 from data_hub_watcher.api_client import ApiError
 from data_hub_watcher.events import EventReporter
@@ -217,3 +223,42 @@ class TestHeartbeatStartupBeat:
             )
         finally:
             self._stop(loop)
+
+
+class TestHeartbeatStop:
+    """``stop()`` joins the loop thread before it sends ``status=stopped``.
+
+    One tick is a heartbeat request (which can run for tens of seconds), an
+    event flush and an update check. If ``stop()`` gave up on the thread early,
+    that tick's ``watching`` heartbeat could land after the ``stopped`` one and
+    the server would end on ``watching``. A test can shorten the interval to a
+    second, so the wait must not be derived from the interval alone.
+    """
+
+    @pytest.mark.parametrize(
+        ("interval", "expected_wait"),
+        [
+            pytest.param(1, 65, id="short-override-keeps-the-production-wait"),
+            pytest.param(60, 65, id="production-interval"),
+            pytest.param(600, 605, id="longer-interval-waits-longer"),
+        ],
+    )
+    def test_waits_for_a_tick_in_progress(self, interval: int, expected_wait: int) -> None:
+        client = MagicMock()
+        reporter = MagicMock(spec=EventReporter)
+        loop = HeartbeatLoop(
+            client=client,
+            watcher_id="w-test",
+            interval_seconds=interval,
+            event_reporter=reporter,
+            instrument_id="inst-1",
+            watch_directory="/tmp/watch",
+            upload_mode="auto",
+        )
+        thread = MagicMock(spec=threading.Thread)
+        thread.is_alive.return_value = True
+        loop._thread = thread
+
+        loop.stop()
+
+        thread.join.assert_called_once_with(timeout=expected_wait)
