@@ -16,8 +16,12 @@ import stat
 import subprocess
 import sys
 import textwrap
+import threading
 import time
+import urllib.error
+import urllib.request
 from collections.abc import Iterator
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -25,6 +29,7 @@ from typing import Any
 import pytest
 from click.testing import CliRunner
 
+from data_hub_shared.testing_proxy import FaultProxy
 from data_hub_watcher import cli as cli_module
 from data_hub_watcher.config_io import load_config
 from data_hub_watcher.models import InstrumentResponse, RegisterWatcherResponse
@@ -39,6 +44,7 @@ from e2e_support.drivers import (
     active_driver_kind,
     clean_environment,
     driver_class_for,
+    install_watcher_tool,
 )
 from e2e_support.factory import WatcherFactory
 from e2e_support.files import (
@@ -51,6 +57,7 @@ from e2e_support.files import (
     write_run,
 )
 from e2e_support.platforms import platforms_skip_reason
+from e2e_support.proxy_helpers import silence_heartbeats
 from e2e_support.server import FileRow, ServerView
 from e2e_support.waiting import (
     KnownBugStillPresent,
@@ -1067,6 +1074,24 @@ class TestCliDriver:
         fake_driver.state_execute("INSERT INTO pending_uploads VALUES ('x')")
         assert fake_driver.state_query("SELECT count(*) FROM pending_uploads") == [(1,)]
 
+    def test_a_failed_insert_does_not_leave_the_watchers_connection_holding_the_lock(
+        self, fake_driver: CliDriver
+    ) -> None:
+        make_state_db(fake_driver)
+        # The watcher's connection opens a transaction itself before an insert, and a statement
+        # that only aborted would leave it open.
+        watcher_side = sqlite3.connect(fake_driver.state_db_path())
+
+        with fake_driver.fail_writes("pending_uploads"):
+            with pytest.raises(sqlite3.IntegrityError, match="injected"):
+                watcher_side.executemany("INSERT INTO pending_uploads VALUES (?)", [("x",)])
+            assert not watcher_side.in_transaction
+            # Another writer is not kept waiting by it, and dropping the trigger works at once.
+            fake_driver.state_execute("INSERT INTO meta VALUES ('k', 'v')")
+
+        assert triggers(fake_driver) == []
+        watcher_side.close()
+
     def test_a_trigger_helper_takes_plain_table_names_only(self, fake_driver: CliDriver) -> None:
         make_state_db(fake_driver)
 
@@ -1178,6 +1203,223 @@ def test_lock_state_db_blocks_writers_until_the_block_ends(
 
     with sqlite3.connect(fake_driver.state_db_path(), timeout=1) as after:
         after.execute("INSERT INTO meta VALUES ('a', 'b')")
+
+
+def _hold_the_write_lock(
+    driver: CliDriver, *, start_after: float, seconds: float
+) -> threading.Thread:
+    """Take the state database's write lock after ``start_after`` seconds and keep it for
+    ``seconds``, from a thread, as a watcher stuck inside a write would."""
+
+    def hold() -> None:
+        time.sleep(start_after)
+        with driver.lock_state_db():
+            time.sleep(seconds)
+
+    thread = threading.Thread(target=hold, daemon=True)
+    thread.start()
+    return thread
+
+
+@posix_only
+class TestWaitForStateDbBusy:
+    def make(self, fake_driver: CliDriver) -> CliDriver:
+        make_state_db(fake_driver)
+        return fake_driver
+
+    def test_it_returns_once_the_lock_has_been_held_for_the_whole_time(
+        self, fake_driver: CliDriver
+    ) -> None:
+        driver = self.make(fake_driver)
+        holder = _hold_the_write_lock(driver, start_after=0.3, seconds=3)
+        started = time.monotonic()
+
+        driver.wait_for_state_db_busy(hold_seconds=1.0, timeout=10)
+
+        # The lock was taken at about 0.3 s, so a hold of one second is seen at about 1.3 s,
+        # while it is still held.
+        assert 1.0 <= time.monotonic() - started < 2.8
+        holder.join(10)
+
+    def test_a_lock_that_is_let_go_of_early_does_not_count(self, fake_driver: CliDriver) -> None:
+        driver = self.make(fake_driver)
+        holder = _hold_the_write_lock(driver, start_after=0.1, seconds=0.4)
+
+        with pytest.raises(WaitTimeout, match="hold the write lock of its state database"):
+            driver.wait_for_state_db_busy(hold_seconds=1.5, timeout=2.5)
+
+        holder.join(10)
+
+    def test_a_free_database_is_never_busy_and_the_probe_leaves_it_writable(
+        self, fake_driver: CliDriver
+    ) -> None:
+        driver = self.make(fake_driver)
+
+        with pytest.raises(WaitTimeout, match="never|hold the write lock"):
+            driver.wait_for_state_db_busy(hold_seconds=0.3, timeout=0.5)
+
+        driver.state_execute("INSERT INTO pending_uploads VALUES ('after')")
+
+    def test_a_database_that_does_not_exist_yet_is_waited_for(self, fake_driver: CliDriver) -> None:
+        with pytest.raises(WaitTimeout, match="hold the write lock of its state database"):
+            fake_driver.wait_for_state_db_busy(hold_seconds=0.1, timeout=0.3)
+
+
+class TestSilenceHeartbeats:
+    @contextlib.contextmanager
+    def upstream_and_proxy(self) -> Iterator[tuple[FaultProxy, list[str]]]:
+        """A server that records the paths it gets, and a fault proxy in front of it."""
+        reached: list[str] = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self) -> None:
+                reached.append(self.path)
+                self.rfile.read(int(self.headers.get("Content-Length", 0)))
+                self.send_response(200)
+                self.send_header("Content-Length", "2")
+                self.end_headers()
+                self.wfile.write(b"{}")
+
+            def log_message(self, format: str, *args: object) -> None:
+                pass
+
+        upstream = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=upstream.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with FaultProxy(f"http://127.0.0.1:{upstream.server_address[1]}") as proxy:
+                yield proxy, reached
+        finally:
+            upstream.shutdown()
+            upstream.server_close()
+
+    @staticmethod
+    def beat(proxy: FaultProxy, watcher: str) -> int:
+        request = urllib.request.Request(
+            f"{proxy.base_url}/api/v1/watchers/{watcher}/heartbeat", data=b"{}", method="POST"
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=5) as response:
+                return response.status
+        except urllib.error.HTTPError as exc:
+            return exc.code
+
+    def test_it_returns_after_a_refusal_and_nothing_gets_through_after_it(self) -> None:
+        with self.upstream_and_proxy() as (proxy, reached):
+            stop = threading.Event()
+
+            def heartbeats() -> None:
+                while not stop.wait(0.1):
+                    self.beat(proxy, "w1")
+
+            sender = threading.Thread(target=heartbeats, daemon=True)
+            sender.start()
+            wait_until(lambda: reached, 5, what="a heartbeat to get through")
+
+            rule = silence_heartbeats(proxy, "w1", timeout=5)
+
+            # Every heartbeat that was sent has been answered, and they stop reaching the server.
+            gone_through = len(reached)
+            seen = len(proxy.requests)
+            wait_until(lambda: len(proxy.requests) >= seen + 3, 5, what="three more heartbeats")
+            assert len(reached) == gone_through
+            stop.set()
+            sender.join(5)
+            proxy.remove_fault(rule)
+            assert self.beat(proxy, "w1") == 200
+
+    def test_the_other_watchers_are_left_alone_when_one_is_named(self) -> None:
+        with self.upstream_and_proxy() as (proxy, reached):
+            waiter = threading.Thread(
+                target=lambda: silence_heartbeats(proxy, "w1", timeout=5), daemon=True
+            )
+            waiter.start()
+
+            # `w1` heartbeats until the helper's fault is in place and refuses one.
+            wait_until(
+                lambda: self.beat(proxy, "w1") == 503, 5, what="a heartbeat of w1 to be refused"
+            )
+            waiter.join(5)
+            assert not waiter.is_alive()
+            # `w2` is not affected.
+            assert self.beat(proxy, "w2") == 200
+            assert reached[-1] == "/api/v1/watchers/w2/heartbeat"
+
+    def test_an_earlier_refusal_does_not_count(self) -> None:
+        with self.upstream_and_proxy() as (proxy, _):
+            with proxy.fault("status", path=r"/heartbeat$", status=503):
+                assert self.beat(proxy, "w1") == 503
+
+            with pytest.raises(TimeoutError):
+                silence_heartbeats(proxy, "w1", timeout=0.5)
+
+
+class TestInstallWheel:
+    def test_a_reinstall_is_asked_for_only_when_wanted(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        commands: list[list[str]] = []
+        root = tmp_path / "install"
+
+        def fake_run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+            commands.append(command)
+            executable = ToolInstall(root).executable
+            executable.parent.mkdir(parents=True, exist_ok=True)
+            executable.touch()
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        monkeypatch.setattr(drivers.subprocess, "run", fake_run)
+        monkeypatch.setattr(drivers, "uv_executable", lambda: "uv")
+        monkeypatch.setattr(drivers, "uv_environment", lambda: {})
+        wheel = tmp_path / "data_hub_watcher-1.0.0-py3-none-any.whl"
+
+        install_watcher_tool(root, wheel)
+        install_watcher_tool(root, wheel, reinstall=True)
+
+        assert commands[0] == ["uv", "tool", "install", "--python", "3.12", str(wheel)]
+        assert commands[1] == [
+            "uv",
+            "tool",
+            "install",
+            "--python",
+            "3.12",
+            "--reinstall",
+            str(wheel),
+        ]
+
+    def test_the_shared_install_is_never_changed(self, tmp_path: Path) -> None:
+        driver = make_driver(tmp_path)
+
+        with pytest.raises(RuntimeError, match="own_install=True"):
+            driver.install_wheel(tmp_path / "x.whl")
+
+    def test_a_running_watcher_is_never_reinstalled_under(
+        self, fake_driver: CliDriver, tmp_path: Path
+    ) -> None:
+        fake_driver.owns_install = True
+        fake_driver.start()
+
+        with pytest.raises(RuntimeError, match="Stop the watcher"):
+            fake_driver.install_wheel(tmp_path / "x.whl")
+
+    def test_the_wheel_is_reinstalled_into_the_pcs_own_install(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        driver = make_driver(tmp_path)
+        driver.owns_install = True
+        calls: list[tuple[Path, Path, str, bool]] = []
+
+        def fake_install(
+            root: Path, wheel: Path, *, python: str = "3.12", reinstall: bool = False, **_: Any
+        ) -> ToolInstall:
+            calls.append((root, wheel, python, reinstall))
+            return ToolInstall(root)
+
+        monkeypatch.setattr(drivers, "install_watcher_tool", fake_install)
+
+        driver.install_wheel(tmp_path / "old.whl")
+
+        assert calls == [(tmp_path / "install", tmp_path / "old.whl", "3.12", True)]
 
 
 # ---------------------------------------------------------------------------
@@ -1312,6 +1554,27 @@ class TestWaitForUploaded:
 
         with pytest.raises(WaitTimeout, match="the stand-in to hold inst/RUN/empty.csv"):
             view.wait_for_uploaded("inst", "RUN", "RUN/empty.csv", timeout=0.3)
+
+
+class TestListWatchers:
+    def view(self, paths: list[str]) -> ServerView:
+        view = ServerView(env=SimpleNamespace())  # type: ignore[arg-type]
+
+        def get(path: str, *, token: str | None = None) -> SimpleNamespace:
+            paths.append(path)
+            return SimpleNamespace(raise_for_status=lambda: None, body={"data": [{"id": "w1"}]})
+
+        view.get = get  # type: ignore[method-assign]
+        return view
+
+    def test_the_filters_become_the_query_of_the_list_route(self) -> None:
+        paths: list[str] = []
+        view = self.view(paths)
+
+        assert view.list_watchers() == [{"id": "w1"}]
+        view.list_watchers(status="stale", instrument_id="inst one")
+
+        assert paths == ["/api/v1/watchers", "/api/v1/watchers?status=stale&instrument_id=inst+one"]
 
 
 # ---------------------------------------------------------------------------

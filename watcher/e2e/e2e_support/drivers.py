@@ -44,6 +44,9 @@ Driver method               Windows service
 ``pid``                     the pid ``service status`` reports, ``None`` unless running
 ``exit_code``               the win32 exit code of the last run, ``None`` while it runs
 ``installed_version``       ``data-hub-watcher --version`` of the machine's uv-tool install
+``install_wheel``           ``uv tool install --reinstall <wheel>`` into the machine's
+                            uv-tool install, with the service stopped (see "install_wheel"
+                            below)
 ``hide_uv``                 see "hide_uv" below
 ``log_files``               ``C:\\ProgramData\\DataHubWatcher\\watcher.log``,
                             ``service-bootstrap.log`` and ``upgrade-worker.log``
@@ -113,6 +116,16 @@ failed or killed service after 60 s and then 120 s.
   the install prefix and from ``USERPROFILE`` does not exist (a per-test profile has none; if
   the standalone installer put one in the profile the tool was installed from, move it away
   for the test and put it back in a ``finally``).
+* **install_wheel.** The shared scenarios call it, on a PC with an install of its own, to put
+  another version in place of the one that runs, as an operator reinstalling by hand would, so
+  that the next start runs that version (the scenario of an update that did not take effect).
+  Under the service it is ``uv tool install --reinstall <wheel>`` against the machine's
+  uv-tool install, run while the service is stopped, which the scenario guarantees (it calls it
+  between a stop and the next start). The upgrade worker does the install itself, so a scenario
+  can't slip a reinstall in between the worker's install and its restart: the scenario that
+  needs that moment is ``platforms("cli")``.
+* **wait_for_state_db_busy** and the state database. The method is shared and needs no
+  override: it uses :meth:`state_db_path` and opens the database the way ``state_query`` does.
 * **kill() and the recovery actions.** ``taskkill /F`` is a crash for the SCM, so with the
   failure actions on the service comes back by itself after 60 s. With them off (note above)
   it stays down, ``wait_exit`` returns the win32 exit code of the killed process, and
@@ -140,6 +153,7 @@ import signal
 import sqlite3
 import subprocess
 import sys
+import time
 from abc import ABC, abstractmethod
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
@@ -347,19 +361,29 @@ class ToolInstall:
 
 
 def install_watcher_tool(
-    root: Path, wheel: Path, *, python: str = DEFAULT_PYTHON, extras: Sequence[str] = ()
+    root: Path,
+    wheel: Path,
+    *,
+    python: str = DEFAULT_PYTHON,
+    extras: Sequence[str] = (),
+    reinstall: bool = False,
 ) -> ToolInstall:
     """Install ``wheel`` with ``uv tool install`` under ``root`` and return the install.
 
     ``python`` is the interpreter the tool runs on. Dependencies come from PyPI, through
-    uv's cache, so the first install of a session needs the network.
+    uv's cache, so the first install of a session needs the network. With ``reinstall``, an
+    install that is already under ``root`` is replaced by ``wheel`` whatever versions are
+    involved, which is how a version goes down as well as up.
     """
     install = ToolInstall(root=Path(root), python=python)
     install.root.mkdir(parents=True, exist_ok=True)
     spec = str(wheel)
     if extras:
         spec = f"data-hub-watcher[{','.join(extras)}] @ {Path(wheel).resolve().as_uri()}"
-    command = [uv_executable(), "tool", "install", "--python", python, spec]
+    command = [uv_executable(), "tool", "install", "--python", python]
+    if reinstall:
+        command.append("--reinstall")
+    command.append(spec)
     result = subprocess.run(
         command,
         cwd=install.root,
@@ -695,6 +719,20 @@ class WatcherDriver(ABC):
         prints it. After an update it is the new version, before the watcher restarts."""
 
     @abstractmethod
+    def install_wheel(self, wheel: Path) -> None:
+        """Replace the watcher installed for this PC with the one in ``wheel`` (any version,
+        older or newer), the way an operator reinstalling by hand would, without going through
+        the watcher. The next start runs that version.
+
+        Call it while the watcher is not running, on a PC that has an install of its own
+        (``watcher(own_install=True)``): the shared install belongs to every test, so a driver
+        refuses to change it. A scenario about an update that did not take effect uses it to put
+        the old version back after the update installed the new one.
+
+        CLI: ``uv tool install --reinstall <wheel>`` into the PC's own tool directory. Service:
+        see "install_wheel" in the module docstring."""
+
+    @abstractmethod
     def hide_uv(self) -> None:
         """Make the watcher unable to find ``uv``, so an update fails before it starts (the
         ``uv executable not found`` case). Call it before :meth:`start`.
@@ -850,6 +888,48 @@ class WatcherDriver(ABC):
         with contextlib.closing(self._state_connection()) as conn:
             conn.execute(sql, tuple(params))
 
+    def wait_for_state_db_busy(self, hold_seconds: float = 1.0, timeout: float = 30.0) -> None:
+        """Wait until another process has held the state database's write lock for
+        ``hold_seconds`` without a break, which is a watcher stuck inside a write.
+
+        It tries to take the lock (``BEGIN IMMEDIATE`` with no wait) every 50 ms. A try that
+        works means the lock was free, so the count starts again; a try that finds it taken
+        is one more moment of the hold. The watcher's own writes take milliseconds, so a lock
+        held for a second is a write that is not going to finish: the one ``stall_writes``
+        sets up, which a scenario can then end with ``kill()``. Waiting for it, and not for a
+        row in the database, keeps the scenario from depending on which statements of the
+        watcher share a transaction. Raises ``WaitTimeout`` if the lock is never held that
+        long.
+        """
+        path = self.state_db_path()
+        held_since: list[float | None] = [None]
+
+        def held() -> bool | None:
+            if not path.exists():
+                return None
+            with contextlib.closing(sqlite3.connect(path, timeout=0, isolation_level=None)) as conn:
+                try:
+                    conn.execute("BEGIN IMMEDIATE")
+                except sqlite3.OperationalError as exc:
+                    if "locked" not in str(exc) and "busy" not in str(exc):
+                        held_since[0] = None
+                        raise
+                    now = time.monotonic()
+                    if held_since[0] is None:
+                        held_since[0] = now
+                    return now - held_since[0] >= hold_seconds
+                conn.execute("ROLLBACK")
+            held_since[0] = None
+            return None
+
+        wait_until(
+            held,
+            timeout,
+            lambda: f"state database: {path}\n{self.log_tail()}",
+            what=f"the watcher to hold the write lock of its state database for {hold_seconds:g} s",
+            interval=0.05,
+        )
+
     @contextlib.contextmanager
     def lock_state_db(self) -> Iterator[None]:
         """Hold a write lock on the watcher's state database for the length of a ``with`` block.
@@ -919,13 +999,16 @@ class WatcherDriver(ABC):
     @contextlib.contextmanager
     def fail_writes(self, table: str, message: str = "injected") -> Iterator[None]:
         """Make every insert into ``table`` of the watcher's state database fail, for the
-        length of a ``with`` block: the statement aborts with ``message`` (the watcher sees an
-        ``sqlite3.IntegrityError``).
+        length of a ``with`` block: the statement fails with ``message`` (the watcher sees an
+        ``sqlite3.IntegrityError``) and its transaction is rolled back, as a write that fails
+        for a real reason such as a full disk is. That is on purpose: a statement that merely
+        aborted would leave the watcher's connection in an open transaction that holds the write
+        lock, and the trigger could not be dropped until that connection committed.
 
         The trigger is always dropped when the block ends.
         """
         escaped = message.replace("'", "''")
-        name = self._install_insert_trigger("fail", table, f"SELECT RAISE(ABORT, '{escaped}')")
+        name = self._install_insert_trigger("fail", table, f"SELECT RAISE(ROLLBACK, '{escaped}')")
         try:
             yield
         finally:
@@ -1037,6 +1120,7 @@ class CliDriver(WatcherDriver):
         api_key: str,
         watcher_id: str | None = None,
         extra_environment: Mapping[str, str] | None = None,
+        owns_install: bool = False,
     ) -> None:
         super().__init__(
             instrument_id=instrument_id,
@@ -1048,6 +1132,9 @@ class CliDriver(WatcherDriver):
         )
         self.home = home
         self.tool_install = tool_install
+        # Whether the install is this PC's alone (the factory's `own_install=True`). The
+        # shared one belongs to every test, so `install_wheel` refuses to change it.
+        self.owns_install = owns_install
         self.extra_environment = dict(extra_environment or {})
         self._process: subprocess.Popen[bytes] | None = None
         self._run_count = 0
@@ -1131,6 +1218,18 @@ class CliDriver(WatcherDriver):
 
     def installed_version(self) -> str:
         return self.tool_install.version()
+
+    def install_wheel(self, wheel: Path) -> None:
+        if not self.owns_install:
+            raise RuntimeError(
+                "install_wheel changes the install of this PC, which is the one every test "
+                "shares: ask the factory for `own_install=True`"
+            )
+        if self.is_running():
+            raise RuntimeError("Stop the watcher before its install is replaced")
+        install_watcher_tool(
+            self.tool_install.root, wheel, python=self.tool_install.python, reinstall=True
+        )
 
     def hide_uv(self) -> None:
         # `uv` is looked for on the PATH, and in a few places under the home folder, which is

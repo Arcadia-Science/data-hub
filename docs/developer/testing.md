@@ -320,9 +320,10 @@ shared code is the package `watcher/e2e/e2e_support/`, which pytest finds throug
 | Module | What it is for |
 | --- | --- |
 | `drivers` | `WatcherDriver`, the only way a test starts, stops, kills or inspects the watcher. `CliDriver` runs the process on POSIX. See [Drivers](#drivers) |
-| `server` | `ServerView`: the watcher row, the status the web app shows (`stale` included), events, heartbeats, files, runs and their derived status, helpers that make a timestamp old, and the S3 stand-in's objects. It has `wait_for_*` methods that fail with a dump of the server's state |
+| `server` | `ServerView`: the watcher row, the status the web app shows (`stale` included) and the watcher list route's rows (`list_watchers`), events, heartbeats, files, runs and their derived status, helpers that make a timestamp old, and the S3 stand-in's objects. It has `wait_for_*` methods that fail with a dump of the server's state |
 | `admin` | `Admin`: the actions of a person in the web app, through the real routes. Request upload, delete and restore a run, dismiss a file, change an instrument's status, deregister a watcher, save a config revision, set the release, revoke a token, run the cron sweep |
 | `waiting` | `wait_until`, the deadline poll behind every wait, and `stays_true` for "this must not happen". Tests never sleep for a fixed time. A timeout shows the last value seen. `known_bug()` and `KnownBugStillPresent` are for [tests of known bugs](#the-transition-catalog) |
+| `proxy_helpers` | What several scenario files do with the fault proxy. `silence_heartbeats` keeps a watcher's heartbeats from reaching the server, so a killed watcher's last heartbeat can be aged without one still on its way refreshing it |
 | `platforms` | Which kind of driver a `@pytest.mark.platforms(...)` test is for, and when a run skips it |
 | `files` | Write run folders, files of an exact size on each side of the 1 KB multipart threshold, and a file that keeps growing |
 | `factory`, `artifacts` | The `watcher` fixture's factory and the failure artifacts |
@@ -373,6 +374,9 @@ What a driver offers:
   `Start-Service`, so the service stops cleanly (exit code 0, a `Service stopped` event, never exit
   code 1 and never "restarting for auto-update") and a new process starts. A scenario that checks
   the exit code or the "restarting for auto-update" event is marked `platforms("cli")`.
+  `install_wheel(wheel)` puts another version in place of the installed one while the watcher is
+  stopped (the PC must have an install of its own), for the scenario of an update that did not
+  take effect: the new version was installed, and the old one is back at the next start.
 - **What the watcher says:** it names itself by role, so a test uses `started_prefix`
   (`Watcher started on ` or `Service started on `), `resumed_prefix`, `restarted_prefix`,
   `operator_stop_message` (`Watcher stopped by user`, or `Service stopped`) and
@@ -388,8 +392,11 @@ What a driver offers:
 - **The state database:** `state_query` for a SELECT, `state_execute` for a write, and two
   switches for the watcher's own database: `stall_writes(table)` makes its next insert into the
   table take minutes (a watcher stuck inside it is killed when the block ends, and the trigger is
-  always dropped) and `fail_writes(table, message)` makes inserts fail. A test never opens the
-  database itself.
+  always dropped) and `fail_writes(table, message)` makes inserts fail and roll back their
+  transaction. `wait_for_state_db_busy(hold_seconds)` waits until another process has held the
+  database's write lock for that long without a break, which is how a scenario knows the watcher
+  is stuck inside a stalled write without depending on which of its writes share a transaction.
+  A test never opens the database itself.
 
 Nothing supervises a watcher that runs as a CLI process. After an update it exits with code 1 and
 stays down, and `await_upgrade_restart` is the driver standing in for a supervisor and starting

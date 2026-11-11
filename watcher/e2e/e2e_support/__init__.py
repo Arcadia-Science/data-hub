@@ -15,6 +15,8 @@ finds through the ``pythonpath`` setting in the root ``pyproject.toml``.
   through the real REST routes.
 * :mod:`e2e_support.waiting`: ``wait_until``, the deadline poll every wait uses, and
   ``known_bug()`` with ``KnownBugStillPresent`` for the tests of known bugs.
+* :mod:`e2e_support.proxy_helpers`: what several scenario files do with the fault proxy
+  (``silence_heartbeats``).
 * :mod:`e2e_support.platforms`: which kind of driver a ``@pytest.mark.platforms(...)`` test is
   for, and when a run skips it.
 * :mod:`e2e_support.files`: write run folders, files of an exact size, and a file that is

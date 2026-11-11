@@ -11,7 +11,9 @@ The ageing helpers move a timestamp into the past, to cross a server timer (the 
 stale mark, the 15-minute sweep grace) without waiting for it. A running watcher
 overwrites ``last_heartbeat_at`` with every heartbeat, so a test that ages it must first
 stop the watcher, or keep its heartbeats from arriving with a proxy fault on
-``/heartbeat``.
+``/heartbeat``. A watcher that was killed is not enough: a heartbeat it had sent can still be
+on its way through the proxy and reach the server after the timestamp was aged, so the fault
+goes on before the kill (``e2e_support.proxy_helpers.silence_heartbeats``).
 
 The S3 stand-in is a folder: ``object_path`` and ``read_object`` read it.
 """
@@ -23,6 +25,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal, cast
+from urllib.parse import urlencode
 
 from data_hub_shared.testing import IntegrationEnv, db_query, db_update
 from e2e_support._http import ApiResult, call, new_session
@@ -218,6 +221,27 @@ class ServerView:
         body = self.watcher_api(watcher_id)
         return None if body is None else str(body["status"])
 
+    def list_watchers(
+        self, *, status: str | None = None, instrument_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        """``GET /api/v1/watchers``, the list route, as the ``*`` token reads it: the rows of
+        its ``data``, each with the effective status (``stale`` included) in ``status``.
+
+        ``status`` is the route's filter (``stale`` is computed from the heartbeat, any other
+        value is compared with the stored status), and ``instrument_id`` limits the list to one
+        instrument's watchers, which keeps a test away from rows it didn't make.
+        """
+        query = urlencode(
+            {
+                key: value
+                for key, value in (("status", status), ("instrument_id", instrument_id))
+                if value is not None
+            }
+        )
+        result = self.get("/api/v1/watchers" + (f"?{query}" if query else ""))
+        result.raise_for_status()
+        return list(cast("dict[str, Any]", result.body)["data"])
+
     def upload_queue(self, watcher_id: str) -> list[dict[str, Any]]:
         """The watcher's upload queue as the route answers it, which is what the watcher polls."""
         if self.watcher_token is None:
@@ -390,7 +414,7 @@ class ServerView:
         The server calls a watcher stale after 5 minutes (:data:`STALE_AFTER_MINUTES`) and
         its sweep reverts upload requests after 15 (:data:`SWEEP_GRACE_MINUTES`). A running
         watcher sets the column again on its next heartbeat, so stop it first or keep its
-        heartbeats away with a proxy fault.
+        heartbeats away with a proxy fault (``silence_heartbeats``, put on before a kill).
         """
         self.execute(
             "UPDATE watchers SET last_heartbeat_at = now() - (%s * interval '1 minute') "

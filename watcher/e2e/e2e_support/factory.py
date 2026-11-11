@@ -148,6 +148,7 @@ class WatcherFactory:
         driver = self._new_driver(
             number=number,
             install=self._new_install(wheel) if own_install else self._tool_install,
+            own_install=own_install,
             instrument=instrument,
             folder=folder,
             environment=environment,
@@ -201,6 +202,7 @@ class WatcherFactory:
         *,
         number: int,
         install: ToolInstall,
+        own_install: bool,
         instrument: str,
         folder: Path,
         environment: str,
@@ -219,5 +221,6 @@ class WatcherFactory:
                 environment=environment,
                 api_base_url=base_url,
                 api_key=api_key,
+                owns_install=own_install,
             )
         raise NotImplementedError(f"No way to build a {self._driver_class.__name__} yet")
