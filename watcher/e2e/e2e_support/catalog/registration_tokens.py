@@ -20,6 +20,12 @@ TRANSITIONS: tuple[Transition, ...] = (
     ),
     covered(
         MACHINE,
+        "registration.live_watcher->refused",
+        "While an instrument has a watcher that is not deregistered, registering another one "
+        "for it is refused with 409, and the answer names the existing watcher.",
+    ),
+    covered(
+        MACHINE,
         "watcher.registered->claimed_by_new_token",
         "After the registering token is revoked, the first other token that checks in "
         "claims the watcher and is bound to it from then on.",
