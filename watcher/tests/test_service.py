@@ -1145,11 +1145,10 @@ class _LoopHarness:
         # _run_service_loop, so patching at the source module is
         # sufficient — there's no re-export to keep in sync.
 
-        # Force the operator-facing env override on so the root
-        # logger drops down to INFO (pytest's logging plugin
-        # defaults it to WARNING, which would silence the very
-        # ``logger.info`` calls these tests assert on).
-        monkeypatch.setenv("DATA_HUB_WATCHER_LOG_LEVEL", "INFO")
+        # The service's own default has to bring the INFO lines these
+        # tests assert on, so no log-level override comes from the
+        # developer's shell.
+        monkeypatch.delenv("DATA_HUB_WATCHER_LOG_LEVEL", raising=False)
 
 
 @pytest.fixture
@@ -1168,6 +1167,9 @@ def harness(
     root = logging.getLogger()
     original_handlers = list(root.handlers)
     original_level = root.level
+    # Where Python leaves the root logger in a new process, which is what
+    # the service starts from.
+    root.setLevel(logging.WARNING)
     try:
         yield _LoopHarness(service_module, monkeypatch, tmp_path)
     finally:

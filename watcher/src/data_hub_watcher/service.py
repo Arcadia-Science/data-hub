@@ -612,6 +612,13 @@ def _run_service_loop(stop_event: threading.Event, sm: Any) -> None:
     # ``monitor``, ``heartbeat``, and ``updater`` — is silently
     # dropped, which is the bug this whole module-level rework is
     # closing.
+    #
+    # Python starts the root logger at WARNING, and the CLI's
+    # ``basicConfig`` never runs in the service's process, so without
+    # this every INFO line (the "starting" and "is running" lines among
+    # them) would be dropped. ``DATA_HUB_WATCHER_LOG_LEVEL``, when it is
+    # set, still wins inside ``setup_file_logging``.
+    logging.getLogger().setLevel(logging.INFO)
     log_path = setup_file_logging()
     attach_servicemanager_handler(sm)
     logger.info("%s starting (pid=%s, log=%s)", SERVICE_DISPLAY_NAME, os.getpid(), log_path)

@@ -71,21 +71,15 @@ def _apply_root_level() -> None:
     """Set the root logger level from the env var override if present.
 
     The watcher's two entrypoints (CLI ``watch`` and the Windows
-    service) each call into this module once at startup. We only
-    *force* the level when ``DATA_HUB_WATCHER_LOG_LEVEL`` is set —
-    otherwise we either initialize the (still-unset) root logger to
-    INFO, or leave a caller-supplied level alone. Without this
-    deference, a user that explicitly set ``logging.DEBUG`` at the
-    top of a script would have their choice silently reverted to
-    INFO by the first ``setup_file_logging`` call.
+    service) each call into this module once at startup. The level is
+    only *forced* when ``DATA_HUB_WATCHER_LOG_LEVEL`` is set; otherwise
+    the caller's level stands. Python starts the root logger at
+    WARNING, so each entrypoint sets its own default of INFO first: the
+    CLI with ``logging.basicConfig`` and the service in
+    ``_run_service_loop``.
     """
-    raw = os.environ.get(_LEVEL_ENV_VAR)
-    root = logging.getLogger()
-    if raw:
-        root.setLevel(_resolve_root_level())
-        return
-    if root.level == logging.NOTSET:
-        root.setLevel(logging.INFO)
+    if os.environ.get(_LEVEL_ENV_VAR):
+        logging.getLogger().setLevel(_resolve_root_level())
 
 
 def _watcher_log_path() -> Path:
