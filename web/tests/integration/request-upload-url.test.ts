@@ -69,15 +69,24 @@ describe("Request Upload URL API", () => {
     );
     expect(res.status).toBe(200);
     const data = await res.json();
-    expect(data.upload_url).toBeTruthy();
     expect(data.s3_bucket).toBeTruthy();
     expect(data.s3_key).toBe(`${instrumentId}/${runId}/new_data.csv`);
+    // This server runs with the S3 stand-in, so the upload URL is a path on
+    // the server itself, not an S3 URL.
+    expect(data.upload_url).toBe(
+      `/api/local-s3/${data.s3_bucket}/${instrumentId}/${runId}/new_data.csv`
+    );
     expect(data.file_id).toBeGreaterThan(0);
     expect(data.expires_in).toBe(3600);
     expect(data.already_uploaded).toBe(false);
     // Drift guard: the live response must match its documented OpenAPI schema
     // (responses aren't validated at runtime, so this is the only backstop).
-    uploadUrlResponse.parse(data);
+    // The schema wants an absolute URL, so the stand-in's path is resolved
+    // against the server's origin first, as the watcher does.
+    uploadUrlResponse.parse({
+      ...data,
+      upload_url: new URL(data.upload_url, getBaseUrl()).href,
+    });
   });
 
   it("creates a file record if none exists", async () => {
