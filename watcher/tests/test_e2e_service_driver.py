@@ -1278,6 +1278,7 @@ class TestAnUpgradeRestart:
         with pytest.raises(WaitTimeout):
             driver.wait_for_new_process(pid, 0.3, after_starts=driver.start_lines())
         # Another pid, with or without the count.
+        assert pid is not None
         assert driver.wait_for_new_process(None, 1).pid == pid
         assert driver.wait_for_new_process(pid + 1, 1).pid == pid
 
@@ -1455,7 +1456,9 @@ class TestClosing:
             return result
 
         monkeypatch.setattr(machine, "_sc", goes_when_stopped)
-        monkeypatch.setattr(machine, "cli", lambda args, global_args: CliResult(tuple(args), 0))
+        monkeypatch.setattr(
+            machine, "cli", lambda args, global_args: CliResult(tuple(args), 0, "", "")
+        )
 
         driver.wait_for_removal(5)
 
@@ -1844,9 +1847,10 @@ class TestUvAndTheInstall:
         self, tmp_path: Path, machine: FakeMachine, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         installed_after: list[int] = []
+        watched: list[int] = []
 
         def fake_install(root: Path, wheel: Path, **kwargs: object) -> ToolInstall:
-            installed_after.append(machine.lingering_pids[pid])
+            installed_after.append(machine.lingering_pids[watched[0]])
             return ToolInstall(root)
 
         monkeypatch.setattr(drivers, "install_watcher_tool", fake_install)
@@ -1855,6 +1859,7 @@ class TestUvAndTheInstall:
         driver.start()
         pid = driver.pid
         assert pid is not None
+        watched.append(pid)
         driver.stop()
         # The SCM says STOPPED, and the process is still listed for the next three looks.
         machine.lingering_pids[pid] = 3
