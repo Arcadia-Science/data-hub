@@ -11,9 +11,14 @@ when:
 
 * a test names an ID that is not in the catalog,
 * a transition that is not ``excluded`` has no test,
-* an ``xfail_bug`` transition has no ``xfail(strict=True)`` test, or a ``covered`` one has
-  only xfail tests,
-* an ``excluded`` transition has a test.
+* an ``xfail_bug`` transition has no strict xfail test, or a ``covered`` one has only xfail
+  tests,
+* an ``excluded`` transition has a test,
+* a test runs under a kind of driver (``cli`` or ``service``, from its
+  ``@pytest.mark.platforms(...)``) where a transition it covers doesn't exist,
+* a known-bug test doesn't follow the pattern (see :mod:`e2e_support.catalog.check`), or a
+  test uses a way of hiding coverage: ``pytest.skip``, ``skip``/``skipif`` marks,
+  ``pytest.param(..., marks=...)``, a conditional ``xfail`` or a mark it can't read.
 
 So adding behavior to the catalog without a test, or deleting a test, fails the PR.
 
@@ -58,8 +63,10 @@ from e2e_support.catalog import (
 )
 from e2e_support.catalog.model import (
     BOTH,
-    LINUX,
-    WINDOWS,
+    CLI,
+    DRIVER_KINDS,
+    SERVICE,
+    DriverKind,
     Status,
     Transition,
     covered,
@@ -71,11 +78,13 @@ __all__ = [
     "ALL_TRANSITIONS",
     "BOTH",
     "BY_ID",
-    "LINUX",
+    "CLI",
+    "DRIVER_KINDS",
     "MACHINES",
-    "WINDOWS",
-    "WINDOWS_SUITE_READY",
-    "WINDOWS_TEST_FILE",
+    "SERVICE",
+    "SERVICE_SUITE_READY",
+    "SERVICE_TEST_FILE",
+    "DriverKind",
     "Status",
     "Transition",
     "covered",
@@ -85,14 +94,14 @@ __all__ = [
     "xfail_bug",
 ]
 
-# Until the Windows suite lands (PR 3), the transitions that exist only on Windows can't have
-# a test, so the catalog check does not ask for one. PR 3 flips this to True, and from then on
-# `test_windows_service.py` must cover every one of them.
-WINDOWS_SUITE_READY = False
+# Until the service suite lands (PR 3), the transitions that exist only under the Windows
+# service can't have a test, so the catalog check does not ask for one. PR 3 flips this to
+# True, and from then on `test_windows_service.py` must cover every one of them.
+SERVICE_SUITE_READY = False
 
-# The one test file whose tests run only under the Windows service. Every other test file
-# runs under both drivers.
-WINDOWS_TEST_FILE = "test_windows_service.py"
+# The one test file whose tests run only under the service driver. Every other test file runs
+# under both drivers, except the tests that say otherwise with `@pytest.mark.platforms(...)`.
+SERVICE_TEST_FILE = "test_windows_service.py"
 
 _MODULES = (
     setup_startup,

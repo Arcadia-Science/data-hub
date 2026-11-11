@@ -7,8 +7,10 @@ from typing import Literal
 
 __all__ = [
     "BOTH",
-    "LINUX",
-    "WINDOWS",
+    "CLI",
+    "DRIVER_KINDS",
+    "SERVICE",
+    "DriverKind",
     "Status",
     "Transition",
     "covered",
@@ -18,9 +20,17 @@ __all__ = [
 
 Status = Literal["covered", "xfail_bug", "excluded"]
 
-LINUX = frozenset({"linux"})
-WINDOWS = frozenset({"windows"})
-BOTH = frozenset({"linux", "windows"})
+# The platforms of a transition are the *kinds of driver* a scenario can run under, because
+# that is what decides whether a transition exists for a test. ``"cli"`` is a
+# ``data-hub-watcher watch`` process (on Linux, and on macOS for a developer), ``"service"``
+# is the real Windows service. Names that say "Linux" or "Windows" would be wrong the day the
+# CLI driver runs on Windows too.
+DriverKind = Literal["cli", "service"]
+DRIVER_KINDS: tuple[DriverKind, ...] = ("cli", "service")
+
+CLI = frozenset({"cli"})
+SERVICE = frozenset({"service"})
+BOTH = frozenset(DRIVER_KINDS)
 
 _ID = re.compile(r"[a-z][a-z0-9_]*\.[a-z0-9_]+->[a-z0-9_]+")
 
@@ -31,18 +41,23 @@ class Transition:
 
     ``id`` reads ``<thing>.<from>-><to>``, for example ``file.pending->stable`` or
     ``service.running->recovery_restart``. ``machine`` is the catalog module it lives in.
-    ``platforms`` says where the transition exists: a scenario in a shared test file runs
-    on both the CLI driver and the Windows service driver, and one in
-    ``test_windows_service.py`` only on the service.
+    ``platforms`` says under which kinds of driver the transition exists (``"cli"``,
+    ``"service"``, see :data:`DriverKind`). A test claims it for the kinds it runs under: a
+    test in a shared file runs under both unless it carries ``@pytest.mark.platforms("cli")``
+    (or ``"service"``), and one in ``test_windows_service.py`` runs only under the service.
 
     ``status`` is one of:
 
     * ``covered``: an end-to-end test shows it works. A test names it with
       ``@pytest.mark.covers("<id>")``.
-    * ``xfail_bug``: a known gap. A test asserts the *intended* behavior and is marked
-      ``xfail(strict=True)``, so it fails today and starts failing loudly (XPASS) the day
-      the bug is fixed, which is when the mark comes off and the status becomes
-      ``covered``. ``bug`` is a short slug until a Linear issue exists.
+    * ``xfail_bug``: a known gap. A test asserts the *intended* behavior, wraps only that
+      assertion in ``known_bug()`` and is marked ``xfail(strict=True,
+      raises=KnownBugStillPresent, reason="<bug>: ...")``, so it fails today and starts
+      failing loudly (XPASS) the day the bug is fixed, which is when the mark and the
+      ``known_bug()`` block come off and the status becomes ``covered``. A broken
+      precondition raises something else, so it fails the test instead of hiding as an
+      expected failure. ``bug`` is a short slug until a Linear issue exists, and the
+      ``reason`` of the test starts with it.
     * ``excluded``: deliberately not tested end to end. ``reason`` says why and where it is
       tested instead. A test must not name it.
     """

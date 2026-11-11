@@ -6,7 +6,7 @@ waiting state), ``models.py`` (``watch_directory_problem``).
 
 from __future__ import annotations
 
-from e2e_support.catalog.model import LINUX, Transition, covered, excluded, xfail_bug
+from e2e_support.catalog.model import CLI, Transition, covered, excluded, xfail_bug
 
 MACHINE = "setup_startup"
 
@@ -121,7 +121,7 @@ TRANSITIONS: tuple[Transition, ...] = (
         "A watch folder that exists but cannot be listed also starts the watcher in "
         "`waiting`, with a `not readable` reason (a POSIX permission, as root can list "
         "anything).",
-        platforms=LINUX,
+        platforms=CLI,
     ),
     covered(
         MACHINE,

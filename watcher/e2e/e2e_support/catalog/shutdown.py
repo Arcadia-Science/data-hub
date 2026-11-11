@@ -8,7 +8,7 @@ Code: ``cli.py`` (``watch``: the signal handlers, ``run_supervisor``),
 
 from __future__ import annotations
 
-from e2e_support.catalog.model import LINUX, Transition, covered, xfail_bug
+from e2e_support.catalog.model import CLI, Transition, covered, xfail_bug
 
 MACHINE = "shutdown"
 
@@ -25,7 +25,7 @@ TRANSITIONS: tuple[Transition, ...] = (
         "process.interrupt->clean_exit",
         "Ctrl+C (SIGINT) stops the watcher the same way: exit code 0, a `stopped` heartbeat "
         "and a `watcher_stopped` event.",
-        platforms=LINUX,
+        platforms=CLI,
     ),
     covered(
         MACHINE,
@@ -70,6 +70,6 @@ TRANSITIONS: tuple[Transition, ...] = (
         "heartbeat to keep the watcher in that window, because the scan itself is too "
         "quick to hit from outside.",
         "bug-09-sigterm-during-scan",
-        platforms=LINUX,
+        platforms=CLI,
     ),
 )

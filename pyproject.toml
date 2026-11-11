@@ -63,6 +63,7 @@ markers = [
     "integration: Tests requiring Postgres + Next.js server",
     "e2e: End-to-end tests that run the real watcher against the test server (watcher/e2e, make py-test-e2e)",
     "covers(*transition_ids): The watcher state-machine transitions an end-to-end test covers, by catalog ID (watcher/e2e/e2e_support/catalog)",
+    "platforms(*kinds): The kinds of watcher driver an end-to-end test is for, 'cli' and/or 'service' (default: both). conftest.py skips it under the other kind, and the catalog check reads it",
 ]
 filterwarnings = ["ignore::DeprecationWarning:matplotlib"]
 

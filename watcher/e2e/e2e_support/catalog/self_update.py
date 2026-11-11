@@ -6,16 +6,18 @@ the upgrade marker), ``self_update.py`` (``detect_install_method``, ``build_upgr
 ``app/api/v1/watchers/[watcherId]/update-check`` and the release settings. The suite installs
 a built wheel with ``uv tool install`` and points the watcher at a local package index with
 ``DATA_HUB_WATCHER_INDEX_URL``, with a newer wheel (the patch number plus 1000) as the
-release. On Windows the install goes through the upgrade worker instead of the watcher's own
-process (see ``windows_service``), which stops and starts the service itself, so the
-transitions that describe the in-process install (the exit code 1 and the failure of the
-install command) are Linux-only here. ``self-update`` and the in-process updater share the
-install command.
+release. Under the Windows service the install goes through the upgrade worker instead of the
+watcher's own process (see ``windows_service``), which stops the service, installs and starts
+it again, so the service ends cleanly and never exits with code 1. The transitions that describe
+the in-process install (the exit code 1 and the failure of the install command) are for the
+``cli`` driver only, and the scenarios that show them are marked ``platforms("cli")``; the rest
+ask the driver for ``await_upgrade_restart``. ``self-update`` and the in-process updater share
+the install command.
 """
 
 from __future__ import annotations
 
-from e2e_support.catalog.model import LINUX, Transition, covered, excluded
+from e2e_support.catalog.model import CLI, Transition, covered, excluded
 
 MACHINE = "self_update"
 
@@ -44,7 +46,7 @@ TRANSITIONS: tuple[Transition, ...] = (
         "After a successful install the watcher stops with a `watcher_stopped` event that "
         "says it is restarting for the update, and exits with code 1 for its supervisor to "
         "start it again. (Windows: the upgrade worker stops and starts the service itself.)",
-        platforms=LINUX,
+        platforms=CLI,
     ),
     covered(
         MACHINE,
@@ -79,7 +81,7 @@ TRANSITIONS: tuple[Transition, ...] = (
         "old version, and clears the upgrade marker. The next check tries again. "
         "(Windows: a failure inside the upgrade worker is reported after the service comes "
         "back, see `service.upgrade->worker_failure_reported`.)",
-        platforms=LINUX,
+        platforms=CLI,
     ),
     covered(
         MACHINE,
@@ -116,7 +118,7 @@ TRANSITIONS: tuple[Transition, ...] = (
         "`self-update` installs the advertised version from the configured index and tells "
         "the operator to restart the watcher. (Windows: it hands the install to the upgrade "
         "worker, which restarts the service itself.)",
-        platforms=LINUX,
+        platforms=CLI,
     ),
     excluded(
         MACHINE,
