@@ -53,6 +53,14 @@ TRANSITIONS: tuple[Transition, ...] = (
         "watcher.stopped->watching",
         "Starting a stopped watcher again makes it `watching` again.",
     ),
+    xfail_bug(
+        MACHINE,
+        "watcher.stopped->stays_stopped",
+        "A watcher that stopped cleanly keeps reading `stopped` however old its last "
+        "heartbeat gets, because it can't send another one. It does not turn `stale` "
+        "(`Unresponsive`), which is for a watcher that went quiet without saying so.",
+        "bug-new-stopped-reads-stale",
+    ),
     covered(
         MACHINE,
         "watcher.waiting->reason_recorded",
@@ -76,6 +84,14 @@ TRANSITIONS: tuple[Transition, ...] = (
         "The counts from a heartbeat that failed to send are added to the next successful "
         "heartbeat instead of being lost.",
         "bug-03-failed-heartbeat-counts-lost",
+    ),
+    xfail_bug(
+        MACHINE,
+        "heartbeat.in_flight->counts_kept",
+        "A count added while a heartbeat request is in flight (a file uploaded during a "
+        "slow heartbeat) is reported by the next heartbeat instead of being reset away "
+        "when the request returns.",
+        "bug-new-counts-lost-during-heartbeat",
     ),
     covered(
         MACHINE,

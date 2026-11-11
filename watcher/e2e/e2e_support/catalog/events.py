@@ -45,8 +45,8 @@ TRANSITIONS: tuple[Transition, ...] = (
         MACHINE,
         "reporter.queue->overflow_dropped_oldest",
         "A queue past 500 events drops the oldest first and reports the gap as `events_dropped`.",
-        "Reaching 500 queued events end to end takes hundreds of files; test_events.py "
-        "covers the bound and the order.",
+        "Reaching 500 queued events end to end takes hundreds of files; the unit tests in "
+        "watcher/tests/test_events.py cover the bound and the order.",
     ),
     # --- event types the watcher sends ------------------------------------------------------
     covered(
@@ -172,7 +172,8 @@ TRANSITIONS: tuple[Transition, ...] = (
         MACHINE,
         "event.upload_retries_exhausted->emitted",
         "An `error` event of kind `upload_retries_exhausted` is stored when a pending "
-        "upload fails on its third start, with `relative_path`, `run_id` and `attempts`.",
+        "upload fails its third retry, one retry per watcher start, with `relative_path`, "
+        "`run_id` and `attempts`.",
     ),
     covered(
         MACHINE,
