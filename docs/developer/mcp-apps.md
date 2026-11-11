@@ -149,7 +149,7 @@ The built file is gitignored. Self-hosters and CI must run that step (or `npm ru
 
 Browser-based hosts reach `/mcp/v1` from a different origin, so `web/lib/mcp/cors.ts` sends `Access-Control-Allow-Origin: *` on that route and answers preflight requests. The route authenticates with a Bearer token only and never sets `Access-Control-Allow-Credentials`, so a browser will not attach a session cookie to those requests.
 
-`web/proxy.ts` never runs on `/api/local-s3/`, so the route works without a session. The View needs that because it loads file bytes from a cross-origin sandbox that has no cookie. GET and HEAD on that route return 404 whenever `NODE_ENV` is `production` or `LOCAL_S3_MIRROR` is unset, and every method returns 404 on a Vercel deployment, so it cannot expose anything on a real deploy. GET and HEAD send the same `*` CORS headers as the S3 buckets; without them a `fetch` of a plate-reader CSV or Aunty JSON fails with "Failed to fetch" even though the file is public.
+`web/proxy.ts` never runs on `/api/local-s3/`, so the route works without a session. The View needs that because it loads file bytes from a cross-origin sandbox that has no cookie. GET and HEAD on that route return 404 whenever `NODE_ENV` is `production` or `LOCAL_S3_MIRROR` is unset, and GET, HEAD, and PUT return 404 on a Vercel deployment (`OPTIONS` always answers the CORS preflight with 204, which carries no data), so it cannot expose anything on a real deploy. GET and HEAD send the same `*` CORS headers as the S3 buckets; without them a `fetch` of a plate-reader CSV or Aunty JSON fails with "Failed to fetch" even though the file is public.
 
 ## Content security policy
 
