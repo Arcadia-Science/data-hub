@@ -1,10 +1,14 @@
-// Local-only S3 mirror: reads and writes `<LOCAL_S3_MIRROR>/<bucket>/<key>`,
-// with `*` CORS on GET/HEAD so the MCP Apps sandbox can fetch the files. GET,
-// HEAD, and a whole-file PUT 404 when that root is off, including every
-// production build. A part PUT uses `mirrorRootForMultipart`, which also
-// accepts `INTEGRATION_TEST_S3_MIRROR` when `VERCEL` is unset so the
-// integration harness can store parts without AWS. Vercel sets `VERCEL`,
-// so a deployment still 404s.
+// Local-only S3 stand-in: reads and writes `<root>/<bucket>/<key>`, with `*`
+// CORS on GET/HEAD so the MCP Apps sandbox can fetch the files.
+//
+// - GET and HEAD serve only from the dev mirror (`LOCAL_S3_MIRROR`). They 404
+//   when it is off, including under the integration harness.
+// - PUT takes a whole-file write and a multipart part write. Both go to the
+//   dev mirror, or to the integration mirror (`INTEGRATION_TEST_S3_MIRROR`)
+//   when `VERCEL` is unset, via `mirrorRootForUploads`. A whole file lands at
+//   `<root>/<bucket>/<key>`, the same place a completed multipart upload goes.
+// - On a Vercel deployment GET, HEAD, and PUT all 404. `VERCEL` turns off the
+//   integration mirror, and the dev mirror is off under `NODE_ENV=production`.
 
 import { createReadStream, createWriteStream } from "node:fs";
 import { mkdir, stat } from "node:fs/promises";
@@ -18,7 +22,7 @@ import {
   localSavePart,
   MirrorMultipartError,
   mimeFor,
-  mirrorRootForMultipart,
+  mirrorRootForUploads,
   parseByteRange,
   resolveMirrorPath,
 } from "@/lib/s3-local-mirror";
@@ -151,7 +155,7 @@ export async function PUT(request: NextRequest, { params }: RouteContext) {
   const uploadId = url.searchParams.get("uploadId");
   const partNumberRaw = url.searchParams.get("partNumber");
   if (uploadId) {
-    const mirror = mirrorRootForMultipart();
+    const mirror = mirrorRootForUploads();
     if (!mirror) {
       return NOT_FOUND_RESPONSE();
     }
@@ -175,7 +179,7 @@ export async function PUT(request: NextRequest, { params }: RouteContext) {
     }
   }
 
-  const root = getLocalMirrorRoot();
+  const root = mirrorRootForUploads();
   if (!root) {
     return NOT_FOUND_RESPONSE();
   }
