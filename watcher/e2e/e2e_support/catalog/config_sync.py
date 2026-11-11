@@ -96,7 +96,8 @@ TRANSITIONS: tuple[Transition, ...] = (
         MACHINE,
         "config.revision->result_retried",
         "A revision result the server did not receive is kept and sent after the next "
-        "successful heartbeat, including after a restart.",
+        "successful heartbeat, or first thing at the next start if the watcher was "
+        "restarted in between.",
     ),
     covered(
         MACHINE,
