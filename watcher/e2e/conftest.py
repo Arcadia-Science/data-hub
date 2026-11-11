@@ -14,11 +14,12 @@ Session (built once, shared):
   to the wheel it is about to publish), and a "next" wheel with a higher version, built when
   a test asks for it.
 * ``driver_class``: the kind of driver the run uses (``$DATA_HUB_E2E_DRIVER``: ``cli``, the
-  default, or ``service``, which PR 3 adds).
-* ``tool_install``: ``uv tool install --python 3.12`` of the current wheel, in a folder whose
-  path contains ``/uv/tools/data-hub-watcher``, so the watcher recognises it as a uv-tool
-  install. Tests share it, so no test may update it: one that updates the watcher asks the
-  ``watcher`` fixture for ``own_install=True``.
+  default, or ``service``, the Windows service, which needs Windows and an elevated shell).
+* ``tool_install``: ``uv tool install --python 3.12`` of the current wheel (with the extras the
+  driver needs: pywin32 for the service), in a folder whose path contains
+  ``/uv/tools/data-hub-watcher``, so the watcher recognises it as a uv-tool install. Tests share
+  it, so no test may update it: one that updates the watcher asks the ``watcher`` fixture for
+  ``own_install=True``.
 * ``package_index``: a local package index serving the wheels in ``wheel_dir``: the current
   one, and the bumped one once a test has asked for ``bumped_wheel``. For self-update.
 
@@ -275,19 +276,29 @@ def bumped_wheel(wheel_dir: Path, bumped_version: str) -> Path:
 def driver_class() -> type[WatcherDriver]:
     """The driver class of this run, from ``$DATA_HUB_E2E_DRIVER`` (``cli`` unless set).
 
-    ``service`` raises ``NotImplementedError`` until the Windows service driver (PR 3) exists.
+    ``service`` needs Windows and an elevated shell, and stops the run with a clear message
+    anywhere else.
     """
     return driver_class_for(active_driver_kind())
 
 
 @pytest.fixture(scope="session")
-def tool_install(tmp_path_factory: pytest.TempPathFactory, current_wheel: Path) -> ToolInstall:
-    """The shared ``uv tool install`` of the current wheel on Python 3.12.
+def tool_install(
+    tmp_path_factory: pytest.TempPathFactory,
+    current_wheel: Path,
+    driver_class: type[WatcherDriver],
+) -> ToolInstall:
+    """The shared ``uv tool install`` of the current wheel on Python 3.12, with the extras the
+    kind of driver needs (the service needs ``windows-service``, for pywin32).
 
     The watcher installs updates into the folder it runs from, so a test that updates must
     not use this one: it asks the ``watcher`` fixture for ``own_install=True``.
     """
-    return install_watcher_tool(tmp_path_factory.mktemp("shared-install"), current_wheel)
+    return install_watcher_tool(
+        tmp_path_factory.mktemp("shared-install"),
+        current_wheel,
+        extras=driver_class.install_extras,
+    )
 
 
 @pytest.fixture(scope="session")
@@ -405,7 +416,9 @@ def watch_dir(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def private_install(
-    tmp_path_factory: pytest.TempPathFactory, current_wheel: Path
+    tmp_path_factory: pytest.TempPathFactory,
+    current_wheel: Path,
+    driver_class: type[WatcherDriver],
 ) -> Callable[[Path | None], ToolInstall]:
     """A factory for a ``uv tool install`` of this test's own: ``private_install()`` installs
     the current wheel, ``private_install(bumped_wheel)`` another one.
@@ -417,7 +430,10 @@ def private_install(
 
     def make(wheel: Path | None = None, *, python: str = "3.12") -> ToolInstall:
         return install_watcher_tool(
-            tmp_path_factory.mktemp("private-install"), wheel or current_wheel, python=python
+            tmp_path_factory.mktemp("private-install"),
+            wheel or current_wheel,
+            python=python,
+            extras=driver_class.install_extras,
         )
 
     return make

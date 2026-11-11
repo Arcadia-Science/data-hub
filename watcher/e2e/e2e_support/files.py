@@ -14,6 +14,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import os
+import sys
 import threading
 from collections.abc import Mapping
 from pathlib import Path
@@ -23,6 +24,7 @@ __all__ = [
     "LARGE",
     "MULTIPART_THRESHOLD_BYTES",
     "SMALL",
+    "ExclusiveWriter",
     "GrowingFile",
     "payload",
     "write_file",
@@ -134,3 +136,98 @@ class GrowingFile:
         traceback: TracebackType | None,
     ) -> None:
         self.stop()
+
+
+class ExclusiveWriter:
+    """A writer that holds its file open for writing with sharing mode "none", as an instrument
+    that locks the file it is acquiring does. Windows only.
+
+    While it is open, nothing else can open the file for reading or writing, and the folder
+    entry grows as it writes. Use it as a context manager::
+
+        with ExclusiveWriter(watch_dir / "RUN1" / "scan.csv") as writer:
+            writer.write(b"...")   # the watcher sees the file grow, and can't read it
+        # closed: the file can be read, and holds writer.content
+    """
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self.content = bytearray()
+        self._handle: int | None = None
+
+    def open(self) -> ExclusiveWriter:
+        if sys.platform != "win32":
+            raise RuntimeError("ExclusiveWriter needs Windows file sharing modes")
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.CreateFileW.argtypes = [
+            wintypes.LPCWSTR,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.LPVOID,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.HANDLE,
+        ]
+        kernel32.CreateFileW.restype = wintypes.HANDLE
+        generic_write, share_none, create_always, normal = 0x40000000, 0, 2, 0x80
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        handle = kernel32.CreateFileW(
+            str(self.path), generic_write, share_none, None, create_always, normal, None
+        )
+        if handle in (None, wintypes.HANDLE(-1).value):
+            raise ctypes.WinError(ctypes.get_last_error())
+        self._handle = handle
+        return self
+
+    def write(self, data: bytes) -> None:
+        """Append ``data`` and flush it, so the size the watcher sees is up to date."""
+        if self._handle is None:
+            raise RuntimeError("The file is not open")
+        if sys.platform != "win32":
+            raise RuntimeError("ExclusiveWriter needs Windows file sharing modes")
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.WriteFile.argtypes = [
+            wintypes.HANDLE,
+            wintypes.LPCVOID,
+            wintypes.DWORD,
+            ctypes.POINTER(wintypes.DWORD),
+            wintypes.LPVOID,
+        ]
+        kernel32.WriteFile.restype = wintypes.BOOL
+        kernel32.FlushFileBuffers.argtypes = [wintypes.HANDLE]
+        kernel32.FlushFileBuffers.restype = wintypes.BOOL
+        written = wintypes.DWORD(0)
+        if not kernel32.WriteFile(self._handle, data, len(data), ctypes.byref(written), None):
+            raise ctypes.WinError(ctypes.get_last_error())
+        kernel32.FlushFileBuffers(self._handle)
+        self.content += data[: written.value]
+
+    def close(self) -> bytes:
+        """Release the file and return what was written. Safe to call twice."""
+        if self._handle is not None and sys.platform == "win32":
+            import ctypes
+            from ctypes import wintypes
+
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+            kernel32.CloseHandle.restype = wintypes.BOOL
+            kernel32.CloseHandle(self._handle)
+        self._handle = None
+        return bytes(self.content)
+
+    def __enter__(self) -> ExclusiveWriter:
+        return self.open()
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        self.close()

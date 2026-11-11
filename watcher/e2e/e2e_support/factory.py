@@ -23,6 +23,7 @@ from e2e_support.drivers import (
     WatcherDriver,
 )
 from e2e_support.server import ServerView
+from e2e_support.service_driver import WindowsServiceDriver
 
 __all__ = ["E2EContext", "WatcherFactory"]
 
@@ -209,12 +210,24 @@ class WatcherFactory:
         base_url: str,
         api_key: str,
     ) -> WatcherDriver:
-        """Build the driver of this run's kind. PR 3 adds the service driver's branch here:
-        what it needs in place of ``home`` and ``install`` is described in the notes in
-        ``e2e_support.drivers``."""
+        """Build the driver of this run's kind: a ``CliDriver`` gets a ``HOME`` of its own, and a
+        ``WindowsServiceDriver`` a profile folder that stands in for the operator's home
+        (``USERPROFILE``), which holds ``~/.data-hub``. Each is a folder of this test."""
+        folder_name = f"home-{number}"
         if issubclass(self._driver_class, CliDriver):
             return self._driver_class(
-                home=self._tmp_path / f"home-{number}",
+                home=self._tmp_path / folder_name,
+                tool_install=install,
+                instrument_id=instrument,
+                watch_dir=folder,
+                environment=environment,
+                api_base_url=base_url,
+                api_key=api_key,
+                owns_install=own_install,
+            )
+        if issubclass(self._driver_class, WindowsServiceDriver):
+            return self._driver_class(
+                profile=self._tmp_path / folder_name,
                 tool_install=install,
                 instrument_id=instrument,
                 watch_dir=folder,
