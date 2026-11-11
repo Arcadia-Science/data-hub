@@ -10,9 +10,9 @@ run in GitHub Actions.
 
 | Command | Package(s) | What it runs |
 | --- | --- | --- |
-| `make py-test-unit` | `lambda/`, `watcher/` | pytest, excluding `@pytest.mark.integration` — no external services |
+| `make py-test-unit` | `lambda/`, `watcher/`, `packages/shared/` | pytest, excluding `@pytest.mark.integration` — no Postgres or server. The wheel-build tests in `packages/shared/` need `uv` on the PATH, and network access when the `uv` cache is cold |
 | `make py-test-integration` | `lambda/`, `watcher/` | pytest, only `@pytest.mark.integration` — builds/starts Next.js against Postgres |
-| `make py-test` | `lambda/`, `watcher/` | All pytest tests (unit + integration) |
+| `make py-test` | `lambda/`, `watcher/`, `packages/shared/` | All pytest tests (unit + integration) |
 | `make fe-test-unit` | `web/` | Vitest `tests/unit/` + `tests/mcp/` — no Postgres, no server |
 | `make fe-test-integration` | `web/` | Vitest `tests/integration/` — builds/starts Next.js against Postgres |
 | `make fe-test` | `web/` | `fe-test-unit` then `fe-test-integration` |
@@ -23,11 +23,11 @@ infrastructure that `lambda/` and `watcher/` both depend on (see
 for end-to-end tests of the watcher (see
 [below](#helpers-for-end-to-end-watcher-tests)). It has unit tests of its own in
 `packages/shared/tests/`, and `make py-test-unit` runs them too. They need
-neither Postgres nor a server. The tests for `testing_wheels` run `uv build` twice
-(they share the two wheels), so they need `uv` on the PATH, and network access
-to fetch the build tools when the `uv` cache is cold. A few tests for `testing_index` install a package with `uv`
-and need `uv` but no network. Tests that need `uv` skip themselves when it isn't
-on the PATH.
+neither Postgres nor a server. The tests for `testing_wheels` run `uv build`
+twice (the tests in that file share the two wheels), so they need `uv` on the
+PATH, and network access to fetch the build tools when the `uv` cache is cold.
+A few tests for `testing_index` install a package with `uv` and need `uv` but no
+network. Tests that need `uv` skip themselves when it isn't on the PATH.
 
 Integration tests (Python and TypeScript alike) need Postgres reachable at
 `127.0.0.1:5432` and create/reuse a `data_hub_test` database. The Python
