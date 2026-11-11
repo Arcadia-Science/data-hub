@@ -1103,10 +1103,9 @@ def test_an_upgrade_is_dispatched_to_the_worker_once(
     package_index: LocalPackageIndex,
     bumped_wheel: Path,
     bumped_version: str,
+    watch_dir: Path,
 ) -> None:
-    # A heartbeat, and a check for an update, every second: the worker takes several seconds to
-    # reach `Stop-Service` (the task scheduler starts PowerShell), so the checks that come
-    # before the service stops are many.
+    # A heartbeat, and a check for an update, every second.
     pc = service_pc(
         watcher,
         own_install=True,
@@ -1116,12 +1115,20 @@ def test_an_upgrade_is_dispatched_to_the_worker_once(
     package_index.clear_requested_paths()
     start_watching(pc, server)
 
+    # An upload that is still under way when the worker's `Stop-Service` arrives. The stop waits
+    # up to 5 seconds for it (`FileMonitor.stop`), and the heartbeat, with its update check every
+    # second, keeps going until the stop gets past that wait. So checks come after the dispatch
+    # however fast the worker is (on a runner it stops the service about a second after it is
+    # triggered).
+    proxy.add_fault("delay", path=r"/api/local-s3/", method="PUT", delay_seconds=20, count=1)
+    write_run(watch_dir, "RUN001", {"held.csv": SMALL})
+    proxy.wait_for_request(
+        lambda r: r.method == "PUT" and "/api/local-s3/" in r.path and r.fault_mode == "delay",
+        timeout=30,
+    )
+
     admin.set_release(bumped_version, mandatory=True).raise_for_status()
     server.wait_for_event(pc.watcher_id, event_type="update_started")
-    # The next heartbeat is held for eight seconds. The tick that sends it is still running when
-    # the worker's `Stop-Service` arrives, and its update check comes after the stop: the stop
-    # waits for the tick, so the check is made whatever the speed of the worker.
-    proxy.add_fault("delay", path=r"/heartbeat$", method="POST", delay_seconds=8, count=1)
     wait_for_wheel_request(pc, package_index, bumped_version)
     pc.await_upgrade_restart(pc.install_timeout_seconds)
     server.wait_for_event(pc.watcher_id, event_type="update_succeeded")

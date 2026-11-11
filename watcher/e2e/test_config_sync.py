@@ -822,7 +822,9 @@ def test_a_revision_equal_to_the_running_settings_overwrites_an_unapplied_edit_o
     assert [e.details for e in pushed] == [{"trigger": "config_revision"}]
     assert _config_calls(proxy, pc.watcher_id).count(f"PUT {PUSH_ROUTE}") == 1
     row = server.watcher(pc.watcher_id)
-    assert row.config_yaml == running_file.decode("utf-8")
+    # The watcher writes the file in text mode, so on Windows its lines end in CRLF. The server
+    # keeps the YAML with LF.
+    assert row.config_yaml == running_file.decode("utf-8").replace("\r\n", "\n")
     assert row.config_checksum == _checksum(pc.config_path)
     # The push made no `pc` revision: it is the file of revision 1, which the admin saved.
     assert revisions.history() == [(1, "web", "applied")]

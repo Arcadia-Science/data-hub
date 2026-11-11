@@ -324,11 +324,13 @@ class WindowsServiceDriver(WatcherDriver):
                 f"`data-hub-watcher {' '.join([*global_args, *args])}` did not finish in "
                 f"{timeout:g} s.\nstdout:\n{_text(exc.stdout)}\nstderr:\n{_text(exc.stderr)}"
             ) from exc
+        # Console output on Windows ends its lines with CRLF. The CLI driver's text mode turns
+        # that into "\n", so scenarios shared by both drivers can match whole lines.
         return CliResult(
             args=tuple(args),
             returncode=completed.returncode,
-            stdout=completed.stdout.decode("utf-8", errors="replace"),
-            stderr=completed.stderr.decode("utf-8", errors="replace"),
+            stdout=_lf(completed.stdout),
+            stderr=_lf(completed.stderr),
         )
 
     def installed_version(self) -> str:
@@ -1062,6 +1064,10 @@ class WindowsServiceDriver(WatcherDriver):
             finally:
                 WindowsServiceDriver._owner = None
         self._installed = False
+
+
+def _lf(data: bytes) -> str:
+    return data.decode("utf-8", errors="replace").replace("\r\n", "\n")
 
 
 def _text(data: bytes | str | None) -> str:

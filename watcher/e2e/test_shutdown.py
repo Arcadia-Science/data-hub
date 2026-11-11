@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from data_hub_shared.testing_proxy import FaultProxy
+from data_hub_watcher import testing_overrides
 from e2e_support.drivers import WatcherDriver
 from e2e_support.factory import WatcherFactory
 from e2e_support.files import SMALL, write_file, write_run
@@ -411,7 +412,11 @@ def test_a_stop_starts_no_new_part_or_file_of_an_auto_upload(
 def test_the_stop_event_reaches_the_server_before_the_stopped_heartbeat(
     watcher: WatcherFactory, server: ServerView
 ) -> None:
-    pc = watcher()
+    # One heartbeat at start, then none for a minute. A tick that is under way when the stop comes
+    # sends the queued stop event with its own flush, ahead of the final heartbeat, and hides the
+    # order the stop itself uses. Stopping the service takes about as long as the usual 2-second
+    # interval, so with that interval a tick usually is under way.
+    pc = watcher(overrides={testing_overrides.HEARTBEAT_INTERVAL_ENV_VAR: "60"})
     start_watching(pc, server)
 
     assert pc.stop() == 0
