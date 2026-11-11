@@ -12,6 +12,7 @@ watcher got, because the same assertions run on FSEvents (macOS) and on inotify 
 """
 
 from __future__ import annotations
+import hashlib
 from pathlib import Path
 from typing import Literal
 
@@ -74,6 +75,32 @@ def relative_paths(server: ServerView, instrument_id: str, run_id: str) -> list[
 
 def run_names(server: ServerView, instrument_id: str) -> list[str]:
     return sorted(r.run_id for r in server.runs(instrument_id))
+
+
+def wait_for_run_file(
+    server: ServerView,
+    instrument_id: str,
+    run_id: str,
+    name: str,
+    upload_mode: str,
+    content: bytes,
+) -> None:
+    """Wait for ``<run_id>/<name>`` to be done: uploaded in auto mode, or reported as
+    ``detected`` in manual mode (which leaves the file on the PC)."""
+    if upload_mode == "auto":
+        server.wait_for_uploaded(instrument_id, run_id, f"{run_id}/{name}", content=content)
+    else:
+        server.wait_for_file(instrument_id, run_id, f"{run_id}/{name}", status="detected")
+
+
+def has_recorded_files(pc: WatcherDriver, upload_mode: str, count: int) -> bool:
+    """Whether the watcher's state database holds its record of ``count`` files: uploaded, with
+    nothing left to retry, in auto mode, and reported (``detected_files``) in manual mode."""
+    if upload_mode == "auto":
+        return pc.state_query("SELECT count(*) FROM pending_uploads") == [(0,)] and (
+            pc.state_query("SELECT count(*) FROM uploaded_files") == [(count,)]
+        )
+    return pc.state_query("SELECT count(*) FROM detected_files") == [(count,)]
 
 
 def forget(pc: WatcherDriver, prefix: str) -> None:
@@ -190,7 +217,9 @@ def test_a_file_that_never_settles_is_abandoned_with_an_error_event(
     pc.start()
 
     live = watch_dir / "RUN001" / "live.csv"
-    with GrowingFile(live, interval=0.5):
+    # A write every quarter of a second: well inside the stability period, so the file is never
+    # quiet long enough to be stable, and only the timeout ends its wait.
+    with GrowingFile(live, interval=0.25):
         event = server.wait_for_event(
             pc.watcher_id, event_type="error", kind="stability_timeout", timeout=40
         )
@@ -199,6 +228,12 @@ def test_a_file_that_never_settles_is_abandoned_with_an_error_event(
     assert Path(event.details["path"]) == live
     assert event.details["max_wait_seconds"] == 4
     assert event.message == "File live.csv did not stabilise within 4s"
+
+    # Being abandoned is not forever: the last write put the file back on the list, and once
+    # the file stops changing it is reported at its final size.
+    final = live.read_bytes()
+    row = server.wait_for_file(instrument_id, "RUN001", "RUN001/live.csv", status="detected")
+    assert row.size_bytes == len(final)
 
 
 @pytest.mark.covers("file.pending->vanished")
@@ -470,6 +505,50 @@ def test_files_with_the_same_run_id_reach_the_server_as_one_run(
     assert sorted(e.details["run_id"] for e in reported) == ["RUN001", "RUN002"]
 
 
+@pytest.mark.covers("file.same_name_in_two_folders->stored_apart")
+@pytest.mark.parametrize("upload_mode", ["manual", "auto"])
+def test_files_with_the_same_name_in_two_folders_of_a_run_are_both_kept(
+    upload_mode: Literal["auto", "manual"],
+    watcher: WatcherFactory,
+    server: ServerView,
+    instrument_id: str,
+    watch_dir: Path,
+) -> None:
+    pc = watcher(upload_mode=upload_mode)
+    pc.start()
+    # One run, two folders, one file name. The sizes differ so that a single PUT and a multipart
+    # upload both have to keep the two apart.
+    first = write_file(watch_dir / "RUN001" / "day1" / "data.csv", payload(SMALL, seed=1))
+    second = write_file(watch_dir / "RUN001" / "day2" / "data.csv", payload(LARGE, seed=2))
+    contents = {"RUN001/day1/data.csv": first, "RUN001/day2/data.csv": second}
+
+    for relative_path, data in contents.items():
+        if upload_mode == "auto":
+            server.wait_for_uploaded(instrument_id, "RUN001", relative_path, content=data)
+        else:
+            server.wait_for_file(instrument_id, "RUN001", relative_path, status="detected")
+
+    # The server keeps both, as rows of their own with their folders, and one of them is stored
+    # under a name tagged with a hash of its folder, because the run has one row per name.
+    rows = {f.relative_path or f.filename: f for f in server.files(instrument_id, "RUN001")}
+    assert sorted(rows) == sorted(contents)
+    plain = [r for r in rows.values() if r.filename == "data.csv"]
+    tagged = [r for r in rows.values() if r.filename != "data.csv"]
+    assert len(plain) == 1 and len(tagged) == 1, [r.filename for r in rows.values()]
+    folder = (tagged[0].relative_path or "").rsplit("/", 1)[0]
+    tag = hashlib.sha256(folder.encode()).hexdigest()[:8]
+    assert tagged[0].filename == f"data~{tag}.csv"
+    assert run_names(server, instrument_id) == ["RUN001"]
+
+    if upload_mode == "auto":
+        # Each file's bytes are under its own name: the two did not overwrite each other.
+        for relative_path, data in contents.items():
+            row = rows[relative_path]
+            assert server.read_object(instrument_id, "RUN001", row.filename) == data
+        uploaded = server.wait_for_events(pc.watcher_id, event_type="file_uploaded", count=2)
+        assert len({e.details["s3_key"] for e in uploaded}) == 2
+
+
 @pytest.mark.covers("run.known->file_added")
 def test_a_later_file_of_a_reported_run_goes_out_as_an_update(
     watcher: WatcherFactory,
@@ -541,6 +620,39 @@ def test_a_failed_run_report_is_retried_with_a_growing_delay(
     assert len(server.events(pc.watcher_id, event_type="run_reported")) == 1
     assert run_names(server, instrument_id) == ["RUN001"]
     server.wait_for_file(instrument_id, "RUN001", "RUN001/a.csv", status="detected")
+
+
+@pytest.mark.covers("run.update->retried_after_server_error", "event.run_report_failed->emitted")
+def test_a_failed_run_update_is_retried_and_carries_the_file(
+    watcher: WatcherFactory,
+    server: ServerView,
+    proxy: FaultProxy,
+    instrument_id: str,
+    watch_dir: Path,
+) -> None:
+    pc = watcher(upload_mode="manual")
+    pc.start()
+    write_file(watch_dir / "RUN001" / "a.csv")
+    server.wait_for_file(instrument_id, "RUN001", "RUN001/a.csv", status="detected")
+
+    # The run is reported, and the update for its next file gets a 503.
+    with proxy.fault("status", path=r"/runs/RUN001$", method="PATCH", status=503, count=1):
+        write_file(watch_dir / "RUN001" / "b.csv")
+        server.wait_for_file(instrument_id, "RUN001", "RUN001/b.csv", status="detected", timeout=30)
+
+    # The retry came after the base delay, and sent the file the failed update had not.
+    updates = [r for r in run_reports(proxy, instrument_id) if r.method == "PATCH"]
+    assert [(r.fault_mode, r.upstream_status) for r in updates] == [("status", None), (None, 200)]
+    assert updates[1].timestamp - updates[0].timestamp >= RETRY_BASE_DELAY_SECONDS - 0.5
+    pc.wait_for_log(r"Updated run RUN001 \(sent 1 new file\(s\), 2 total\)")
+    assert relative_paths(server, instrument_id, "RUN001") == ["RUN001/a.csv", "RUN001/b.csv"]
+
+    # The failure was reported once, as an update of a run that already had a file.
+    [failed] = error_events(server, pc.watcher_id, "run_report_failed")
+    assert failed.details["operation"] == "update"
+    assert failed.details["status_code"] == 503
+    assert failed.details["run_id"] == "RUN001"
+    assert len(server.events(pc.watcher_id, event_type="run_reported")) == 1
 
 
 @pytest.mark.covers(
@@ -650,37 +762,51 @@ def test_reporting_a_deleted_run_again_is_refused_and_attaches_no_files(
 @pytest.mark.xfail(
     strict=True,
     raises=KnownBugStillPresent,
-    reason="bug-new-run-id-not-url-encoded: the watcher puts the run ID into the update URL "
-    "as it is, so a hash or percent sign in it sends the update to another run, or nowhere",
+    reason="bug-new-run-id-not-url-encoded: the watcher puts the run ID into the URL path of its "
+    "calls as it is, so a hash or percent sign in it sends an update (manual mode) or an upload "
+    "(auto mode) to another run, or nowhere",
 )
 @pytest.mark.covers("run.url_characters_in_id->update_reaches_run")
-def test_a_later_file_of_a_run_with_url_characters_in_its_id_reaches_that_run(
-    watcher: WatcherFactory, server: ServerView, instrument_id: str, watch_dir: Path
+@pytest.mark.parametrize("upload_mode", ["manual", "auto"])
+def test_a_run_with_url_characters_in_its_id_gets_its_files(
+    upload_mode: Literal["auto", "manual"],
+    watcher: WatcherFactory,
+    server: ServerView,
+    instrument_id: str,
+    watch_dir: Path,
 ) -> None:
-    pc = watcher(upload_mode="manual")
+    pc = watcher(upload_mode=upload_mode)
     pc.start()
-    # "Q%41" reads as "QA" once the URL is decoded, so an update that isn't encoded lands in
-    # that run, which holds a file of its own.
-    write_file(watch_dir / "QA" / "own.csv")
-    server.wait_for_file(instrument_id, "QA", "QA/own.csv", status="detected")
-    for run_id in ("Plate#3", "Q%41"):
-        write_run(watch_dir, run_id, {"first.csv": SMALL, "second.csv": SMALL})
+    # "Q%41" reads as "QA" once the URL is decoded, so a call that isn't encoded lands in that
+    # run, which holds a file of its own.
+    own = write_file(watch_dir / "QA" / "own.csv", SMALL)
+    wait_for_run_file(server, instrument_id, "QA", "own.csv", upload_mode, own)
+    contents = {
+        run_id: write_run(watch_dir, run_id, {"first.csv": SMALL, "second.csv": SMALL})
+        for run_id in ("Plate#3", "Q%41", "PLAIN")
+    }
     # A run with a plain ID, written last, shows the watcher has got through the others.
-    write_run(watch_dir, "PLAIN", {"first.csv": SMALL, "second.csv": SMALL})
-    server.wait_for_file(instrument_id, "PLAIN", "PLAIN/second.csv", status="detected")
+    wait_for_run_file(
+        server, instrument_id, "PLAIN", "second.csv", upload_mode, contents["PLAIN"]["second.csv"]
+    )
 
     with known_bug():
         for run_id in ("Plate#3", "Q%41"):
-            expected = [f"{run_id}/first.csv", f"{run_id}/second.csv"]
-            wait_until(
-                lambda run_id=run_id, expected=expected: (
-                    relative_paths(server, instrument_id, run_id) == expected
-                ),
-                5,
-                lambda: server.dump(pc.watcher_id, instrument_id),
-                what=f"both files of run {run_id!r}",
-            )
+            for name, data in contents[run_id].items():
+                if upload_mode == "auto":
+                    # Done means the row says so and the stand-in holds the bytes under the
+                    # run's own folder, `<instrument>/<run>/<name>`.
+                    server.wait_for_uploaded(
+                        instrument_id, run_id, f"{run_id}/{name}", content=data, timeout=10
+                    )
+                else:
+                    server.wait_for_file(
+                        instrument_id, run_id, f"{run_id}/{name}", status="detected", timeout=5
+                    )
+        # Nothing of these runs landed in the run that the encoded ID reads as.
         assert relative_paths(server, instrument_id, "QA") == ["QA/own.csv"]
+        assert not server.object_exists(instrument_id, "QA", "first.csv")
+        assert not server.object_exists(instrument_id, "QA", "second.csv")
 
 
 @pytest.mark.xfail(
@@ -801,6 +927,14 @@ def test_a_restart_does_not_report_or_upload_known_files_again(
             server.wait_for_uploaded(instrument_id, "RUN001", f"RUN001/{name}", content=content)
         else:
             server.wait_for_file(instrument_id, "RUN001", f"RUN001/{name}", status="detected")
+    # The watcher writes its own record after the server has the row, and it is the record that
+    # the next start goes by, so wait for it before the stop.
+    wait_until(
+        lambda: has_recorded_files(pc, upload_mode, len(data)),
+        30,
+        lambda: server.dump(pc.watcher_id, instrument_id),
+        what="the watcher to record the files in its state database",
+    )
     rows_before = server.files(instrument_id, "RUN001")
     assert pc.stop() == 0
 

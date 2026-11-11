@@ -94,6 +94,14 @@ TRANSITIONS: tuple[Transition, ...] = (
     # --- a run on the server ----------------------------------------------------------------
     covered(
         MACHINE,
+        "file.same_name_in_two_folders->stored_apart",
+        "Two files with the same name in different folders of one run both reach the server, "
+        "as rows of their own with their folders: one keeps the plain name and the other is "
+        "stored as `<stem>~<hash of its folder>.<ext>`. In auto mode both are uploaded, each "
+        "under its own name, and neither overwrites the other.",
+    ),
+    covered(
+        MACHINE,
         "run.first_file->reported",
         "The first stable file of a run ID makes the watcher POST the run, with its detected "
         "files, and queue a `run_reported` event.",
@@ -115,6 +123,13 @@ TRANSITIONS: tuple[Transition, ...] = (
         "A run report that fails with a 5xx or a dropped connection is retried in the "
         "process with a growing delay and succeeds once the server is back, with a single "
         "`run_report_failed` event for the run.",
+    ),
+    covered(
+        MACHINE,
+        "run.update->retried_after_server_error",
+        "A run update that fails with a 5xx is retried in the process after the base delay, "
+        "carries the file the failed update did not, and succeeds once the server is back, "
+        "with a single `run_report_failed` event (`operation: update`) for the run.",
     ),
     covered(
         MACHINE,
@@ -147,8 +162,15 @@ TRANSITIONS: tuple[Transition, ...] = (
     xfail_bug(
         MACHINE,
         "run.url_characters_in_id->update_reaches_run",
-        "A run whose ID contains URL characters such as `#` or `%` gets its later files through "
-        "an update to that same run: the watcher percent-encodes the run ID in the URL.",
+        "A run whose ID contains URL characters such as `#` or `%` gets its files: the watcher "
+        "percent-encodes the run ID in every URL path that carries it, which are the run update "
+        "(`PATCH /runs/<id>`) and the upload URL request (`POST /runs/<id>/request-upload-url`). "
+        "Today a `#` cuts the path short (an update goes to another run, and in auto mode no "
+        "file of the run uploads), and `Q%41` reads as `QA`: in auto mode the file's row is "
+        "created in run `QA` and its bytes are stored under `<instrument>/QA/`. The test "
+        "runs in both upload modes and asserts that each file lands in its own run and, in "
+        "auto mode, under `<instrument>/<run id>/`, and that the run the ID reads as gets "
+        "nothing.",
         "bug-new-run-id-not-url-encoded",
     ),
     # --- the initial scan and restarts ------------------------------------------------------
