@@ -99,12 +99,12 @@ failed or killed service after 60 s and then 120 s.
   right after ``service install`` the driver turns the actions off (``sc failure
   DataHubWatcher reset= 0 actions= ""``), and the real recovery is tested only in
   ``test_windows_service.py``, which switches them on itself.
-* **A second PC for the two tests that run** ``init`` **for another one**
-  (``test_a_second_registration_for_an_instrument_with_a_live_watcher_is_refused`` and
-  ``test_init_for_an_instrument_that_has_a_watcher_names_it``). There is one service per
-  machine, so a second PC can't be a second service. It is a config-only driver: a folder
-  with its own profile whose ``run_cli`` passes the group option ``--config <path>``
-  (``global_args=("--config", str(path))``), so ``init`` writes there and the registered
+* **A second PC for the test that runs** ``init`` **for another one**
+  (``test_a_second_registration_for_an_instrument_with_a_live_watcher_is_refused``). There
+  is one service per machine, so a second PC can't be a second service. It is a
+  config-only driver: a folder with its own profile whose ``run_cli`` passes the group
+  option ``--config <path>`` (``global_args=("--config", str(path))``), so ``init``
+  writes there and the registered
   service is left alone. It never starts.
 * **await_upgrade_restart** waits for the service to be ``running`` with a pid other than the
   one the driver saw at its last ``start()`` (or its last ``await_upgrade_restart``). Take
