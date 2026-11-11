@@ -82,7 +82,7 @@ Integration test infrastructure used by both Lambda and watcher test suites. Pro
 
 ### `testing_proxy`
 
-`FaultProxy` is a reverse proxy that sits between the watcher and the test server, passes requests through, and lets a test switch on faults such as error responses, delays, dropped connections and an outage, so the test can check how the watcher copes.
+`FaultProxy` is a reverse proxy that sits between the watcher and the test server, passes requests through, and lets a test switch on faults such as error responses, delays, dropped connections and an outage, so the test can check how the watcher copes. It forwards requests unchanged and keeps a log of them, including their headers, for the test to read. While the proxy is down it keeps its port reserved where the operating system still refuses connections to it, so nothing else can take the port.
 
 ### `testing_index`
 

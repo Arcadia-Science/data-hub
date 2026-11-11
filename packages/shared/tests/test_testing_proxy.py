@@ -1,22 +1,26 @@
 """Tests for the fault-injecting proxy, run against a tiny local upstream server."""
 
 from __future__ import annotations
+import dataclasses
 import hashlib
 import json
 import re
 import socket
+import struct
+import sys
 import threading
 import time
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, cast
+from typing import Any, cast, get_args
 from urllib.parse import urlsplit
 
 import pytest
 import requests
 
-from data_hub_shared.testing_proxy import FaultProxy
+from data_hub_shared import testing_proxy
+from data_hub_shared.testing_proxy import FaultMode, FaultProxy, RecordedRequest
 
 # ---------------------------------------------------------------------------
 # A small upstream server that records what it receives
@@ -26,10 +30,20 @@ from data_hub_shared.testing_proxy import FaultProxy
 class _Received:
     """One request as the upstream server saw it."""
 
-    def __init__(self, method: str, path: str, headers: dict[str, str], body: bytes) -> None:
+    def __init__(
+        self,
+        method: str,
+        path: str,
+        headers: dict[str, str],
+        body: bytes,
+        header_pairs: list[tuple[str, str]],
+    ) -> None:
         self.method = method
         self.path = path
         self.headers = headers
+        # Every header in the order it arrived, with repeats kept. `headers` keeps only the
+        # last value of a repeated header.
+        self.header_pairs = header_pairs
         self.body = body
         self.body_sha256 = hashlib.sha256(body).hexdigest()
 
@@ -53,6 +67,7 @@ class _UpstreamHandler(BaseHTTPRequestHandler):
             self.path,
             {name.lower(): value for name, value in self.headers.items()},
             body,
+            list(self.headers.items()),
         )
         upstream = cast(_UpstreamServer, self.server).fake_upstream
         with upstream.lock:
@@ -165,6 +180,16 @@ def _get(http: requests.Session, proxy: FaultProxy, path: str = "/echo", **kwarg
     return http.get(proxy.base_url + path, timeout=10, **kwargs)
 
 
+def _send_raw(proxy: FaultProxy, request: bytes) -> bytes:
+    """Send exact bytes to the proxy and read until it closes the connection."""
+    with socket.create_connection(("127.0.0.1", proxy.port), timeout=10) as sock:
+        sock.sendall(request)
+        raw = b""
+        while chunk := sock.recv(4096):
+            raw += chunk
+    return raw
+
+
 # ---------------------------------------------------------------------------
 # Pass-through
 # ---------------------------------------------------------------------------
@@ -231,6 +256,39 @@ def test_host_is_rewritten_and_connection_headers_are_dropped(
     assert seen["x-custom"] == "kept"
     assert "x-secret" not in seen
     assert "keep-alive" not in seen
+
+
+def test_the_proxy_adds_no_accept_encoding_header_of_its_own(
+    proxy: FaultProxy, upstream: _FakeUpstream
+) -> None:
+    # http.client adds `Accept-Encoding: identity` on its own unless told not to, which
+    # would show up next to the client's header, or on a request that had none.
+    _send_raw(proxy, b"GET /echo HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
+    _send_raw(
+        proxy,
+        b"GET /echo HTTP/1.1\r\nHost: x\r\nAccept-Encoding: br\r\nConnection: close\r\n\r\n",
+    )
+
+    without, with_one = upstream.received
+    assert [v for n, v in without.header_pairs if n.lower() == "accept-encoding"] == []
+    assert [v for n, v in with_one.header_pairs if n.lower() == "accept-encoding"] == ["br"]
+
+
+def test_request_headers_reach_upstream_in_order_with_repeats_and_case(
+    proxy: FaultProxy, upstream: _FakeUpstream
+) -> None:
+    _send_raw(
+        proxy,
+        b"GET /echo HTTP/1.1\r\nHost: x\r\nX-First: 1\r\nx-repeat: a\r\nX-Repeat: b\r\n"
+        b"X-Last: 3\r\nConnection: close\r\n\r\n",
+    )
+
+    (received,) = upstream.received
+    # The proxy writes `Host` and `Connection` itself. The other headers keep their order
+    # and the client's capitalization, and a repeated header is not merged.
+    names = [n for n, _ in received.header_pairs if n.lower() not in ("host", "connection")]
+    assert names == ["X-First", "x-repeat", "X-Repeat", "X-Last"]
+    assert [v for n, v in received.header_pairs if n.lower() == "x-repeat"] == ["a", "b"]
 
 
 def test_responses_close_the_connection_and_carry_content_length(
@@ -381,6 +439,34 @@ def test_delay_fault_waits_and_then_forwards(
     assert len(upstream.received) == 1
     assert proxy.requests[0].fault_mode == "delay"
     assert proxy.requests[0].upstream_status == 200
+    assert proxy.requests[0].client_gone is False
+
+
+@pytest.mark.parametrize("how", ["closes", "resets"])
+def test_delayed_request_is_not_forwarded_if_the_client_hung_up(
+    how: str, proxy: FaultProxy, upstream: _FakeUpstream
+) -> None:
+    proxy.add_fault("delay", delay_seconds=0.3)
+    sock = socket.create_connection(("127.0.0.1", proxy.port), timeout=10)
+    sock.sendall(b"POST /echo HTTP/1.1\r\nHost: x\r\nContent-Length: 4\r\n\r\nbody")
+    proxy.wait_for_request(lambda r: r.fault_mode == "delay", timeout=10)
+
+    if how == "resets":
+        # A reset instead of a clean close, as when the client's process is killed.
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, _linger_reset())
+    sock.close()
+
+    gone = proxy.wait_for_request(lambda r: r.client_gone, timeout=10)
+    assert gone.fault_mode == "delay"
+    assert gone.upstream_status is None
+    # Give a forward that should not happen time to show up.
+    time.sleep(0.3)
+    assert upstream.received == []
+    assert proxy.requests[0].client_gone is True
+
+
+def _linger_reset() -> bytes:
+    return struct.pack("hh", 1, 0) if sys.platform == "win32" else struct.pack("ii", 1, 0)
 
 
 def test_reset_fault_closes_the_connection_without_a_response(
@@ -509,6 +595,19 @@ def test_add_fault_rejects_bad_arguments(proxy: FaultProxy, kwargs: dict[str, An
         proxy.add_fault(**kwargs)
 
 
+def test_add_fault_accepts_every_mode_in_the_fault_mode_type(proxy: FaultProxy) -> None:
+    modes = get_args(FaultMode)
+
+    assert set(modes) == {"status", "delay", "reset", "drop_response"}
+    for mode in modes:
+        assert proxy.add_fault(mode).mode == mode
+
+
+def test_add_fault_names_the_valid_modes_when_given_a_bad_one(proxy: FaultProxy) -> None:
+    with pytest.raises(ValueError, match="drop_response"):
+        proxy.add_fault("bogus")  # pyright: ignore[reportArgumentType]
+
+
 def test_add_fault_rejects_an_invalid_regex(proxy: FaultProxy) -> None:
     with pytest.raises(re.error):
         proxy.add_fault("status", path="(")
@@ -541,6 +640,86 @@ def test_go_down_refuses_connections_and_come_up_reuses_the_port(
 
     assert proxy.is_up
     assert (proxy.port, proxy.base_url) == (port, base_url)
+    assert _get(http, proxy).status_code == 200
+
+
+def test_the_port_is_held_while_down_so_nothing_else_can_take_it(
+    proxy: FaultProxy, http: requests.Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Whether the operating system refuses a connection to a bound port varies, so the
+    # check that decides this is replaced here. The holding itself works the same everywhere.
+    monkeypatch.setattr(testing_proxy, "_refuses_connections", lambda _port: True)
+    port = proxy.port
+
+    proxy.go_down()
+
+    with socket.socket() as other, pytest.raises(OSError):
+        other.bind(("127.0.0.1", port))
+
+    proxy.come_up()
+
+    assert proxy.port == port
+    assert _get(http, proxy).status_code == 200
+
+
+def test_the_port_is_left_alone_while_down_if_holding_it_would_stop_connections_being_refused(
+    proxy: FaultProxy, http: requests.Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # On macOS a connection to a bound port is dropped without an answer, so the client
+    # waits for a timeout. A proxy that is down must refuse, so it doesn't hold the port.
+    monkeypatch.setattr(testing_proxy, "_refuses_connections", lambda _port: False)
+    port = proxy.port
+
+    proxy.go_down()
+
+    with pytest.raises(ConnectionRefusedError):
+        _connect(proxy)
+    with socket.socket() as other:
+        other.bind(("127.0.0.1", port))  # Nothing holds it.
+    proxy.come_up()
+    assert proxy.port == port
+    assert _get(http, proxy).status_code == 200
+
+
+def test_stopping_while_down_gives_the_port_back(
+    proxy: FaultProxy, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(testing_proxy, "_refuses_connections", lambda _port: True)
+    port = proxy.port
+    proxy.go_down()
+
+    proxy.stop()
+
+    with socket.socket() as other:
+        other.bind(("127.0.0.1", port))
+
+
+def test_refuses_connections_tells_a_refusal_from_an_accepted_connection() -> None:
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        port = listener.getsockname()[1]
+        assert testing_proxy._refuses_connections(port) is False
+
+    # The listener is closed now, so the port is free and nothing answers it.
+    assert testing_proxy._refuses_connections(port) is True
+
+
+def test_a_down_proxy_refuses_connections_whether_or_not_the_port_is_held(
+    proxy: FaultProxy, http: requests.Session
+) -> None:
+    # Uses whatever this operating system does, with no stand-ins. If it timed out instead
+    # of refusing, this would take the length of the connect timeout and then fail.
+    proxy.go_down()
+
+    started = time.monotonic()
+    with pytest.raises(ConnectionRefusedError):
+        socket.create_connection(("127.0.0.1", proxy.port), timeout=5).close()
+    with pytest.raises(requests.ConnectionError):
+        _get(http, proxy)
+
+    assert time.monotonic() - started < 3
+    proxy.come_up()
     assert _get(http, proxy).status_code == 200
 
 
@@ -662,6 +841,66 @@ def test_log_records_each_request(proxy: FaultProxy, http: requests.Session) -> 
     assert (first.fault_mode, first.upstream_status) == (None, 200)
     assert before <= first.timestamp <= second.timestamp <= time.time()
     assert (second.method, second.path, second.upstream_status) == ("POST", "/status/404", 404)
+
+
+def test_log_records_the_request_headers(proxy: FaultProxy, http: requests.Session) -> None:
+    http.get(
+        proxy.base_url + "/echo",
+        headers={"X-Watcher-Version": "1.2.3", "Authorization": "Bearer abc"},
+        timeout=10,
+    )
+
+    (entry,) = proxy.requests
+    assert entry.header("x-watcher-version") == "1.2.3"
+    assert entry.header("X-WATCHER-VERSION") == "1.2.3"
+    assert entry.header("Authorization") == "Bearer abc"
+    assert entry.header("X-Missing") is None
+    assert ("X-Watcher-Version", "1.2.3") in entry.headers  # Names keep the client's case.
+    assert entry.header("Host") == f"127.0.0.1:{proxy.port}"  # As the client sent it.
+
+
+def test_log_keeps_repeated_headers_in_order(proxy: FaultProxy) -> None:
+    _send_raw(
+        proxy,
+        b"GET /echo HTTP/1.1\r\nHost: x\r\nX-Repeat: a\r\nX-Other: o\r\nX-Repeat: b\r\n"
+        b"Connection: close\r\n\r\n",
+    )
+
+    (entry,) = proxy.requests
+    assert [v for n, v in entry.headers if n == "X-Repeat"] == ["a", "b"]
+    assert entry.header("X-Repeat") == "a"
+    assert isinstance(entry.headers, tuple)
+
+
+def test_log_records_the_headers_of_a_request_that_gets_a_fault(
+    proxy: FaultProxy, http: requests.Session
+) -> None:
+    proxy.add_fault("status", path="/events")
+
+    _get(http, proxy, "/events", headers={"X-Watcher-Version": "9.9.9"})
+
+    (entry,) = proxy.requests
+    assert entry.fault_mode == "status"
+    assert entry.header("X-Watcher-Version") == "9.9.9"
+
+
+def test_recorded_request_keeps_its_original_fields_first() -> None:
+    fields = dataclasses.fields(RecordedRequest)
+
+    assert [f.name for f in fields] == [
+        "timestamp",
+        "method",
+        "path",
+        "fault_mode",
+        "upstream_status",
+        "headers",
+        "client_gone",
+    ]
+    # The new fields have defaults, so a request can still be made from the first five.
+    request = RecordedRequest(1.0, "GET", "/x", None, None)
+    assert request.headers == ()
+    assert request.client_gone is False
+    assert request.header("anything") is None
 
 
 def test_log_records_fault_mode_without_an_upstream_status(

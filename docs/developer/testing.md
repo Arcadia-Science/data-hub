@@ -185,7 +185,8 @@ program and break things around it.
 - **`testing_proxy`:** `FaultProxy` is a reverse proxy that sits between the
   watcher and the test server, passes requests through, and lets a test switch
   on faults such as error responses, delays, dropped connections and an outage,
-  so the test can check how the watcher copes.
+  so the test can check how the watcher copes. It forwards requests unchanged
+  and keeps a log of them, including their headers, for the test to read.
 - **`testing_index`:** `LocalPackageIndex` is a small package index that lists
   the watcher wheels in a folder and sends every other package to the real PyPI,
   so a test can offer the watcher a newer version to update to without

@@ -22,7 +22,7 @@ import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, Literal, cast
+from typing import Any, Literal, cast, get_args
 from urllib.parse import urlsplit
 
 __all__ = ["FaultMode", "FaultProxy", "FaultRule", "RecordedRequest"]
@@ -32,14 +32,13 @@ FaultMode = Literal["status", "delay", "reset", "drop_response"]
 
 - ``"status"``: answer with a fixed status code and a small JSON body, without
   contacting the upstream server.
-- ``"delay"``: wait, then forward the request as usual.
+- ``"delay"``: wait, then forward the request as usual. If the client has hung up by
+  the end of the wait, the request is not forwarded.
 - ``"reset"``: close the client's connection abruptly, without any response, and
   without contacting the upstream server.
 - ``"drop_response"``: forward the request so the upstream server fully processes it,
   then close the client's connection without sending the reply.
 """
-
-_FAULT_MODES: tuple[str, ...] = ("status", "delay", "reset", "drop_response")
 
 # Headers that describe a single connection rather than the request or response, so a
 # proxy must not copy them from one side to the other (RFC 9110 section 7.6.1).
@@ -67,6 +66,9 @@ _LINGER_RESET = struct.pack("hh", 1, 0) if sys.platform == "win32" else struct.p
 # the OS can take a moment to let go of the port after a listener closes.
 _REBIND_TIMEOUT_SECONDS = 10.0
 
+# How long `_refuses_connections` waits for a refusal before it decides there won't be one.
+_REFUSAL_PROBE_SECONDS = 0.25
+
 _MAX_HEADER_LINE = 65536
 
 
@@ -79,6 +81,10 @@ class RecordedRequest:
     the fault rule that applied to the request, or ``None`` if it passed through
     untouched. ``upstream_status`` is the status code the upstream server answered
     with, or ``None`` when the upstream server was not contacted (or never answered).
+    ``headers`` are the request headers as the client sent them, as ``(name, value)``
+    pairs in order, with repeated headers kept and the names in the client's own case.
+    ``client_gone`` is true when a ``"delay"`` rule was waiting and the client hung up
+    before the wait ended, so the request was never forwarded.
 
     A request is logged as soon as it arrives, and ``upstream_status`` is filled in once
     the upstream server answers. So a request that is still being delayed or is still
@@ -90,6 +96,16 @@ class RecordedRequest:
     path: str
     fault_mode: FaultMode | None
     upstream_status: int | None
+    headers: tuple[tuple[str, str], ...] = ()
+    client_gone: bool = False
+
+    def header(self, name: str) -> str | None:
+        """The value of the first header called ``name`` (any case), or ``None``."""
+        wanted = name.lower()
+        for header_name, value in self.headers:
+            if header_name.lower() == wanted:
+                return value
+        return None
 
 
 @dataclass(eq=False)
@@ -136,7 +152,8 @@ class FaultProxy:
 
     Requests are forwarded with their method, path, query, headers and body unchanged,
     except that ``Host`` is rewritten to the upstream's and headers that only describe
-    one connection are dropped. The whole upstream response is read, then sent back with a
+    one connection are dropped. The proxy adds no headers of its own, so the upstream
+    server sees the client's ``Accept-Encoding`` as it was, or none. The whole upstream response is read, then sent back with a
     ``Content-Length`` and ``Connection: close``. Closing every connection after each
     response means a client can never keep an idle connection that would skip a
     fault change.
@@ -172,6 +189,8 @@ class FaultProxy:
         self._port: int | None = None
         self._server: _ProxyServer | None = None
         self._thread: threading.Thread | None = None
+        # Holds the port, bound but not listening, while the proxy is down.
+        self._held_port_socket: socket.socket | None = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -215,19 +234,25 @@ class FaultProxy:
         with self._lifecycle_lock:
             if self._state == "up":
                 self._close_listener()
+            elif self._state == "down":
+                self._release_held_port()
             self._state = "stopped"
 
     def go_down(self) -> None:
         """Simulate the server disappearing.
 
         The listening socket and every open client connection are closed, so new
-        connections get "connection refused" until :meth:`come_up` is called. Requests
-        still in flight are abandoned. Calling it when already down does nothing.
+        connections get "connection refused" until :meth:`come_up` is called. Where the
+        operating system still refuses connections to a port that is bound but not
+        listening, the port is kept bound while the proxy is down, so nothing else can
+        take it. Requests still in flight are abandoned. Calling it when already down
+        does nothing.
         """
         with self._lifecycle_lock:
             if self._state == "up":
                 self._close_listener()
                 self._state = "down"
+                self._hold_port(self.port)
             elif self._state == "new":
                 raise RuntimeError("The proxy has not been started yet.")
 
@@ -238,6 +263,7 @@ class FaultProxy:
         """
         with self._lifecycle_lock:
             if self._state == "down":
+                self._release_held_port()
                 self._listen(self.port)
                 self._state = "up"
             elif self._state == "new":
@@ -273,6 +299,50 @@ class FaultProxy:
             daemon=True,
         )
         self._thread.start()
+
+    def _hold_port(self, port: int) -> None:
+        """Keep *port* bound, without listening, while the proxy is down.
+
+        A closed port can be taken by another process, and on Linux a client that
+        retries against a free port can connect to itself when the operating system
+        gives it that same port as its own. A socket that is bound but not listening
+        blocks both, and where the TCP stack answers a connection to it with a reset, a
+        client still sees "connection refused". Not every stack does. macOS drops the
+        attempt without answering, so the client waits for a timeout instead. After
+        binding, this checks what a connection gets, and if it isn't refused it lets
+        the port go again, as if it had not been held.
+        """
+        deadline = time.monotonic() + _REBIND_TIMEOUT_SECONDS
+        while True:
+            holder = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            try:
+                if sys.platform == "win32":
+                    # Refuse to share the port. The default would let another socket
+                    # that sets SO_REUSEADDR bind it too.
+                    exclusive = getattr(socket, "SO_EXCLUSIVEADDRUSE", None)
+                    if exclusive is not None:
+                        holder.setsockopt(socket.SOL_SOCKET, exclusive, 1)
+                else:
+                    # Needed to bind while connections that were open when the
+                    # listener closed are still in TIME_WAIT.
+                    holder.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                holder.bind(("127.0.0.1", port))
+            except OSError:
+                holder.close()
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.05)
+            else:
+                if _refuses_connections(port):
+                    self._held_port_socket = holder
+                else:
+                    holder.close()
+                return
+
+    def _release_held_port(self) -> None:
+        holder, self._held_port_socket = self._held_port_socket, None
+        if holder is not None:
+            holder.close()
 
     def _close_listener(self) -> None:
         server, thread = self._server, self._thread
@@ -310,8 +380,9 @@ class FaultProxy:
         and ``None`` means no limit. When several rules match a request, the one added
         first wins. Returns the rule so it can be removed later.
         """
-        if mode not in _FAULT_MODES:
-            raise ValueError(f"Unknown fault mode {mode!r}. Use one of {_FAULT_MODES}.")
+        modes = get_args(FaultMode)
+        if mode not in modes:
+            raise ValueError(f"Unknown fault mode {mode!r}. Use one of {modes}.")
         if not 100 <= status <= 599:
             raise ValueError(f"status must be between 100 and 599, got {status}.")
         if delay_seconds < 0:
@@ -419,13 +490,28 @@ class FaultProxy:
                     )
                 self._log_changed.wait(remaining)
 
-    def _log_request(self, method: str, target: str, mode: FaultMode | None) -> int:
+    def _log_request(
+        self,
+        method: str,
+        target: str,
+        mode: FaultMode | None,
+        headers: tuple[tuple[str, str], ...],
+    ) -> int:
         with self._lock:
             log_id = self._next_log_id
             self._next_log_id += 1
-            self._log[log_id] = RecordedRequest(time.time(), method, target, mode, None)
+            self._log[log_id] = RecordedRequest(
+                time.time(), method, target, mode, None, headers=headers
+            )
             self._log_changed.notify_all()
             return log_id
+
+    def _log_client_gone(self, log_id: int) -> None:
+        with self._lock:
+            entry = self._log.get(log_id)
+            if entry is not None:  # The log may have been cleared meanwhile.
+                self._log[log_id] = replace(entry, client_gone=True)
+                self._log_changed.notify_all()
 
     def _log_upstream_status(self, log_id: int, status: int) -> None:
         with self._lock:
@@ -501,6 +587,24 @@ class _ProxyServer(ThreadingHTTPServer):
         super().handle_error(request, client_address)
 
 
+def _refuses_connections(port: int) -> bool:
+    """True if connecting to *port* on the loopback address is refused straight away.
+
+    A closed port refuses at once, so waiting a quarter of a second for the answer is
+    long enough on any machine. A connection that times out, or that succeeds, is not a
+    refusal.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.settimeout(_REFUSAL_PROBE_SECONDS)
+        try:
+            probe.connect(("127.0.0.1", port))
+        except ConnectionRefusedError:
+            return True
+        except OSError:
+            return False
+        return False
+
+
 def _close_with_reset(conn: socket.socket) -> None:
     """Close a socket so the peer sees a connection reset instead of a clean end."""
     with contextlib.suppress(OSError):
@@ -551,7 +655,9 @@ class _ProxyHandler(BaseHTTPRequestHandler):
             return  # The proxy went down just as this connection arrived.
 
         rule = proxy._claim_fault(method, target)
-        log_id = proxy._log_request(method, target, rule.mode if rule else None)
+        log_id = proxy._log_request(
+            method, target, rule.mode if rule else None, tuple(self.headers.items())
+        )
 
         if rule is not None and rule.mode == "reset":
             self._proxy_server.reset_on_close(self.connection)
@@ -574,6 +680,11 @@ class _ProxyHandler(BaseHTTPRequestHandler):
         if rule is not None and rule.mode == "delay":
             if self._proxy_server.closing.wait(rule.delay_seconds):
                 return  # The proxy went down while this request was waiting.
+            if self._client_has_hung_up():
+                # Nobody is waiting for the answer, and forwarding the request now would
+                # make the upstream server act on a request the client has given up on.
+                proxy._log_client_gone(log_id)
+                return
 
         try:
             upstream_response = self._forward(body)
@@ -589,6 +700,28 @@ class _ProxyHandler(BaseHTTPRequestHandler):
         if rule is not None and rule.mode == "drop_response":
             return  # The upstream server has handled the request. The client gets silence.
         self._respond(status, reason, headers, payload)
+
+    def _client_has_hung_up(self) -> bool:
+        """True if the client closed its end of the connection while it was waiting.
+
+        The request has been read in full, so any byte still to read would be the start
+        of another request. Peeking at the socket without blocking tells the two cases
+        apart: no data means the client is still there, an end-of-stream or an error
+        means it left. A client that closes only its sending side after the request, and
+        then keeps waiting for the answer, would look the same as one that left. The
+        clients used in the tests don't do that.
+        """
+        conn = self.connection
+        previous_timeout = conn.gettimeout()
+        conn.setblocking(False)
+        try:
+            return conn.recv(1, socket.MSG_PEEK) == b""
+        except BlockingIOError:
+            return False
+        except OSError:
+            return True
+        finally:
+            conn.settimeout(previous_timeout)
 
     def _read_request_body(self) -> bytes | None:
         """Read the request body. Returns ``None`` when the request has none."""
@@ -645,7 +778,7 @@ class _ProxyHandler(BaseHTTPRequestHandler):
             proxy._upstream_host, proxy._upstream_port, timeout=proxy._upstream_timeout
         )
         try:
-            conn.putrequest(self.command, self.path, skip_host=True, skip_accept_encoding=False)
+            conn.putrequest(self.command, self.path, skip_host=True, skip_accept_encoding=True)
             for name, value in headers:
                 conn.putheader(name, value)
             if body is not None or self.command in ("POST", "PUT", "PATCH"):
