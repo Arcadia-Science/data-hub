@@ -19,9 +19,10 @@ TRANSITIONS: tuple[Transition, ...] = (
     covered(
         MACHINE,
         "service.not_installed->installed",
-        "`service install` registers the DataHubWatcher service with automatic start, "
-        "creates the ProgramData log folder, and writes the upgrade worker script and its "
-        "scheduled task.",
+        "`service install` registers the DataHubWatcher service with automatic start, as "
+        "LocalSystem, and writes the upgrade worker script and its scheduled task. (It "
+        "creates the ProgramData log folder when that is missing; the test doesn't claim "
+        "that, because the folder is there already on a machine that has run the service.)",
         platforms=SERVICE,
     ),
     covered(
@@ -34,8 +35,9 @@ TRANSITIONS: tuple[Transition, ...] = (
     covered(
         MACHINE,
         "service.install->recovery_actions",
-        "`sc qfailure` shows restart after 60 s, restart after 120 s, then no action, with "
-        "the actions-on-non-crash-failures flag set.",
+        "`sc qfailure` shows restart after 60 s and restart after 120 s, with the "
+        "actions-on-non-crash-failures flag set, and the failure actions in the registry "
+        "end with a third entry that does nothing (`sc qfailure` prints no line for it).",
         platforms=SERVICE,
     ),
     covered(
@@ -90,7 +92,9 @@ TRANSITIONS: tuple[Transition, ...] = (
         MACHINE,
         "service.running->state_in_config_dir",
         "The state database and the upgrade sentinels live in the directory of the "
-        "registered config file, not in the LocalSystem profile.",
+        "registered config file, not in the LocalSystem profile. The state database is "
+        "asserted here, and the sentinels (the in-progress marker, the request and the "
+        "result) in `service.upgrade->worker_mandatory_installs`.",
         platforms=SERVICE,
     ),
     covered(
@@ -132,44 +136,54 @@ TRANSITIONS: tuple[Transition, ...] = (
     # --- start-up failures and the SCM's recovery -------------------------------------------
     covered(
         MACHINE,
-        "service.registry_unreadable->recovery_restart",
-        "A service whose registry values cannot be read exits with code 1 and the SCM "
-        "restarts it after 60 s, and it runs once the values are back.",
+        "service.registry_unreadable->failure_exit",
+        "A service whose registry values cannot be read logs why and stops with a failure "
+        "exit code (a non-zero one, which the SCM's recovery treats as a failure). The "
+        "recovery is off in this test: a start-up refusal ends in the same `SystemExit(1)` "
+        "whatever its cause, and `service.api_unreachable->recovery_restart` waits for the "
+        "restart of that exit once.",
         platforms=SERVICE,
     ),
     covered(
         MACHINE,
-        "service.no_api_url->recovery_restart",
-        "A config with no API URL for its environment makes the service exit with code 1, "
-        "and the SCM restarts it after 60 s.",
+        "service.no_api_url->failure_exit",
+        "A config with no API URL for its environment is logged, and the service stops with "
+        "a failure exit code. As for `service.registry_unreadable->failure_exit`, the "
+        "recovery is off here.",
         platforms=SERVICE,
     ),
     covered(
         MACHINE,
         "service.api_unreachable->recovery_restart",
-        "An unreachable API at start makes the service exit with code 1, the SCM restarts "
-        "it after 60 s, and it runs once the API is back.",
+        "An unreachable API at start makes the service stop with a failure exit code (the "
+        "win32 code 1066 with the service-specific code 0x20000001, which is what pywin32 "
+        "reports for a `SystemExit(1)`), the SCM restarts it after 60 s, and it runs once "
+        "the API is back. It is the one start-up refusal whose restart is waited for.",
         platforms=SERVICE,
     ),
     covered(
         MACHINE,
-        "service.instrument_pending->recovery_restart",
-        "A pending instrument makes the service exit with code 1, the SCM restarts it after "
-        "60 s, and it runs once the instrument is activated.",
+        "service.instrument_pending->failure_exit",
+        "A pending instrument is logged, and the service stops with a failure exit code. "
+        "The recovery is off here, as for `service.registry_unreadable->failure_exit`.",
         platforms=SERVICE,
     ),
     covered(
         MACHINE,
-        "service.no_watcher_id->recovery_restart",
-        "A config with no watcher id makes the service exit with code 1, and the SCM "
-        "restarts it after 60 s.",
+        "service.no_watcher_id->failure_exit",
+        "A config with no watcher id is logged, and the service stops with a failure exit "
+        "code. The recovery is off here, as for `service.registry_unreadable->failure_exit`.",
         platforms=SERVICE,
     ),
     covered(
         MACHINE,
         "service.failures->stays_stopped_after_two",
-        "A third failure inside the failure-count window leaves the service stopped, with "
-        "no further restart.",
+        "A crash (a kill) is the first failure and two refused starts after it are the "
+        "second and third, so a crash and a `SystemExit(1)` count as failures of one "
+        "service: the restarts come after 60 s and 120 s, and after the third failure the "
+        "service stays stopped, because the failure actions end with an entry that does "
+        "nothing (read from the registry: waiting for a restart that doesn't come would "
+        "take longer than the 120 s of the second one).",
         platforms=SERVICE,
     ),
     covered(
@@ -218,11 +232,12 @@ TRANSITIONS: tuple[Transition, ...] = (
     xfail_bug(
         MACHINE,
         "service.deregistered->stays_stopped",
-        "A running service that finds out its watcher was deregistered stops and stays "
-        "stopped: the SCM's recovery actions, which restart a service that exits with a "
-        "failure, must not bring back a watcher that can never recover. (It is the service "
-        "side of `watcher.deregistered->process_exits`; today the service keeps running with "
-        "404s.)",
+        "PROPOSED — confirm intent: a running service that finds out its watcher was "
+        "deregistered stops itself cleanly, exiting 0, which the SCM treats as a clean stop "
+        "(a failure exit would make its recovery actions restart a watcher that can never "
+        "recover), and it stays stopped. (It is the service side of "
+        "`watcher.deregistered->process_exits`, which exits non-zero under `watch`; today "
+        "the service keeps running with 404s.)",
         "bug-08-deregistered-watcher-keeps-running",
         platforms=SERVICE,
     ),

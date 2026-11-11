@@ -10,8 +10,12 @@ The driver turns the SCM's recovery actions off after ``service install``, so th
 refused service stays down as a ``watch`` process does. A test of recovery asks for the
 configuration the product sets with ``install_service(failure_actions="product")``. The restarts
 those tests wait for are the real ones: 60 s after the first failure and 120 s after the second.
-Where a test only has to see that the SCM does *not* restart a service, it gives the SCM a
-5-second restart instead, so that a restart would show within seconds.
+They are slow, so only three tests wait for them: a killed service, one whose start is refused
+(``api_unreachable``), and the third failure that leaves the service stopped. Every start-up
+refusal ends the same way (a ``SystemExit(1)``, which pywin32 reports as the same failure code),
+so the others are shown by their log line and a non-zero exit with the recovery off. Where a test
+only has to see that the SCM does *not* restart a service, it gives the SCM a 2-second restart
+instead, so that a restart would show within seconds.
 
 There is one service per machine, so these tests run one after the other, and each removes the
 service when it ends.
@@ -35,13 +39,9 @@ from e2e_support.files import SMALL, ExclusiveWriter, payload, write_run
 from e2e_support.server import HeartbeatRow, ServerView
 from e2e_support.service_driver import READY_LINE, START_LINE, WindowsServiceDriver
 from e2e_support.waiting import KnownBugStillPresent, known_bug, stays_true, wait_until
-from e2e_support.windows_scm import ServiceState
+from e2e_support.windows_scm import SERVICE_FAILURE_EXIT_CODE, ServiceState
 
 pytestmark = pytest.mark.e2e
-
-# A `uv tool install --reinstall` under the worker is `LocalSystem`'s own: it has its own uv
-# cache, so the first one downloads what the others find.
-INSTALL_TIMEOUT = 300.0
 
 # The SCM restarts a failed service after 60 s, and after 120 s the second time. The bounds
 # allow for the time a failure takes to be seen and a restart to be noticed.
@@ -86,13 +86,24 @@ def update_events(server: ServerView, pc: WindowsServiceDriver) -> list[str]:
     return [e.event_type for e in server.events(pc.watcher_id) if e.event_type in kinds]
 
 
-def wait_for_wheel_request(index: LocalPackageIndex, version: str) -> None:
+def update_event_sequence(server: ServerView, pc: WindowsServiceDriver) -> list[str]:
+    """The update events in order, a repeat of the same event counted once: the scenarios about
+    the upgrade compare this, and ``service.upgrade->worker_dispatch_once`` is the one that
+    counts the repeats (the updater doesn't mark an upgrade it hands to the worker as in
+    progress, so a check on the next heartbeat can dispatch it again)."""
+    kinds = update_events(server, pc)
+    return [kind for index, kind in enumerate(kinds) if index == 0 or kinds[index - 1] != kind]
+
+
+def wait_for_wheel_request(
+    pc: WindowsServiceDriver, index: LocalPackageIndex, version: str
+) -> None:
     """Wait until the package index was asked for the wheel of ``version``: the worker's
     ``uv`` installed from the local index and not from PyPI."""
     prefix = f"/files/data_hub_watcher-{version}-"
     wait_until(
         lambda: any(path.startswith(prefix) for path in index.requested_paths),
-        INSTALL_TIMEOUT,
+        pc.install_timeout_seconds,
         lambda: "index requests:\n" + "\n".join(index.requested_paths),
         what=f"the package index to be asked for the {version} wheel",
     )
@@ -118,9 +129,7 @@ def refused_start(pc: WindowsServiceDriver) -> float:
     return pc.ended_at
 
 
-def recover(
-    pc: WindowsServiceDriver, server: ServerView, failed_at: float, *, runs: int = 2
-) -> None:
+def recover(pc: WindowsServiceDriver, server: ServerView, failed_at: float) -> None:
     """Wait for the SCM's restart after a failure, check it came after about 60 s, and that the
     service then runs and watches."""
     status = pc.wait_for_new_process(None, timeout=150)
@@ -129,7 +138,7 @@ def recover(
     assert low <= waited <= high, f"the SCM restarted the service {waited:.0f} s after it failed"
     assert status.state is ServiceState.RUNNING
     server.wait_for_watcher_status(pc.watcher_id, "watching", timeout=60)
-    assert starts_logged(pc) == runs, pc.log_tail()
+    assert starts_logged(pc) == 2, pc.log_tail()
 
 
 # ---------------------------------------------------------------------------
@@ -138,7 +147,7 @@ def recover(
 
 
 @pytest.mark.covers("service.not_installed->installed")
-def test_install_registers_the_service_the_log_folder_and_the_upgrade_task(
+def test_install_registers_the_service_the_upgrade_worker_and_its_task(
     watcher: WatcherFactory,
 ) -> None:
     pc = service_pc(watcher)
@@ -159,8 +168,9 @@ def test_install_registers_the_service_the_log_folder_and_the_upgrade_task(
     assert "data-hub-watcher" in binary
     assert "python.exe" in binary
     assert "-m data_hub_watcher.service" in binary
-    # The shared log folder exists, and the upgrade worker and its on-demand task are in place.
-    assert pc.log_dir.is_dir()
+    # The upgrade worker and its on-demand task are in place. (`service install` also creates the
+    # ProgramData log folder when it is missing, but on a machine that has run the service before
+    # it is there already, so this test doesn't claim it.)
     assert pc.worker_script.is_file()
     assert pc.host.task_exists()
     task = pc.host.task_details()
@@ -185,7 +195,7 @@ def test_the_registry_holds_the_config_and_env_file_the_service_will_load(
 
 
 @pytest.mark.covers("service.install->recovery_actions")
-def test_install_sets_restart_after_60_then_120_seconds_and_then_nothing(
+def test_install_sets_restart_after_60_then_120_seconds_and_no_action_after(
     watcher: WatcherFactory,
 ) -> None:
     pc = service_pc(watcher)
@@ -198,6 +208,14 @@ def test_install_sets_restart_after_60_then_120_seconds_and_then_nothing(
     assert failure.reset_period_seconds == 86_400
     # A `SystemExit(1)` is a failure to the SCM only because of this flag.
     assert failure.on_noncrash_failures is True
+    # `sc qfailure` prints no line for a "no action" entry, so the third entry is read from the
+    # registry value the SCM keeps, which lists it. The third failure leaving the service
+    # stopped is shown in action by `service.failures->stays_stopped_after_two`.
+    assert pc.host.failure_action_list() == (
+        ("restart", 60_000),
+        ("restart", 120_000),
+        ("none", 0),
+    )
 
 
 @pytest.mark.covers("service.install->delayed_start_and_dependencies")
@@ -248,9 +266,9 @@ def test_stop_ends_the_service_cleanly_and_the_scm_does_not_restart_it(
 ) -> None:
     pc = service_pc(watcher)
     pc.install_service()
-    # A restart after 5 s for any failure, a stop that is not a clean one included: if the SCM
+    # A restart after 2 s for any failure, a stop that is not a clean one included: if the SCM
     # did take a clean stop for a failure, it would show well inside the wait below.
-    pc.host.set_restart_actions([5_000, 5_000])
+    pc.host.set_restart_actions([2_000, 2_000])
     start_watching(pc, server)
 
     assert pc.stop() == 0
@@ -266,7 +284,7 @@ def test_stop_ends_the_service_cleanly_and_the_scm_does_not_restart_it(
     assert stopped == [pc.operator_stop_message]
     stays_true(
         lambda: not pc.is_running(),
-        20,
+        10,
         pc.log_tail,
         what="the SCM to leave a cleanly stopped service alone",
     )
@@ -354,6 +372,7 @@ def test_a_killed_service_is_restarted_by_the_scm_after_a_minute(
     old_pid = pc.pid
     assert old_pid is not None
     mark = pc.mark_logs()
+    starts_before = pc.start_lines()
 
     # A crash, as far as the SCM can tell. There is no stopped heartbeat to explain it.
     pc.kill()
@@ -361,11 +380,12 @@ def test_a_killed_service_is_restarted_by_the_scm_after_a_minute(
     assert pc.exit_code not in (None, 0)
     assert [b.status for b in server.heartbeats(pc.watcher_id)][-1] == "watching"
 
-    status = pc.wait_for_new_process(old_pid, timeout=150)
+    status = pc.wait_for_new_process(old_pid, timeout=150, after_starts=starts_before)
     waited = time.monotonic() - killed_at
     low, high = FIRST_RESTART_SECONDS
     assert low <= waited <= high, f"the SCM restarted the service {waited:.0f} s after the kill"
-    assert status.pid != old_pid
+    # A new process: another pid, or (Windows hands pids out again) another start line.
+    assert status.pid != old_pid or pc.start_lines() > starts_before
     pc.wait_for_log(READY_LINE.pattern, timeout=60, since=mark)
     server.wait_for_events(pc.watcher_id, count=2, event_type="watcher_started")
     server.wait_for_watcher_status(pc.watcher_id, "watching")
@@ -543,9 +563,9 @@ def test_a_missing_watch_folder_makes_the_service_wait_and_not_exit(
     folder = watch_dir / "not-there-yet"
     pc = service_pc(watcher, watch_dir=folder, create_watch_dir=False)
     pc.install_service()
-    # A restart 5 s after any failure: a service that exited because of the folder would be
+    # A restart 2 s after any failure: a service that exited because of the folder would be
     # back, with another pid, well inside the wait below.
-    pc.host.set_restart_actions([5_000, 5_000])
+    pc.host.set_restart_actions([2_000, 2_000])
 
     pc.start()
 
@@ -555,7 +575,7 @@ def test_a_missing_watch_folder_makes_the_service_wait_and_not_exit(
     assert "is waiting" in pc.log_text()
     stays_true(
         lambda: pc.pid == pid and starts_logged(pc) == 1,
-        20,
+        10,
         pc.log_tail,
         what="one process to keep waiting for the folder",
     )
@@ -596,37 +616,33 @@ def test_a_file_its_writer_holds_open_is_reported_and_uploaded_once_it_is_closed
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.covers("service.registry_unreadable->recovery_restart")
-def test_a_service_that_cannot_read_its_registry_paths_fails_and_is_restarted(
-    watcher: WatcherFactory, server: ServerView
+@pytest.mark.covers("service.registry_unreadable->failure_exit")
+def test_a_service_that_cannot_read_its_registry_paths_logs_why_and_exits_with_a_failure(
+    watcher: WatcherFactory,
 ) -> None:
     pc = service_pc(watcher)
-    pc.install_service(failure_actions="product")
-    config_path, _ = pc.registered_paths()
+    pc.install_service()
     pc.host.delete_registry_value("ConfigPath")
 
-    failed_at = refused_start(pc)
+    refused_start(pc)
 
     assert "Cannot read config/env paths from registry" in pc.log_text()
-    # With the value back, the restart that comes after about 60 s runs the watcher.
-    pc.host.set_registry_value("ConfigPath", str(config_path))
-    recover(pc, server, failed_at)
+    assert not pc.is_running()
 
 
-@pytest.mark.covers("service.no_api_url->recovery_restart")
-def test_a_config_without_an_api_url_fails_the_service_and_it_is_restarted(
-    watcher: WatcherFactory, server: ServerView
+@pytest.mark.covers("service.no_api_url->failure_exit")
+def test_a_config_without_an_api_url_is_logged_and_the_service_exits_with_a_failure(
+    watcher: WatcherFactory,
 ) -> None:
     pc = service_pc(watcher)
-    pc.install_service(failure_actions="product")
+    pc.install_service()
     good = pc.load_config()
     pc.write_config(good.model_copy(update={"api_base_urls": {}}))
 
-    failed_at = refused_start(pc)
+    refused_start(pc)
 
     assert "No API base URL configured for environment" in pc.log_text()
-    pc.write_config(good)
-    recover(pc, server, failed_at)
+    assert not pc.is_running()
 
 
 @pytest.mark.covers("service.api_unreachable->recovery_restart")
@@ -640,69 +656,94 @@ def test_an_unreachable_api_fails_the_service_and_it_runs_once_the_api_is_back(
     failed_at = refused_start(pc)
 
     assert "Cannot reach API during startup" in pc.log_text()
+    # A `SystemExit(1)` reaches the SCM as the failure of the service-specific code 0x20000001
+    # (pywin32 reports anything raised out of `SvcRun` that way), which the non-crash flag turns
+    # into a failure the recovery acts on. This is the one start-up refusal whose restart the
+    # suite waits for: the other refusals end in the same `SystemExit(1)`.
+    assert pc.exit_code == SERVICE_FAILURE_EXIT_CODE
     proxy.come_up()
     recover(pc, server, failed_at)
 
 
-@pytest.mark.covers("service.instrument_pending->recovery_restart")
-def test_a_pending_instrument_fails_the_service_and_it_runs_once_the_instrument_is_active(
-    watcher: WatcherFactory, server: ServerView, admin: Admin, instrument_id: str
+@pytest.mark.covers("service.instrument_pending->failure_exit")
+def test_a_pending_instrument_is_logged_and_the_service_exits_with_a_failure(
+    watcher: WatcherFactory, server: ServerView, instrument_id: str
 ) -> None:
     pc = service_pc(watcher)
-    pc.install_service(failure_actions="product")
+    pc.install_service()
     server.set_instrument_status(instrument_id, "pending")
 
-    failed_at = refused_start(pc)
+    refused_start(pc)
 
     assert "is still pending activation" in pc.log_text()
-    admin.activate_instrument(instrument_id).raise_for_status()
-    recover(pc, server, failed_at)
+    assert not pc.is_running()
 
 
-@pytest.mark.covers("service.no_watcher_id->recovery_restart")
-def test_a_config_without_a_watcher_id_fails_the_service_and_it_is_restarted(
-    watcher: WatcherFactory, server: ServerView
+@pytest.mark.covers("service.no_watcher_id->failure_exit")
+def test_a_config_without_a_watcher_id_is_logged_and_the_service_exits_with_a_failure(
+    watcher: WatcherFactory,
 ) -> None:
     pc = service_pc(watcher)
-    pc.install_service(failure_actions="product")
+    pc.install_service()
     good = pc.load_config()
     pc.write_config(good.model_copy(update={"watcher_ids": {}}))
 
-    failed_at = refused_start(pc)
+    refused_start(pc)
 
     assert "No watcher_id in config" in pc.log_text()
-    pc.write_config(good)
-    recover(pc, server, failed_at)
+    assert not pc.is_running()
 
 
 @pytest.mark.covers("service.failures->stays_stopped_after_two")
 def test_the_third_failure_inside_the_window_leaves_the_service_stopped(
-    watcher: WatcherFactory, proxy: FaultProxy
+    watcher: WatcherFactory, server: ServerView, proxy: FaultProxy
 ) -> None:
     pc = service_pc(watcher)
     pc.install_service(failure_actions="product")
-    proxy.go_down()
     message = "Cannot reach API during startup"
+    start_watching(pc, server)
 
-    # The first failure: restarted after 60 s.
-    failed_at = refused_start(pc)
-    wait_until(lambda: count_in_log(pc, message) >= 2, 150, pc.log_tail, what="the first restart")
-    second_at = time.monotonic()
+    # The first failure is a crash: the process is killed, and the SCM restarts it after 60 s.
+    # The server is gone by then, so the restarted service ends with a `SystemExit(1)`, which is
+    # the second failure (restart after 120 s) and the first refusal. The next restart is refused
+    # too: the third failure. A crash and a `SystemExit(1)` count as failures of one service, so
+    # the SCM has no restart left after two refusals.
+    pc.kill()
+    killed_at = time.monotonic()
+    proxy.go_down()
+
+    wait_until(
+        lambda: count_in_log(pc, message) >= 1,
+        150,
+        pc.log_tail,
+        what="the restart after the kill, which the API refuses",
+    )
+    first_refusal_at = time.monotonic()
     low, high = FIRST_RESTART_SECONDS
-    assert low <= second_at - failed_at <= high
+    assert low <= first_refusal_at - killed_at <= high
 
-    # The second: restarted after 120 s.
-    wait_until(lambda: count_in_log(pc, message) >= 3, 220, pc.log_tail, what="the second restart")
-    third_at = time.monotonic()
+    wait_until(
+        lambda: count_in_log(pc, message) >= 2,
+        220,
+        pc.log_tail,
+        what="the second restart, which the API refuses",
+    )
     low, high = SECOND_RESTART_SECONDS
-    assert low <= third_at - second_at <= high
+    assert low <= time.monotonic() - first_refusal_at <= high
 
-    # The third has no restart: it stays stopped, however long the SCM is given.
+    # The third failure has no restart. The SCM's actions end with a "no action" entry, which
+    # `sc qfailure` doesn't print and the registry value does: waiting for a restart that doesn't
+    # come would take longer than the 120 s that the second restart has, so the entry is read.
     pc.wait_for_state(ServiceState.STOPPED, timeout=30)
     assert pc.exit_code not in (None, 0)
+    assert pc.host.failure_action_list() == (
+        ("restart", 60_000),
+        ("restart", 120_000),
+        ("none", 0),
+    )
     stays_true(
-        lambda: not pc.is_running() and count_in_log(pc, message) == 3,
-        30,
+        lambda: not pc.is_running() and count_in_log(pc, message) == 2,
+        10,
         pc.log_tail,
         what="no restart after the third failure",
     )
@@ -731,9 +772,11 @@ def test_a_service_that_cannot_start_its_module_writes_the_traceback_to_the_boot
     pc.run_cli("service", "start")
     pc.wait_for_state(ServiceState.STOPPED, timeout=60)
 
-    log = pc.bootstrap_log.read_text(encoding="utf-8", errors="replace")
+    assert pc.bootstrap_log.is_file(), (
+        f"the service wrote no {pc.bootstrap_log.name}.\n{pc.log_tail()}"
+    )
     written = pc.log_text()
-    assert "bootstrap failure" in written, log[-2000:]
+    assert "bootstrap failure" in written, pc.log_tail()
     assert "RuntimeError: e2e: simulated broken service host" in written
     assert "Traceback (most recent call last)" in written
 
@@ -816,11 +859,11 @@ def test_a_mandatory_release_is_installed_by_the_worker_and_the_service_comes_ba
     assert started.details["via_worker"] is True
     assert started.details["mandatory"] is True
     assert started.details["pkg_spec"] == f"data-hub-watcher[windows-service]=={bumped_version}"
-    wait_for_wheel_request(package_index, bumped_version)
+    wait_for_wheel_request(pc, package_index, bumped_version)
 
     # The worker stops the service (a clean stop, not an exit for the SCM to restart), runs uv,
     # and starts it again.
-    pc.await_upgrade_restart(INSTALL_TIMEOUT)
+    pc.await_upgrade_restart(pc.install_timeout_seconds)
     stopped = server.wait_for_event(
         pc.watcher_id, event_type="watcher_stopped", message_contains=pc.update_stop_message
     )
@@ -832,7 +875,7 @@ def test_a_mandatory_release_is_installed_by_the_worker_and_the_service_comes_ba
     assert succeeded.details["target_version"] == bumped_version
     wait_for_watching_on(server, pc, bumped_version)
     assert pc.installed_version() == bumped_version
-    assert update_events(server, pc) == ["update_started", "update_succeeded"]
+    assert update_event_sequence(server, pc) == ["update_started", "update_succeeded"]
     # What the worker did is in its own log, in the config directory.
     worker_log = pc.worker_log.read_text(encoding="utf-8", errors="replace")
     assert "stopping service DataHubWatcher" in worker_log
@@ -879,8 +922,8 @@ def test_a_non_mandatory_release_goes_to_the_worker_only_after_the_idle_window(
     started = server.wait_for_event(pc.watcher_id, event_type="update_started", timeout=60)
     assert started.details["mandatory"] is False
     assert started.details["via_worker"] is True
-    wait_for_wheel_request(package_index, bumped_version)
-    pc.await_upgrade_restart(INSTALL_TIMEOUT)
+    wait_for_wheel_request(pc, package_index, bumped_version)
+    pc.await_upgrade_restart(pc.install_timeout_seconds)
     server.wait_for_event(pc.watcher_id, event_type="update_succeeded")
     wait_for_watching_on(server, pc, bumped_version)
     assert pc.installed_version() == bumped_version
@@ -910,7 +953,7 @@ def test_a_failed_install_in_the_worker_is_reported_by_the_service_that_comes_ba
     # again and again.
     admin.set_release(current_version).raise_for_status()
 
-    pc.await_upgrade_restart(INSTALL_TIMEOUT)
+    pc.await_upgrade_restart(pc.install_timeout_seconds)
 
     failed = server.wait_for_event(pc.watcher_id, event_type="update_failed", timeout=60)
     assert failed.details["via_worker"] is True
@@ -923,7 +966,7 @@ def test_a_failed_install_in_the_worker_is_reported_by_the_service_that_comes_ba
     assert any(p.startswith("/simple/data-hub-watcher/") for p in package_index.requested_paths)
     assert pc.installed_version() == current_version
     wait_for_watching_on(server, pc, current_version)
-    assert update_events(server, pc) == ["update_started", "update_failed"]
+    assert update_event_sequence(server, pc) == ["update_started", "update_failed"]
 
 
 # ---------------------------------------------------------------------------
@@ -991,7 +1034,7 @@ def test_uninstall_removes_the_service_its_registry_values_and_task_and_keeps_th
     raises=KnownBugStillPresent,
     reason=(
         "bug-08-deregistered-watcher-keeps-running: a service whose watcher was deregistered "
-        "keeps running with 404s instead of stopping, and staying stopped"
+        "keeps running with 404s instead of stopping cleanly, and staying stopped"
     ),
 )
 @pytest.mark.covers("service.deregistered->stays_stopped")
@@ -1000,9 +1043,11 @@ def test_a_deregistered_service_stops_and_the_scm_does_not_bring_it_back(
 ) -> None:
     pc = service_pc(watcher)
     pc.install_service()
-    # Restart after 5 s for any failure: a deregistered watcher can never recover, so the
-    # recovery actions must not bring it back, and a restart shows within seconds.
-    pc.host.set_restart_actions([5_000, 5_000])
+    # Restart after 2 s for any failure: a deregistered watcher can never recover, so the
+    # recovery actions must not bring it back, and a restart shows within seconds. (The intended
+    # outcome, PROPOSED, is that the service exits 0: a clean stop for the SCM, which a failure
+    # exit would not be. The SCM restarts only what fails.)
+    pc.host.set_restart_actions([2_000, 2_000])
     start_watching(pc, server)
     admin.deregister_watcher(pc.watcher_id).raise_for_status()
     proxy.wait_for_request(
@@ -1012,9 +1057,10 @@ def test_a_deregistered_service_stops_and_the_scm_does_not_bring_it_back(
 
     with known_bug():
         wait_until(lambda: not pc.is_running(), 30, pc.log_tail, what="the service to stop")
+        assert pc.exit_code == 0, f"the service stopped with {pc.exit_code}, not as a clean stop"
         stays_true(
             lambda: not pc.is_running(),
-            20,
+            10,
             pc.log_tail,
             what="the SCM not to restart a deregistered service",
         )

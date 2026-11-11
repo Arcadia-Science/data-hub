@@ -340,13 +340,21 @@ fails, the scheduled-task worker that upgrades it, and uninstalling it. It needs
   ended when the test began, and never truncates it.
 
 Some of it takes real time. The SCM restarts a service that failed 60 seconds after the first
-failure and 120 seconds after the second, so the tests of recovery wait for those (a kill, each
-start-up failure, the third failure that leaves the service stopped), and every upgrade runs the
-worker's `uv tool install` as `LocalSystem`, which has its own uv cache. The suite sets the SCM's
-recovery actions to none right after `service install`, so a test that kills or refuses the service
-sees it stay down as a `watch` process does. Where a test only has to see that the SCM does not
-restart a service, it gives it a 5-second restart instead of waiting for 60. A test of recovery
-asks for what the product configures with `install_service(failure_actions="product")`.
+failure and 120 seconds after the second, so the tests of recovery wait for those, and every upgrade
+runs the worker's `uv tool install` as `LocalSystem`, which has its own uv cache. Only three tests
+wait for the SCM's real restarts: a killed service, a refused start (the API is unreachable), and
+the third failure that leaves the service stopped (a kill, then two refused starts, to show that a
+crash and a `SystemExit(1)` count as one service's failures). The other start-up refusals end in the
+same `SystemExit(1)`, so they are shown by their log line and a failure exit code. The suite sets
+the SCM's recovery actions to none right after `service install`, so a test that kills or refuses
+the service sees it stay down as a `watch` process does. Where a test only has to see that the SCM
+does not restart a service, it gives it a 2-second restart instead of waiting for 60. A test of
+recovery asks for what the product configures with `install_service(failure_actions="product")`.
+
+CI splits the service run over three runners that run at the same time, because one would need
+longer than its step allows (see [CI and deployment](ci-and-deployment.md#watcher-end-to-end-tests-watcher-e2eyml)).
+To run one shard, pass its files: `uv run pytest watcher/e2e/test_windows_service.py -m e2e`, or
+the rest of the suite with `--ignore` for the files of the other two.
 
 ### How a test is built
 
