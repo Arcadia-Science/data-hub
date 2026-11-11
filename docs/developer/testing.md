@@ -72,9 +72,11 @@ def integration_env() -> Generator[IntegrationEnv, None, None]:
 the Drizzle schema via `npx drizzle-kit push --force`, seeds a deterministic
 `watcher_release_config` row, builds and starts `next start` on a free port,
 waits for it to respond, seeds a test user + personal access token, and yields
-an `IntegrationEnv`. It reads the `DATA_HUB_TEST_PG*` variables when it is called. It finds
-`npx` with `shutil.which`, so it works on Windows, where the program is
-`npx.cmd`. It stops with a clear error if `npx` is missing.
+an `IntegrationEnv`. It reads the `DATA_HUB_TEST_PG*` variables when it is
+called. It finds `npx` (for `drizzle-kit` and `next build`) and `node` (for the
+server) with `shutil.which`, so it works on Windows, where `npx` is `npx.cmd`.
+It stops with a clear error if `npx` or `node` is missing, or if Next.js isn't
+installed in `web/node_modules` (run `npm ci` in `web/`).
 
 `IntegrationEnv` is a frozen dataclass with these fields:
 
@@ -121,11 +123,27 @@ a `web/.env.local` made by `vercel env pull`. A variable that is set to an empty
 string is left alone, and the server treats it as unset. Variables that the
 harness doesn't set still come from your `web/.env*` files.
 
-**Teardown.** `next start` runs in its own process group (its own session on
-POSIX, `CREATE_NEW_PROCESS_GROUP` on Windows), because `npx` starts the real
-server as a child. When the `with` block exits, the whole tree is stopped. On
-POSIX the harness sends SIGTERM to the group, waits 10 seconds, then sends
-SIGKILL. On Windows it runs `taskkill /T /F`.
+**The server process.** The harness starts the server as `node
+web/node_modules/next/dist/bin/next start -H 127.0.0.1 -p <port>`, without
+`npx`. `npx` runs the real server as a child of a wrapper process (`cmd.exe` on
+Windows), and `taskkill /T` finds children by their parent process, so a
+wrapper that exited first would leave the server running. With `node` there is
+a single process to stop on both platforms. `drizzle-kit push` and `next build`
+still go through `npx`, because they finish before the server starts. The server
+listens on `127.0.0.1` only. `next start` listens on every interface by
+default, and the S3 stand-in has no authentication, so any machine on your
+network could write into it during a run.
+
+**Teardown.** The server runs in its own process group (its own session on
+POSIX). When the `with` block exits, the harness stops it. On POSIX it sends
+SIGTERM to the process group, waits up to 10 seconds for the server to exit,
+then sends SIGKILL to the group. On Windows it runs `taskkill /T /F` on the
+server's process id, and kills that process directly if `taskkill` fails.
+Teardown doesn't depend on the Windows process group. It kills by process id.
+
+If pytest is killed before the `with` block can exit (a second Ctrl+C, or
+SIGKILL), nothing stops the server, and it keeps running on its port. Look for
+a `node` process that was started with `next start` and stop it.
 
 **Admin sessions.** Some routes need a signed-in admin, and a personal access
 token can't reach them. `seed_admin_session(dsn)` inserts an admin user and a

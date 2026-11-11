@@ -337,7 +337,8 @@ def test_start_test_server_reads_the_harness_variables_when_it_is_called(
     monkeypatch.setenv("PGPORT", "1")
     monkeypatch.setenv("PGUSER", "someone-else")
     monkeypatch.setenv("PGPASSWORD", "nope")
-    monkeypatch.setattr(testing.shutil, "which", lambda _name: "/fake/npx")
+    monkeypatch.setattr(testing.shutil, "which", lambda name: f"/fake/{name}")
+    monkeypatch.setattr(testing, "_resolve_next_cli", lambda: Path("/fake/next"))
     dsns: list[str] = []
 
     def fake_connect(dsn: str) -> None:
@@ -390,6 +391,74 @@ def test_start_test_server_checks_for_npx_before_touching_postgres(
     monkeypatch.setattr(testing.psycopg2, "connect", fail_connect)
 
     with pytest.raises(RuntimeError, match="npx"), testing.start_test_server():
+        pass
+
+
+def test_resolve_node_returns_the_path_shutil_finds(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[str] = []
+
+    def fake_which(name: str) -> str:
+        seen.append(name)
+        return r"C:\Program Files\nodejs\node.exe"
+
+    monkeypatch.setattr(testing.shutil, "which", fake_which)
+
+    assert testing._resolve_node() == r"C:\Program Files\nodejs\node.exe"
+    assert seen == ["node"]
+
+
+def test_resolve_node_fails_with_a_clear_error_when_node_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(testing.shutil, "which", lambda _name: None)
+
+    with pytest.raises(RuntimeError, match=r"Could not find `node` on PATH"):
+        testing._resolve_node()
+
+
+def test_the_next_cli_is_the_script_in_the_web_dir() -> None:
+    assert testing._NEXT_CLI == (
+        testing._WEB_DIR / "node_modules" / "next" / "dist" / "bin" / "next"
+    )
+
+
+def test_resolve_next_cli_returns_the_script_when_it_exists(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    script = tmp_path / "next"
+    script.write_text("")
+    monkeypatch.setattr(testing, "_NEXT_CLI", script)
+
+    assert testing._resolve_next_cli() == script
+
+
+def test_resolve_next_cli_says_to_install_the_web_packages_when_it_is_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    missing = tmp_path / "node_modules" / "next" / "dist" / "bin" / "next"
+    monkeypatch.setattr(testing, "_NEXT_CLI", missing)
+
+    with pytest.raises(RuntimeError, match=r"Could not find Next\.js at .*npm ci"):
+        testing._resolve_next_cli()
+
+
+@pytest.mark.parametrize("missing", ["node", "next"])
+def test_start_test_server_checks_for_node_and_next_before_touching_postgres(
+    missing: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(
+        testing.shutil, "which", lambda name: None if name == missing else f"/fake/{name}"
+    )
+    monkeypatch.setattr(testing, "_NEXT_CLI", tmp_path / "missing-next")
+    if missing == "node":
+        (tmp_path / "missing-next").write_text("")  # Only node is missing.
+
+    def fail_connect(dsn: str) -> None:
+        raise AssertionError("connected to Postgres before checking for node and Next.js")
+
+    monkeypatch.setattr(testing.psycopg2, "connect", fail_connect)
+
+    with pytest.raises(RuntimeError, match=r"`node`|Next\.js"), testing.start_test_server():
         pass
 
 
@@ -636,20 +705,20 @@ def test_windows_teardown_runs_taskkill_and_waits(monkeypatch: pytest.MonkeyPatc
     proc.kill.assert_not_called()
 
 
-def test_windows_teardown_kills_the_wrapper_if_taskkill_does_not_finish_the_job(
+def test_windows_teardown_kills_the_server_directly_if_taskkill_does_not_finish_the_job(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(testing.subprocess, "run", MagicMock())
     proc = MagicMock()
     proc.pid = 4321
-    proc.wait.side_effect = [subprocess.TimeoutExpired("npx", 7), None]
+    proc.wait.side_effect = [subprocess.TimeoutExpired("node", 7), None]
 
     testing._kill_tree_windows(proc, 7)
 
     proc.kill.assert_called_once_with()
 
 
-def test_windows_teardown_kills_the_wrapper_if_taskkill_is_missing(
+def test_windows_teardown_kills_the_server_directly_if_taskkill_is_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(testing.subprocess, "run", MagicMock(side_effect=FileNotFoundError))
@@ -680,7 +749,7 @@ def test_terminate_process_tree_uses_the_teardown_for_this_platform(
         windows.assert_not_called()
 
 
-# A wrapper that starts one child and waits, like `npx` starting `next start`.
+# A process that starts one child and waits, like a server that forks a worker.
 # Both print a line once their SIGTERM handling is set up, so a test can wait
 # for that. The child holds the same stdout pipe as the wrapper, so the pipe
 # reaches end-of-file only when both are gone. That makes the check immune to
@@ -788,18 +857,21 @@ def test_teardown_is_quiet_when_the_process_is_already_gone() -> None:
     assert proc.returncode == 0
 
 
-def _fake_npx(tmp_path: Path, body: str) -> Path:
-    script = tmp_path / "npx"
+def _fake_node(tmp_path: Path, body: str) -> Path:
+    script = tmp_path / "node"
     script.write_text(f"#!/bin/sh\n{body}\n")
     script.chmod(0o755)
     return script
+
+
+_FAKE_NEXT = Path("/fake/web/node_modules/next/dist/bin/next")
 
 
 @posix_only
 def test_server_output_goes_to_the_log_file_instead_of_pipes(tmp_path: Path) -> None:
     # About 1 MB on each stream. Pipes that nobody reads would fill up and
     # block the process long before it finished.
-    npx = _fake_npx(
+    node = _fake_node(
         tmp_path,
         "head -c 1000000 /dev/zero | tr '\\0' o\n"
         "echo STDOUT-END\n"
@@ -808,7 +880,7 @@ def test_server_output_goes_to_the_log_file_instead_of_pipes(tmp_path: Path) -> 
     )
     log = tmp_path / "server.log"
 
-    proc = testing._start_server_process(str(npx), 12345, dict(os.environ), log)
+    proc = testing._start_server_process(str(node), _FAKE_NEXT, 12345, dict(os.environ), log)
     try:
         assert proc.wait(timeout=30) == 0
     finally:
@@ -825,8 +897,10 @@ def test_server_output_goes_to_the_log_file_instead_of_pipes(tmp_path: Path) -> 
 
 @posix_only
 def test_server_process_leads_its_own_process_group(tmp_path: Path) -> None:
-    npx = _fake_npx(tmp_path, "exec sleep 60")
-    proc = testing._start_server_process(str(npx), 12345, dict(os.environ), tmp_path / "server.log")
+    node = _fake_node(tmp_path, "exec sleep 60")
+    proc = testing._start_server_process(
+        str(node), _FAKE_NEXT, 12345, dict(os.environ), tmp_path / "server.log"
+    )
     try:
         assert os.getpgid(proc.pid) == proc.pid
         assert os.getpgid(proc.pid) != os.getpgrp()
@@ -837,11 +911,28 @@ def test_server_process_leads_its_own_process_group(tmp_path: Path) -> None:
 
 
 @posix_only
-def test_server_process_gets_the_next_start_command_line(tmp_path: Path) -> None:
-    npx = _fake_npx(tmp_path, 'echo "args: $*"')
+def test_server_is_node_running_the_next_script_on_localhost_only(tmp_path: Path) -> None:
+    # The process that is started is `node` itself, with no `npx` wrapper in between, and it
+    # is told to listen on 127.0.0.1. `next start` listens on every interface by default.
+    node = _fake_node(tmp_path, 'echo "args: $*"')
     log = tmp_path / "server.log"
 
-    proc = testing._start_server_process(str(npx), 4567, dict(os.environ), log)
+    proc = testing._start_server_process(str(node), _FAKE_NEXT, 4567, dict(os.environ), log)
     proc.wait(timeout=30)
 
-    assert "args: next start -p 4567" in log.read_text()
+    assert f"args: {_FAKE_NEXT} start -H 127.0.0.1 -p 4567" in log.read_text()
+
+
+@posix_only
+def test_server_runs_in_the_web_dir_with_the_given_environment(tmp_path: Path) -> None:
+    node = _fake_node(tmp_path, 'echo "cwd: $(pwd -P)"; echo "marker: $SERVER_ENV_MARKER"')
+    log = tmp_path / "server.log"
+
+    proc = testing._start_server_process(
+        str(node), _FAKE_NEXT, 4567, {**os.environ, "SERVER_ENV_MARKER": "set"}, log
+    )
+    proc.wait(timeout=30)
+
+    content = log.read_text()
+    assert f"cwd: {testing._WEB_DIR.resolve()}" in content
+    assert "marker: set" in content

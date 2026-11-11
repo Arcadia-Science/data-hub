@@ -96,8 +96,17 @@ _BLANKED_SERVER_ENV = (
 # How long the server process tree gets to exit after SIGTERM before SIGKILL.
 _SERVER_STOP_GRACE_SECONDS = 10.0
 
+# The server listens on the loopback address only. `next start` defaults to every interface,
+# which would let other machines on the network PUT into the S3 stand-in, since the
+# stand-in has no authentication.
+_SERVER_HOST = "127.0.0.1"
+
 # testing.py lives at packages/shared/src/data_hub_shared/ — walk up 4 levels to the repo root.
 _WEB_DIR = Path(__file__).resolve().parents[4] / "web"
+
+# Next.js's command-line script. The server is started with `node` and this file, without
+# the `npx` wrapper, so there is a single process to stop (see `_start_server_process`).
+_NEXT_CLI = _WEB_DIR / "node_modules" / "next" / "dist" / "bin" / "next"
 
 
 # ---------------------------------------------------------------------------
@@ -285,13 +294,37 @@ def _resolve_npx() -> str:
     return path
 
 
+def _resolve_node() -> str:
+    """Return the full path to ``node``, which runs the Next.js server."""
+    path = shutil.which("node")
+    if path is None:
+        raise RuntimeError(
+            "Could not find `node` on PATH. Install Node.js and make sure its directory is on PATH."
+        )
+    return path
+
+
+def _resolve_next_cli() -> Path:
+    """Return the path to Next.js's command-line script, which ``node`` runs."""
+    if not _NEXT_CLI.is_file():
+        raise RuntimeError(
+            f"Could not find Next.js at {_NEXT_CLI}. Run `npm ci` in {_WEB_DIR} first."
+        )
+    return _NEXT_CLI
+
+
 class _ProcessGroupKwargs(TypedDict, total=False):
     start_new_session: bool
     creationflags: int
 
 
 def _process_group_kwargs(platform: str = sys.platform) -> _ProcessGroupKwargs:
-    """``Popen`` options that put the child in its own process group."""
+    """``Popen`` options that put the child in its own process group.
+
+    On POSIX the child leads a new session, so the group id is the child's pid and
+    teardown can signal the whole group. On Windows the child is the root of a new process
+    group, but teardown doesn't rely on that. It kills by pid with ``taskkill /T``.
+    """
     if platform == "win32":
         return {"creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x200)}
     return {"start_new_session": True}
@@ -327,6 +360,9 @@ def _kill_tree_posix(proc: subprocess.Popen[bytes], grace: float) -> None:
 
 
 def _kill_tree_windows(proc: subprocess.Popen[bytes], grace: float) -> None:
+    # `taskkill /T` finds the children by their parent pid, so it must be given the pid of
+    # the process that started them. The server runs as one `node` process, so that is
+    # `proc` itself. Falling back to `proc.kill()` covers a missing or failing taskkill.
     try:
         subprocess.run(_taskkill_command(proc.pid), capture_output=True, check=False)
     except OSError:
@@ -343,9 +379,9 @@ def _terminate_process_tree(
 ) -> None:
     """Stop *proc* and everything it started.
 
-    *proc* must have been started with ``_process_group_kwargs()``. On POSIX
-    this sends SIGTERM to the process group, waits up to *grace* seconds, then
-    sends SIGKILL. On Windows it runs ``taskkill /T /F``.
+    *proc* must have been started with ``_process_group_kwargs()``. On POSIX this sends
+    SIGTERM to the process group, waits up to *grace* seconds for *proc* to exit, then
+    sends SIGKILL to the group. On Windows it runs ``taskkill /T /F`` on *proc*'s pid.
     """
     if sys.platform == "win32":
         _kill_tree_windows(proc, grace)
@@ -370,16 +406,22 @@ def _run_npx(npx: str, args: list[str], *, what: str, env: Mapping[str, str]) ->
 
 
 def _start_server_process(
-    npx: str, port: int, env: Mapping[str, str], log_path: Path
+    node: str, next_cli: Path, port: int, env: Mapping[str, str], log_path: Path
 ) -> subprocess.Popen[bytes]:
-    """Start ``next start`` in its own process group, logging to *log_path*.
+    """Start ``node next start`` in its own process group, logging to *log_path*.
 
-    The server writes straight to the file, so nothing has to read a pipe. A
-    long run can't fill a pipe and stall the server.
+    The server is started with ``node`` directly instead of through ``npx``. ``npx`` runs
+    the server as a child of a wrapper (``cmd.exe`` on Windows), and ``taskkill /T`` finds
+    children by their parent pid, so a wrapper that exits first would leave the server
+    running. With ``node`` there is one process to stop on both platforms. It listens on
+    ``127.0.0.1`` only.
+
+    The server writes straight to the file, so nothing has to read a pipe. A long run
+    can't fill a pipe and stall the server.
     """
     with log_path.open("wb") as log_file:
         return subprocess.Popen(
-            [npx, "next", "start", "-p", str(port)],
+            [node, str(next_cli), "start", "-H", _SERVER_HOST, "-p", str(port)],
             cwd=str(_WEB_DIR),
             env=dict(env),
             stdin=subprocess.DEVNULL,
@@ -658,12 +700,19 @@ def start_test_server() -> Generator[IntegrationEnv, None, None]:
 
     Postgres comes from ``DATA_HUB_TEST_PGHOST``, ``DATA_HUB_TEST_PGPORT``,
     ``DATA_HUB_TEST_PGUSER`` and ``DATA_HUB_TEST_PGPASSWORD`` (read when this is
-    called), and defaults to ``postgres:postgres@127.0.0.1:5432``. The server's output goes to
-    ``IntegrationEnv.server_log`` and its S3 stand-in to
-    ``IntegrationEnv.s3_mirror_root``, both in a temp directory that is left
-    in place after the run so a failure can be inspected.
+    called), and defaults to ``postgres:postgres@127.0.0.1:5432``. The server's output
+    goes to ``IntegrationEnv.server_log`` and its S3 stand-in to
+    ``IntegrationEnv.s3_mirror_root``, both in a temp directory that is left in place
+    after the run so a failure can be inspected.
+
+    The server is ``node`` running Next.js directly, on ``127.0.0.1`` only. When the
+    ``with`` block exits, it and anything it started are stopped. That teardown doesn't
+    happen if the test process is killed first (a second Ctrl+C, or SIGKILL), and the
+    server is then left running until someone stops it.
     """
     npx = _resolve_npx()
+    node = _resolve_node()
+    next_cli = _resolve_next_cli()
     pg = _pg_settings_from_env()
     admin_dsn = pg.dsn("postgres")
     test_dsn = pg.dsn(_TEST_DB)
@@ -699,14 +748,14 @@ def start_test_server() -> Generator[IntegrationEnv, None, None]:
     s3_mirror_root.mkdir()
 
     port = get_free_port()
-    base_url = f"http://127.0.0.1:{port}"
+    base_url = f"http://{_SERVER_HOST}:{port}"
 
     server_env = _build_server_env(
         os.environ, database_url=database_url, s3_mirror_root=s3_mirror_root, base_url=base_url
     )
     _run_npx(npx, ["next", "build"], what="Next.js build", env=server_env)
 
-    server_proc = _start_server_process(npx, port, server_env, server_log)
+    server_proc = _start_server_process(node, next_cli, port, server_env, server_log)
 
     try:
         # 4. Wait for the server to become ready.
