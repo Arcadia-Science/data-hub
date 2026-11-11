@@ -524,9 +524,8 @@ def test_watcher_survives_a_server_outage_and_reports_the_gap_when_it_ends(
     mark = pc.mark_logs()
     proxy.go_down()
     # The outage lasts until two heartbeats have been refused, however long a refused connection
-    # takes (about two seconds on Windows, which retries a connect to a port nobody listens on).
-    # A fixed time would leave fewer failures there than on Linux. The watcher keeps running and
-    # nothing is stored.
+    # takes (about two seconds on Windows, and no time on Linux). A fixed time would leave fewer
+    # failures on Windows. The watcher keeps running and nothing is stored.
     wait_until(
         lambda: pc.log_text(mark).count("Heartbeat failed") >= 2,
         60,

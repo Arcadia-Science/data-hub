@@ -418,7 +418,11 @@ What a driver offers:
   it hands the upgrade to a scheduled-task worker that runs `Stop-Service`, `uv tool install` and
   `Start-Service`, so the service stops cleanly (exit code 0, a `Service stopped` event, never exit
   code 1 and never "restarting for auto-update") and a new process starts. A scenario that checks
-  the exit code or the "restarting for auto-update" event is marked `platforms("cli")`.
+  the exit code or the "restarting for auto-update" event is marked `platforms("cli")`. A scenario
+  that waits for an install reads how long from `driver.install_timeout_seconds` (180 s, 300 s under
+  the service, whose worker runs `uv` as `LocalSystem` with a cold cache) and keeps no constant of
+  its own. Under the service the updater can dispatch the same upgrade to the worker twice, so a
+  scenario about the upgrade compares its events with a repeat counted once.
   `install_wheel(wheel)` puts another version in place of the installed one while the watcher is
   stopped (the PC must have an install of its own), for the scenario of an update that did not
   take effect: the new version was installed, and the old one is back at the next start.

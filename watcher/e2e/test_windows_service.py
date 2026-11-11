@@ -736,9 +736,9 @@ def test_the_third_failure_inside_the_window_leaves_the_service_stopped(
     low, high = SECOND_RESTART_SECONDS
     assert low <= time.monotonic() - first_refusal_at <= high
 
-    # The third failure has no restart. The SCM's actions end with a "no action" entry, which
-    # `sc qfailure` doesn't print and the registry value does: waiting for a restart that doesn't
-    # come would take longer than the 120 s that the second restart has, so the entry is read.
+    # The third failure has no restart: the SCM's actions end with a "no action" entry, which
+    # `sc qfailure` doesn't print and the registry value does. Showing it by waiting would take
+    # more than the 120 s of the second restart, so the entry is read.
     pc.wait_for_state(ServiceState.STOPPED, timeout=30)
     assert pc.exit_code not in (None, 0)
     assert pc.host.failure_action_list() == (
