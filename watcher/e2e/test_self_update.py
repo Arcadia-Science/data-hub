@@ -37,7 +37,7 @@ from e2e_support.admin import Admin
 from e2e_support.drivers import WatcherDriver
 from e2e_support.factory import WatcherFactory
 from e2e_support.files import SMALL, write_file, write_run
-from e2e_support.server import HeartbeatRow, ServerView, WatcherRow
+from e2e_support.server import ServerView, WatcherRow
 from e2e_support.waiting import wait_until
 
 pytestmark = pytest.mark.e2e
@@ -59,6 +59,18 @@ def idle_ticks(count: int) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def refuse_installs(package_index: LocalPackageIndex) -> None:
+    """Make the index fail every install of the watcher, for a scenario that expects none.
+
+    A scenario that runs on the install every test shares must not install anything: if a
+    regression did, the shared install would be replaced and every test after it would run on
+    the wrong version. With the project unavailable (a 404, which stops `uv` at once) the attempt
+    fails and the install stays as it is, and the request is still in ``requested_paths``, where
+    the scenario looks for it.
+    """
+    package_index.set_project_unavailable("data-hub-watcher", 404)
 
 
 def wheel_request_prefix(version: str) -> str:
@@ -92,20 +104,6 @@ def wait_for_watching_on(server: ServerView, pc: WatcherDriver, version: str) ->
 
     return server.wait_until(
         running, 60, what=f"the watcher to be watching on {version}", watcher_id=pc.watcher_id
-    )
-
-
-def wait_for_upload_heartbeat(server: ServerView, watcher_id: str) -> HeartbeatRow:
-    """Wait for a heartbeat that reports uploaded files, the one that restarts the count of
-    quiet heartbeats an update waits for."""
-    return server.wait_until(
-        lambda: next(
-            (b for b in server.heartbeats(watcher_id) if (b.files_uploaded_since_last or 0) > 0),
-            None,
-        ),
-        30,
-        what="a heartbeat that reports an upload",
-        watcher_id=watcher_id,
     )
 
 
@@ -191,7 +189,6 @@ def test_mandatory_release_installs_and_restarts_into_the_new_version(
     # The instrument has just finished a run, so a non-mandatory release would have to wait.
     files = write_run(watch_dir, "RUN001", {"a.csv": SMALL})
     server.wait_for_uploaded(instrument_id, "RUN001", "RUN001/a.csv", content=files["a.csv"])
-    wait_for_upload_heartbeat(server, pc.watcher_id)
 
     admin.set_release(bumped_version, mandatory=True).raise_for_status()
 
@@ -299,6 +296,55 @@ def test_mandatory_release_older_than_the_running_version_rolls_back(
     )
 
 
+@pytest.mark.platforms("cli")  # Under the service the upgrade worker installs and restarts.
+@pytest.mark.covers("selfupdate.restart->version_mismatch", "event.update_failed->emitted")
+def test_a_restart_that_comes_back_on_the_old_version_reports_that_the_update_did_not_take_effect(
+    watcher: WatcherFactory,
+    server: ServerView,
+    admin: Admin,
+    package_index: LocalPackageIndex,
+    bumped_wheel: Path,
+    current_wheel: Path,
+    bumped_version: str,
+    current_version: str,
+) -> None:
+    pc = watcher(own_install=True, index_url=package_index.url, overrides=CHECK_EVERY_HEARTBEAT)
+    package_index.clear_requested_paths()
+    pc.start()
+    server.wait_for_watcher_status(pc.watcher_id, "watching")
+
+    admin.set_release(bumped_version, mandatory=True).raise_for_status()
+    server.wait_for_event(pc.watcher_id, event_type="update_started")
+    wait_for_wheel_request(package_index, bumped_version)
+    assert pc.wait_exit(timeout=INSTALL_TIMEOUT) == 1, pc.log_tail()
+    assert pc.installed_version() == bumped_version
+    assert upgrade_marker(pc).exists()
+
+    # Before the watcher is started again, the old version is put back (a reinstall by hand, a
+    # restore from a backup), so the process that comes up is not the one the update installed.
+    # The release goes back with it, so the old version is not offered the update again.
+    admin.set_release(current_version).raise_for_status()
+    pc.install_wheel(current_wheel)
+    assert pc.installed_version() == current_version
+    pc.start()
+
+    failed = server.wait_for_event(pc.watcher_id, event_type="update_failed")
+    reason = f"expected {bumped_version!r} after upgrade, running {current_version!r}"
+    assert failed.details["reason"] == reason
+    assert failed.details["previous_version"] == current_version
+    assert failed.details["target_version"] == bumped_version
+    assert failed.message == f"Watcher upgrade did not take effect: {reason}"
+    # The watcher says what happened and does not call it a success. The marker was read once.
+    assert not upgrade_marker(pc).exists()
+    row = wait_for_watching_on(server, pc, current_version)
+    assert row.status == "watching"
+    server.wait_for_heartbeats(
+        pc.watcher_id, count=2, after_id=server.last_heartbeat_id(pc.watcher_id)
+    )
+    assert update_events(server, pc) == ["update_started", "update_failed"]
+    assert pc.is_running()
+
+
 @pytest.mark.covers("selfupdate.below_floor->recovers_by_update")
 def test_watcher_below_the_minimum_version_updates_and_heartbeats_again(
     watcher: WatcherFactory,
@@ -343,7 +389,9 @@ def test_watcher_below_the_minimum_version_updates_and_heartbeats_again(
     wait_for_watching_on(server, pc, bumped_version)
     assert server.effective_status(pc.watcher_id) == "watching"
     refused = len(refusals())
-    server.wait_for_heartbeats(pc.watcher_id, count=2)
+    server.wait_for_heartbeats(
+        pc.watcher_id, count=2, after_id=server.last_heartbeat_id(pc.watcher_id)
+    )
     assert len(refusals()) == refused
     assert pc.installed_version() == bumped_version
 
@@ -368,7 +416,9 @@ def test_non_mandatory_release_waits_for_quiet_uploads_then_installs(
     watch_dir: Path,
     instrument_id: str,
 ) -> None:
-    quiet_needed = 4
+    # Six quiet heartbeats, and the instrument keeps uploading for eight, so a few seconds of
+    # delay in one upload can't leave a gap as long as the gate.
+    quiet_needed = 6
     pc = watcher(
         own_install=True,
         index_url=package_index.url,
@@ -378,10 +428,9 @@ def test_non_mandatory_release_waits_for_quiet_uploads_then_installs(
     pc.start()
     server.wait_for_watcher_status(pc.watcher_id, "watching")
 
-    # An upload, and the heartbeat that reports it.
+    # An upload.
     write_file(watch_dir / "RUN001" / "file-0.csv", SMALL)
     server.wait_for_uploaded(instrument_id, "RUN001", "RUN001/file-0.csv")
-    wait_for_upload_heartbeat(server, pc.watcher_id)
 
     # A release is offered, and the instrument keeps uploading (each file after the one
     # before it is done, so there is an upload in every few heartbeats) for longer than the
@@ -481,6 +530,7 @@ def test_no_update_when_the_release_is_the_running_version_or_older(
     current_version: str,
 ) -> None:
     pc = watcher(index_url=package_index.url, overrides=CHECK_EVERY_HEARTBEAT)
+    refuse_installs(package_index)
     package_index.clear_requested_paths()
     admin.set_release(current_version).raise_for_status()
     pc.start()
@@ -506,6 +556,7 @@ def test_no_update_when_the_server_has_no_release(
     admin.set_release(None).raise_for_status()
     assert admin.get_release()["latest_version"] is None
     pc = watcher(index_url=package_index.url, overrides=CHECK_EVERY_HEARTBEAT)
+    refuse_installs(package_index)
     package_index.clear_requested_paths()
     pc.start()
     server.wait_for_watcher_status(pc.watcher_id, "watching")
@@ -622,6 +673,7 @@ def test_three_failed_update_checks_in_a_row_are_reported_once(
     watcher: WatcherFactory, server: ServerView, proxy: FaultProxy, package_index: LocalPackageIndex
 ) -> None:
     pc = watcher(index_url=package_index.url, overrides=CHECK_EVERY_HEARTBEAT)
+    refuse_installs(package_index)
 
     # The first two checks fail and the third works: three failures, but not in a row.
     proxy.add_fault("status", path="/update-check", status=503, count=2)
@@ -678,6 +730,7 @@ def test_self_update_check_reports_the_target_and_installs_nothing(
     current_version: str,
 ) -> None:
     pc = watcher(index_url=package_index.url)
+    refuse_installs(package_index)
     package_index.clear_requested_paths()
 
     admin.set_release(bumped_version, mandatory=True).raise_for_status()

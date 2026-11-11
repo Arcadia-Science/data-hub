@@ -57,6 +57,17 @@ TRANSITIONS: tuple[Transition, ...] = (
     ),
     covered(
         MACHINE,
+        "selfupdate.restart->version_mismatch",
+        "When the process that starts after an update runs another version than the update "
+        "installed (the old one was put back before the start), it queues `update_failed` "
+        "(`Watcher upgrade did not take effect`, with `expected '<target>' after upgrade, "
+        "running '<version>'`), not `update_succeeded`, removes the upgrade marker, and keeps "
+        "running. (Windows: the worker's own result decides, see "
+        "`service.upgrade->worker_failure_reported`.)",
+        platforms=CLI,
+    ),
+    covered(
+        MACHINE,
         "selfupdate.idle_gate->waits_for_quiet_uploads",
         "A non-mandatory release waits while files were uploaded in recent heartbeat "
         "intervals, and installs only after the required number of quiet ones.",
