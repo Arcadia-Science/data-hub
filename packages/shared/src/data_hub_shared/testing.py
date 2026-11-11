@@ -358,7 +358,7 @@ def _kill_tree_posix(proc: subprocess.Popen[bytes], grace: float) -> None:
         _signal_group(pgid, signal.SIGKILL)
         proc.wait()
     else:
-        # The wrapper exited. Sweep up anything it left behind.
+        # The server exited. Sweep up anything it started and left behind.
         _signal_group(pgid, signal.SIGKILL)
 
 
