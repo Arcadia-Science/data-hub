@@ -217,9 +217,11 @@ def test_a_file_that_never_settles_is_abandoned_with_an_error_event(
     pc.start()
 
     live = watch_dir / "RUN001" / "live.csv"
-    # A write every quarter of a second: well inside the stability period, so the file is never
-    # quiet long enough to be stable, and only the timeout ends its wait.
-    with GrowingFile(live, interval=0.25):
+    # A write every second: inside the 2-second stability period, so the file is never quiet long
+    # enough to be stable, and only the timeout ends its wait. Not faster: on Windows the watcher
+    # gets no file events for the folder while a file in it is written twice a second or more,
+    # only once the writes pause, so it would never see the file.
+    with GrowingFile(live, interval=1.0):
         event = server.wait_for_event(
             pc.watcher_id, event_type="error", kind="stability_timeout", timeout=40
         )
