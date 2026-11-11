@@ -58,8 +58,33 @@ TRANSITIONS: tuple[Transition, ...] = (
         "watcher.stopped->stays_stopped",
         "A watcher that stopped cleanly keeps reading `stopped` however old its last "
         "heartbeat gets, because it can't send another one. It does not turn `stale` "
-        "(`Unresponsive`), which is for a watcher that went quiet without saying so.",
+        "(`Unresponsive`), which is for a watcher that went quiet without saying so. The web "
+        "app itself says as much: the status badge (`watcher-status-badge.tsx`) calls a "
+        'stopped watcher one that is "expected to be silent" and "shouldn\'t read as an '
+        'alarm", and the docs list Stopped as a status of its own, while '
+        "`computeEffectiveStatus` turns any status but `registered` into `stale` after five "
+        "minutes.",
         "bug-new-stopped-reads-stale",
+    ),
+    xfail_bug(
+        MACHINE,
+        "watcher.stopped->stays_stopped_in_list",
+        "The same in the watcher list (`GET /api/v1/watchers`): five minutes after its last "
+        "heartbeat a cleanly stopped watcher is still listed under `status=stopped` with "
+        "status `stopped`, and is not listed under `status=stale`. Today the route's `stale` "
+        "filter is a SQL check on the age of `last_heartbeat_at` that doesn't look at the "
+        "stored status, and the status it prints comes from `computeEffectiveStatus`, so both "
+        "have to change for the list to agree with the detail route.",
+        "bug-new-stopped-reads-stale",
+    ),
+    covered(
+        MACHINE,
+        "watcher.list->stale_filtered",
+        "The watcher list's `status=stale` filter returns exactly the watchers whose last "
+        "heartbeat is over five minutes old, or missing once the watcher has started, each "
+        "with status `stale`: not a running one, a stopped one that just stopped, or a "
+        "`registered` one however old its row is. The other filters list a watcher under its "
+        "own status.",
     ),
     covered(
         MACHINE,

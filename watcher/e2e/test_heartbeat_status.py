@@ -17,8 +17,10 @@ import pytest
 from data_hub_shared.testing_proxy import FaultProxy, RecordedRequest
 from data_hub_watcher import testing_overrides
 from e2e_support.admin import Admin
+from e2e_support.drivers import WatcherDriver
 from e2e_support.factory import WatcherFactory
 from e2e_support.files import SMALL, write_run
+from e2e_support.proxy_helpers import silence_heartbeats
 from e2e_support.server import HeartbeatRow, ServerView
 from e2e_support.waiting import KnownBugStillPresent, known_bug, stays_true, wait_until
 
@@ -186,9 +188,97 @@ def test_a_cleanly_stopped_watcher_keeps_reading_stopped(
         assert server.effective_status(pc.watcher_id) == "stopped"
 
 
+@pytest.mark.covers("watcher.stopped->stays_stopped_in_list")
+@pytest.mark.xfail(
+    strict=True,
+    raises=KnownBugStillPresent,
+    reason=(
+        "bug-new-stopped-reads-stale: the watcher list shows a cleanly stopped watcher as "
+        "`stale` and lists it under the stale filter, five minutes after its last heartbeat"
+    ),
+)
+def test_the_watcher_list_keeps_a_cleanly_stopped_watcher_stopped(
+    watcher: WatcherFactory, server: ServerView
+) -> None:
+    pc = watcher()
+    pc.start()
+    server.wait_for_watcher_status(pc.watcher_id, "watching")
+    assert pc.stop() == 0
+    server.wait_for_watcher_status(pc.watcher_id, "stopped")
+    assert [(r["id"], r["status"]) for r in server.list_watchers(status="stopped")] == [
+        (pc.watcher_id, "stopped")
+    ]
+    assert server.list_watchers(status="stale") == []
+
+    # The stopped watcher sends no more heartbeats, so its last one only gets older. The list
+    # route does it in two places: its `stale` filter is a check on the heartbeat's age that
+    # doesn't ask whether the watcher said it was stopping, and the status it prints is the
+    # computed one. The web app itself calls a stopped watcher "expected to be silent" that
+    # "shouldn't read as an alarm" (the status badge), and an unresponsive one is an alarm.
+    server.age_past_stale(pc.watcher_id)
+    with known_bug():
+        stopped = [(r["id"], r["status"]) for r in server.list_watchers(status="stopped")]
+        assert stopped == [(pc.watcher_id, "stopped")]
+        assert server.list_watchers(status="stale") == []
+
+
 # ---------------------------------------------------------------------------
 # stale
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.covers("watcher.list->stale_filtered")
+def test_the_watcher_list_filters_stale_watchers_by_the_age_of_their_heartbeat(
+    watcher: WatcherFactory,
+    server: ServerView,
+    proxy: FaultProxy,
+    instrument_id: str,
+    tmp_path: Path,
+) -> None:
+    def another(name: str) -> WatcherDriver:
+        return watcher(
+            instrument_id=f"{instrument_id}-{name}", watch_dir=tmp_path / f"watch-{name}"
+        )
+
+    online, silent, stopped, never = (
+        watcher(),
+        another("silent"),
+        another("stopped"),
+        another("never"),
+    )
+    for pc in (online, silent, stopped):
+        pc.start()
+        server.wait_for_watcher_status(pc.watcher_id, "watching")
+    assert stopped.stop() == 0
+    server.wait_for_watcher_status(stopped.watcher_id, "stopped")
+
+    # One watcher goes quiet without a word. Its heartbeats are refused until a refusal has been
+    # seen, so none is on its way when it is killed and its timestamp aged.
+    silence_heartbeats(proxy, silent.watcher_id)
+    silent.kill()
+    server.age_past_stale(silent.watcher_id)
+
+    def shown(status: str | None) -> dict[str, str]:
+        return {r["id"]: r["status"] for r in server.list_watchers(status=status)}
+
+    # `stale` is computed from the heartbeat: only the quiet watcher is listed, and it says so.
+    assert shown("stale") == {silent.watcher_id: "stale"}
+    assert shown(None) == {
+        online.watcher_id: "watching",
+        silent.watcher_id: "stale",
+        stopped.watcher_id: "stopped",
+        never.watcher_id: "registered",
+    }
+    # The others are listed under their own status. A watcher that never checked in has no
+    # heartbeat to be old, and is not stale.
+    assert shown("watching").get(online.watcher_id) == "watching"
+    assert shown("stopped") == {stopped.watcher_id: "stopped"}
+    assert shown("registered") == {never.watcher_id: "registered"}
+
+    # A watcher that has started but has no heartbeat at all is stale too.
+    server.clear_heartbeat(silent.watcher_id)
+    assert shown("stale") == {silent.watcher_id: "stale"}
+    assert server.effective_status(silent.watcher_id) == "stale"
 
 
 @pytest.mark.covers(
@@ -375,17 +465,23 @@ def test_counts_added_while_a_heartbeat_is_being_sent_are_reported_in_the_next_o
     pc.start()
     server.wait_for_watcher_status(pc.watcher_id, "watching")
 
+    def held_heartbeat() -> RecordedRequest:
+        """The delayed heartbeat as the proxy logs it now. (A request the proxy returned
+        earlier is a snapshot: the proxy fills in the upstream status on a new record.)"""
+        return next(r for r in heartbeat_requests(proxy) if r.fault_mode == "delay")
+
     # Hold one heartbeat for a while. Its payload was built before the hold, so it says
     # nothing happened, and the counters are reset when it returns.
     with proxy.fault("delay", path=r"/heartbeat$", delay_seconds=6, count=1):
-        held = proxy.wait_for_request(
+        proxy.wait_for_request(
             lambda r: r.fault_mode == "delay" and r.path.endswith("/heartbeat"), 15
         )
         stored_before = server.last_heartbeat_id(pc.watcher_id)
         content = write_run(watch_dir, "RUN001", {"small.csv": SMALL})["small.csv"]
         server.wait_for_uploaded(instrument_id, "RUN001", "RUN001/small.csv", content=content)
-        # The run was reported and the file uploaded while the heartbeat was still held.
-        assert held.upstream_status is None
+        # The run was reported and the file uploaded while the heartbeat was still held: the
+        # server has not answered it, and has stored nothing new.
+        assert held_heartbeat().upstream_status is None
         assert server.last_heartbeat_id(pc.watcher_id) == stored_before
         # The held heartbeat gets through, and two more follow it.
         server.wait_for_heartbeats(pc.watcher_id, count=3, after_id=stored_before)
