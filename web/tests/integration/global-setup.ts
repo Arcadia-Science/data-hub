@@ -327,11 +327,20 @@ export async function setup() {
     stdio: "pipe",
   });
 
-  serverProcess = spawn("npx", ["next", "start", "-p", String(port)], {
-    cwd: import.meta.dirname ? `${import.meta.dirname}/../..` : process.cwd(),
-    env: serverEnv,
-    stdio: "pipe",
-  });
+  // `-H 127.0.0.1` keeps the server off the machine's other interfaces
+  // (`next start` listens on every one by default). The upload stand-in at
+  // `/api/local-s3` takes unauthenticated PUTs, so a host on the LAN could
+  // otherwise write into the mirror for the length of a run. It matches the
+  // loopback address in `baseUrl`.
+  serverProcess = spawn(
+    "npx",
+    ["next", "start", "-H", "127.0.0.1", "-p", String(port)],
+    {
+      cwd: import.meta.dirname ? `${import.meta.dirname}/../..` : process.cwd(),
+      env: serverEnv,
+      stdio: "pipe",
+    }
+  );
 
   serverProcess.stderr?.on("data", (data: Buffer) => {
     const msg = data.toString();
