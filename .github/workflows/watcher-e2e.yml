@@ -11,6 +11,9 @@ name: Watcher end-to-end tests
 #   * as the `e2e` job of publish-watcher.yml, which must pass before a release is
 #     published to PyPI. That call hands over the wheel it built, so the release is tested
 #     as built and not rebuilt from the checkout.
+#
+# Two jobs run the suite: `linux` (the `watch` process) and `windows` (the real Windows
+# service, on `windows-latest`). They share these triggers and inputs.
 on:
   push:
     branches:
@@ -100,6 +103,165 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
-  # The `windows` job goes here, next to `linux`, when the Windows service driver lands
-  # (the third pull request of the watcher end-to-end stack). It runs the same suite with the
-  # real service on `windows-latest`, so keep the two jobs' triggers and inputs shared.
+  # The real Windows service, on `windows-latest`. It runs the same suite as `linux`, with
+  # DATA_HUB_E2E_DRIVER=service. Windows runners cannot run service containers, so Postgres is
+  # the one the runner image ships. The `Start PostgreSQL` step starts it.
+  # See docs/developer/ci-and-deployment.md.
+  windows:
+    name: Windows (watcher service)
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    env:
+      DATA_HUB_TEST_PGHOST: "127.0.0.1"
+      DATA_HUB_TEST_PGPORT: "5432"
+      DATA_HUB_TEST_PGUSER: postgres
+      DATA_HUB_TEST_PGDATABASE: data_hub_test
+
+    defaults:
+      run:
+        # Git Bash is on the Windows runner. The PostgreSQL step below sets its own shell.
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - uses: astral-sh/setup-uv@v8.1.0
+
+      # The image documents PostgreSQL as a stopped Windows service named postgresql-x64-<major>,
+      # with the start type Disabled, a PGBIN folder with the client tools, and the postgres
+      # password `root`. The source is the runner-images readme for Windows 2025:
+      # https://github.com/actions/runner-images/blob/main/images/windows/Windows2025-Readme.md
+      #
+      # The step uses the documented password once to set a random one for this run. It masks
+      # that password in the log and passes it to later steps through GITHUB_ENV.
+      - name: Start PostgreSQL
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          # The services are named postgresql-x64-<major>. If the image has more than one, the
+          # highest major version wins.
+          $services = @(Get-Service -Name 'postgresql-x64-*' -ErrorAction SilentlyContinue |
+            Sort-Object -Property @{ Expression = { [int](($_.Name -split '-')[-1]) } } -Descending)
+          if ($services.Count -eq 0) {
+            throw "No PostgreSQL Windows service (postgresql-x64-*) was found on this runner image. The image readmes at https://github.com/actions/runner-images list one for windows-latest, so check whether the image has changed."
+          }
+          $service = $services[0]
+          Write-Output "PostgreSQL service: $($service.Name), status $($service.Status), start type $($service.StartType)"
+
+          $pgBin = $env:PGBIN
+          if (-not $pgBin -or -not (Test-Path -LiteralPath (Join-Path $pgBin 'pg_isready.exe'))) {
+            throw "PGBIN does not point at a folder with pg_isready.exe (PGBIN is '$pgBin')."
+          }
+          $pgIsReady = Join-Path $pgBin 'pg_isready.exe'
+          $psql = Join-Path $pgBin 'psql.exe'
+          $port = [int]$env:DATA_HUB_TEST_PGPORT
+
+          # A disabled service cannot be started, so its start type becomes Manual first.
+          if ($service.StartType -eq 'Disabled') {
+            Set-Service -Name $service.Name -StartupType Manual
+          }
+          if ($service.Status -ne 'Running') {
+            Start-Service -Name $service.Name
+          }
+          $service.WaitForStatus('Running', [TimeSpan]::FromSeconds(60))
+
+          # Wait until the server accepts connections.
+          $ready = $false
+          $deadline = (Get-Date).AddSeconds(90)
+          while (-not $ready -and (Get-Date) -lt $deadline) {
+            & $pgIsReady -h 127.0.0.1 -p $port -q
+            if ($LASTEXITCODE -eq 0) { $ready = $true } else { Start-Sleep -Seconds 2 }
+          }
+          if (-not $ready) {
+            throw "PostgreSQL did not accept connections on 127.0.0.1:$port within 90 seconds."
+          }
+
+          # Set a random password for this run, using the documented default once. Mask it
+          # before anything prints it.
+          $password = -join ([System.Security.Cryptography.RandomNumberGenerator]::GetBytes(24) | ForEach-Object { $_.ToString('x2') })
+          Write-Output "::add-mask::$password"
+
+          $env:PGPASSWORD = 'root'
+          & $psql -h 127.0.0.1 -p $port -U postgres -d postgres -q -v ON_ERROR_STOP=1 -c "ALTER USER postgres PASSWORD '$password'"
+          $exit = $LASTEXITCODE
+          Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
+          if ($exit -ne 0) {
+            throw "Could not set the postgres password with the image's documented default. The image may have changed."
+          }
+
+          # Check that the new password works before the tests depend on it.
+          $env:PGPASSWORD = $password
+          & $psql -h 127.0.0.1 -p $port -U postgres -d postgres -q -t -A -c 'SELECT 1' | Out-Null
+          $exit = $LASTEXITCODE
+          Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
+          if ($exit -ne 0) {
+            throw "Connecting to PostgreSQL with the new password failed."
+          }
+
+          "DATA_HUB_TEST_PGPASSWORD=$password" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Output "PostgreSQL is accepting connections on 127.0.0.1:$port."
+
+      - name: Install Node.js packages
+        run: npm ci
+        working-directory: web
+
+      # The `windows-service` extra adds pywin32, which only installs on Windows. The
+      # service driver installs the watcher with the same extra in its own `uv tool` environment.
+      - name: Install Python packages
+        run: uv sync --all-packages --extra windows-service
+
+      # The release pipeline passes the wheel it is about to publish. Otherwise the suite
+      # builds one from the checkout.
+      - name: Download the wheel to test
+        if: inputs.wheel-artifact != ''
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.wheel-artifact }}
+          path: ${{ runner.temp }}/wheel
+
+      # The same command as `make py-test-e2e`, called directly because the image is not
+      # guaranteed to have `make`. The step has a limit of its own, under the job's, so a hung
+      # test fails the step and the steps below still run. `-o faulthandler_timeout=300` prints
+      # the stacks of a test that takes over 5 minutes.
+      - name: Run the end-to-end tests
+        run: uv run pytest watcher/e2e -m e2e -v -o faulthandler_timeout=300
+        timeout-minutes: 75
+        env:
+          DATA_HUB_E2E_DRIVER: service
+          DATA_HUB_E2E_ARTIFACTS: ${{ runner.temp }}/e2e-artifacts
+          DATA_HUB_E2E_WHEEL: ${{ inputs.wheel-artifact != '' && format('{0}/wheel', runner.temp) || '' }}
+
+      # The service writes to the Windows Event Log as well as its own log file. This exports the
+      # last three hours of Application and System entries from the service control manager,
+      # Python and DataHub providers, so a service that failed to start leaves its reason in the
+      # artifact. It is best effort, so a failure here does not hide the test result.
+      - name: Export the Windows Event Log
+        if: failure() || cancelled()
+        continue-on-error: true
+        shell: pwsh
+        env:
+          DATA_HUB_E2E_ARTIFACTS: ${{ runner.temp }}/e2e-artifacts
+        run: |
+          New-Item -ItemType Directory -Force -Path $env:DATA_HUB_E2E_ARTIFACTS | Out-Null
+          $since = (Get-Date).AddHours(-3)
+          Get-WinEvent -FilterHashtable @{ LogName = 'Application', 'System'; StartTime = $since } -MaxEvents 5000 -ErrorAction SilentlyContinue |
+            Where-Object { $_.ProviderName -match 'DataHub|Service Control Manager|Python' } |
+            Select-Object TimeCreated, LogName, ProviderName, Id, LevelDisplayName, Message |
+            Format-List |
+            Out-File -FilePath (Join-Path $env:DATA_HUB_E2E_ARTIFACTS 'event-log.txt') -Encoding utf8
+
+      # The same folder as the linux job, plus event-log.txt.
+      - name: Upload failure artifacts
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v7
+        with:
+          name: watcher-e2e-windows-artifacts
+          path: ${{ runner.temp }}/e2e-artifacts
+          if-no-files-found: ignore
+          retention-days: 14
