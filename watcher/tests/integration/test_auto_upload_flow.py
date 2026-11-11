@@ -9,6 +9,7 @@ instrument:
 """
 
 from __future__ import annotations
+import os
 import random
 import threading
 from pathlib import Path
@@ -47,6 +48,15 @@ def _register_and_report(
         },
     )
     return watcher.watcher_id, run_id
+
+
+def _raw_bucket() -> str:
+    """The raw-data bucket the test server was started with.
+
+    It matches the default in `data_hub_shared.testing`, which reads the same
+    variable from the test process's environment.
+    """
+    return os.environ.get("S3_RAW_DATA_BUCKET", "data-hub-test-raw")
 
 
 def _get_file_id(dsn: str, run_id: str, filename: str) -> int:
@@ -402,6 +412,66 @@ class TestFullAutoModeLifecycle:
         assert rows[0][0] == "stopped"
 
 
+class TestWholeFileUpload:
+    def test_small_file_is_uploaded_with_one_put(
+        self,
+        client: DataHubClient,
+        instrument_id: str,
+        integration_env: IntegrationEnv,
+        tmp_path: Path,
+    ) -> None:
+        watcher_id, _run_id = _register_and_report(client, instrument_id, run_id="WHOLE-001")
+        # The test server uploads in parts from 1024 bytes, so this is one PUT.
+        # The bytes differ from one position to the next, so a truncated or
+        # shifted upload changes what the stand-in stores.
+        payload = random.Random(1).randbytes(700)
+        path = tmp_path / "small.bin"
+        path.write_bytes(payload)
+        state = StateDB(tmp_path / "state.db")
+        try:
+            reporter = EventReporter(client, watcher_id)
+            uploader = Uploader(
+                client=client,
+                state_db=state,
+                event_reporter=reporter,
+                counters=WatcherCounters(),
+                instrument_id=instrument_id,
+                watcher_id=watcher_id,
+                watch_directory=tmp_path,
+            )
+            assert uploader._upload_single(path, "WHOLE-001") is True
+            reporter.flush()
+        finally:
+            state.close()
+
+        rows = db_query(
+            integration_env.db_dsn,
+            """SELECT f.status, f.multipart_upload_id FROM files f
+               JOIN instrument_runs r ON f.instrument_run_id = r.id
+               WHERE r.run_id = %s AND f.filename = %s""",
+            ("WHOLE-001", "small.bin"),
+        )
+        assert rows[0] == ("uploaded", None)
+        stored = (
+            integration_env.s3_mirror_root
+            / _raw_bucket()
+            / instrument_id
+            / "WHOLE-001"
+            / "small.bin"
+        )
+        assert stored.read_bytes() == payload
+
+        events = db_query(
+            integration_env.db_dsn,
+            "SELECT details FROM watcher_events WHERE watcher_id = %s AND event_type = %s",
+            (watcher_id, "file_uploaded"),
+        )
+        assert len(events) == 1
+        details = cast(dict[str, Any], events[0][0])
+        assert details["part_count"] == 1
+        assert details["size_bytes"] == len(payload)
+
+
 class TestMultipartUpload:
     def test_large_file_is_uploaded_in_parts(
         self,
@@ -441,7 +511,7 @@ class TestMultipartUpload:
         assert rows[0] == ("uploaded", None)
         stored = (
             integration_env.s3_mirror_root
-            / "data-hub-test-raw"
+            / _raw_bucket()
             / instrument_id
             / "PARTS-001"
             / "stack.bin"
@@ -520,7 +590,7 @@ class TestMultipartUpload:
         assert rows[0] == ("uploaded", None)
         stored = (
             integration_env.s3_mirror_root
-            / "data-hub-test-raw"
+            / _raw_bucket()
             / instrument_id
             / "PARTS-001"
             / "stack.bin"
