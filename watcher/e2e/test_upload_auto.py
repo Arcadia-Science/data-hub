@@ -7,9 +7,12 @@ server and also in front of the stand-in, because upload URLs are relative:
 
 * a PUT to the stand-in is any ``PUT /api/local-s3/...``. A whole file has no query string and a
   part of a multipart upload has ``?uploadId=...&partNumber=N``;
-* a failing presign is a 503 on ``request-upload-url``, which fails an upload at once, where a
-  failing PUT takes the watcher 7 seconds of backoff to give up on;
-* a part that fails for good is a 4xx on ``part-urls``, the one failure the watcher doesn't retry.
+* a failing presign is a 503 on ``request-upload-url``. The watcher doesn't retry a presign
+  within the upload, so the file fails at once and is left for the next start, where a failing
+  PUT is retried with a backoff first and takes several seconds to give up on;
+* a part that fails for good is a 4xx on ``part-urls``, a failure the watcher doesn't retry (a
+  4xx on the request that completes a multipart upload isn't retried either, and a 5xx or a lost
+  reply there is).
 
 The queue (manual mode, "Request upload") has its own file, ``test_upload_queue.py``.
 """
@@ -22,6 +25,7 @@ from pathlib import Path
 import pytest
 
 from data_hub_shared.testing_proxy import FaultProxy, RecordedRequest
+from data_hub_watcher import testing_overrides
 from e2e_support.admin import Admin
 from e2e_support.drivers import WatcherDriver
 from e2e_support.factory import WatcherFactory
@@ -39,6 +43,7 @@ LARGE_PATH = f"{RUN}/large.csv"
 LOCAL_S3 = r"^/api/local-s3/"
 PRESIGN = r"/request-upload-url$"
 PART_URLS = r"/multipart-upload/part-urls$"
+COMPLETE = r"/multipart-upload/complete$"
 MARK_UPLOADED = r"/api/v1/files/\d+$"
 ABORT = r"/multipart-upload$"
 POST_RUN = r"/instruments/[^/]+/runs$"
@@ -153,15 +158,12 @@ def test_small_file_is_uploaded_with_one_put(
     assert uploaded.details["size_bytes"] == SMALL
     assert uploaded.details["part_count"] == 1
 
-    # The watcher remembers the upload, has nothing left to retry, and counted it.
+    # The watcher remembers the upload and has nothing left to retry. (That a heartbeat counts the
+    # upload is shown by the counters scenario in test_heartbeat_status.py, which keeps the
+    # heartbeat away from the upload. Waiting for "exactly one" here would be a race with
+    # bug-new-counts-lost-during-heartbeat.)
     assert recorded_uploads(pc) == [SMALL_PATH]
     assert pending(pc) == []
-    wait_until(
-        lambda: heartbeat_total(server, pc.watcher_id, "files_uploaded_since_last") == 1,
-        20,
-        lambda: server.dump(pc.watcher_id),
-        what="a heartbeat to report the uploaded file",
-    )
 
 
 @pytest.mark.covers("upload.stable->multipart_uploaded", "event.file_uploaded->emitted")
@@ -195,6 +197,40 @@ def test_large_file_is_uploaded_in_parts_and_completed(
     assert uploaded.details["size_bytes"] == LARGE
     assert uploaded.details["sha256"] == hashlib.sha256(content).hexdigest()
     assert recorded_uploads(pc) == [LARGE_PATH]
+    assert pending(pc) == []
+
+
+@pytest.mark.covers("upload.empty_file->uploaded", "event.file_uploaded->emitted")
+def test_an_empty_file_is_uploaded_with_one_put_of_length_zero(
+    watcher: WatcherFactory,
+    server: ServerView,
+    proxy: FaultProxy,
+    instrument_id: str,
+    watch_dir: Path,
+) -> None:
+    pc = watcher()
+    start_watching(pc, server)
+
+    content = write_file(watch_dir / RUN / "empty.csv", b"")
+    assert content == b""
+    row = server.wait_for_uploaded(instrument_id, RUN, f"{RUN}/empty.csv", content=content)
+
+    assert row.size_bytes == 0
+    assert server.read_object(instrument_id, RUN, "empty.csv") == b""
+    # One PUT with a length of zero. A body without a length would be sent with chunked
+    # transfer encoding, which S3 refuses.
+    [put] = whole_file_puts(proxy)
+    assert put.upstream_status == 200
+    assert put.header("Content-Length") == "0"
+    assert put.header("Transfer-Encoding") is None
+    assert part_puts(proxy) == []
+    assert len(calls(proxy, "PATCH", f"/api/v1/files/{row.id}")) == 1
+
+    uploaded = server.wait_for_event(pc.watcher_id, event_type="file_uploaded")
+    assert uploaded.details["size_bytes"] == 0
+    assert uploaded.details["sha256"] == hashlib.sha256(b"").hexdigest()
+    assert uploaded.details["part_count"] == 1
+    assert recorded_uploads(pc) == [f"{RUN}/empty.csv"]
     assert pending(pc) == []
 
 
@@ -247,8 +283,15 @@ def test_files_of_a_run_upload_in_parallel_but_never_more_than_the_budget(
     # after the one `budget` places before it, because that one is still running.
     for earlier, later in zip(starts, starts[budget:], strict=False):
         assert later - earlier >= hold - slack, starts
-    # And the uploads really do overlap: some PUT starts while the one before it still runs.
-    assert any(b - a < hold - slack for a, b in zip(starts, starts[1:], strict=False)), starts
+    # And files really are uploaded at the same time. The parts of one large file alone would
+    # overlap with each other, so the overlap that counts is between PUTs to different objects
+    # (the same path without its query): one starts while the other, held `hold` seconds in the
+    # proxy, still runs.
+    assert any(
+        a.timestamp <= b.timestamp < a.timestamp + hold - slack and _route(a) != _route(b)
+        for a in puts
+        for b in puts
+    ), [(_route(r), round(r.timestamp - starts[0], 2)) for r in puts]
     assert server.run_status(instrument_id, RUN) == "uploaded"
 
 
@@ -317,7 +360,10 @@ def test_single_put_that_fails_three_times_leaves_the_file_pending(
     instrument_id: str,
     watch_dir: Path,
 ) -> None:
-    pc = watcher()
+    # A 6-second tick, so the error is counted well inside one interval and not while a
+    # heartbeat is in flight (see bug-new-counts-lost-during-heartbeat). The file needs a few
+    # seconds to give up on, which is time enough for the first tick to go by.
+    pc = watcher(overrides={testing_overrides.HEARTBEAT_INTERVAL_ENV_VAR: "6"})
     proxy.add_fault("status", path=LOCAL_S3, method="PUT", status=503)
     start_watching(pc, server)
 
@@ -476,6 +522,78 @@ def test_a_failed_part_is_retried_on_its_own_and_the_upload_completes(
     assert server.events(pc.watcher_id, event_type="upload_failed") == []
 
 
+@pytest.mark.covers("upload.complete->retried_after_5xx")
+def test_a_5xx_on_the_completing_request_is_retried_without_sending_the_parts_again(
+    watcher: WatcherFactory,
+    server: ServerView,
+    proxy: FaultProxy,
+    instrument_id: str,
+    watch_dir: Path,
+) -> None:
+    pc = watcher()
+    proxy.add_fault("status", path=COMPLETE, method="POST", status=503, count=1)
+    start_watching(pc, server)
+
+    content = write_run(watch_dir, RUN, {"large.csv": LARGE})["large.csv"]
+    row = server.wait_for_uploaded(instrument_id, RUN, LARGE_PATH, content=content)
+    uploaded = server.wait_for_event(pc.watcher_id, event_type="file_uploaded")
+
+    # Two requests to complete the upload, a second apart: the one that was refused, and the
+    # one that worked. The five parts were sent once, and nothing was aborted.
+    completes = calls(proxy, "POST", "/multipart-upload/complete")
+    assert [r.fault_mode for r in completes] == ["status", None]
+    assert [r.upstream_status for r in completes] == [None, 200]
+    assert completes[1].timestamp - completes[0].timestamp >= 0.9
+    assert len(part_puts(proxy)) == 5
+    assert calls(proxy, "DELETE", "/multipart-upload") == []
+    assert len(calls(proxy, "POST", "/request-upload-url")) == 1
+    assert multipart_upload_id(server, row.id) is None
+
+    assert uploaded.details["part_count"] == 5
+    assert server.events(pc.watcher_id, event_type="upload_failed") == []
+    wait_for_pending(pc, [])
+
+
+@pytest.mark.covers("upload.complete->retried_after_lost_reply")
+def test_a_completing_request_whose_reply_is_lost_is_retried_and_the_upload_is_not_failed(
+    watcher: WatcherFactory,
+    server: ServerView,
+    proxy: FaultProxy,
+    instrument_id: str,
+    watch_dir: Path,
+) -> None:
+    pc = watcher()
+    # The server completes the upload and marks the file uploaded, but the watcher never sees
+    # the answer.
+    proxy.add_fault("drop_response", path=COMPLETE, method="POST", count=1)
+    start_watching(pc, server)
+
+    content = write_run(watch_dir, RUN, {"large.csv": LARGE})["large.csv"]
+    row = server.wait_for_uploaded(instrument_id, RUN, LARGE_PATH, content=content)
+    # The server holds the file after the first request, so the watcher's verdict is the thing
+    # to wait for: it reports the upload once its retry has been answered.
+    uploaded = server.wait_for_event(pc.watcher_id, event_type="file_uploaded")
+
+    # The watcher asked again after its backoff, and the server said the file is already
+    # uploaded. That is a success: the watcher does not report a failed upload for a file that
+    # is there, or abort an upload that is finished.
+    completes = calls(proxy, "POST", "/multipart-upload/complete")
+    assert [r.fault_mode for r in completes] == ["drop_response", None]
+    assert [r.upstream_status for r in completes] == [200, 200]
+    assert calls(proxy, "DELETE", "/multipart-upload") == []
+    assert len(part_puts(proxy)) == 5
+    assert multipart_upload_id(server, row.id) is None
+
+    assert uploaded.details["sha256"] == hashlib.sha256(content).hexdigest()
+    assert server.events(pc.watcher_id, event_type="upload_failed") == []
+    wait_for_pending(pc, [])
+    assert recorded_uploads(pc) == [LARGE_PATH]
+    # The row is still the finished upload's.
+    done = server.file(instrument_id, RUN, LARGE_PATH)
+    assert done is not None and done.id == row.id and done.status == "uploaded"
+    assert server.read_object(instrument_id, RUN, "large.csv") == content
+
+
 @pytest.mark.covers("upload.multipart->aborted_on_failure", "event.upload_failed->emitted")
 def test_a_part_that_fails_for_good_aborts_the_upload_on_the_server(
     watcher: WatcherFactory,
@@ -531,6 +649,16 @@ def change_file_during(
         write_file(path_on_disk, restore)
 
 
+def wait_for_calls(proxy: FaultProxy, method: str, suffix: str, count: int) -> None:
+    """Wait until the watcher has sent ``count`` requests of this kind."""
+    wait_until(
+        lambda: len(calls(proxy, method, suffix)) >= count,
+        60,
+        lambda: "\n".join(f"{r.method} {r.path} fault={r.fault_mode}" for r in proxy.requests),
+        what=f"{count} {method} request(s) ending in {suffix}",
+    )
+
+
 @pytest.mark.covers("upload.multipart->bad_digest_restarted")
 def test_file_that_changed_after_hashing_restarts_the_upload_once(
     watcher: WatcherFactory,
@@ -551,7 +679,8 @@ def test_file_that_changed_after_hashing_restarts_the_upload_once(
         proxy, watch_dir / RUN / "large.csv", payload(LARGE, seed=99), restore=original
     )
 
-    # The second upload read the original bytes, the ones that were hashed, and succeeded.
+    # The second upload read the original bytes, the ones that were hashed (the restart sends the
+    # first hash again, so only those bytes can match it), and succeeded.
     row = server.wait_for_uploaded(instrument_id, RUN, LARGE_PATH, content=original)
     completes = calls(proxy, "POST", "/multipart-upload/complete")
     assert [r.upstream_status for r in completes] == [400, 200]
@@ -574,12 +703,17 @@ def test_second_checksum_rejection_aborts_the_upload_and_reports_the_failure(
     watch_dir: Path,
 ) -> None:
     pc = watcher()
-    proxy.add_fault("delay", path=PART_URLS, method="POST", delay_seconds=4, count=1)
+    # Both part URL requests, the upload's and the restart's, are held, and the file changes
+    # during each of them: whatever the watcher hashed before, the bytes it reads afterwards
+    # are different, so the second rejection does not depend on what the restart hashes.
+    proxy.add_fault("delay", path=PART_URLS, method="POST", delay_seconds=4, count=2)
     start_watching(pc, server)
 
     write_file(watch_dir / RUN / "large.csv", LARGE)
-    # The file stays changed, so the restart reads bytes that don't match the hash either.
-    change_file_during(proxy, watch_dir / RUN / "large.csv", payload(LARGE, seed=99))
+    wait_for_calls(proxy, "POST", "/multipart-upload/part-urls", 1)
+    write_file(watch_dir / RUN / "large.csv", payload(LARGE, seed=99))
+    wait_for_calls(proxy, "POST", "/multipart-upload/part-urls", 2)
+    write_file(watch_dir / RUN / "large.csv", payload(LARGE, seed=100))
 
     failed = server.wait_for_event(pc.watcher_id, event_type="upload_failed", timeout=60)
     assert failed.details["s3_key"] == f"{instrument_id}/{RUN}/large.csv"
@@ -596,6 +730,50 @@ def test_second_checksum_rejection_aborts_the_upload_and_reports_the_failure(
     assert not server.object_exists(instrument_id, RUN, "large.csv")
     assert pending(pc) == [(LARGE_PATH, RUN, 0)]
     assert recorded_uploads(pc) == []
+
+
+@pytest.mark.xfail(
+    strict=True,
+    raises=KnownBugStillPresent,
+    reason="bug-new-bad-digest-not-rehashed: the restart after a rejected checksum sends the "
+    "first hash again, so a file that stays changed fails twice",
+)
+@pytest.mark.covers("upload.multipart->bad_digest_rehashed")
+def test_file_that_changed_after_hashing_is_hashed_again_and_uploaded_as_it_is_now(
+    watcher: WatcherFactory,
+    server: ServerView,
+    proxy: FaultProxy,
+    instrument_id: str,
+    watch_dir: Path,
+) -> None:
+    pc = watcher()
+    proxy.add_fault("delay", path=PART_URLS, method="POST", delay_seconds=4, count=1)
+    start_watching(pc, server)
+
+    write_file(watch_dir / RUN / "large.csv", LARGE)
+    # The file changes once, after it was hashed, and stays as it is: the same size, other bytes.
+    changed = payload(LARGE, seed=99)
+    change_file_during(proxy, watch_dir / RUN / "large.csv", changed)
+
+    # The precondition: the upload is over, one way or the other, and the server rejected the
+    # checksum of the first attempt (which was made of the bytes the file had before it changed).
+    def over() -> bool:
+        row = server.file(instrument_id, RUN, LARGE_PATH)
+        failed = server.events(pc.watcher_id, event_type="upload_failed")
+        return bool(row is not None and row.status == "uploaded") or bool(failed)
+
+    wait_until(
+        over, 60, lambda: server.dump(pc.watcher_id, instrument_id), what="the upload to be over"
+    )
+    assert calls(proxy, "POST", "/multipart-upload/complete")[0].upstream_status == 400
+
+    # Intended (proposed: confirm with the owners): the restart hashes the file as it is now, so
+    # the file ends up uploaded with its current bytes, and `file_uploaded` says what they hash to.
+    # Today the restart sends the first hash again, which the changed bytes can't match.
+    with known_bug():
+        server.wait_for_uploaded(instrument_id, RUN, LARGE_PATH, content=changed, timeout=5)
+        uploaded = server.wait_for_event(pc.watcher_id, event_type="file_uploaded", timeout=15)
+        assert uploaded.details["sha256"] == hashlib.sha256(changed).hexdigest()
 
 
 # ---------------------------------------------------------------------------
@@ -664,7 +842,7 @@ def test_pending_upload_is_dropped_after_three_failed_starts_and_can_still_be_re
 ) -> None:
     pc = watcher()
     # An upload that fails every time. A refused upload-URL request fails at once, where a
-    # failing PUT would take the watcher seven seconds of backoff for every start.
+    # failing PUT would make the watcher back off between its attempts at every start.
     fault = proxy.add_fault("status", path=PRESIGN, method="POST", status=503)
     start_watching(pc, server)
 
@@ -762,22 +940,20 @@ def test_watcher_killed_after_the_run_report_uploads_the_files_after_a_restart(
     start_watching(pc, server)
 
     # The watcher's next write of a `pending_uploads` row is made to take minutes, so it sits
-    # exactly between "the run was reported" and "the files were recorded as pending". The
-    # run's own `runs` and `detected_files` rows commit as usual.
+    # exactly between "the run was reported" and "the files were recorded as pending".
     with pc.stall_writes("pending_uploads"):
         content = write_run(watch_dir, RUN, {"small.csv": SMALL})["small.csv"]
-        # The run is reported and the watcher remembers it, but the pending record is stuck.
-        wait_until(
-            lambda: (
-                pc.state_query("SELECT count(*) FROM detected_files WHERE run_id = ?", (RUN,))[0][0]
-                == 1
-            ),
-            30,
-            lambda: server.dump(pc.watcher_id, instrument_id),
-            what="the watcher to record the reported run",
-        )
-        reported = server.file(instrument_id, RUN, SMALL_PATH)
-        assert reported is not None and reported.status == "detected"
+        # The run is reported ...
+        reported = server.wait_for_file(instrument_id, RUN, SMALL_PATH, status="detected")
+        assert reported.size_bytes == SMALL
+        # ... and the watcher is stuck in the write. The wait is for the database's write lock
+        # to be held without a break, and not for a row of the watcher's own: a fix that writes
+        # the pending record in the same transaction as the reported run leaves no committed row
+        # of either to wait for, and the watcher is stuck all the same. (A fix that writes the
+        # pending record before it reports the run would be stuck before the report: the wait
+        # for the server's row above would then fail, loudly, and the scenario needs a second
+        # look.)
+        pc.wait_for_state_db_busy(hold_seconds=1.0)
         pc.kill()
     # The crash left nothing to retry, and the upload had not started.
     assert pending(pc) == []
@@ -786,5 +962,44 @@ def test_watcher_killed_after_the_run_report_uploads_the_files_after_a_restart(
     # Intended: the files of a run the watcher reported are not forgotten, so an auto-mode
     # watcher that starts again uploads them. Today nothing does.
     pc.start()
+    with known_bug():
+        server.wait_for_uploaded(instrument_id, RUN, SMALL_PATH, content=content, timeout=12)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    raises=KnownBugStillPresent,
+    reason="bug-02-crash-before-pending-record: a pending record that can't be written, with no "
+    "crash at all, loses the file in the same way",
+)
+@pytest.mark.covers("upload.pending_record_failed->retried_after_restart")
+def test_a_pending_record_that_cannot_be_written_does_not_lose_the_file(
+    watcher: WatcherFactory,
+    server: ServerView,
+    proxy: FaultProxy,
+    instrument_id: str,
+    watch_dir: Path,
+) -> None:
+    pc = watcher()
+    start_watching(pc, server)
+
+    # Writing the `pending_uploads` row fails (as it would on a full disk). Today that happens
+    # after the run has been reported and remembered. Nothing crashes: the watcher reports the
+    # failed callback and carries on. (Whether the run has been reported by then is not checked,
+    # so the scenario holds for a fix that writes the pending row first.)
+    with pc.fail_writes("pending_uploads", "disk or database is full"):
+        content = write_run(watch_dir, RUN, {"small.csv": SMALL})["small.csv"]
+        failed = server.wait_for_event(
+            pc.watcher_id, event_type="error", kind="stable_callback_failed", timeout=30
+        )
+        assert "disk or database is full" in failed.details["error"]
+        assert pc.is_running()
+        assert calls(proxy, "POST", "/request-upload-url") == []
+    assert pending(pc) == []
+
+    # Intended: as after a crash, the files of a reported run are not forgotten, and the next
+    # start uploads them. Today the run is remembered as handled, with nothing to say that its
+    # file was never uploaded.
+    pc.restart()
     with known_bug():
         server.wait_for_uploaded(instrument_id, RUN, SMALL_PATH, content=content, timeout=12)
