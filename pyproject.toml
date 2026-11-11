@@ -57,4 +57,7 @@ filterwarnings = ["ignore::DeprecationWarning:matplotlib"]
 
 [tool.pyright]
 include = ["lambda", "watcher", "packages/shared"]
-exclude = ["legacy", ".venv"]
+# `build` holds the copy of the source that a wheel build leaves in the package
+# folder (for example `watcher/build/lib`). The wheel tests in
+# packages/shared make one, and it goes stale as soon as the source changes.
+exclude = ["legacy", ".venv", "**/build"]
