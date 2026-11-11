@@ -35,9 +35,12 @@ py-test:
 # none of the targets above collect it. It builds the watcher wheel and installs it with
 # `uv tool install --python 3.12`. Like py-test-integration it builds into web/.next, so stop
 # `make dev` first. It is not part of PR CI. See docs/developer/testing.md.
+#
+# `faulthandler_timeout` makes pytest print the stack of every thread when one test takes longer
+# than 5 minutes, so a hang in CI shows where it hangs. It doesn't stop the test.
 .PHONY: py-test-e2e
 py-test-e2e:
-	uv run pytest watcher/e2e -m e2e -v
+	uv run pytest watcher/e2e -m e2e -v -o faulthandler_timeout=300
 
 # Used by the publish-watcher workflow to refuse releases where the git tag
 # (e.g. `watcher-v0.3.0`) doesn't match `[project].version` in

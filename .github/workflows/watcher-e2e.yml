@@ -75,17 +75,24 @@ jobs:
           path: ${{ runner.temp }}/wheel
 
       # `uv tool install --python 3.12` finds the runner's Python 3.12 or fetches one.
+      #
+      # The step has a limit of its own, under the job's, so a hung test fails the step and the
+      # steps below still run: a job that times out is cancelled and cleaned up with no chance
+      # to upload anything. pytest dumps the stacks of a test that takes over 5 minutes
+      # (`faulthandler_timeout` in the Makefile target), which shows where it hung.
       - name: Run the end-to-end tests
         run: make py-test-e2e
+        timeout-minutes: 35
         env:
           DATA_HUB_E2E_ARTIFACTS: ${{ runner.temp }}/e2e-artifacts
           DATA_HUB_E2E_WHEEL: ${{ inputs.wheel-artifact != '' && format('{0}/wheel', runner.temp) || '' }}
 
       # For a failed test: its watcher logs and state database, the part of the server log
       # written during the test, the fault proxy's request log and a listing of the S3
-      # stand-in, under one folder per test.
+      # stand-in, under one folder per test. A run that is cancelled uploads too: pytest gets
+      # the interrupt, and the test that was running leaves its files.
       - name: Upload failure artifacts
-        if: failure()
+        if: failure() || cancelled()
         uses: actions/upload-artifact@v7
         with:
           name: watcher-e2e-linux-artifacts
