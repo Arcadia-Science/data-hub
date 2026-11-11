@@ -448,18 +448,30 @@ reads the config and a scenario may write it after the PC is built. Under the ho
 - `start()` waits for the line the service logs when it has finished starting (`Data Hub Watcher is
   running`, or `is waiting`), because the SCM reports `RUNNING` as soon as the process is up.
   `wait_exit()` and `kill()` (`taskkill /F /T /PID`) read the SCM's state with `sc queryex`, and
-  `exit_code` is its win32 exit code.
+  `exit_code` is its win32 exit code: 0 after a clean stop, 1067 after a kill, and 536870913
+  (0x20000001) for anything raised out of the service, a `SystemExit(1)` and an uncaught error alike
+  (pywin32 catches what leaves `SvcRun`). It is never the 1 of the `SystemExit`.
 - There is one service per machine. A driver that installs takes it over from whichever driver had
-  it, and `close()` removes it only if the driver is still the owner. A test with several PCs starts
-  them one after the other.
+  it, and `close()` removes it only if the driver is still the owner. A driver that no longer owns
+  the service reports it as not running, and `request_stop()`, `kill()` and `wait_exit()` raise, so
+  a test can't stop another PC's service. A test with several PCs starts them one after the other.
+- `close()` (and the next install) removes the service in this order: the recovery actions off, so
+  that nothing killed comes back; the upgrade task ended and deleted, and any worker still running
+  killed, because a worker's last step is `Start-Service`; the stop, a kill if the service won't
+  stop (`sc stop` answers 1061 while it is stopping and 1052 while it is starting, and does nothing,
+  so the driver waits for those); `service uninstall`; and a wait until the SCM has forgotten the
+  service.
 - `service install` configures restarts after 60 s and 120 s. The driver turns them off right after
   (`sc failure DataHubWatcher reset= 0 actions= ""`), so that a scenario which kills the watcher or
   refuses its start sees it stay down. `install_service(failure_actions="product")` keeps them.
 - The env file gets a `PATH` that leads to `uv` (a service has no user PATH, and the updater needs
   it). `hide_uv()` replaces it with `System32`.
 - The log text is `watcher.log` (machine-wide, read from an offset), `service-bootstrap.log`, the
-  worker's `upgrade-worker.log` and, after a failed run, what the service host reported to the Event
-  Log. `log_files()` adds an export of the service's Event Log entries for the failure artifacts.
+  worker's `upgrade-worker.log` and, after a failed run, the one Event Log entry pywin32 writes when
+  the service fails (`The instance's SvcRun() method failed`, with the traceback). The service's own
+  log lines reach the Event Log as well, but `watcher.log` has them, so they aren't copied again.
+  `log_files()` adds the worker's script and the upgrade sentinels and an export of the service's
+  Event Log entries for the failure artifacts.
 - `interrupt()` raises `NotImplementedError`, and `start()` refuses `args` and `global_args`: a
   service has no Ctrl+C and takes no options.
 

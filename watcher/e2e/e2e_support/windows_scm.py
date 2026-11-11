@@ -16,6 +16,7 @@ prints (``STATE : 4``), not the word after it.
 from __future__ import annotations
 import base64
 import re
+import struct
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -26,12 +27,16 @@ from data_hub_watcher.constants import SERVICE_NAME
 from data_hub_watcher.scheduled_task import UPGRADE_TASK_NAME
 
 __all__ = [
+    "ERROR_INVALID_SERVICE_CONTROL",
+    "ERROR_SERVICE_CANNOT_ACCEPT_CTRL",
     "ERROR_SERVICE_DOES_NOT_EXIST",
+    "ERROR_SERVICE_MARKED_FOR_DELETE",
     "ERROR_SERVICE_NEVER_STARTED",
     "ERROR_SERVICE_SPECIFIC_ERROR",
     "REG_CONFIG_PATH",
     "REG_ENV_PATH",
     "SERVICE_DISPLAY_NAME",
+    "SERVICE_FAILURE_EXIT_CODE",
     "SERVICE_NAME",
     "SERVICE_REGISTRY_KEY",
     "UPGRADE_TASK_NAME",
@@ -47,6 +52,7 @@ __all__ = [
     "event_log_script",
     "format_event_entries",
     "parse_event_log",
+    "parse_failure_actions_value",
     "parse_registry_values",
     "parse_sc_failure",
     "parse_sc_failure_flag",
@@ -58,10 +64,18 @@ __all__ = [
 ]
 
 # Win32 system error codes the SCM reports, and that `sc.exe` returns as its exit code.
+ERROR_INVALID_SERVICE_CONTROL = 1052  # A stop while the service is still starting.
+ERROR_SERVICE_CANNOT_ACCEPT_CTRL = 1061  # A stop while the service is already stopping.
 ERROR_SERVICE_DOES_NOT_EXIST = 1060
 ERROR_SERVICE_NOT_ACTIVE = 1062
 ERROR_SERVICE_SPECIFIC_ERROR = 1066
 ERROR_SERVICE_NEVER_STARTED = 1077
+ERROR_SERVICE_MARKED_FOR_DELETE = 1072
+
+# What pywin32 reports when anything is raised out of `SvcRun`, whatever it is (a
+# `SystemExit(1)`, an uncaught `ClickException`): the win32 exit code is
+# `ERROR_SERVICE_SPECIFIC_ERROR` and the service-specific one is this, 0x20000001, not 1.
+SERVICE_FAILURE_EXIT_CODE = 0x20000001
 
 # What the service calls itself in its log (`SERVICE_DISPLAY_NAME` in `service.py`). The module
 # is not imported: on Windows it imports pywin32, which the suite's own environment doesn't
@@ -105,9 +119,14 @@ class Runner(Protocol):
 def run_command(
     argv: Sequence[str], timeout: float = _DEFAULT_TIMEOUT_SECONDS, *, encoding: str | None = None
 ) -> CommandResult:
-    """Run ``argv`` and capture its output. The output is decoded with ``encoding`` (the
-    system's, by default) and never fails to decode: ``sc`` and ``reg`` print in the console's
-    code page."""
+    """Run ``argv`` and capture its output, decoded as UTF-8 unless ``encoding`` says
+    otherwise, with a byte that doesn't decode replaced rather than raised.
+
+    ``sc``, ``reg`` and ``schtasks`` print in the OEM code page, so a non-ASCII character in
+    what they print (a localized message) comes out as a replacement character. The parsers
+    here only read what is plain ASCII: state numbers, the field names, ``FAILED 1060``. The
+    PowerShell scripts set their output to UTF-8 themselves and are run with
+    ``encoding="utf-8"``."""
     completed = subprocess.run(
         list(argv), capture_output=True, timeout=timeout, check=False, stdin=subprocess.DEVNULL
     )
@@ -143,18 +162,34 @@ class ServiceStatus:
     pid: int | None
     win32_exit_code: int
     service_exit_code: int
+    # The controls `sc queryex` lists under the state: ``STOPPABLE``, ``NOT_PAUSABLE``,
+    # ``ACCEPTS_SHUTDOWN`` or ``IGNORES_SHUTDOWN``. Empty for a stopped service.
+    controls: tuple[str, ...] = ()
 
     @property
     def exit_code(self) -> int | None:
         """How the last run ended: 0 after a clean stop, and for a failure the win32 code (for
         example 1067 for a killed process), or the service's own code where the win32 code says
-        ``ERROR_SERVICE_SPECIFIC_ERROR``, which is how a service reports ``SystemExit(1)``.
+        ``ERROR_SERVICE_SPECIFIC_ERROR``. That is what anything raised out of ``SvcRun`` ends
+        with, a ``SystemExit(1)`` or an uncaught exception alike (pywin32 catches it): the code
+        is :data:`SERVICE_FAILURE_EXIT_CODE` (0x20000001), not the 1 of the ``SystemExit``.
         ``None`` when the service has never run."""
         if self.win32_exit_code == ERROR_SERVICE_NEVER_STARTED:
             return None
         if self.win32_exit_code == ERROR_SERVICE_SPECIFIC_ERROR:
             return self.service_exit_code
         return self.win32_exit_code
+
+    @property
+    def accepts_shutdown(self) -> bool | None:
+        """Whether the service told the SCM it handles a system shutdown (``SvcShutdown``),
+        which `sc queryex` lists as ``ACCEPTS_SHUTDOWN`` or ``IGNORES_SHUTDOWN``. ``None``
+        when it lists neither (a stopped service lists no controls)."""
+        if "ACCEPTS_SHUTDOWN" in self.controls:
+            return True
+        if "IGNORES_SHUTDOWN" in self.controls:
+            return False
+        return None
 
 
 class ScError(RuntimeError):
@@ -172,6 +207,8 @@ _STATE = re.compile(r"^\s*STATE\s*:\s*(\d+)", re.MULTILINE)
 _WIN32_EXIT = re.compile(r"^\s*WIN32_EXIT_CODE\s*:\s*(\d+)", re.MULTILINE)
 _SERVICE_EXIT = re.compile(r"^\s*SERVICE_EXIT_CODE\s*:\s*(\d+)", re.MULTILINE)
 _PID = re.compile(r"^\s*PID\s*:\s*(\d+)", re.MULTILINE)
+# The controls are on the line after the state: `(STOPPABLE, NOT_PAUSABLE, IGNORES_SHUTDOWN)`.
+_CONTROLS = re.compile(r"^\s*STATE\s*:\s*\d+[^\n]*\n\s*\(([A-Z_, ]+)\)", re.MULTILINE)
 _SC_FAILED = re.compile(r"FAILED\s+(\d+)")
 
 
@@ -196,11 +233,17 @@ def parse_sc_queryex(result: CommandResult) -> ServiceStatus | None:
     specific = _SERVICE_EXIT.search(result.stdout)
     pid_match = _PID.search(result.stdout)
     pid = int(pid_match.group(1)) if pid_match else 0
+    listed = _CONTROLS.search(result.stdout)
     return ServiceStatus(
         state=ServiceState(int(state.group(1))),
         pid=pid or None,
         win32_exit_code=int(win32.group(1)) if win32 else 0,
         service_exit_code=int(specific.group(1)) if specific else 0,
+        controls=(
+            tuple(name.strip() for name in listed.group(1).split(",") if name.strip())
+            if listed
+            else ()
+        ),
     )
 
 
@@ -308,6 +351,37 @@ def parse_sc_failure(text: str, *, on_noncrash_failures: bool | None = None) -> 
     )
 
 
+_ACTION_KINDS = {0: "none", 1: "restart", 2: "reboot", 3: "run_command"}
+
+
+def parse_failure_actions_value(hex_text: str) -> tuple[tuple[str, int], ...]:
+    """The actions in the ``FailureActions`` value of the service's registry key, as
+    ``(kind, delay in ms)`` pairs in order, where ``kind`` is ``restart``, ``reboot``,
+    ``run_command`` or ``none``.
+
+    ``sc qfailure`` prints no line for a "no action" entry, so it can't show that the third
+    failure does nothing. The registry value, which ``reg query`` prints as ``REG_BINARY`` hex,
+    can: it is the ``SERVICE_FAILURE_ACTIONS`` structure with its two strings and the array
+    given as offsets. Five little-endian DWORDs (the reset period in seconds, the offsets of the
+    reboot message and the command, the number of actions and the offset of the array), then each
+    action as two DWORDs, its type and its delay in milliseconds.
+    """
+    try:
+        data = bytes.fromhex(hex_text.strip())
+    except ValueError as exc:
+        raise ValueError(f"FailureActions is not hex: {hex_text!r}") from exc
+    if len(data) < 20:
+        raise ValueError(f"FailureActions is too short ({len(data)} bytes)")
+    _reset, _reboot, _command, count, offset = struct.unpack_from("<5I", data, 0)
+    if offset + count * 8 > len(data):
+        raise ValueError(f"FailureActions holds {count} actions but only {len(data)} bytes")
+    actions = []
+    for index in range(count):
+        kind, delay = struct.unpack_from("<II", data, offset + index * 8)
+        actions.append((_ACTION_KINDS.get(kind, f"type{kind}"), delay))
+    return tuple(actions)
+
+
 def parse_sc_failure_flag(text: str) -> bool | None:
     """Whether recovery also runs when the service stops with a non-zero exit code and did
     not crash (``sc qfailureflag``). ``None`` if the output doesn't say."""
@@ -366,7 +440,7 @@ POWERSHELL = "powershell.exe"
 _EVENT_SCRIPT = r"""
 $ErrorActionPreference = 'SilentlyContinue'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-$start = [DateTimeOffset]::FromUnixTimeSeconds(__SINCE__).LocalDateTime
+$start = [DateTimeOffset]::FromUnixTimeMilliseconds(__SINCE__).LocalDateTime
 $mine = 'DataHubWatcher|Data Hub Watcher'
 $application = @{ LogName = 'Application'; StartTime = $start }
 $system = @{ LogName = 'System'; ProviderName = 'Service Control Manager'; StartTime = $start }
@@ -387,11 +461,28 @@ foreach ($e in ($found | Sort-Object TimeCreated)) {
 """
 
 
+# The processes of an upgrade worker: the scheduled task runs `powershell.exe ... -File
+# <config dir>\upgrade-worker.ps1`. `uv` is in the pattern for a process that carries the
+# script's name on its command line; the `uv` the real worker starts is ended with the tree of
+# its PowerShell. This script's own command line is base64, so it never matches itself; its
+# own pid is left out anyway.
+_FIND_WORKERS_SCRIPT = r"""
+$ErrorActionPreference = 'SilentlyContinue'
+Get-CimInstance Win32_Process |
+  Where-Object {
+    $_.ProcessId -ne $PID -and
+    $_.Name -match '^(powershell|pwsh|uv)(\.exe)?$' -and
+    $_.CommandLine -like '*upgrade-worker.ps1*'
+  } |
+  ForEach-Object { $_.ProcessId }
+"""
+
+
 def event_log_script(since_epoch: float, *, include_system: bool = True) -> str:
     """The PowerShell script that lists the service's Event Log entries since a time: the
     Application log's, and with ``include_system`` the Service Control Manager's in the System
     log."""
-    return _EVENT_SCRIPT.replace("__SINCE__", str(int(since_epoch))).replace(
+    return _EVENT_SCRIPT.replace("__SINCE__", str(int(since_epoch * 1000))).replace(
         "__SYSTEM__", "$true" if include_system else "$false"
     )
 
@@ -531,18 +622,37 @@ class WindowsHost:
         )
         self._must(["sc.exe", "failureflag", self.service, "1" if noncrash else "0"])
 
-    def stop(self) -> None:
-        """Ask the service to stop (``sc stop``), without waiting. A service that is not running
-        is not an error."""
+    def stop(self) -> int:
+        """Ask the service to stop (``sc stop``), without waiting, and return the code ``sc``
+        gave (0 when the stop was taken).
+
+        None of these is an error: the service is not running (1062) or not installed (1060),
+        it is already stopping (1061, ``ERROR_SERVICE_CANNOT_ACCEPT_CTRL``) or it is still
+        starting (1052, ``ERROR_INVALID_SERVICE_CONTROL``). A service that is stopping or
+        starting takes no control, so the caller waits for it to settle, and asks again or
+        kills it.
+        """
         result = self._run(["sc.exe", "stop", self.service])
-        if result.returncode not in (0, ERROR_SERVICE_NOT_ACTIVE, ERROR_SERVICE_DOES_NOT_EXIST):
+        if result.returncode not in (
+            0,
+            ERROR_SERVICE_NOT_ACTIVE,
+            ERROR_SERVICE_DOES_NOT_EXIST,
+            ERROR_SERVICE_CANNOT_ACCEPT_CTRL,
+            ERROR_INVALID_SERVICE_CONTROL,
+        ):
             raise ScError(["sc.exe", "stop", self.service], result)
+        return result.returncode
 
     def delete(self) -> None:
         """Mark the service for deletion (``sc delete``), for a ``service uninstall`` that
-        failed. A service that is already gone is not an error."""
+        failed. A service that is already gone, or already marked for deletion (1072), is not an
+        error."""
         result = self._run(["sc.exe", "delete", self.service])
-        if result.returncode not in (0, ERROR_SERVICE_DOES_NOT_EXIST):
+        if result.returncode not in (
+            0,
+            ERROR_SERVICE_DOES_NOT_EXIST,
+            ERROR_SERVICE_MARKED_FOR_DELETE,
+        ):
             raise ScError(["sc.exe", "delete", self.service], result)
 
     def kill_tree(self, pid: int) -> None:
@@ -554,6 +664,36 @@ class WindowsHost:
         if result.returncode not in (0, 128):
             raise ScError(["taskkill.exe", "/F", "/T", "/PID", str(pid)], result)
 
+    def process_running(self, pid: int) -> bool:
+        """Whether a process with this id exists (``tasklist``)."""
+        result = self._run(["tasklist.exe", "/FI", f"PID eq {pid}", "/NH", "/FO", "CSV"])
+        if result.returncode != 0:
+            raise ScError(["tasklist.exe", "/FI", f"PID eq {pid}"], result)
+        # A match is a CSV row that starts with the image name and has the pid as its second
+        # field; with no match `tasklist` says "INFO: No tasks are running ...".
+        return any(
+            len(fields) > 1 and fields[1].strip('"') == str(pid)
+            for fields in (line.split(",") for line in result.stdout.splitlines())
+        )
+
+    def kill_upgrade_workers(self) -> list[int]:
+        """End every ``powershell`` or ``uv`` process started with the upgrade worker's
+        script (its command line contains ``upgrade-worker.ps1``), with the processes each
+        started (``taskkill /T``: the ``uv`` of an install), and return their ids.
+
+        The worker's last step is ``Start-Service``, so one that is still running when a test
+        ends would start the service the next test has just installed. The task is ended with
+        :meth:`delete_task`, which stops the task's own process; this also ends a worker that
+        the task no longer owns.
+        """
+        result = self._run(powershell_command(_FIND_WORKERS_SCRIPT), 60.0, encoding="utf-8")
+        if result.returncode != 0:
+            raise ScError([POWERSHELL, "(find upgrade workers)"], result)
+        pids = [int(line) for line in result.stdout.split() if line.isdigit()]
+        for pid in pids:
+            self.kill_tree(pid)
+        return pids
+
     # -- the registry -----------------------------------------------------------
 
     def registry_values(self) -> dict[str, str]:
@@ -562,6 +702,13 @@ class WindowsHost:
         if result.returncode != 0:
             return {}
         return parse_registry_values(result.stdout)
+
+    def failure_action_list(self) -> tuple[tuple[str, int], ...] | None:
+        """The service's recovery actions in order, ``("restart", 60000)`` and so on, with the
+        "no action" entries ``sc qfailure`` leaves out (see
+        :func:`parse_failure_actions_value`); ``None`` if the service has none."""
+        value = self.registry_values().get("FailureActions")
+        return parse_failure_actions_value(value) if value else None
 
     def set_registry_value(self, name: str, value: str) -> None:
         """Write a string value under the service's registry key."""

@@ -27,7 +27,9 @@ leaves it:
   The registry values ``ConfigPath`` and ``EnvPath`` then point into the profile. There is one
   service per machine: a driver that installs takes the service over from whichever driver had
   it, and ``close()`` removes it only if it is still the owner, so a test with several PCs
-  (one after the other) leaves nothing behind.
+  (one after the other) leaves nothing behind. A driver that no longer owns the service neither
+  reads nor controls it: it reports "not running", and ``request_stop``, ``kill`` and
+  ``wait_exit`` raise, so a test can't stop another PC's service by mistake.
 * Right after ``service install`` the driver turns the SCM's recovery actions off, so a killed
   or refused service stays down as a ``watch`` process does. ``install_service(
   failure_actions="product")`` keeps what the product configured, for the tests of recovery.
@@ -47,14 +49,18 @@ How the abstract members map to Windows
                        for ``STOPPED``
 ``is_running``         the SCM state is anything but ``STOPPED``
 ``pid``                the pid ``sc queryex`` reports
-``exit_code``          the win32 exit code (the service's own where the win32 code is
-                       ``ERROR_SERVICE_SPECIFIC_ERROR``); ``None`` while it runs
+``exit_code``          the win32 exit code (1067 for a kill), or for anything raised out of
+                       ``SvcRun`` (a ``SystemExit(1)``, an uncaught error) the service's
+                       own code, 0x20000001, which is not the 1 of the ``SystemExit``;
+                       ``None`` while it runs
 ``await_upgrade_restart``  waits for ``RUNNING`` with a pid other than the last start's
 ``log_files``          ``watcher.log`` in ProgramData (shared by the machine; read from
                        the byte offset at the driver's creation), ``service-bootstrap.log``,
-                       the profile's ``upgrade-worker.log``, and an Event Log export
-``close``              stops the service, ``service uninstall``, waits until the SCM has
-                       forgotten it, and removes the upgrade task if it is left
+                       the profile's ``upgrade-worker.log`` and ``upgrade-worker.ps1``, the
+                       upgrade sentinels, and an Event Log export
+``close``              recovery off, the upgrade task and any worker ended, the service
+                       stopped (killed if it won't), ``service uninstall``, and a wait until
+                       the SCM has forgotten it
 =====================  =================================================================
 
 ``interrupt`` raises ``NotImplementedError``: a service has no Ctrl+C.
@@ -66,6 +72,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
@@ -75,7 +82,10 @@ from data_hub_watcher import self_update
 from data_hub_watcher.config_io import load_config
 from data_hub_watcher.constants import WATCHER_LOG_DIR
 from data_hub_watcher.models import WatcherConfig
+from data_hub_watcher.updater import UPGRADE_MARKER_FILENAME
 from data_hub_watcher.upgrade_worker import (
+    UPGRADE_REQUEST_FILENAME,
+    UPGRADE_RESULT_FILENAME,
     UPGRADE_WORKER_LOG_FILENAME,
     UPGRADE_WORKER_SCRIPT_FILENAME,
 )
@@ -92,6 +102,7 @@ from e2e_support.waiting import WaitTimeout, wait_until
 from e2e_support.windows_scm import (
     SERVICE_DISPLAY_NAME,
     EventLogEntry,
+    ScError,
     ServiceState,
     ServiceStatus,
     WindowsHost,
@@ -102,6 +113,7 @@ __all__ = [
     "BOOTSTRAP_LOG_FILENAME",
     "READY_LINE",
     "START_LINE",
+    "SVCRUN_FAILED_TEXT",
     "WATCHER_LOG_FILENAME",
     "WindowsServiceDriver",
     "is_elevated",
@@ -125,6 +137,17 @@ _START_GRACE_SECONDS = 5.0
 # How long a graceful stop may take when the driver removes the service, before it is killed.
 _CLOSE_GRACE_SECONDS = 20.0
 _REMOVE_TIMEOUT_SECONDS = 60.0
+
+# What pywin32 reports to the Event Log when `SvcRun` raises (`E_PYS_START_FAILED`), followed by
+# the traceback. The service's own log lines reach the Event Log as well, and `watcher.log` has
+# them already, so this is the one entry the driver copies.
+SVCRUN_FAILED_TEXT = "SvcRun() method failed"
+
+# How long the service's process may take to be gone once the SCM says it has stopped.
+_PROCESS_EXIT_SECONDS = 30.0
+
+# How long a `taskkill` that reported a failure is given before the service counts as not killed.
+_TASKKILL_SETTLE_SECONDS = 3.0
 
 FailureActionsMode = Literal["off", "product"]
 
@@ -316,6 +339,7 @@ class WindowsServiceDriver(WatcherDriver):
             )
         if self.is_running():
             raise RuntimeError("Stop the service before its install is replaced")
+        self._wait_for_process_exit()
         drivers.install_watcher_tool(
             self.tool_install.root,
             wheel,
@@ -394,14 +418,30 @@ class WindowsServiceDriver(WatcherDriver):
             )
         if result.returncode != 0:
             raise RuntimeError(f"`service install` failed:\n{result.output}")
+        # This driver owns the service from here on, so that `close()` removes it even if the
+        # next command fails.
+        self._take_ownership()
         if failure_actions == "off":
             self.host.disable_failure_actions()
+        return result
+
+    def _take_ownership(self) -> None:
         previous = WindowsServiceDriver._owner
         if previous is not None and previous is not self:
             previous._installed = False
         WindowsServiceDriver._owner = self
         self._installed = True
-        return result
+
+    def _owns_service(self) -> bool:
+        """Whether the service on this machine is this PC's (the one it installed last)."""
+        return WindowsServiceDriver._owner is self
+
+    def _require_ownership(self, action: str) -> None:
+        if not self._owns_service():
+            raise RuntimeError(
+                f"Can't {action}: the service is no longer this PC's (another PC installed it, "
+                "or this one never did), and it would act on that PC's service"
+            )
 
     @contextlib.contextmanager
     def _installable_config(self) -> Iterator[None]:
@@ -442,31 +482,30 @@ class WindowsServiceDriver(WatcherDriver):
         self.write_env(overrides={"PATH": self.service_path()})
 
     def _ensure_installed(self) -> None:
-        if (
-            self._installed
-            and WindowsServiceDriver._owner is self
-            and self.host.status() is not None
-        ):
+        if self._installed and self._owns_service() and self.host.status() is not None:
             return
         self.install_service()
 
     def _remove_installed_service(self) -> None:
-        """Stop and uninstall whatever service is on the machine, and wait until the SCM has
-        forgotten it. Nothing happens when there is none."""
+        """Remove whatever service is on the machine, and wait until the SCM has forgotten it.
+        Nothing happens when there is none.
+
+        The order matters. Recovery goes first, so that killing the service can't make the SCM
+        start it again. Then the upgrade task and any worker end: a worker's last step is
+        ``Start-Service``, which would start the service the next test installs. Then the service
+        stops (and is killed if it won't), and ``service uninstall`` removes it, its registry
+        values and the worker's script, and the wait runs until the SCM has really let go.
+        """
         status = self.host.status()
-        if status is not None and status.state is not ServiceState.STOPPED:
-            self.host.stop()
-            try:
-                self._wait_for_state(ServiceState.STOPPED, _CLOSE_GRACE_SECONDS)
-            except WaitTimeout:
-                latest = self.host.status()
-                if latest is not None and latest.pid:
-                    self.host.kill_tree(latest.pid)
-                self._wait_for_state(ServiceState.STOPPED, 30.0)
         if status is not None:
+            with contextlib.suppress(ScError):
+                self.host.disable_failure_actions()
+        self._end_upgrade_worker(service_present=status is not None)
+        if status is not None:
+            self._stop_service(_CLOSE_GRACE_SECONDS)
             # The CLI's own uninstall removes the worker script, the task and the registry
             # values before it removes the service. `sc delete` is the fallback for a service
-            # whose uninstall fails, and the task goes in any case.
+            # whose uninstall fails.
             result = self.run_cli("service", "uninstall")
             if result.returncode != 0 and self.host.status() is not None:
                 self.host.delete()
@@ -475,12 +514,114 @@ class WindowsServiceDriver(WatcherDriver):
                 self.host.delete_task()
         self.wait_for_removal(_REMOVE_TIMEOUT_SECONDS)
 
+    def _end_upgrade_worker(self, *, service_present: bool) -> None:
+        """End the upgrade task (``schtasks /End`` is part of deleting it) and any process of a
+        worker, best effort. Looking for processes takes a PowerShell start, so it is done only
+        when a worker has run: it writes ``upgrade-worker.log`` as its first step."""
+        if not service_present and not self._task_exists():
+            return
+        with contextlib.suppress(Exception):
+            self.host.delete_task()
+        if self._worker_may_have_run():
+            with contextlib.suppress(Exception):
+                self.host.kill_upgrade_workers()
+
+    def _task_exists(self) -> bool:
+        try:
+            return self.host.task_exists()
+        except Exception:
+            return False
+
+    def _worker_may_have_run(self) -> bool:
+        """Whether this PC's, or the owner's, upgrade worker has written its log."""
+        owner = WindowsServiceDriver._owner
+        logs = {self.worker_log}
+        if owner is not None:
+            logs.add(owner.worker_log)
+        return any(path.exists() for path in logs)
+
+    def _stop_service(self, grace: float) -> None:
+        """Stop the service and wait up to ``grace`` seconds for ``STOPPED``, then kill it.
+
+        Only a running service takes a stop. One that is stopping (``STOP_PENDING``) is waited
+        for, and one that is still starting (``START_PENDING``) is waited for and asked again
+        once it runs: ``sc stop`` answers those two with an error and does nothing.
+        """
+        deadline = time.monotonic() + grace
+        while True:
+            status = self.host.status()
+            if status is None or status.state is ServiceState.STOPPED:
+                return
+            if status.state is ServiceState.RUNNING:
+                self.host.stop()
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(0.25)
+        latest = self.host.status()
+        if latest is not None and latest.state is not ServiceState.STOPPED:
+            if latest.pid:
+                self._kill_process_tree(latest.pid)
+            self._wait_for_state(ServiceState.STOPPED, 30.0)
+
+    def _kill_process_tree(self, pid: int) -> None:
+        """``taskkill /F /T`` of the service's process. ``/T`` can report a failure when a child
+        of the tree ends while it is being killed, so a failure is an error only if the service
+        is still not stopped a moment later."""
+        try:
+            self.host.kill_tree(pid)
+        except ScError as error:
+
+            def stopped() -> bool:
+                status = self.host.status()
+                return status is None or status.state is ServiceState.STOPPED
+
+            try:
+                wait_until(
+                    stopped,
+                    _TASKKILL_SETTLE_SECONDS,
+                    what="the service to be stopped after a failed taskkill",
+                )
+            except WaitTimeout:
+                raise error from None
+
+    def _wait_for_process_exit(self) -> None:
+        """Wait until the process of the last start is gone. The SCM says ``STOPPED`` when the
+        service reports it, which can be a moment before the process lets go of its files
+        (``Scripts\\python.exe``, which a reinstall replaces): the upgrade worker sleeps for the
+        same reason."""
+        pid = self._baseline_pid
+        if pid is None:
+            return
+        wait_until(
+            lambda: not self.host.process_running(pid),
+            _PROCESS_EXIT_SECONDS,
+            what=f"process {pid} of the stopped service to exit",
+            interval=0.5,
+        )
+
     def wait_for_removal(self, timeout: float = 30.0) -> None:
         """Wait until the SCM no longer knows the service (``sc queryex`` says error 1060).
         ``DeleteService`` only marks it, and ``CreateService`` fails with 1072 until the
-        marked service is gone."""
+        marked service is gone, which takes every handle to it and its process ending. So a
+        service that still runs is asked to stop while this waits, and killed if it won't."""
+        started = time.monotonic()
+
+        def gone() -> bool:
+            status = self.host.status()
+            if status is None:
+                return True
+            if status.state is ServiceState.RUNNING:
+                self.host.stop()
+            elif (
+                status.state is not ServiceState.STOPPED
+                and status.pid
+                and time.monotonic() - started >= _CLOSE_GRACE_SECONDS
+            ):
+                self._kill_process_tree(status.pid)
+            return False
+
         wait_until(
-            lambda: self.host.status() is None,
+            gone,
             timeout,
             lambda: f"service: {self.host.status()}",
             what="the SCM to forget the service",
@@ -488,33 +629,69 @@ class WindowsServiceDriver(WatcherDriver):
         )
 
     def reinstall_service(
-        self, *, failure_actions: FailureActionsMode = "off", wait_ready: bool = True
+        self,
+        *,
+        failure_actions: FailureActionsMode = "off",
+        wait_ready: bool = True,
+        poll_seconds: float = 0.1,
     ) -> CliResult:
         """``data-hub-watcher service reinstall``: stop, uninstall, install and start, in one
-        command. It starts the service, so it is a start of this driver."""
+        command. It starts the service, so it is a start of this driver.
+
+        The command configures the SCM's recovery as it installs and starts the service a moment
+        later, with no stop in between. With ``failure_actions="off"`` a thread turns the
+        recovery off as soon as the install has set it (every ``poll_seconds``), so that a
+        service that fails at once isn't restarted by the SCM. If it loses the race, the
+        recovery is turned off when the command returns, as after any install.
+        """
         self._ensure_service_path()
         self._begin_run()
-        result = self.run_cli(
-            "service",
-            "reinstall",
-            "--env-path",
-            str(self.env_path),
-            global_args=("--config", str(self.config_path)),
-            timeout=300.0,
-        )
+        with self._recovery_off_once_set(failure_actions == "off", poll_seconds):
+            result = self.run_cli(
+                "service",
+                "reinstall",
+                "--env-path",
+                str(self.env_path),
+                global_args=("--config", str(self.config_path)),
+                timeout=300.0,
+            )
         if result.returncode != 0:
             raise RuntimeError(f"`service reinstall` failed:\n{result.output}")
-        previous = WindowsServiceDriver._owner
-        if previous is not None and previous is not self:
-            previous._installed = False
-        WindowsServiceDriver._owner = self
-        self._installed = True
+        self._take_ownership()
         if failure_actions == "off":
             self.host.disable_failure_actions()
         self._baseline_pid = self._wait_for_pid()
         if wait_ready:
             self.wait_until_ready()
         return result
+
+    @contextlib.contextmanager
+    def _recovery_off_once_set(self, enabled: bool, poll_seconds: float) -> Iterator[None]:
+        """While the block runs, take the recovery actions away as soon as a service has them
+        (the install of a ``service reinstall`` sets them, and the start follows). Best effort."""
+        if not enabled:
+            yield
+            return
+        done = threading.Event()
+
+        def watch() -> None:
+            while not done.is_set():
+                try:
+                    actions = self.host.failure_action_list()
+                    if actions and any(kind != "none" for kind, _ in actions):
+                        self.host.disable_failure_actions()
+                        return
+                except Exception:
+                    pass  # No service yet, or it is being replaced.
+                done.wait(poll_seconds)
+
+        thread = threading.Thread(target=watch, name="recovery-off", daemon=True)
+        thread.start()
+        try:
+            yield
+        finally:
+            done.set()
+            thread.join(timeout=10)
 
     # -- the process --------------------------------------------------------
 
@@ -540,7 +717,7 @@ class WindowsServiceDriver(WatcherDriver):
                 "The service runs `watch` with no arguments: a scenario that passes "
                 f"{[*global_args, *args]} is for the CLI driver"
             )
-        if self.is_running():
+        if self._owns_service() and self.is_running():
             raise RuntimeError("The service is already running")
         self._ensure_installed()
         self._begin_run()
@@ -611,9 +788,29 @@ class WindowsServiceDriver(WatcherDriver):
 
     def request_stop(self) -> None:
         """``data-hub-watcher service stop``: the SCM asks the service to stop, and this returns
-        without waiting."""
-        result = self.run_cli("service", "stop")
-        if result.returncode != 0 and self.is_running():
+        without waiting.
+
+        A service that is already stopping takes no second stop (the command fails with 1061),
+        which is not an error here, and one that is still starting takes none yet (1052), so
+        the stop is asked again once it runs.
+        """
+        self._require_ownership("stop")
+        deadline = time.monotonic() + 30.0
+        while True:
+            result = self.run_cli("service", "stop")
+            if result.returncode == 0:
+                return
+            status = self.host.status()
+            if status is None or status.state in (ServiceState.STOPPED, ServiceState.STOP_PENDING):
+                return
+            # Still starting, or running by now: ask again (the service may have been in
+            # START_PENDING when the first stop was refused).
+            if (
+                status.state in (ServiceState.START_PENDING, ServiceState.RUNNING)
+                and time.monotonic() < deadline
+            ):
+                time.sleep(0.5)
+                continue
             raise RuntimeError(f"`service stop` failed:\n{result.output}")
 
     def interrupt(self) -> None:
@@ -622,6 +819,7 @@ class WindowsServiceDriver(WatcherDriver):
     def kill(self) -> None:
         """End the process with ``taskkill /F /T`` and wait until the SCM says it stopped. With
         the recovery actions on, the SCM then restarts it after 60 s, as for any crash."""
+        self._require_ownership("kill")
         status = self.host.status()
         if status is None or status.state is ServiceState.STOPPED:
             return
@@ -629,7 +827,7 @@ class WindowsServiceDriver(WatcherDriver):
         if pid is None:
             pid = self._wait_for_pid(10.0)
         if pid is not None:
-            self.host.kill_tree(pid)
+            self._kill_process_tree(pid)
         self._wait_for_state(ServiceState.STOPPED, 30.0)
 
     def _wait_for_state(self, state: ServiceState, timeout: float) -> ServiceStatus:
@@ -646,24 +844,35 @@ class WindowsServiceDriver(WatcherDriver):
         return self._wait_for_state(state, timeout)
 
     def wait_exit(self, timeout: float = 30.0) -> int:
+        self._require_ownership("wait for the service to exit")
         status = self._wait_for_state(ServiceState.STOPPED, timeout)
         self._capture_failures()
         return 0 if status.exit_code is None else status.exit_code
 
+    def start_lines(self) -> int:
+        """How many times the service has logged that it is starting since this driver's last
+        start (each process logs it once, whatever its pid)."""
+        return len(START_LINE.findall(self.log_text(self._start_mark)))
+
     def wait_for_new_process(
-        self, previous_pid: int | None, timeout: float = 120.0
+        self, previous_pid: int | None, timeout: float = 120.0, *, after_starts: int | None = None
     ) -> ServiceStatus:
-        """Wait until the service is ``RUNNING`` with a pid other than ``previous_pid``: the SCM
-        has started it again (a recovery action, or the upgrade worker's ``Start-Service``)."""
+        """Wait until the service is ``RUNNING`` in a process other than the one with
+        ``previous_pid``: the SCM has started it again (a recovery action, or the upgrade
+        worker's ``Start-Service``).
+
+        Windows hands a pid out again, so a restarted process can have the pid of the one before.
+        With ``after_starts``, the number of start lines the log had (:meth:`start_lines`), a
+        start line beyond that count shows a new process as well.
+        """
 
         def restarted() -> ServiceStatus | None:
             status = self.host.status()
-            if (
-                status is not None
-                and status.state is ServiceState.RUNNING
-                and status.pid
-                and status.pid != previous_pid
-            ):
+            if status is None or status.state is not ServiceState.RUNNING or not status.pid:
+                return None
+            if status.pid != previous_pid:
+                return status
+            if after_starts is not None and self.start_lines() > after_starts:
                 return status
             return None
 
@@ -677,11 +886,13 @@ class WindowsServiceDriver(WatcherDriver):
 
     def await_upgrade_restart(self, timeout: float) -> None:
         """Wait for the upgrade worker's ``Stop-Service``, ``uv tool install`` and
-        ``Start-Service``: the service is ``RUNNING`` with a pid other than the one of the last
-        start, and has logged that it is ready. Never starts the service: the worker does."""
+        ``Start-Service``: the service is ``RUNNING`` in a new process, and has logged that it is
+        ready. Never starts the service: the worker does."""
         if self._baseline_pid is None:
             raise RuntimeError("await_upgrade_restart needs a service that was started first")
-        status = self.wait_for_new_process(self._baseline_pid, timeout)
+        status = self.wait_for_new_process(
+            self._baseline_pid, timeout, after_starts=self._runs_since_mark
+        )
         self._baseline_pid = status.pid
         self._runs_since_mark += 1
         nth = self._runs_since_mark
@@ -694,11 +905,17 @@ class WindowsServiceDriver(WatcherDriver):
         )
 
     def is_running(self) -> bool:
+        """Whether this PC's service is running. A PC that does not own the service (another PC
+        installed it, or this one never did) has none."""
+        if not self._owns_service():
+            return False
         status = self.host.status()
         return status is not None and status.state is not ServiceState.STOPPED
 
     @property
     def pid(self) -> int | None:
+        if not self._owns_service():
+            return None
         status = self.host.status()
         if status is None or status.state is ServiceState.STOPPED:
             return None
@@ -706,7 +923,7 @@ class WindowsServiceDriver(WatcherDriver):
 
     @property
     def exit_code(self) -> int | None:
-        if self._run_count == 0:
+        if self._run_count == 0 or not self._owns_service():
             return None
         status = self.host.status()
         if status is None or status.state is not ServiceState.STOPPED:
@@ -744,10 +961,30 @@ class WindowsServiceDriver(WatcherDriver):
         except OSError:
             return ""
 
+    def watcher_log_text(self, since: LogMark | None = None) -> str:
+        """Only what the service wrote to ``watcher.log`` (from the driver's creation, or from
+        ``since``), without the bootstrap log, the worker's log and the Event Log entries that
+        :meth:`log_text` adds. For a scenario about what reaches the file an operator reads."""
+        offsets = dict(since.offsets) if since is not None else {}
+        return self._read_log(self.watcher_log, offsets)
+
+    def upgrade_files(self) -> list[Path]:
+        """The upgrade worker's script and the sentinels that exist now, all in the config
+        directory: ``upgrade-worker.ps1``, ``.upgrade-in-progress``, ``.upgrade-request.json``
+        and ``.upgrade-result.json``."""
+        candidates = [
+            self.worker_script,
+            self.config_dir() / UPGRADE_MARKER_FILENAME,
+            self.config_dir() / UPGRADE_REQUEST_FILENAME,
+            self.config_dir() / UPGRADE_RESULT_FILENAME,
+        ]
+        return [path for path in candidates if path.exists()]
+
     def log_files(self) -> list[Path]:
         """Everything for the failure artifacts: ``watcher.log`` whole (it is the machine's),
-        the bootstrap log, the worker's log and an Event Log export."""
-        files = self._log_text_files()
+        the bootstrap log, the worker's log, the worker's script and the upgrade sentinels, and
+        an Event Log export."""
+        files = [*self._log_text_files(), *self.upgrade_files()]
         exported = self.export_event_log()
         if exported is not None:
             files.append(exported)
@@ -779,7 +1016,11 @@ class WindowsServiceDriver(WatcherDriver):
 
         An exception that nothing catches in the service (a config that doesn't load raises
         ``ClickException`` outside any ``try``) is not in ``watcher.log``: pywin32 reports its
-        traceback to the Event Log. A scenario that wants the message finds it in the log text.
+        traceback to the Event Log, in an entry that says ``The instance's SvcRun() method
+        failed``. That entry is the only one copied. The service's own log lines (including
+        ``logger.exception`` tracebacks) reach the Event Log too, and ``watcher.log`` has them
+        already, so copying them would show them twice. A scenario that wants the message finds
+        it in the log text.
         """
         status = self.host.status()
         if status is None or status.state is not ServiceState.STOPPED:
@@ -794,7 +1035,7 @@ class WindowsServiceDriver(WatcherDriver):
             entry
             for entry in entries
             if entry.record_id not in self._captured_event_ids
-            and ("Traceback" in entry.message or "SvcRun" in entry.message)
+            and SVCRUN_FAILED_TEXT in entry.message
         ]
         if not fresh:
             return

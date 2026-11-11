@@ -45,26 +45,30 @@ Driver method               Windows service
                             because a venv's ``python.exe`` is a launcher that starts the real
                             interpreter), then waits for the SCM state ``STOPPED``
 ``wait_exit``               wait for the SCM state ``STOPPED``; the exit code is the service's
-                            win32 exit code (0 after a stop)
+                            win32 exit code (0 after a stop, 1067 after a kill). Anything
+                            raised out of ``SvcRun`` (a refused start's ``SystemExit(1)``, an
+                            uncaught error) ends with 0x20000001, never 1
 ``await_upgrade_restart``   wait until the SCM shows ``RUNNING`` with a pid other than the
                             one of the last start, and the new process says it is ready
 ``is_running``              the SCM state is not ``STOPPED``
 ``pid``                     the pid ``sc queryex`` reports, ``None`` when stopped
-``exit_code``               the win32 exit code of the last run (the service's own code when
-                            the win32 code says ``ERROR_SERVICE_SPECIFIC_ERROR``), ``None``
-                            while it runs
+``exit_code``               the win32 exit code of the last run (the service's own code,
+                            0x20000001, when the win32 code says
+                            ``ERROR_SERVICE_SPECIFIC_ERROR``), ``None`` while it runs
 ``installed_version``       ``data-hub-watcher --version`` of the PC's uv-tool install
 ``install_wheel``           ``uv tool install --reinstall <wheel>[windows-service]`` into
                             the PC's own uv-tool install, with the service stopped
 ``hide_uv``                 see "hide_uv" below
 ``log_files``               ``C:\\ProgramData\\DataHubWatcher\\watcher.log``,
-                            ``service-bootstrap.log``, the profile's ``upgrade-worker.log`` and
-                            an Event Log export (``Get-WinEvent``)
+                            ``service-bootstrap.log``, the profile's ``upgrade-worker.log``,
+                            ``upgrade-worker.ps1`` and the upgrade sentinels, and an
+                            Event Log export (``Get-WinEvent``)
 ``state_db_path``           beside the config file (the registry's ``ConfigPath``), which
                             is in the test's profile
 ``config_dir``              the directory of that config file
-``close``                   ``service stop``, ``service uninstall``, wait for the service to
-                            be removed, and delete the upgrade task if it is left
+``close``                   recovery off, the upgrade task and any worker ended, ``service
+                            stop`` (a kill if it won't), ``service uninstall``, and a wait
+                            for the service to be removed
 ==========================  ===========================================================
 
 The fault proxy, the server and every assertion are the same under both drivers. The
@@ -147,7 +151,7 @@ failed or killed service after 60 s and then 120 s.
   from an elevated shell, against the file the service (``LocalSystem``) has open.
 * **kill() and the recovery actions.** ``taskkill /F`` is a crash for the SCM, so with the
   failure actions on the service comes back by itself after 60 s. With them off (note above)
-  it stays down, ``wait_exit`` returns the win32 exit code of the killed process, and
+  it stays down, ``wait_exit`` returns the win32 exit code of the killed process (1067), and
   ``restart()`` is the only supervisor. ``stall_writes`` and ``fail_writes`` below may call
   ``kill()`` when a watcher is stuck inside a trigger.
 * **The service's** ``config_invalid`` **path.** ``_run_service_loop`` calls ``load_config``

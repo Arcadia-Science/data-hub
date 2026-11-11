@@ -14,8 +14,10 @@ from __future__ import annotations
 import base64
 import os
 import stat
+import struct
 import sys
 import textwrap
+import time
 from collections.abc import Iterator, Sequence
 from pathlib import Path
 
@@ -28,6 +30,7 @@ from e2e_support.drivers import CliResult, ToolInstall
 from e2e_support.service_driver import (
     READY_LINE,
     START_LINE,
+    SVCRUN_FAILED_TEXT,
     WindowsServiceDriver,
 )
 from e2e_support.waiting import WaitTimeout
@@ -39,6 +42,7 @@ from e2e_support.windows_scm import (
     event_log_script,
     format_event_entries,
     parse_event_log,
+    parse_failure_actions_value,
     parse_registry_values,
     parse_sc_failure,
     parse_sc_failure_flag,
@@ -52,18 +56,33 @@ from e2e_support.windows_scm import (
 # What Windows prints (as `sc`, `reg` and `schtasks` print it)
 # ---------------------------------------------------------------------------
 
-QUERYEX_RUNNING = """
+_QUERYEX_ACTIVE = """
 SERVICE_NAME: DataHubWatcher
         TYPE               : 10  WIN32_OWN_PROCESS
-        STATE              : 4  RUNNING
-                                (STOPPABLE, NOT_PAUSABLE, ACCEPTS_SHUTDOWN)
+        STATE              : {state}  {state_name}
+                                (STOPPABLE, NOT_PAUSABLE, {shutdown})
         WIN32_EXIT_CODE    : 0  (0x0)
         SERVICE_EXIT_CODE  : 0  (0x0)
         CHECKPOINT         : 0x0
         WAIT_HINT          : 0x0
-        PID                : 4132
+        PID                : {pid}
         FLAGS              :
 """
+
+
+def queryex_active(
+    *,
+    state: int = 4,
+    state_name: str = "RUNNING",
+    shutdown: str = "IGNORES_SHUTDOWN",
+    pid: int = 4132,
+) -> str:
+    """What `sc queryex` prints for a service that is not stopped. The real service lists
+    IGNORES_SHUTDOWN: it has no `SvcShutdown`."""
+    return _QUERYEX_ACTIVE.format(state=state, state_name=state_name, shutdown=shutdown, pid=pid)
+
+
+QUERYEX_RUNNING = queryex_active()
 
 QUERYEX_STOPPED = """
 SERVICE_NAME: DataHubWatcher
@@ -139,6 +158,7 @@ class TestReadingWhatWindowsPrints:
 
         assert status is not None
         assert (status.state, status.pid, status.exit_code) == (ServiceState.RUNNING, 4132, 0)
+        assert status.accepts_shutdown is False
 
     def test_a_stopped_service_has_no_pid_and_says_how_it_ended(self) -> None:
         text = QUERYEX_STOPPED.format(win32=1067, specific=0)
@@ -148,12 +168,32 @@ class TestReadingWhatWindowsPrints:
         assert status is not None
         assert (status.state, status.pid, status.exit_code) == (ServiceState.STOPPED, None, 1067)
 
-    def test_the_service_specific_code_is_the_exit_code_of_a_system_exit(self) -> None:
-        # `SystemExit(1)` in the service ends it with ERROR_SERVICE_SPECIFIC_ERROR and code 1.
-        status = parse_sc_queryex(CommandResult(0, QUERYEX_STOPPED.format(win32=1066, specific=1)))
+    def test_anything_raised_out_of_svcrun_ends_with_the_service_specific_failure_code(
+        self,
+    ) -> None:
+        # pywin32 catches whatever `SvcRun` raises, a `SystemExit(1)` or an uncaught
+        # `ClickException`, and stops the service with ERROR_SERVICE_SPECIFIC_ERROR and the
+        # service-specific code 0x20000001. Not 1.
+        text = QUERYEX_STOPPED.format(win32=1066, specific=0x20000001)
+
+        status = parse_sc_queryex(CommandResult(0, text))
 
         assert status is not None
-        assert status.exit_code == 1
+        assert status.exit_code == 0x20000001 == windows_scm.SERVICE_FAILURE_EXIT_CODE
+        assert status.exit_code == 536870913
+        assert status.exit_code != 1
+
+    def test_the_controls_say_whether_the_service_accepts_a_shutdown(self) -> None:
+        ignoring = parse_sc_queryex(CommandResult(0, queryex_active()))
+        accepting = parse_sc_queryex(CommandResult(0, queryex_active(shutdown="ACCEPTS_SHUTDOWN")))
+        stopped = parse_sc_queryex(CommandResult(0, QUERYEX_STOPPED.format(win32=0, specific=0)))
+
+        assert ignoring is not None and accepting is not None and stopped is not None
+        assert ignoring.controls == ("STOPPABLE", "NOT_PAUSABLE", "IGNORES_SHUTDOWN")
+        assert ignoring.accepts_shutdown is False
+        assert accepting.accepts_shutdown is True
+        # A stopped service lists no controls.
+        assert (stopped.controls, stopped.accepts_shutdown) == ((), None)
 
     def test_a_service_that_never_ran_has_no_exit_code(self) -> None:
         status = parse_sc_queryex(CommandResult(0, QUERYEX_STOPPED.format(win32=1077, specific=0)))
@@ -209,6 +249,29 @@ class TestReadingWhatWindowsPrints:
 
         assert (actions.restart_delays_ms, actions.reset_period_seconds) == ((), 0)
 
+    def test_the_failure_actions_in_the_registry_include_the_no_action_entry(self) -> None:
+        # 86400 s reset, no reboot message or command, three actions at offset 20: restart after
+        # 60000 ms, restart after 120000 ms, and none. `sc qfailure` prints no line for the last.
+        value = (
+            "80510100" "00000000" "00000000" "03000000" "14000000"
+            "01000000" "60ea0000" "01000000" "c0d40100" "00000000" "00000000"
+        )  # fmt: skip
+
+        assert parse_failure_actions_value(value) == (
+            ("restart", 60_000),
+            ("restart", 120_000),
+            ("none", 0),
+        )
+        # The same value as a program builds it.
+        built = struct.pack("<5I", 86_400, 0, 0, 2, 20) + struct.pack("<4I", 1, 5_000, 2, 0)
+        assert parse_failure_actions_value(built.hex()) == (("restart", 5_000), ("reboot", 0))
+        with pytest.raises(ValueError, match="not hex"):
+            parse_failure_actions_value("zz")
+        with pytest.raises(ValueError, match="too short"):
+            parse_failure_actions_value("8051")
+        with pytest.raises(ValueError, match="holds 9 actions"):
+            parse_failure_actions_value(struct.pack("<5I", 0, 0, 0, 9, 20).hex())
+
     def test_registry_values_stop_at_the_first_key(self) -> None:
         values = parse_registry_values(REG_QUERY)
 
@@ -238,6 +301,11 @@ Traceback (most recent call last):
 click.exceptions.ClickException: Config file not found
 ### 103 2026-01-01T10:00:06.0000000Z System id=7034 Service Control Manager
 The Data Hub Watcher service terminated unexpectedly.
+### 104 2026-01-01T10:00:07.0000000Z Application id=3 DataHubWatcher
+Config revision callback failed
+Traceback (most recent call last):
+  File "supervisor.py", line 9, in poll
+RuntimeError: forwarded by logger.exception
 """
 
 
@@ -249,6 +317,7 @@ class TestEventLog:
             (101, "Application", 1, "Python Service"),
             (102, "Application", 7000, "DataHubWatcher"),
             (103, "System", 7034, "Service Control Manager"),
+            (104, "Application", 3, "DataHubWatcher"),
         ]
         assert "Traceback (most recent call last)" in entries[1].message
         assert entries[1].message.endswith("Config file not found")
@@ -266,7 +335,8 @@ class TestEventLog:
         assert argv[0] == "powershell.exe"
         assert argv[-2] == "-EncodedCommand"
         script = base64.b64decode(argv[-1]).decode("utf-16-le")
-        assert "FromUnixTimeSeconds(1700000000)" in script
+        # The start keeps its milliseconds: a second is a lot to lose when the log is busy.
+        assert "FromUnixTimeMilliseconds(1700000000900)" in script
         assert "Get-WinEvent" in script
         assert "LogName = 'Application'" in script
         assert "if ($true)" in script
@@ -341,6 +411,61 @@ class TestTheCommandsTheHostRuns:
         WindowsHost(run).stop()
 
         assert run.calls == [["sc.exe", "stop", "DataHubWatcher"]]
+
+    def test_a_stop_that_the_service_cannot_take_yet_or_any_more_is_not_an_error(self) -> None:
+        # 1061: it is already stopping. 1052: it is still starting. `sc stop` does nothing for
+        # either, so the caller waits and looks again.
+        assert WindowsHost(Recorder(CommandResult(1061))).stop() == 1061
+        assert WindowsHost(Recorder(CommandResult(1052))).stop() == 1052
+        assert WindowsHost(Recorder(CommandResult(0))).stop() == 0
+        with pytest.raises(ScError):
+            WindowsHost(Recorder(CommandResult(5, "Access is denied."))).stop()
+
+    def test_deleting_a_service_that_is_marked_for_deletion_is_not_an_error(self) -> None:
+        WindowsHost(Recorder(CommandResult(1072))).delete()
+        WindowsHost(Recorder(CommandResult(1060))).delete()
+        with pytest.raises(ScError):
+            WindowsHost(Recorder(CommandResult(5))).delete()
+
+    def test_a_process_is_looked_up_with_tasklist(self) -> None:
+        listed = '"python.exe","4132","Services","0","21,004 K"\n'
+        none = "INFO: No tasks are running which match the specified criteria.\n"
+
+        assert WindowsHost(Recorder(CommandResult(0, listed))).process_running(4132) is True
+        assert WindowsHost(Recorder(CommandResult(0, none))).process_running(4132) is False
+        # Another process with that number in its memory column is not a match.
+        other = '"python.exe","9999","Services","0","4132 K"\n'
+        assert WindowsHost(Recorder(CommandResult(0, other))).process_running(4132) is False
+        run = Recorder(CommandResult(0, none))
+        WindowsHost(run).process_running(7)
+        assert run.calls == [["tasklist.exe", "/FI", "PID eq 7", "/NH", "/FO", "CSV"]]
+
+    def test_upgrade_workers_are_found_by_their_script_and_ended_with_their_children(self) -> None:
+        run = Recorder(CommandResult(0, "812\r\n977\r\n"), CommandResult(0), CommandResult(128))
+
+        killed = WindowsHost(run).kill_upgrade_workers()
+
+        assert killed == [812, 977]
+        assert run.calls[0][0] == "powershell.exe"
+        script = base64.b64decode(run.calls[0][-1]).decode("utf-16-le")
+        assert "upgrade-worker.ps1" in script and "Win32_Process" in script
+        assert run.calls[1:] == [
+            ["taskkill.exe", "/F", "/T", "/PID", "812"],
+            ["taskkill.exe", "/F", "/T", "/PID", "977"],
+        ]
+        assert WindowsHost(Recorder(CommandResult(0, ""))).kill_upgrade_workers() == []
+
+    def test_the_failure_actions_are_read_from_the_registry_value(self) -> None:
+        value = struct.pack("<5I", 86_400, 0, 0, 1, 20) + struct.pack("<2I", 1, 60_000)
+        listing = REG_QUERY.replace(
+            "    ConfigPath", f"    FailureActions    REG_BINARY    {value.hex()}\n    ConfigPath"
+        )
+
+        assert WindowsHost(Recorder(CommandResult(0, listing))).failure_action_list() == (
+            ("restart", 60_000),
+        )
+        assert WindowsHost(Recorder(CommandResult(0, REG_QUERY))).failure_action_list() is None
+        assert WindowsHost(Recorder(CommandResult(1))).failure_action_list() is None
 
     def test_registry_values_are_written_and_deleted_under_the_service_key(self) -> None:
         run = Recorder()
@@ -439,8 +564,9 @@ class TestTheCommandsTheHostRuns:
 
 class FakeMachine:
     """The parts of a Windows machine the driver talks to: one service, its registry key, its
-    scheduled task and the shared log. It is a runner for :class:`WindowsHost`, and
-    :meth:`cli` stands in for ``data-hub-watcher service ...``, changing the same state.
+    scheduled task, the processes of an upgrade worker and the shared log. It is a runner for
+    :class:`WindowsHost`, and :meth:`cli` stands in for ``data-hub-watcher service ...``,
+    changing the same state.
     """
 
     def __init__(self, log_dir: Path) -> None:
@@ -455,6 +581,17 @@ class FakeMachine:
         self.refuse_start = False
         self.event_output = ""
         self.removal_delay = 0  # queries that still see a removed service
+        # A stop that takes this many queries to finish: the service is STOP_PENDING meanwhile,
+        # and takes no second stop (1061).
+        self.stopping_queries = 0
+        # A start that takes this many queries to finish: START_PENDING takes no stop (1052).
+        self.starting_queries = 0
+        self.reuse_pid: int | None = None  # The pid the next start gets (a reused one).
+        self.lingering_pids: dict[int, int] = {}  # pid -> `tasklist` calls that still list it
+        self.worker_pids: list[int] = []  # Processes whose command line has the worker script.
+        self.reinstall_delay = 0.0  # Between the install and the start of a reinstall.
+        self.failure_at_start: str | None = None
+        self.kill_reports_failure = False  # `taskkill /T` that fails after it killed the tree.
 
     @property
     def log(self) -> Path:
@@ -476,29 +613,45 @@ class FakeMachine:
             return self._sc(verb, args)
         if program == "taskkill.exe":
             return self._taskkill(int(args[-1]))
+        if program == "tasklist.exe":
+            return self._tasklist(int(args[2].removeprefix("PID eq ")))
         if program == "schtasks.exe":
             return self._schtasks(args)
         if program == "reg.exe":
             return self._reg(verb)
         if program == "powershell.exe":
+            script = base64.b64decode(args[-1]).decode("utf-16-le")
+            if "Win32_Process" in script:
+                return CommandResult(0, "\r\n".join(str(pid) for pid in self.worker_pids))
             return CommandResult(0, self.event_output)
         raise AssertionError(f"the fake machine doesn't know {args}")
 
     def _sc(self, verb: str, args: list[str]) -> CommandResult:
         if verb == "queryex":
-            if self.service is None or (self.removal_delay and self.service.get("gone")):
-                if self.service is not None:
-                    self.removal_delay -= 1
-                    if self.removal_delay == 0:
-                        self.service = None
-                    return CommandResult(0, self._queryex())
+            if self.service is None:
                 return CommandResult(1060, SC_NOT_INSTALLED)
+            if self.removal_delay and self.service.get("gone"):
+                self.removal_delay -= 1
+                if self.removal_delay == 0:
+                    self.service = None
+                    return CommandResult(1060, SC_NOT_INSTALLED)
+                return CommandResult(0, self._queryex())
+            self._settle()
             return CommandResult(0, self._queryex())
         if verb == "stop":
             if self.service is None:
                 return CommandResult(1060, SC_NOT_INSTALLED)
-            if self.service["state"] == ServiceState.STOPPED:
+            state = self.service["state"]
+            if state == ServiceState.STOPPED:
                 return CommandResult(1062)
+            if state == ServiceState.STOP_PENDING:
+                return CommandResult(1061)
+            if state == ServiceState.START_PENDING:
+                return CommandResult(1052)
+            if self.stopping_queries:
+                self.service["state"] = ServiceState.STOP_PENDING
+                self.service["pending"] = self.stopping_queries
+                return CommandResult(0)
             self._stopped(0, 0)
             self.write_log("Data Hub Watcher stopped")
             return CommandResult(0)
@@ -512,6 +665,20 @@ class FakeMachine:
             return CommandResult(0)
         raise AssertionError(f"the fake machine doesn't know {args}")
 
+    def _settle(self) -> None:
+        """A pending state moves on each time it is queried."""
+        assert self.service is not None
+        state = self.service["state"]
+        if state in (ServiceState.STOP_PENDING, ServiceState.START_PENDING):
+            self.service["pending"] -= 1
+            if self.service["pending"] <= 0:
+                if state == ServiceState.STOP_PENDING:
+                    self._stopped(0, 0)
+                    self.write_log("Data Hub Watcher stopped")
+                else:
+                    self.service["state"] = ServiceState.RUNNING
+                    self.write_log("Data Hub Watcher is running")
+
     def _queryex(self) -> str:
         assert self.service is not None
         state = self.service["state"]
@@ -519,17 +686,40 @@ class FakeMachine:
             return QUERYEX_STOPPED.format(
                 win32=self.service["win32"], specific=self.service["specific"]
             )
-        return QUERYEX_RUNNING.replace("4132", str(self.service["pid"]))
+        return queryex_active(
+            state=int(state), state_name=ServiceState(state).name, pid=self.service["pid"]
+        )
 
     def _stopped(self, win32: int, specific: int) -> None:
         assert self.service is not None
         self.service.update(state=ServiceState.STOPPED, pid=0, win32=win32, specific=specific)
 
     def _taskkill(self, pid: int) -> CommandResult:
+        if pid in self.worker_pids:
+            self.worker_pids.remove(pid)
+            return CommandResult(0)
         if self.service is None or self.service["pid"] != pid:
             return CommandResult(128)
+        # A kill is a crash to the SCM.
         self._stopped(1067, 0)
-        return CommandResult(0)
+        return (
+            CommandResult(1, "ERROR: a child ended")
+            if self.kill_reports_failure
+            else CommandResult(0)
+        )
+
+    def _tasklist(self, pid: int) -> CommandResult:
+        if self.lingering_pids.get(pid, 0) > 0:
+            self.lingering_pids[pid] -= 1
+            return CommandResult(0, f'"python.exe","{pid}","Services","0","20,000 K"\n')
+        alive = (
+            self.service is not None
+            and self.service["pid"] == pid
+            and self.service["state"] != ServiceState.STOPPED
+        )
+        if alive:
+            return CommandResult(0, f'"python.exe","{pid}","Services","0","20,000 K"\n')
+        return CommandResult(0, "INFO: No tasks are running which match the specified criteria.\n")
 
     def _schtasks(self, args: list[str]) -> CommandResult:
         verb = args[1].lower()
@@ -543,17 +733,29 @@ class FakeMachine:
         if verb != "query" or self.service is None:
             return CommandResult(1)
         lines = [f"    {name}    REG_SZ    {value}" for name, value in self.registry.items()]
+        if self.failure == "product":
+            actions = struct.pack("<5I", 86_400, 0, 0, 3, 20) + struct.pack(
+                "<6I", 1, 60_000, 1, 120_000, 0, 0
+            )
+            lines.append(f"    FailureActions    REG_BINARY    {actions.hex()}")
         return CommandResult(0, "\nHKEY_LOCAL_MACHINE\\x\\DataHubWatcher\n" + "\n".join(lines))
 
     # -- data-hub-watcher service ... -------------------------------------
 
     def cli(self, args: Sequence[str], global_args: Sequence[str]) -> CliResult:
         command = list(args)
+        self.calls.append(["data-hub-watcher", *global_args, *command])
         if command[:2] == ["service", "install"]:
             if self.service is not None:
                 return self._cli_failed(args, "(1073, 'CreateService', 'The service exists.')")
             config = list(global_args)[list(global_args).index("--config") + 1]
-            self.service = {"state": ServiceState.STOPPED, "pid": 0, "win32": 1077, "specific": 0}
+            self.service = {
+                "state": ServiceState.STOPPED,
+                "pid": 0,
+                "win32": 1077,
+                "specific": 0,
+                "pending": 0,
+            }
             self.registry = {
                 "ConfigPath": config,
                 "EnvPath": command[command.index("--env-path") + 1],
@@ -564,12 +766,19 @@ class FakeMachine:
         if command[:2] == ["service", "start"]:
             if self.service is None:
                 return self._cli_failed(args, "(1060, 'OpenService', 'does not exist')")
-            self.next_pid += 1
+            self.failure_at_start = self.failure
+            self.next_pid = self.reuse_pid or self.next_pid + 1
             self.write_log(f"Data Hub Watcher starting (pid={self.next_pid}, log=x)")
             if self.refuse_start:
                 self.service.update(state=ServiceState.RUNNING, pid=self.next_pid)
                 self.write_log("Cannot reach API during startup: down")
-                self._stopped(1066, 1)
+                self._stopped(1066, 0x20000001)
+            elif self.starting_queries:
+                self.service.update(
+                    state=ServiceState.START_PENDING,
+                    pid=self.next_pid,
+                    pending=self.starting_queries,
+                )
             else:
                 self.service.update(state=ServiceState.RUNNING, pid=self.next_pid)
                 self.write_log("Data Hub Watcher is running")
@@ -582,6 +791,19 @@ class FakeMachine:
                 self._stopped(0, 0)
             self.service, self.registry, self.task = None, {}, False
             return CliResult(tuple(args), 0, "✓ Service removed.\n", "")
+        if command[:2] == ["service", "reinstall"]:
+            self.cli(["service", "stop"], ())
+            self.cli(["service", "uninstall"], ())
+            self.cli(["service", "install", *command[2:]], global_args)
+            time.sleep(self.reinstall_delay)  # The worker is installed, then the start.
+            self.cli(["service", "start"], ())
+            return CliResult(
+                tuple(args),
+                0,
+                "✓ Service stopped.\n✓ Service uninstalled.\n✓ Service installed.\n"
+                "✓ Service started.\n",
+                "",
+            )
         raise AssertionError(f"the fake service CLI doesn't know {args}")
 
     @staticmethod
@@ -703,11 +925,13 @@ class TestInstalling:
 
         later.install_service()
 
-        # It looked, found the other PC's service running, and stopped it, before installing.
+        # It looked, found the other PC's service running, took its recovery away and stopped it,
+        # before installing.
         verbs = [" ".join(call[:2]) for call in machine.calls]
-        assert verbs[:2] == ["sc.exe queryex", "sc.exe stop"]
+        assert verbs[:2] == ["sc.exe queryex", "sc.exe failure"]
+        assert verbs.index("sc.exe stop") < verbs.index("data-hub-watcher service")
         assert machine.registry["ConfigPath"] == str(later.config_path)
-        assert not earlier.is_running()
+        assert not earlier.is_running()  # It no longer owns the service.
 
     def test_an_install_without_any_config_says_what_to_do(
         self, tmp_path: Path, machine: FakeMachine, monkeypatch: pytest.MonkeyPatch
@@ -769,6 +993,46 @@ class TestInstalling:
         assert "PATH=custom" in driver.env_path.read_text().splitlines()
 
 
+class TestReinstalling:
+    def test_the_recovery_is_off_before_the_command_starts_the_service(
+        self, tmp_path: Path, machine: FakeMachine, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        driver = make_driver(tmp_path, machine, monkeypatch)
+        driver.start()
+        # The install sets the product's recovery, and the start comes half a second later.
+        machine.reinstall_delay = 0.5
+
+        result = driver.reinstall_service(poll_seconds=0.02)
+
+        assert "Service started" in result.stdout
+        assert machine.failure_at_start == "none"
+        assert driver.is_running()
+        assert WindowsServiceDriver._owner is driver
+
+    def test_a_recovery_the_thread_missed_is_turned_off_when_the_command_returns(
+        self, tmp_path: Path, machine: FakeMachine, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        driver = make_driver(tmp_path, machine, monkeypatch)
+        driver.start()
+
+        driver.reinstall_service(poll_seconds=30)  # Too slow to win the race.
+
+        assert machine.failure_at_start == "product"
+        assert machine.failure == "none"
+
+    def test_the_products_recovery_is_kept_when_a_test_asks_for_it(
+        self, tmp_path: Path, machine: FakeMachine, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        driver = make_driver(tmp_path, machine, monkeypatch)
+        driver.start()
+        machine.reinstall_delay = 0.2
+
+        driver.reinstall_service(failure_actions="product", poll_seconds=0.02)
+
+        assert machine.failure == "product"
+        assert machine.failure_at_start == "product"
+
+
 class TestRunning:
     def test_the_first_start_installs_the_service_and_waits_for_the_ready_line(
         self, tmp_path: Path, machine: FakeMachine, monkeypatch: pytest.MonkeyPatch
@@ -818,8 +1082,10 @@ class TestRunning:
         driver.start()
 
         assert not driver.is_running()
-        assert driver.exit_code == 1  # The service's own code, from ERROR_SERVICE_SPECIFIC_ERROR.
-        assert driver.wait_exit(1) == 1
+        # The service's own code, 0x20000001, from ERROR_SERVICE_SPECIFIC_ERROR: what pywin32
+        # reports for the `SystemExit(1)`.
+        assert driver.exit_code == 0x20000001
+        assert driver.wait_exit(1) == 0x20000001
         assert "Cannot reach API during startup" in driver.log_text()
         # The time the failure was seen, which the scenarios of recovery count 60 s from.
         first_ended = driver.ended_at
@@ -903,6 +1169,75 @@ class TestRunning:
         assert "Data Hub Watcher is running" in str(raised.value)
 
 
+class TestOwnership:
+    """There is one service per machine. A driver that no longer owns it must not read or
+    control it, so a test can't stop or kill another PC's service by mistake."""
+
+    def test_a_pc_can_start_while_another_pcs_service_runs_and_takes_it_over(
+        self, tmp_path: Path, machine: FakeMachine, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        first = make_driver(tmp_path, machine, monkeypatch, name="first")
+        second = make_driver(tmp_path, machine, monkeypatch, name="second")
+        first.start()
+        assert first.is_running()
+
+        second.start()  # The machine's service is running: it is the first PC's, not this one's.
+
+        assert second.is_running()
+        assert machine.registry["ConfigPath"] == str(second.config_path)
+
+    def test_a_pc_that_lost_the_service_reads_nothing_and_controls_nothing(
+        self, tmp_path: Path, machine: FakeMachine, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        first = make_driver(tmp_path, machine, monkeypatch, name="first")
+        second = make_driver(tmp_path, machine, monkeypatch, name="second")
+        first.start()
+        second.start()
+        running_pid = second.pid
+        machine.calls.clear()
+
+        # The service on the machine runs, and it is the second PC's.
+        assert (first.is_running(), first.pid, first.exit_code) == (False, None, None)
+        for action in (first.request_stop, first.kill, first.wait_exit):
+            with pytest.raises(RuntimeError, match="no longer this PC's"):
+                action()
+        assert machine.calls == []  # Nothing was asked of the machine.
+        assert second.pid == running_pid and second.is_running()
+
+    def test_a_pc_that_never_installed_the_service_does_not_own_one(
+        self, tmp_path: Path, machine: FakeMachine, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        owner = make_driver(tmp_path, machine, monkeypatch, name="owner")
+        stranger = make_driver(tmp_path, machine, monkeypatch, name="stranger")
+        owner.start()
+
+        assert (stranger.is_running(), stranger.pid) == (False, None)
+        # The machine-wide view is still there for a test that asks for it.
+        status = stranger.service_status()
+        assert status is not None and status.state is ServiceState.RUNNING
+
+    def test_installing_gives_ownership_before_recovery_is_turned_off(
+        self, tmp_path: Path, machine: FakeMachine, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        driver = make_driver(tmp_path, machine, monkeypatch)
+
+        def refuse(self: WindowsHost) -> None:
+            raise ScError(["sc.exe", "failure"], CommandResult(5, "Access is denied."))
+
+        original = WindowsHost.disable_failure_actions
+        monkeypatch.setattr(WindowsHost, "disable_failure_actions", refuse)
+
+        with pytest.raises(ScError):
+            driver.install_service()
+
+        # The service is on the machine and the driver owns it, so closing removes it.
+        assert machine.service is not None
+        assert WindowsServiceDriver._owner is driver
+        monkeypatch.setattr(WindowsHost, "disable_failure_actions", original)
+        driver.close()
+        assert machine.service is None
+
+
 class TestAnUpgradeRestart:
     def test_it_waits_for_a_new_pid_and_for_the_new_process_to_be_ready(
         self, tmp_path: Path, machine: FakeMachine, monkeypatch: pytest.MonkeyPatch
@@ -918,6 +1253,33 @@ class TestAnUpgradeRestart:
         # The next restart is waited for from the new pid.
         machine.restart_with_new_pid()
         driver.await_upgrade_restart(2)
+
+    def test_a_restart_that_gets_the_same_pid_is_seen_by_its_start_line(
+        self, tmp_path: Path, machine: FakeMachine, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        driver = make_driver(tmp_path, machine, monkeypatch)
+        driver.start()
+        machine.reuse_pid = driver.pid  # Windows hands the pid of the stopped process out again.
+
+        machine.restart_with_new_pid()
+        driver.await_upgrade_restart(2)
+
+        assert driver.pid == machine.reuse_pid
+        assert driver.start_lines() == 2
+
+    def test_waiting_for_a_new_process_takes_a_new_pid_or_a_new_start_line(
+        self, tmp_path: Path, machine: FakeMachine, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        driver = make_driver(tmp_path, machine, monkeypatch)
+        driver.start()
+        pid = driver.pid
+
+        # The same process: neither.
+        with pytest.raises(WaitTimeout):
+            driver.wait_for_new_process(pid, 0.3, after_starts=driver.start_lines())
+        # Another pid, with or without the count.
+        assert driver.wait_for_new_process(None, 1).pid == pid
+        assert driver.wait_for_new_process(pid + 1, 1).pid == pid
 
     def test_the_same_process_is_not_a_restart(
         self, tmp_path: Path, machine: FakeMachine, monkeypatch: pytest.MonkeyPatch
@@ -968,27 +1330,136 @@ class TestClosing:
         assert not machine.task
         assert machine.log.exists()  # The shared log stays.
 
-    def test_the_order_is_stop_then_uninstall_then_the_task_then_waiting(
+    def test_the_order_is_recovery_off_then_the_task_then_stop_then_uninstall_then_waiting(
         self, tmp_path: Path, machine: FakeMachine, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         driver = make_driver(tmp_path, machine, monkeypatch)
         driver.start()
         machine.calls.clear()
-        order: list[str] = []
-        real = machine.cli
-
-        def noting(args: Sequence[str], global_args: Sequence[str]) -> CliResult:
-            order.append(" ".join(args))
-            return real(args, global_args)
-
-        monkeypatch.setattr(machine, "cli", noting)
 
         driver.close()
 
-        sc_calls = [call[1] for call in machine.calls if call[0] == "sc.exe"]
-        assert sc_calls[:2] == ["queryex", "stop"]
-        assert order == ["service uninstall"]
+        steps = [
+            " ".join(call[:2]) if call[0] != "schtasks.exe" else f"{call[0]} {call[1]}"
+            for call in machine.calls
+        ]
+        # Recovery first, so that nothing the driver kills comes back. Then the upgrade task is
+        # ended and deleted, before `service uninstall` removes the service: a worker's last
+        # step is `Start-Service`. Then the stop, the uninstall, and the wait.
+        assert steps.index("sc.exe failure") < steps.index("schtasks.exe /End")
+        assert steps.index("schtasks.exe /Delete") < steps.index("sc.exe stop")
+        assert steps.index("sc.exe stop") < steps.index("data-hub-watcher service")
         assert machine.calls[-1][:2] == ["sc.exe", "queryex"]
+        assert machine.service is None
+
+    def test_a_worker_that_is_still_running_is_ended_before_the_service_is_removed(
+        self, tmp_path: Path, machine: FakeMachine, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        driver = make_driver(tmp_path, machine, monkeypatch)
+        driver.start()
+        # The worker has run (its log is the first thing it writes) and is still going.
+        driver.config_dir().mkdir(parents=True, exist_ok=True)
+        driver.worker_log.write_text("upgrade-worker starting\n")
+        machine.worker_pids = [812]
+        machine.calls.clear()
+
+        driver.close()
+
+        steps = [call[0] for call in machine.calls]
+        assert machine.worker_pids == []
+        assert ["taskkill.exe", "/F", "/T", "/PID", "812"] in machine.calls
+        assert steps.index("powershell.exe") < steps.index("data-hub-watcher")
+        assert machine.service is None
+
+    def test_no_process_is_looked_for_when_no_worker_has_run(
+        self, tmp_path: Path, machine: FakeMachine, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        driver = make_driver(tmp_path, machine, monkeypatch)
+        driver.start()
+        machine.calls.clear()
+
+        driver.close()
+
+        assert "powershell.exe" not in [call[0] for call in machine.calls]
+
+    def test_a_service_that_is_stopping_is_waited_for_and_not_asked_again(
+        self, tmp_path: Path, machine: FakeMachine, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        driver = make_driver(tmp_path, machine, monkeypatch)
+        driver.start()
+        machine.stopping_queries = 4
+        machine.service["state"] = ServiceState.STOP_PENDING  # type: ignore[index]
+        machine.service["pending"] = 4  # type: ignore[index]
+        machine.calls.clear()
+
+        driver.close()  # `sc stop` would answer 1061, which is no reason to fail.
+
+        assert machine.service is None
+        assert ["sc.exe", "stop", "DataHubWatcher"] not in machine.calls
+        assert not any(call[:2] == ["taskkill.exe", "/F"] for call in machine.calls)
+
+    def test_a_service_that_is_still_starting_is_stopped_once_it_runs(
+        self, tmp_path: Path, machine: FakeMachine, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        driver = make_driver(tmp_path, machine, monkeypatch)
+        machine.starting_queries = 3
+        driver.start(wait_ready=False)
+        assert machine.service is not None
+        assert machine.service["state"] == ServiceState.START_PENDING
+        machine.calls.clear()
+
+        driver.close()
+
+        assert machine.service is None
+        assert not any(call[:2] == ["taskkill.exe", "/F"] for call in machine.calls)
+
+    def test_a_stop_that_comes_back_with_1061_is_not_a_failure_of_request_stop(
+        self, tmp_path: Path, machine: FakeMachine, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        driver = make_driver(tmp_path, machine, monkeypatch)
+        driver.start()
+        machine.stopping_queries = 3
+        driver.request_stop()
+        assert machine.service is not None
+        assert machine.service["state"] == ServiceState.STOP_PENDING
+
+        driver.request_stop()  # The service is stopping: nothing more to ask.
+
+        assert driver.wait_exit(2) == 0
+
+    def test_a_stop_that_arrives_while_the_service_starts_is_asked_again(
+        self, tmp_path: Path, machine: FakeMachine, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        driver = make_driver(tmp_path, machine, monkeypatch)
+        machine.starting_queries = 2
+        driver.start(wait_ready=False)
+
+        driver.request_stop()
+
+        assert driver.wait_exit(2) == 0
+
+    def test_a_marked_service_that_still_runs_is_stopped_while_the_removal_is_awaited(
+        self, tmp_path: Path, machine: FakeMachine, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        driver = make_driver(tmp_path, machine, monkeypatch)
+        driver.start()
+        assert machine.service is not None
+        machine.service["gone"] = 1
+        machine.removal_delay = 100  # It goes only once the process has ended.
+        real = machine._sc  # noqa: SLF001
+
+        def goes_when_stopped(verb: str, args: list[str]) -> CommandResult:
+            result = real(verb, args)
+            if verb == "stop":
+                machine.removal_delay = 1  # The marked service is removed at the next query.
+            return result
+
+        monkeypatch.setattr(machine, "_sc", goes_when_stopped)
+        monkeypatch.setattr(machine, "cli", lambda args, global_args: CliResult(tuple(args), 0))
+
+        driver.wait_for_removal(5)
+
+        assert ["sc.exe", "stop", "DataHubWatcher"] in machine.calls
 
     def test_a_service_that_will_not_stop_is_killed(
         self, tmp_path: Path, machine: FakeMachine, monkeypatch: pytest.MonkeyPatch
@@ -1008,6 +1479,29 @@ class TestClosing:
 
         assert any(call[:4] == ["taskkill.exe", "/F", "/T", "/PID"] for call in machine.calls)
         assert machine.service is None
+
+    def test_a_taskkill_that_reports_a_failure_but_stopped_the_service_is_not_an_error(
+        self, tmp_path: Path, machine: FakeMachine, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        driver = make_driver(tmp_path, machine, monkeypatch)
+        driver.start()
+        machine.kill_reports_failure = True  # A child ended while `/T` was killing the tree.
+
+        driver.kill()
+
+        assert driver.exit_code == 1067
+        assert not driver.is_running()
+
+    def test_a_taskkill_that_fails_and_leaves_the_service_running_is_an_error(
+        self, tmp_path: Path, machine: FakeMachine, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        driver = make_driver(tmp_path, machine, monkeypatch)
+        driver.start()
+        monkeypatch.setattr(machine, "_taskkill", lambda pid: CommandResult(5, "Access is denied."))
+        monkeypatch.setattr("e2e_support.service_driver._TASKKILL_SETTLE_SECONDS", 0.2)
+
+        with pytest.raises(ScError, match="Access is denied"):
+            driver.kill()
 
     def test_a_task_that_is_left_behind_is_deleted(
         self, tmp_path: Path, machine: FakeMachine, monkeypatch: pytest.MonkeyPatch
@@ -1150,12 +1644,46 @@ class TestTheSharedLog:
         driver.wait_exit(1)
 
         text = driver.log_text()
+        assert SVCRUN_FAILED_TEXT in text
         assert "click.exceptions.ClickException: Config file not found" in text
         # The entries that only repeat what watcher.log has are not copied: nothing is counted
-        # twice.
+        # twice. That includes a `logger.exception` line with a traceback, which the service
+        # forwards to the Event Log and which watcher.log holds already.
         assert text.count("Data Hub Watcher is running") == 0
+        assert "forwarded by logger.exception" not in text
         driver.wait_exit(1)
         assert driver.log_text().count("ClickException") == 1
+
+    def test_the_artifacts_get_the_workers_script_and_the_upgrade_sentinels_that_exist(
+        self, tmp_path: Path, machine: FakeMachine, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        driver = make_driver(tmp_path, machine, monkeypatch)
+        driver.start()
+        config_dir = driver.config_dir()
+        for name in ("upgrade-worker.ps1", ".upgrade-request.json", ".upgrade-in-progress"):
+            (config_dir / name).write_text("x")
+
+        names = [path.name for path in driver.log_files()]
+
+        assert "upgrade-worker.ps1" in names
+        assert ".upgrade-request.json" in names
+        assert ".upgrade-in-progress" in names
+        assert ".upgrade-result.json" not in names  # Not there, so not listed.
+        assert "watcher.log" in names and "event-log.txt" in names
+
+    def test_the_watcher_log_alone_is_the_service_log_without_the_other_files(
+        self, tmp_path: Path, machine: FakeMachine, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        driver = make_driver(tmp_path, machine, monkeypatch)
+        driver.start()
+        (machine.log_dir / "service-bootstrap.log").write_text("boot trouble\n")
+        mark = driver.mark_logs()
+        machine.write_log("after the mark")
+
+        assert "Data Hub Watcher is running" in driver.watcher_log_text()
+        assert "boot trouble" not in driver.watcher_log_text()
+        assert "boot trouble" in driver.log_text()
+        assert driver.watcher_log_text(mark).strip().endswith("after the mark")
 
     def test_the_artifacts_get_an_event_log_export(
         self, tmp_path: Path, machine: FakeMachine, monkeypatch: pytest.MonkeyPatch
@@ -1311,6 +1839,45 @@ class TestUvAndTheInstall:
                 "reinstall": True,
             }
         ]
+
+    def test_installing_a_wheel_waits_until_the_process_of_the_stopped_service_has_exited(
+        self, tmp_path: Path, machine: FakeMachine, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        installed_after: list[int] = []
+
+        def fake_install(root: Path, wheel: Path, **kwargs: object) -> ToolInstall:
+            installed_after.append(machine.lingering_pids[pid])
+            return ToolInstall(root)
+
+        monkeypatch.setattr(drivers, "install_watcher_tool", fake_install)
+        driver = make_driver(tmp_path, machine, monkeypatch)
+        driver.owns_install = True
+        driver.start()
+        pid = driver.pid
+        assert pid is not None
+        driver.stop()
+        # The SCM says STOPPED, and the process is still listed for the next three looks.
+        machine.lingering_pids[pid] = 3
+
+        driver.install_wheel(tmp_path / "old.whl")
+
+        assert installed_after == [0]  # The process had gone when the install began.
+
+    def test_installing_a_wheel_fails_when_the_process_will_not_go(
+        self, tmp_path: Path, machine: FakeMachine, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("e2e_support.service_driver._PROCESS_EXIT_SECONDS", 0.3)
+        monkeypatch.setattr(drivers, "install_watcher_tool", lambda *a, **k: ToolInstall(tmp_path))
+        driver = make_driver(tmp_path, machine, monkeypatch)
+        driver.owns_install = True
+        driver.start()
+        pid = driver.pid
+        assert pid is not None
+        driver.stop()
+        machine.lingering_pids[pid] = 10_000
+
+        with pytest.raises(WaitTimeout, match="process .* of the stopped service to exit"):
+            driver.install_wheel(tmp_path / "old.whl")
 
     def test_the_installed_version_is_what_the_install_reports(
         self, tmp_path: Path, machine: FakeMachine, monkeypatch: pytest.MonkeyPatch
