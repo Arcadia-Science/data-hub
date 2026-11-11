@@ -410,7 +410,7 @@ Each file's on-disk creation time (`st_birthtime` where the OS provides it, othe
 
 ## Test-only overrides
 
-The end-to-end suite runs the real watcher, and the watcher's timers are minutes long. These environment variables shrink them and point self-update at a local package index, so the suite doesn't have to wait or patch the process it tests. They exist for that suite only. Don't set them on a lab PC. They are left out of the operator docs on purpose.
+The [end-to-end suite](testing.md#end-to-end-tests-of-the-watcher) runs the real watcher, and the watcher's timers are minutes long. These environment variables shrink them and point self-update at a local package index, so the suite doesn't have to wait or patch the process it tests. They exist for that suite only. Don't set them on a lab PC. They are left out of the operator docs on purpose.
 
 | Variable | Replaces |
 | --- | --- |

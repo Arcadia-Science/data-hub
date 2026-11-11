@@ -1,0 +1,98 @@
+name: Watcher end-to-end tests
+
+# Runs the real watcher (`data-hub-watcher watch`) against the real Next.js server and
+# Postgres, and drives it from outside: files in the watch folder, signals, server-side
+# admin actions and network faults. See "End-to-end tests of the watcher" in
+# docs/developer/testing.md.
+#
+# It is not part of pull-request CI: the suite takes a while and builds the web app. It runs
+#   * on every push to `production`, with no path filter,
+#   * from the Actions tab (workflow_dispatch) on any branch, to try a change, and
+#   * as the `e2e` job of publish-watcher.yml, which must pass before a release is
+#     published to PyPI. That call hands over the wheel it built, so the release is tested
+#     as built and not rebuilt from the checkout.
+on:
+  push:
+    branches:
+      - production
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      wheel-artifact:
+        description: >-
+          Name of an artifact that holds the watcher wheel to install, such as `dist` from
+          publish-watcher.yml. Leave empty to build the wheel from the checkout.
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Linux (watch process)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - uses: astral-sh/setup-uv@v8.1.0
+
+      - name: Install Node.js packages
+        run: npm ci
+        working-directory: web
+
+      - name: Install Python packages
+        run: uv sync --all-packages
+
+      # The release pipeline passes the wheel it is about to publish. Otherwise the suite
+      # builds one from the checkout.
+      - name: Download the wheel to test
+        if: inputs.wheel-artifact != ''
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.wheel-artifact }}
+          path: ${{ runner.temp }}/wheel
+
+      # `uv tool install --python 3.12` finds the runner's Python 3.12 or fetches one.
+      - name: Run the end-to-end tests
+        run: make py-test-e2e
+        env:
+          DATA_HUB_E2E_ARTIFACTS: ${{ runner.temp }}/e2e-artifacts
+          DATA_HUB_E2E_WHEEL: ${{ inputs.wheel-artifact != '' && format('{0}/wheel', runner.temp) || '' }}
+
+      # For a failed test: its watcher logs and state database, the part of the server log
+      # written during the test, the fault proxy's request log and a listing of the S3
+      # stand-in, under one folder per test.
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: watcher-e2e-linux-artifacts
+          path: ${{ runner.temp }}/e2e-artifacts
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # The `windows` job goes here, next to `linux`, when the Windows service driver lands
+  # (the third pull request of the watcher end-to-end stack). It runs the same suite with the
+  # real service on `windows-latest`, so keep the two jobs' triggers and inputs shared.

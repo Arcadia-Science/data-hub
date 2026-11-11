@@ -14,6 +14,11 @@ name: Publish watcher
 # testing is complete. Allowing `staging` here is temporary to let us
 # exercise the release pipeline without cutting a production release.
 #
+# Nothing reaches PyPI until the end-to-end tests pass. The `e2e` job runs
+# `watcher-e2e.yml` against the wheel `build` made, and `publish` needs it, so a
+# failing end-to-end test stops the release before the `pypi` environment is
+# even asked for approval.
+#
 # Authentication is OIDC trusted publishing (no API token in repo
 # secrets); the matching publisher must be configured on PyPI under
 # Project → Publishing for `Arcadia-Science/data-hub` and the workflow
@@ -75,9 +80,18 @@ jobs:
           path: dist/
           if-no-files-found: error
 
+  # Runs the watcher end-to-end suite against the built wheel (the `dist` artifact), on the
+  # same commit. See .github/workflows/watcher-e2e.yml.
+  e2e:
+    name: End-to-end tests
+    needs: build
+    uses: ./.github/workflows/watcher-e2e.yml
+    with:
+      wheel-artifact: dist
+
   publish:
     name: Publish to PyPI
-    needs: build
+    needs: [build, e2e]
     runs-on: ubuntu-latest
     # Gate PyPI publishes on a deployment environment so we can attach
     # required reviewers / branch protection to the release pipeline

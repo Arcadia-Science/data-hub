@@ -15,7 +15,7 @@ the docs site does not render them.
 - [Architecture](architecture.md) — system overview, data flow, and design decisions
 - [MCP Apps](mcp-apps.md) — run-report View: host render flow, the three app-only tools, the shared data source, `mcp-apps:build`, and the gitignored HTML artifact
 - [Docs and changelog over MCP](mcp-docs.md) — how the `search_docs`, `read_doc`, and `search_changelog` tools get their content, how search works, how changelog entry links work, and what to update when docs change
-- [Testing](testing.md) — per-package test frameworks, the shared test-server fixture, S3 mocking
+- [Testing](testing.md) — per-package test frameworks, the shared test-server fixture, S3 mocking, the end-to-end watcher suite
 - [Watcher](watcher.md) — CLI commands, configuration, run detection, upload modes
 - [Lambda](lambda.md) — processing pipeline, supported instruments, adding new instruments
 - [Shared library](shared-library.md) — module reference for `data-hub-shared`
