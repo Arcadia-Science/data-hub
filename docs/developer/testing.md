@@ -249,10 +249,13 @@ thing the Python side doesn't need: an in-process HTTP server on a free port
 that captures outgoing Slack webhook calls (`slack_channel_config` is seeded to
 point at it) and Slack Web API `chat.postMessage` calls (DMs), so
 notification-related tests can assert on captured payloads without hitting
-Slack. It also strips `LAMBDA_FUNCTION_URL` / `AWS_ROLE_ARN` from the spawned
-server's environment so "Lambda not configured" code paths are exercised
-regardless of the developer's local `.env` — tests that need a stubbed Lambda
-call should mock `fetch` instead of relying on a real Function URL. Values that
+Slack. It also sets `LAMBDA_FUNCTION_URL`, `AWS_ROLE_ARN` and
+`STALLED_PROCESSING_AFTER_MINUTES` to empty strings in the spawned server's
+environment, so "Lambda not configured" code paths are exercised regardless of
+the developer's local `.env` (Next.js only fills in variables that are missing,
+so an empty value can't be refilled from `web/.env.local`). Tests that need a
+stubbed Lambda call should mock `fetch` instead of relying on a real Function
+URL. Values that
 test files need (`base_url`, `databaseUrl`, capture-server URLs) are passed
 back via `process.env`, since Vitest's global setup runs in a separate worker
 from the tests themselves.
