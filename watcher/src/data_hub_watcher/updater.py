@@ -31,13 +31,18 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from data_hub_watcher import testing_overrides
 from data_hub_watcher.api_client import ApiError, DataHubClient
-from data_hub_watcher.constants import HEARTBEAT_INTERVAL_SECONDS, WATCHER_VERSION
+from data_hub_watcher.constants import (
+    DEFAULT_CHECK_INTERVAL_TICKS,
+    DEFAULT_IDLE_TICKS_REQUIRED,
+    HEARTBEAT_INTERVAL_SECONDS,
+    WATCHER_VERSION,
+)
 from data_hub_watcher.events import EventReporter, EventType, WatcherEvent
 from data_hub_watcher.heartbeat import WatcherCounters
 from data_hub_watcher.models import WatcherConfig, WatcherUpdateInfoResponse
 from data_hub_watcher.self_update import (
-    DEFAULT_INDEX_URL,
     InstallMethod,
     UvExecutableNotFoundError,
     _resolve_uv_executable,
@@ -57,13 +62,6 @@ logger = logging.getLogger(__name__)
 
 
 UPGRADE_MARKER_FILENAME = ".upgrade-in-progress"
-
-# Default cadence: with a 60-second heartbeat, this works out to roughly
-# "5 minutes idle before we even consider an update" and "one update
-# check per hour". Both are deliberately conservative — we'd rather miss
-# an update window than interrupt a running experiment.
-DEFAULT_IDLE_TICKS_REQUIRED = 5
-DEFAULT_CHECK_INTERVAL_TICKS = 60
 
 # Multiplier on `stability_period_seconds` used to decide whether the
 # instrument has been quiet long enough to safely restart. 5x means a
@@ -99,6 +97,19 @@ class UpdaterConfig:
     # their existing cadence assertions (``for _ in range(N): on_tick();
     # then trigger on the (N+1)th``) keep working unchanged.
     check_on_start: bool = True
+
+
+def updater_config_from_overrides() -> UpdaterConfig:
+    """The auto-update knobs, with any test-only tick overrides applied.
+
+    With no override set this equals ``UpdaterConfig()``, which is what
+    ``Updater`` falls back to when it isn't given one. Called when a runtime is
+    built, so the values come from the environment at that moment.
+    """
+    return UpdaterConfig(
+        idle_ticks_required=testing_overrides.update_idle_ticks(),
+        check_interval_ticks=testing_overrides.update_check_interval_ticks(),
+    )
 
 
 @dataclass
@@ -779,7 +790,7 @@ class Updater:
             target_version=target,
             pkg_spec=pkg_spec,
             uv_executable=uv_path,
-            index_url=DEFAULT_INDEX_URL,
+            index_url=testing_overrides.index_url(),
             previous_version=WATCHER_VERSION,
             install_method=method.value,
         )
@@ -912,6 +923,7 @@ __all__ = [
     "clear_upgrade_marker",
     "evaluate_upgrade_marker",
     "should_attempt_update",
+    "updater_config_from_overrides",
     "upgrade_marker_path",
     "write_upgrade_marker",
 ]

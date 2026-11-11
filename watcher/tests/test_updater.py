@@ -10,10 +10,11 @@ without spinning up a real heartbeat loop or hitting the network.
 from __future__ import annotations
 import json
 import subprocess
+import sys
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
@@ -21,6 +22,11 @@ from unittest.mock import MagicMock
 import pytest
 
 from data_hub_watcher.api_client import ApiError
+from data_hub_watcher.constants import (
+    DEFAULT_CHECK_INTERVAL_TICKS,
+    DEFAULT_IDLE_TICKS_REQUIRED,
+    DEFAULT_INDEX_URL,
+)
 from data_hub_watcher.events import EventReporter, EventType
 from data_hub_watcher.heartbeat import WatcherCounters
 from data_hub_watcher.models import (
@@ -29,7 +35,7 @@ from data_hub_watcher.models import (
     WatcherConfig,
     WatcherUpdateInfoResponse,
 )
-from data_hub_watcher.self_update import InstallMethod
+from data_hub_watcher.self_update import InstallMethod, run_upgrade
 from data_hub_watcher.updater import (
     UPGRADE_MARKER_FILENAME,
     Updater,
@@ -38,6 +44,7 @@ from data_hub_watcher.updater import (
     clear_upgrade_marker,
     evaluate_upgrade_marker,
     should_attempt_update,
+    updater_config_from_overrides,
     upgrade_marker_path,
     write_upgrade_marker,
 )
@@ -1256,6 +1263,44 @@ class TestUpdaterWorkerDispatch:
         # post-restart marker evaluation, never emitted from here.
         assert EventType.UPDATE_SUCCEEDED not in types
 
+    @pytest.mark.parametrize(
+        ("override", "expected"),
+        [
+            (None, DEFAULT_INDEX_URL),
+            ("http://127.0.0.1:8123/simple/", "http://127.0.0.1:8123/simple/"),
+        ],
+        ids=["pypi_by_default", "test_only_override"],
+    )
+    def test_request_sentinel_carries_the_index_url(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        override: str | None,
+        expected: str,
+    ) -> None:
+        # The worker runs as another account with its own environment, so the
+        # index it installs from travels in the request, read when the upgrade
+        # is dispatched.
+        from data_hub_watcher.upgrade_worker import read_upgrade_request
+
+        h = _make_updater(tmp_path, upgrade_runner=MagicMock())
+        h.client.get_update_info.return_value = _info(latest="9.9.9")
+        self._force_windows_uv_tool(monkeypatch)
+        monkeypatch.setattr(
+            "data_hub_watcher.scheduled_task.trigger_upgrade_task", lambda **_kw: None
+        )
+        if override is not None:
+            monkeypatch.setenv("DATA_HUB_WATCHER_INDEX_URL", override)
+
+        h.counters.last_files_uploaded = 0
+        h.updater.on_tick()
+        h.updater.on_tick()
+        h.updater.on_tick()
+
+        req = read_upgrade_request(tmp_path / ".data-hub")
+        assert req is not None
+        assert req.index_url == expected
+
     def test_uv_not_found_surfaces_update_failed_without_started(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -1430,3 +1475,139 @@ class TestUpdaterWorkerDispatch:
         assert result is not None
         assert result.succeeded is True
         runner.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Test-only overrides
+# ---------------------------------------------------------------------------
+
+
+class TestUpdaterConfigFromOverrides:
+    def test_equals_the_default_config_when_nothing_is_set(self) -> None:
+        # `Updater` falls back to `UpdaterConfig()`, so passing this instead
+        # must not change anything in production.
+        assert updater_config_from_overrides() == UpdaterConfig()
+        assert updater_config_from_overrides().check_interval_ticks == DEFAULT_CHECK_INTERVAL_TICKS
+        assert updater_config_from_overrides().idle_ticks_required == DEFAULT_IDLE_TICKS_REQUIRED
+
+    def test_tick_overrides_are_applied_and_nothing_else_changes(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("DATA_HUB_WATCHER_UPDATE_CHECK_INTERVAL_TICKS", "4")
+        monkeypatch.setenv("DATA_HUB_WATCHER_UPDATE_IDLE_TICKS", "2")
+
+        assert updater_config_from_overrides() == UpdaterConfig(
+            idle_ticks_required=2, check_interval_ticks=4
+        )
+
+    def test_bad_values_fall_back_to_the_defaults(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("DATA_HUB_WATCHER_UPDATE_CHECK_INTERVAL_TICKS", "0")
+        monkeypatch.setenv("DATA_HUB_WATCHER_UPDATE_IDLE_TICKS", "many")
+
+        assert updater_config_from_overrides() == UpdaterConfig()
+
+    def test_updater_built_from_it_checks_on_the_overridden_cadence(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("DATA_HUB_WATCHER_UPDATE_CHECK_INTERVAL_TICKS", "2")
+        h = _make_updater(
+            tmp_path,
+            updater_cfg=replace(
+                updater_config_from_overrides(), check_on_start=False, min_run_age_seconds=10.0
+            ),
+        )
+        h.client.get_update_info.return_value = _info(latest=None)
+
+        assert h.updater.on_tick() is None
+        assert h.updater.on_tick() is not None  # the second tick checks
+        h.client.get_update_info.assert_called_once()
+
+    def test_idle_override_lets_a_non_mandatory_update_through_sooner(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("DATA_HUB_WATCHER_UPDATE_CHECK_INTERVAL_TICKS", "1")
+        monkeypatch.setenv("DATA_HUB_WATCHER_UPDATE_IDLE_TICKS", "1")
+        monkeypatch.setattr(
+            "data_hub_watcher.updater.detect_install_method", lambda: InstallMethod.PIP
+        )
+        runner = MagicMock(return_value=_success_completed_process())
+        h = _make_updater(
+            tmp_path,
+            upgrade_runner=runner,
+            updater_cfg=replace(updater_config_from_overrides(), check_on_start=False),
+        )
+        h.client.get_update_info.return_value = _info(latest="9.9.9")
+        h.state_db.last_run_reported_at.return_value = None
+        h.counters.last_files_uploaded = 0
+
+        # With the default 5 idle ticks, the first tick could not install.
+        result = h.updater.on_tick()
+
+        assert result is not None
+        assert result.succeeded is True
+        runner.assert_called_once()
+
+
+class TestInProcessUpgradeIndexUrl:
+    """The in-process upgrade installs from the test-only index when one is set."""
+
+    def _upgrade_and_capture_argv(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> list[list[str]]:
+        argvs: list[list[str]] = []
+
+        def fake_subprocess(cmd: list[str], **_kw: Any) -> subprocess.CompletedProcess[str]:
+            argvs.append(cmd)
+            return _success_completed_process()
+
+        def upgrade_runner(method: InstallMethod, *, target_version: str) -> Any:
+            # The real `run_upgrade`, with only the subprocess call replaced,
+            # so the command is built exactly as production builds it.
+            return run_upgrade(method, target_version=target_version, runner=fake_subprocess)
+
+        monkeypatch.setattr(
+            "data_hub_watcher.updater.detect_install_method", lambda: InstallMethod.PIP
+        )
+        h = _make_updater(tmp_path, upgrade_runner=upgrade_runner)
+        h.client.get_update_info.return_value = _info(latest="9.9.9")
+        h.counters.last_files_uploaded = 0
+        h.updater.on_tick()
+        h.updater.on_tick()
+        result = h.updater.on_tick()
+        assert result is not None
+        assert result.succeeded is True
+        return argvs
+
+    def test_installs_from_pypi_by_default(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        assert self._upgrade_and_capture_argv(tmp_path, monkeypatch) == [
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "--upgrade",
+                "--index-url",
+                DEFAULT_INDEX_URL,
+                "data-hub-watcher==9.9.9",
+            ]
+        ]
+
+    def test_installs_from_the_test_only_index(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("DATA_HUB_WATCHER_INDEX_URL", "http://127.0.0.1:8123/simple/")
+
+        assert self._upgrade_and_capture_argv(tmp_path, monkeypatch) == [
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "--upgrade",
+                "--index-url",
+                "http://127.0.0.1:8123/simple/",
+                "data-hub-watcher==9.9.9",
+            ]
+        ]

@@ -25,12 +25,11 @@ from typing import Any
 
 import yaml
 
-from data_hub_watcher import config_io
+from data_hub_watcher import config_io, testing_overrides
 from data_hub_watcher.api_client import ApiError, DataHubClient
 from data_hub_watcher.constants import (
     CONFIG_APPLY_DRAIN_TIMEOUT_SECONDS,
     DEFAULT_CONFIG_DIR,
-    HEARTBEAT_INTERVAL_SECONDS,
     PRUNE_DAYS,
     UPLOAD_WORKER_STOP_TIMEOUT_SECONDS,
     WAITING_START_RETRY_MAX_SECONDS,
@@ -55,7 +54,11 @@ from data_hub_watcher.remote_config import (
 )
 from data_hub_watcher.run_detector import RunDetector
 from data_hub_watcher.state import CONFIG_REVISION_UNSENT_RESULT_META_KEY, StateDB
-from data_hub_watcher.updater import Updater, evaluate_upgrade_marker
+from data_hub_watcher.updater import (
+    Updater,
+    evaluate_upgrade_marker,
+    updater_config_from_overrides,
+)
 from data_hub_watcher.upgrade_worker import (
     clear_upgrade_request,
     clear_upgrade_result,
@@ -300,6 +303,7 @@ def build_runtime(
         cfg=cfg,
         config_dir=effective_config_dir,
         request_upgrade_restart=request_upgrade_restart,
+        updater_cfg=updater_config_from_overrides(),
     )
 
     is_auto = inst.upload_mode == "auto"
@@ -328,6 +332,7 @@ def build_runtime(
     upload_worker = UploadQueueWorker(
         uploader,
         stop_event=upload_stop_event,
+        interval_seconds=testing_overrides.upload_poll_interval_seconds(),
         retry_pending_on_start=is_auto,
     )
 
@@ -370,7 +375,7 @@ def build_runtime(
     heartbeat = HeartbeatLoop(
         client=client,
         watcher_id=watcher_id,
-        interval_seconds=HEARTBEAT_INTERVAL_SECONDS,
+        interval_seconds=testing_overrides.heartbeat_interval_seconds(),
         event_reporter=reporter,
         instrument_id=inst.id,
         watch_directory=str(inst.watch_directory),
@@ -1194,7 +1199,7 @@ class WatcherSupervisor:
             reason = f"could not start watching: {exc}"
             self._start_failures += 1
             delay = min(
-                HEARTBEAT_INTERVAL_SECONDS * 2 ** (self._start_failures - 1),
+                testing_overrides.heartbeat_interval_seconds() * 2 ** (self._start_failures - 1),
                 WAITING_START_RETRY_MAX_SECONDS,
             )
             self._next_start_attempt = time.monotonic() + delay
@@ -1437,6 +1442,7 @@ class WatcherSupervisor:
             request_upgrade_restart=_upgrade_restart_requester(
                 self.shutdown_event, self.upgrade_restart_event
             ),
+            updater_cfg=updater_config_from_overrides(),
         )
 
         def on_tick() -> None:
@@ -1451,7 +1457,7 @@ class WatcherSupervisor:
         heartbeat = HeartbeatLoop(
             client=self.client,
             watcher_id=self.watcher_id,
-            interval_seconds=HEARTBEAT_INTERVAL_SECONDS,
+            interval_seconds=testing_overrides.heartbeat_interval_seconds(),
             event_reporter=self.reporter,
             instrument_id=inst.id,
             watch_directory=str(inst.watch_directory),

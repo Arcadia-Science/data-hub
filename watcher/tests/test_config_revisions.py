@@ -28,6 +28,11 @@ import yaml
 from data_hub_watcher import runtime
 from data_hub_watcher.api_client import ApiError, DataHubClient
 from data_hub_watcher.config_io import save_config
+from data_hub_watcher.constants import (
+    DEFAULT_CHECK_INTERVAL_TICKS,
+    DEFAULT_IDLE_TICKS_REQUIRED,
+    HEARTBEAT_INTERVAL_SECONDS,
+)
 from data_hub_watcher.events import EventType
 from data_hub_watcher.heartbeat import HeartbeatLoop
 from data_hub_watcher.models import (
@@ -883,6 +888,64 @@ class TestWaitingState:
             if e["event_type"] == "watcher_started"
         ]
         assert started[-1] == "Watcher resumed on test-host"
+
+    def test_waiting_keeps_the_production_timers_without_overrides(self, env: _Env) -> None:
+        sup = env.supervisor(self._missing_cfg(env))
+        sup.start()
+
+        waiting = sup._waiting
+        assert waiting is not None
+        assert waiting.heartbeat._interval == HEARTBEAT_INTERVAL_SECONDS
+        assert waiting.updater._check_interval_ticks == DEFAULT_CHECK_INTERVAL_TICKS
+        assert waiting.updater._idle_ticks_required == DEFAULT_IDLE_TICKS_REQUIRED
+
+    def test_waiting_heartbeat_and_updater_use_the_test_only_overrides(
+        self, env: _Env, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A waiting watcher builds its own heartbeat and updater, not through
+        # `build_runtime`, so it has to read the overrides itself.
+        monkeypatch.setenv("DATA_HUB_WATCHER_HEARTBEAT_INTERVAL_SECONDS", "7")
+        monkeypatch.setenv("DATA_HUB_WATCHER_UPDATE_CHECK_INTERVAL_TICKS", "3")
+        monkeypatch.setenv("DATA_HUB_WATCHER_UPDATE_IDLE_TICKS", "2")
+        sup = env.supervisor(self._missing_cfg(env))
+        sup.start()
+
+        waiting = sup._waiting
+        assert waiting is not None
+        assert waiting.heartbeat._interval == 7
+        assert waiting.updater._check_interval_ticks == 3
+        assert waiting.updater._idle_ticks_required == 2
+
+    def test_start_failure_backoff_counts_in_overridden_heartbeat_intervals(
+        self, env: _Env, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from data_hub_watcher.monitor import FileMonitor
+
+        def failing_start(_self: FileMonitor) -> None:
+            raise OSError("inotify watch limit reached")
+
+        def tick() -> None:
+            waiting = sup._waiting
+            assert waiting is not None
+            waiting.heartbeat._on_tick()  # type: ignore[misc]
+            sup.poll(timeout=0)
+
+        def seconds_until_next_attempt() -> float:
+            return sup._next_start_attempt - time.monotonic()
+
+        monkeypatch.setenv("DATA_HUB_WATCHER_HEARTBEAT_INTERVAL_SECONDS", "7")
+        monkeypatch.setattr(FileMonitor, "start", failing_start)
+        sup = env.supervisor(self._missing_cfg(env))
+        sup.start()
+        (env.tmp_path / "later").mkdir()
+
+        # The first failure waits one heartbeat interval before the next try
+        # (a minute in production), the second two.
+        tick()
+        assert 0 < seconds_until_next_attempt() <= 7
+        sup._next_start_attempt = 0.0
+        tick()
+        assert 7 < seconds_until_next_attempt() <= 14
 
     def test_config_still_loads_with_a_missing_folder(self, env: _Env) -> None:
         from data_hub_watcher.config_io import load_config

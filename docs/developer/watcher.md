@@ -407,3 +407,21 @@ The watcher's primary observability surface is the per-watcher event log served 
 ### File timestamps
 
 Each file's on-disk creation time (`st_birthtime` where the OS provides it, otherwise `st_mtime`) is captured at stabilization, persisted in `detected_files`, and sent to the API on every run report and presigned-URL request. This lets the dashboard order events by when the instrument actually wrote the file rather than when the watcher uploaded it — useful when an initial scan or backfill uploads files long after their original write time.
+
+## Test-only overrides
+
+The end-to-end suite runs the real watcher, and the watcher's timers are minutes long. These environment variables shrink them and point self-update at a local package index, so the suite doesn't have to wait or patch the process it tests. They exist for that suite only. Don't set them on a lab PC. They are left out of the operator docs on purpose.
+
+| Variable | Replaces |
+| --- | --- |
+| `DATA_HUB_WATCHER_HEARTBEAT_INTERVAL_SECONDS` | `HEARTBEAT_INTERVAL_SECONDS` (60). The heartbeat interval, including the waiting state's heartbeat, and the base of the [waiting state's](#the-waiting-state) start-failure backoff. |
+| `DATA_HUB_WATCHER_UPLOAD_POLL_INTERVAL_SECONDS` | `UPLOAD_POLL_INTERVAL_SECONDS` (60). How often the upload worker polls the server's upload queue. |
+| `DATA_HUB_WATCHER_UPDATE_CHECK_INTERVAL_TICKS` | `DEFAULT_CHECK_INTERVAL_TICKS` (60). Heartbeat ticks between auto-update checks. |
+| `DATA_HUB_WATCHER_UPDATE_IDLE_TICKS` | `DEFAULT_IDLE_TICKS_REQUIRED` (5). Idle heartbeat ticks before a non-mandatory update may install. |
+| `DATA_HUB_WATCHER_INDEX_URL` | `DEFAULT_INDEX_URL` (`https://pypi.org/simple/`). The index that `self-update`, the in-process updater and the Windows upgrade worker install from. |
+
+The values are read when they are needed, never at import. The interval and tick variables are read each time the runtime or the waiting state is built, which is at startup and again after a config revision rebuilds it. The heartbeat variable is also read when a failed start schedules its retry. The index is read each time an upgrade is dispatched. The Windows service loads its registered env file before it builds the runtime, so a variable written there takes effect once the service has restarted. The upgrade worker runs as another account, so it never reads the variable itself: the service writes the index URL into the worker's request file.
+
+A whole-number variable must be at least 1. The two interval variables are capped at 86400 seconds, because a much longer wait raises an error on some platforms, and the two tick variables at 999999999. The index URL must start with `http://` or `https://`. A blank value counts as unset. A value that isn't usable logs a warning that names the variable and then falls back to the default, so a typo never stops a watcher. The first time any override takes effect, the watcher logs one warning for the process that lists every override that is active, so a log from a PC with a test setting left behind says so.
+
+The code is in `watcher/src/data_hub_watcher/testing_overrides.py`. The module is named `testing_overrides` rather than `test_…` so that pytest doesn't collect it. To make another timer overridable, add its variable and check there and call its accessor where the timer is used, not a module-level constant.

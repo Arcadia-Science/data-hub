@@ -29,15 +29,13 @@ from typing import Any
 
 from packaging.version import InvalidVersion, Version
 
+from data_hub_watcher import testing_overrides
 from data_hub_watcher.constants import WATCHER_VERSION
 from data_hub_watcher.models import WatcherUpdateInfoResponse
 
 logger = logging.getLogger(__name__)
 
 PACKAGE_NAME = "data-hub-watcher"
-
-# Default index for `pip install` / `uv tool install` invocations.
-DEFAULT_INDEX_URL = "https://pypi.org/simple/"
 
 
 class UvExecutableNotFoundError(RuntimeError):
@@ -360,7 +358,7 @@ def build_upgrade_command(
     extras_part = f"[{','.join(sorted(extras))}]" if extras else ""
     base_spec = f"{PACKAGE_NAME}{extras_part}"
     pkg_spec = base_spec if not target_version else f"{base_spec}=={target_version}"
-    index = index_url or DEFAULT_INDEX_URL
+    index = index_url or testing_overrides.index_url()
 
     if method is InstallMethod.UV_TOOL:
         uv_path, tried = _resolve_uv_executable(uv_executable)
