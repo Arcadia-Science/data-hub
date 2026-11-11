@@ -18,11 +18,11 @@ import pytest
 from data_hub_shared.testing_proxy import FaultProxy
 from e2e_support._http import ApiResult, call, new_session
 from e2e_support.admin import Admin
-from e2e_support.drivers import CliDriver, InitAnswers, RunDetection
+from e2e_support.drivers import InitAnswers, RunDetection, WatcherDriver
 from e2e_support.factory import WatcherFactory
 from e2e_support.files import SMALL, write_file
 from e2e_support.server import FileRow, ServerView
-from e2e_support.waiting import stays_true, wait_until
+from e2e_support.waiting import KnownBugStillPresent, known_bug, stays_true, wait_until
 
 pytestmark = pytest.mark.e2e
 
@@ -43,7 +43,7 @@ def _post(server: ServerView, path: str, token: str, body: object) -> ApiResult:
 
 
 def _init_answers(
-    pc: CliDriver,
+    pc: WatcherDriver,
     proxy: FaultProxy,
     watch_dir: Path,
     *,
@@ -76,7 +76,7 @@ def _start_with_queued_upload(
     proxy: FaultProxy,
     instrument_id: str,
     watch_dir: Path,
-) -> tuple[CliDriver, FileRow]:
+) -> tuple[WatcherDriver, FileRow]:
     """A watching PC in manual mode whose one file has an upload requested.
 
     The watcher's queue polls are refused from here on, so the request stays in the queue
@@ -395,6 +395,7 @@ def test_init_after_deregistration_registers_a_new_watcher_and_keeps_the_upload_
 @pytest.mark.covers("watcher.deregistered->process_exits")
 @pytest.mark.xfail(
     strict=True,
+    raises=KnownBugStillPresent,
     reason=(
         "bug-08-deregistered-watcher-keeps-running: a running watcher that is deregistered "
         "keeps running with 404s instead of stopping with an error"
@@ -409,19 +410,21 @@ def test_a_running_watcher_exits_with_an_error_once_it_is_deregistered(
 
     admin.deregister_watcher(pc.watcher_id).raise_for_status()
 
-    wait_until(
-        lambda: not pc.is_running(),
-        REACTION_SECONDS,
-        pc.log_tail,
-        what="the deregistered watcher to exit",
-    )
-    assert pc.exit_code not in (None, 0), f"the watcher exited with {pc.exit_code}"
-    assert re.search(r"(?i)deregister", pc.log_text()), "no log line says it was deregistered"
+    with known_bug():
+        wait_until(
+            lambda: not pc.is_running(),
+            REACTION_SECONDS,
+            pc.log_tail,
+            what="the deregistered watcher to exit",
+        )
+        assert pc.exit_code not in (None, 0), f"the watcher exited with {pc.exit_code}"
+        assert re.search(r"(?i)deregister", pc.log_text()), "no log line says it was deregistered"
 
 
 @pytest.mark.covers("startup.deregistered->refused")
 @pytest.mark.xfail(
     strict=True,
+    raises=KnownBugStillPresent,
     reason=(
         "bug-08-deregistered-watcher-keeps-running: starting a watcher whose registration was "
         "deleted runs it with 404s instead of refusing with a message to run init"
@@ -435,11 +438,12 @@ def test_starting_with_a_deregistered_watcher_refuses_and_says_to_run_init(
 
     pc.start(wait_ready=False)
 
-    wait_until(
-        lambda: not pc.is_running(),
-        REACTION_SECONDS,
-        pc.log_tail,
-        what="the watcher to refuse to start",
-    )
-    assert pc.exit_code not in (None, 0), f"the watcher exited with {pc.exit_code}"
-    assert re.search(r"\binit\b", pc.log_text()), "the refusal does not say to run init"
+    with known_bug():
+        wait_until(
+            lambda: not pc.is_running(),
+            REACTION_SECONDS,
+            pc.log_tail,
+            what="the watcher to refuse to start",
+        )
+        assert pc.exit_code not in (None, 0), f"the watcher exited with {pc.exit_code}"
+        assert re.search(r"\binit\b", pc.log_text()), "the refusal does not say to run init"

@@ -78,17 +78,24 @@ def _checksum(path: Path) -> str:
     return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-# The text of a `watcher_started` event starts with the role of the process: "Watcher" for
-# `data-hub-watcher watch`, "Service" for the Windows service.
-def _is_start_message(message: str) -> bool:
+# The text of a `watcher_started` event starts with the role of the process, which the driver
+# knows: "Watcher" for `data-hub-watcher watch`, "Service" for the Windows service.
+def _is_start_message(pc: WatcherDriver, message: str) -> bool:
     """Whether ``message`` is the one of a plain start."""
-    return re.fullmatch(r"(Watcher|Service) started on .+", message) is not None
+    return message.startswith(pc.started_prefix)
 
 
-def _is_restart_message(message: str, revision: int) -> bool:
+def _is_restart_message(pc: WatcherDriver, message: str, revision: int) -> bool:
     """Whether ``message`` is the one of a rebuild for this config revision, in the same process."""
-    pattern = rf"(Watcher|Service) restarted on .+ with config revision {revision}"
+    pattern = rf"{re.escape(pc.restarted_prefix)}.+ with config revision {revision}"
     return re.fullmatch(pattern, message) is not None
+
+
+def _running_pid(pc: WatcherDriver) -> int:
+    """The pid of the running watcher. Compare it later to see that no new process was made."""
+    pid = pc.pid
+    assert pid is not None, "the watcher is not running"
+    return pid
 
 
 def _config_calls(proxy: FaultProxy, watcher_id: str) -> list[str]:
@@ -511,6 +518,7 @@ def test_an_admin_revision_is_applied_by_rebuilding_in_the_same_process(
     pc = watcher()
     revisions = Revisions(admin, server, pc.watcher_id)
     _start(pc, server)
+    pid = _running_pid(pc)
     proxy.clear_log()
 
     # An admin switches the instrument to manual uploads and adds a file pattern.
@@ -532,11 +540,11 @@ def test_an_admin_revision_is_applied_by_rebuilding_in_the_same_process(
     started = server.wait_for_event(
         pc.watcher_id, event_type="watcher_started", message_contains="with config revision 2"
     )
-    assert _is_restart_message(started.message, 2), started.message
+    assert _is_restart_message(pc, started.message, 2), started.message
     assert len(server.events(pc.watcher_id, event_type="watcher_started")) == 2
     assert server.events(pc.watcher_id, event_type="watcher_stopped") == []
     assert "stopped" not in [b.status for b in server.heartbeats(pc.watcher_id)]
-    assert pc.is_running() and pc.exit_code is None
+    assert pc.pid == pid
     assert "Applying config revision 2" in pc.log_text()
 
     # The server recorded the result. The watcher then pushed the new file, which matched the
@@ -610,7 +618,7 @@ def test_a_revision_saved_while_stopped_is_applied_before_watching_starts(
 
     # There was no rebuild: the watcher announces a plain start, after the revision was applied.
     started = server.wait_for_events(pc.watcher_id, event_type="watcher_started", count=2)[-1]
-    assert _is_start_message(started.message), started.message
+    assert _is_start_message(pc, started.message), started.message
     applied = server.wait_for_event(
         pc.watcher_id, event_type="config_synced", kind="config_revision_applied"
     )
@@ -638,6 +646,7 @@ def test_a_revision_that_fixes_the_folder_ends_the_waiting_without_a_restart(
     pc = watcher(watch_dir=unplugged, create_watch_dir=False)
     revisions = Revisions(admin, server, pc.watcher_id)
     pc.start()
+    pid = _running_pid(pc)
     waiting = server.wait_for_watcher_status(pc.watcher_id, "waiting")
     assert "watch_directory not found" in (waiting.status_reason or "")
     unavailable = server.wait_for_event(
@@ -654,11 +663,11 @@ def test_a_revision_that_fixes_the_folder_ends_the_waiting_without_a_restart(
     row = server.wait_for_watcher_status(pc.watcher_id, "watching")
     assert row.status_reason is None
     assert pc.load_config().instrument.watch_directory == watch_dir
-    assert pc.is_running() and pc.exit_code is None
+    assert pc.pid == pid
     resumed = server.wait_for_event(
         pc.watcher_id, event_type="watcher_started", message_contains="with config revision 2"
     )
-    assert _is_restart_message(resumed.message, 2), resumed.message
+    assert _is_restart_message(pc, resumed.message, 2), resumed.message
     assert server.events(pc.watcher_id, event_type="watcher_stopped") == []
 
     # It watches the new folder.
@@ -719,6 +728,7 @@ def test_a_revision_equal_to_the_running_settings_is_applied_without_a_rebuild(
     pc = watcher()
     revisions = Revisions(admin, server, pc.watcher_id)
     _start(pc, server)
+    pid = _running_pid(pc)
     running = pc.revision_settings()
     config_before = pc.config_path.read_bytes()
 
@@ -754,7 +764,7 @@ def test_a_revision_equal_to_the_running_settings_is_applied_without_a_rebuild(
     assert len(server.events(pc.watcher_id, event_type="watcher_started")) == 1
     assert server.events(pc.watcher_id, event_type="watcher_stopped") == []
     assert "stopped" not in [b.status for b in server.heartbeats(pc.watcher_id)]
-    assert pc.is_running() and pc.exit_code is None
+    assert pc.pid == pid
     assert "Applying config revision 3" not in pc.log_text()
     assert pc.config_path.read_bytes() == config_before
     assert f"PUT {PUSH_ROUTE}" not in _config_calls(proxy, pc.watcher_id)
@@ -767,6 +777,7 @@ def test_a_revision_result_the_server_missed_is_sent_after_the_next_heartbeat(
     pc = watcher()
     revisions = Revisions(admin, server, pc.watcher_id)
     _start(pc, server)
+    pid = _running_pid(pc)
 
     # The watcher applies a revision, but neither its result nor the push of the new file
     # (which would show the server that it applied it) gets through.
@@ -797,7 +808,7 @@ def test_a_revision_result_the_server_missed_is_sent_after_the_next_heartbeat(
         pc.watcher_id, event_type="config_synced", kind="config_revision_applied"
     )
     assert done.details["revision"] == 2
-    assert pc.exit_code is None
+    assert pc.pid == pid
 
 
 @pytest.mark.covers("config.revision->result_retried")

@@ -10,7 +10,6 @@ files of the machine they belong to; the point here is that none is left out.
 """
 
 from __future__ import annotations
-from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -19,17 +18,12 @@ from data_hub_shared.testing_index import LocalPackageIndex
 from data_hub_shared.testing_proxy import FaultProxy, RecordedRequest
 from data_hub_watcher import testing_overrides
 from e2e_support.admin import Admin
-from e2e_support.drivers import ToolInstall
 from e2e_support.factory import WatcherFactory
 from e2e_support.files import SMALL, GrowingFile, write_file, write_run
 from e2e_support.server import ServerView
-from e2e_support.waiting import wait_until
+from e2e_support.waiting import KnownBugStillPresent, known_bug, wait_until
 
 pytestmark = pytest.mark.e2e
-
-# A watcher's own `watcher_stopped` and the server's revert event share the event type, so
-# tests of either say which one they mean with the kind or the message.
-STOPPED_BY_USER = "Watcher stopped by user"
 
 
 def event_posts(proxy: FaultProxy) -> list[RecordedRequest]:
@@ -62,7 +56,7 @@ def test_events_queued_between_ticks_are_sent_together_on_the_next_one_in_order(
     pc = watcher(overrides={testing_overrides.HEARTBEAT_INTERVAL_ENV_VAR: "15"})
     pc.start()
     started = server.wait_for_event(pc.watcher_id, event_type="watcher_started")
-    assert started.message.startswith("Watcher started on ")
+    assert started.message.startswith(pc.started_prefix)
     synced = server.wait_for_event(pc.watcher_id, event_type="config_synced")
     assert synced.details == {"trigger": "startup"}
     assert synced.message == "Config synced (trigger=startup)"
@@ -97,12 +91,14 @@ def test_events_queued_between_ticks_are_sent_together_on_the_next_one_in_order(
         assert details["size_bytes"] == len(content)
         assert {"sha256", "prep_seconds", "upload_seconds", "part_count"} <= set(details)
 
-    # A stop flushes at once and says who stopped the watcher.
+    # A stop flushes at once and says who stopped the watcher. (The watcher's own
+    # `watcher_stopped` and the server's revert event share the event type, so the message
+    # says which one is meant.)
     assert pc.stop() == 0
     stopped = server.wait_for_event(
-        pc.watcher_id, event_type="watcher_stopped", message_contains=STOPPED_BY_USER
+        pc.watcher_id, event_type="watcher_stopped", message_contains=pc.operator_stop_message
     )
-    assert stopped.message == STOPPED_BY_USER
+    assert stopped.message == pc.operator_stop_message
 
 
 @pytest.mark.covers(
@@ -142,7 +138,7 @@ def test_a_batch_that_cannot_be_sent_is_dropped_and_the_next_flush_reports_the_g
 @pytest.mark.covers("reporter.queued->persisted_across_kill")
 @pytest.mark.xfail(
     strict=True,
-    raises=AssertionError,
+    raises=KnownBugStillPresent,
     reason=(
         "bug-11-events-lost-on-kill: the queue lives in memory only, so events queued but "
         "not yet sent when the watcher is killed are never delivered"
@@ -165,8 +161,9 @@ def test_events_queued_before_a_kill_are_sent_after_the_restart(
     # Intended: the `run_reported` and `file_uploaded` events of the first process are kept
     # in the state database and sent by the second. Nothing else reports them: the run and
     # the file are known to the new process and are not reported again.
-    server.wait_for_event(pc.watcher_id, event_type="run_reported", timeout=10)
-    server.wait_for_event(pc.watcher_id, event_type="file_uploaded", timeout=10)
+    with known_bug():
+        server.wait_for_event(pc.watcher_id, event_type="run_reported", timeout=10)
+        server.wait_for_event(pc.watcher_id, event_type="file_uploaded", timeout=10)
 
 
 # ---------------------------------------------------------------------------
@@ -580,7 +577,7 @@ def test_a_missing_watch_folder_is_reported_and_resuming_says_so(
     }
     assert unavailable.message == f"Waiting: {reason}"
     started = server.wait_for_event(pc.watcher_id, event_type="watcher_started")
-    assert started.message.startswith("Watcher started on ")
+    assert started.message.startswith(pc.started_prefix)
 
     # The reason changes when a file sits where the folder should be: it is reported again,
     # with the new reason. The same reason is not reported twice.
@@ -594,7 +591,7 @@ def test_a_missing_watch_folder_is_reported_and_resuming_says_so(
     pc.watch_dir.unlink()
     pc.watch_dir.mkdir()
     resumed = server.wait_for_events(pc.watcher_id, event_type="watcher_started", count=2)[1]
-    assert resumed.message.startswith("Watcher resumed on ")
+    assert resumed.message.startswith(pc.resumed_prefix)
     assert len(server.events(pc.watcher_id, kind="watch_directory_unavailable")) == 2
 
 
@@ -675,15 +672,13 @@ def test_a_failed_update_and_then_a_successful_one_are_reported(
     watcher: WatcherFactory,
     server: ServerView,
     admin: Admin,
-    private_install: Callable[..., ToolInstall],
     package_index: LocalPackageIndex,
     bumped_wheel: Path,
     bumped_version: str,
     current_version: str,
 ) -> None:
-    install = private_install()
     pc = watcher(
-        tool_install=install,
+        own_install=True,
         index_url=package_index.url,
         overrides={testing_overrides.UPDATE_CHECK_INTERVAL_TICKS_ENV_VAR: "1"},
     )
@@ -704,17 +699,16 @@ def test_a_failed_update_and_then_a_successful_one_are_reported(
     assert pc.is_running()
     assert server.watcher(pc.watcher_id).watcher_version == current_version
 
-    # The index is back: the next check installs the release and the watcher exits for its
-    # supervisor to start it again.
+    # The index is back: the next check installs the release and the watcher is started
+    # again (by the driver on the CLI, by the upgrade worker for the service).
     package_index.clear_unavailable()
-    assert pc.wait_exit(timeout=180) == 1
+    pc.await_upgrade_restart(180)
     stopped = server.wait_for_event(
-        pc.watcher_id, event_type="watcher_stopped", message_contains="restarting for auto-update"
+        pc.watcher_id, event_type="watcher_stopped", message_contains=pc.update_stop_message
     )
-    assert stopped.message == "Watcher restarting for auto-update"
+    assert stopped.message == pc.update_stop_message
 
     # The restarted process reports that it runs the new version.
-    pc.start()
     succeeded = server.wait_for_event(pc.watcher_id, event_type="update_succeeded")
     assert succeeded.details["previous_version"] == current_version
     assert succeeded.details["target_version"] == bumped_version

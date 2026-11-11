@@ -83,7 +83,7 @@ def test_init_start_and_graceful_stop(
     assert row.last_heartbeat_at is not None
     assert row.watcher_version
     started = server.wait_for_event(pc.watcher_id, event_type="watcher_started")
-    assert started.message.startswith("Watcher started on ")
+    assert started.message.startswith(pc.started_prefix)
     assert server.effective_status(pc.watcher_id) == "watching"
     assert pc.is_running()
 
@@ -91,7 +91,7 @@ def test_init_start_and_graceful_stop(
     assert pc.stop() == 0
     server.wait_for_watcher_status(pc.watcher_id, "stopped")
     stopped = server.wait_for_event(pc.watcher_id, event_type="watcher_stopped")
-    assert stopped.message == "Watcher stopped by user"
+    assert stopped.message == pc.operator_stop_message
     assert [b.status for b in server.heartbeats(pc.watcher_id)][-1] == "stopped"
     assert server.effective_status(pc.watcher_id) == "stopped"
     assert not pc.is_running()

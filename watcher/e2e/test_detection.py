@@ -24,7 +24,7 @@ from e2e_support.drivers import WatcherDriver
 from e2e_support.factory import WatcherFactory
 from e2e_support.files import LARGE, SMALL, GrowingFile, payload, write_file, write_run
 from e2e_support.server import EventRow, ServerView
-from e2e_support.waiting import stays_true, wait_until
+from e2e_support.waiting import KnownBugStillPresent, known_bug, stays_true, wait_until
 
 pytestmark = pytest.mark.e2e
 
@@ -598,6 +598,7 @@ def test_a_deleted_run_refuses_updates_and_catches_up_after_it_is_restored(
 
 @pytest.mark.xfail(
     strict=True,
+    raises=KnownBugStillPresent,
     reason="bug-05-rereport-deleted-run-attaches-files: the POST of a deleted run returns 200 "
     "and attaches the files instead of a 409",
 )
@@ -641,12 +642,14 @@ def test_reporting_a_deleted_run_again_is_refused_and_attaches_no_files(
         lambda: server.dump(pc.watcher_id, instrument_id),
         what="the server's answer to the run report",
     )
-    assert status == 409, "the server accepted a report of a deleted run"
-    assert server.file(instrument_id, "RUN001", "RUN001/second.csv") is None
+    with known_bug():
+        assert status == 409, "the server accepted a report of a deleted run"
+        assert server.file(instrument_id, "RUN001", "RUN001/second.csv") is None
 
 
 @pytest.mark.xfail(
     strict=True,
+    raises=KnownBugStillPresent,
     reason="bug-new-run-id-not-url-encoded: the watcher puts the run ID into the update URL "
     "as it is, so a hash or percent sign in it sends the update to another run, or nowhere",
 )
@@ -666,21 +669,23 @@ def test_a_later_file_of_a_run_with_url_characters_in_its_id_reaches_that_run(
     write_run(watch_dir, "PLAIN", {"first.csv": SMALL, "second.csv": SMALL})
     server.wait_for_file(instrument_id, "PLAIN", "PLAIN/second.csv", status="detected")
 
-    for run_id in ("Plate#3", "Q%41"):
-        expected = [f"{run_id}/first.csv", f"{run_id}/second.csv"]
-        wait_until(
-            lambda run_id=run_id, expected=expected: (
-                relative_paths(server, instrument_id, run_id) == expected
-            ),
-            5,
-            lambda: server.dump(pc.watcher_id, instrument_id),
-            what=f"both files of run {run_id!r}",
-        )
-    assert relative_paths(server, instrument_id, "QA") == ["QA/own.csv"]
+    with known_bug():
+        for run_id in ("Plate#3", "Q%41"):
+            expected = [f"{run_id}/first.csv", f"{run_id}/second.csv"]
+            wait_until(
+                lambda run_id=run_id, expected=expected: (
+                    relative_paths(server, instrument_id, run_id) == expected
+                ),
+                5,
+                lambda: server.dump(pc.watcher_id, instrument_id),
+                what=f"both files of run {run_id!r}",
+            )
+        assert relative_paths(server, instrument_id, "QA") == ["QA/own.csv"]
 
 
 @pytest.mark.xfail(
     strict=True,
+    raises=KnownBugStillPresent,
     reason="bug-06-dismissed-path-blocks-new-file: the dismissed file's path stays unique in "
     "its run, so the report of a new file at that path is dropped without a trace",
 )
@@ -709,10 +714,11 @@ def test_a_new_file_at_a_dismissed_path_is_detected(
     server.wait_for_events(pc.watcher_id, event_type="run_reported", count=2)
 
     row = server.file(instrument_id, "RUN001", "RUN001/a.csv", include_deleted=False)
-    assert row is not None, "the new file at the dismissed path is not on the server"
-    assert row.status == "detected"
-    assert row.size_bytes == 900
-    assert row.id != bad.id
+    with known_bug():
+        assert row is not None, "the new file at the dismissed path is not on the server"
+        assert row.status == "detected"
+        assert row.size_bytes == 900
+        assert row.id != bad.id
 
 
 # ---------------------------------------------------------------------------

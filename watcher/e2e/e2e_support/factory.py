@@ -5,7 +5,7 @@ test that annotates its ``watcher`` argument imports ``WatcherFactory`` from her
 """
 
 from __future__ import annotations
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
@@ -54,9 +54,10 @@ class E2EContext:
 class WatcherFactory:
     """Builds configured watchers. This is the ``watcher`` fixture.
 
-    ``watcher()`` returns a ``CliDriver`` for a PC that is set up like a real one after
-    ``init``: ``config.yaml`` written with the watcher's own ``save_config``, an env file with
-    its API key and the fast test overrides, and a watcher registered with the server (so
+    ``watcher()`` returns a :class:`WatcherDriver` (of the kind the run uses, see
+    ``$DATA_HUB_E2E_DRIVER``) for a PC that is set up like a real one after ``init``:
+    ``config.yaml`` written with the watcher's own ``save_config``, an env file with its API
+    key and the fast test overrides, and a watcher registered with the server (so
     ``driver.watcher_id`` is set). It is not started. Call ``driver.start()``.
 
     Everything is a keyword argument, so a test changes only what it cares about:
@@ -71,7 +72,11 @@ class WatcherFactory:
       ``DEFAULT_TIMER_OVERRIDES`` (heartbeat 2 s, queue poll 2 s, update check every 5th
       heartbeat, 2 quiet heartbeats). A value of ``None`` removes a default.
     * ``index_url``: sets ``DATA_HUB_WATCHER_INDEX_URL``, for self-update.
-    * ``tool_install``: the ``ToolInstall`` to run (default: the shared one).
+    * ``own_install``: install the watcher for this PC alone. A watcher that updates itself
+      reinstalls into the folder it runs from, so a scenario that updates (or that changes what
+      is installed) asks for its own. ``wheel`` is the wheel to install instead of the
+      current one (for example ``bumped_wheel``), and needs ``own_install=True``. Read the
+      version with ``driver.installed_version()``.
     * ``instrument_id``, ``watch_dir``, ``environment``, ``api_base_url`` (default: the proxy),
       ``token`` (default: the test's watcher token).
     * ``register=False`` writes a config with no watcher id and registers nothing.
@@ -89,7 +94,9 @@ class WatcherFactory:
         instrument_id: str,
         watch_dir: Path,
         watcher_token: str,
+        driver_class: type[WatcherDriver],
         tool_install: ToolInstall,
+        new_install: Callable[[Path | None], ToolInstall],
         tmp_path: Path,
     ) -> None:
         self._env = env
@@ -98,7 +105,9 @@ class WatcherFactory:
         self._instrument_id = instrument_id
         self._watch_dir = watch_dir
         self._token = watcher_token
+        self._driver_class = driver_class
         self._tool_install = tool_install
+        self._new_install = new_install
         self._tmp_path = tmp_path
 
     def __call__(
@@ -114,7 +123,8 @@ class WatcherFactory:
         initial_scan: Literal["full", "new-only"] | None = "full",
         overrides: Mapping[str, str | None] | None = None,
         index_url: str | None = None,
-        tool_install: ToolInstall | None = None,
+        own_install: bool = False,
+        wheel: Path | None = None,
         instrument_id: str | None = None,
         watch_dir: Path | None = None,
         environment: str = DEFAULT_ENVIRONMENT,
@@ -123,8 +133,9 @@ class WatcherFactory:
         register: bool = True,
         configure: bool = True,
         create_watch_dir: bool = True,
-        extra_environment: Mapping[str, str] | None = None,
-    ) -> CliDriver:
+    ) -> WatcherDriver:
+        if wheel is not None and not own_install:
+            raise ValueError("wheel= installs a wheel for this PC alone: pass own_install=True")
         instrument = instrument_id or self._instrument_id
         seed_instruments(self._env.db_dsn, {instrument: f"E2E Instrument {instrument[-8:]}"})
         folder = (watch_dir or self._watch_dir).resolve()
@@ -134,15 +145,14 @@ class WatcherFactory:
         base_url = api_base_url or f"{self._proxy.base_url}/api/v1"
 
         number = len(self._context.drivers) + 1
-        driver = CliDriver(
-            home=self._tmp_path / f"home-{number}",
-            tool_install=tool_install or self._tool_install,
-            instrument_id=instrument,
-            watch_dir=folder,
+        driver = self._new_driver(
+            number=number,
+            install=self._new_install(wheel) if own_install else self._tool_install,
+            instrument=instrument,
+            folder=folder,
             environment=environment,
-            api_base_url=base_url,
+            base_url=base_url,
             api_key=api_key,
-            extra_environment=extra_environment,
         )
         self._context.drivers.append(driver)
         if not configure:
@@ -151,6 +161,9 @@ class WatcherFactory:
         watcher_ids: dict[str, str] = {}
         if register:
             client = DataHubClient(f"{self._env.base_url}/api/v1", api_key=api_key)
+            # The server is on this machine, and a proxy in the developer's environment
+            # would send the request somewhere else.
+            client._session.trust_env = False  # type: ignore[attr-defined]  # noqa: SLF001
             registered = client.register_watcher(
                 instrument, hostname=f"e2e-pc-{number}", os_info="E2E test machine"
             )
@@ -182,3 +195,29 @@ class WatcherFactory:
         variables.update(overrides or {})
         driver.write_env(api_key, variables)
         return driver
+
+    def _new_driver(
+        self,
+        *,
+        number: int,
+        install: ToolInstall,
+        instrument: str,
+        folder: Path,
+        environment: str,
+        base_url: str,
+        api_key: str,
+    ) -> WatcherDriver:
+        """Build the driver of this run's kind. PR 3 adds the service driver's branch here:
+        what it needs in place of ``home`` and ``install`` is described in the notes in
+        ``e2e_support.drivers``."""
+        if issubclass(self._driver_class, CliDriver):
+            return self._driver_class(
+                home=self._tmp_path / f"home-{number}",
+                tool_install=install,
+                instrument_id=instrument,
+                watch_dir=folder,
+                environment=environment,
+                api_base_url=base_url,
+                api_key=api_key,
+            )
+        raise NotImplementedError(f"No way to build a {self._driver_class.__name__} yet")

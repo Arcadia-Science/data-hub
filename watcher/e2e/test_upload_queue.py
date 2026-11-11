@@ -27,7 +27,7 @@ from e2e_support.drivers import WatcherDriver
 from e2e_support.factory import WatcherFactory
 from e2e_support.files import LARGE, SMALL, write_file, write_run
 from e2e_support.server import FileRow, ServerView
-from e2e_support.waiting import stays_true, wait_until
+from e2e_support.waiting import KnownBugStillPresent, known_bug, stays_true, wait_until
 
 pytestmark = pytest.mark.e2e
 
@@ -728,6 +728,7 @@ def test_an_uploaded_file_cannot_be_dismissed(
 
 @pytest.mark.xfail(
     strict=True,
+    raises=KnownBugStillPresent,
     reason="bug-04-queue-lists-deleted-run-files: the upload queue still lists files of a "
     "run that was deleted",
 )
@@ -750,4 +751,5 @@ def test_upload_queue_does_not_list_files_of_a_deleted_run(
     admin.delete_run(instrument_id, RUN).raise_for_status()
 
     # Intended: files of a deleted run are not offered to the watcher. Today they still are.
-    assert queue_ids(server, pc) == set()
+    with known_bug():
+        assert queue_ids(server, pc) == set()

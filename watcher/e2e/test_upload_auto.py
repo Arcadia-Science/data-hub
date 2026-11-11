@@ -15,11 +15,8 @@ The queue (manual mode, "Request upload") has its own file, ``test_upload_queue.
 """
 
 from __future__ import annotations
-import contextlib
 import hashlib
 import re
-import sqlite3
-from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -30,7 +27,7 @@ from e2e_support.drivers import WatcherDriver
 from e2e_support.factory import WatcherFactory
 from e2e_support.files import LARGE, SMALL, payload, write_file, write_run
 from e2e_support.server import ServerView
-from e2e_support.waiting import wait_until
+from e2e_support.waiting import KnownBugStillPresent, known_bug, wait_until
 
 pytestmark = pytest.mark.e2e
 
@@ -747,38 +744,9 @@ def test_pending_upload_for_a_file_that_vanished_is_dropped_at_the_next_start(
     assert s3_puts(proxy) == []
 
 
-@contextlib.contextmanager
-def _state_db(pc: WatcherDriver) -> Iterator[sqlite3.Connection]:
-    conn = sqlite3.connect(pc.state_db_path(), timeout=30, isolation_level=None)
-    try:
-        yield conn
-    finally:
-        conn.close()
-
-
-def stall_pending_records(pc: WatcherDriver) -> None:
-    """Make the watcher's next write of a ``pending_uploads`` row take minutes.
-
-    It adds a trigger to the watcher's state database that joins ``sqlite_master`` with itself
-    nine times (about 2e10 rows) before the insert goes through. Every write before it, the
-    run's ``runs`` and ``detected_files`` rows, commits as usual, so the watcher sits exactly
-    between "the run was reported" and "the files were recorded as pending".
-    """
-    cross_join = ", ".join(f"sqlite_master t{n}" for n in range(9))
-    with _state_db(pc) as conn:
-        conn.execute(
-            "CREATE TRIGGER stall_pending BEFORE INSERT ON pending_uploads "
-            f"BEGIN SELECT count(*) FROM {cross_join}; END"
-        )
-
-
-def release_pending_records(pc: WatcherDriver) -> None:
-    with _state_db(pc) as conn:
-        conn.execute("DROP TRIGGER IF EXISTS stall_pending")
-
-
 @pytest.mark.xfail(
     strict=True,
+    raises=KnownBugStillPresent,
     reason="bug-02-crash-before-pending-record: a watcher killed after the run report and "
     "before the pending record never uploads those files",
 )
@@ -792,23 +760,25 @@ def test_watcher_killed_after_the_run_report_uploads_the_files_after_a_restart(
 ) -> None:
     pc = watcher()
     start_watching(pc, server)
-    stall_pending_records(pc)
 
-    content = write_run(watch_dir, RUN, {"small.csv": SMALL})["small.csv"]
-    # The run is reported and the watcher remembers it, but the pending record is stuck.
-    wait_until(
-        lambda: (
-            pc.state_query("SELECT count(*) FROM detected_files WHERE run_id = ?", (RUN,))[0][0]
-            == 1
-        ),
-        30,
-        lambda: server.dump(pc.watcher_id, instrument_id),
-        what="the watcher to record the reported run",
-    )
-    reported = server.file(instrument_id, RUN, SMALL_PATH)
-    assert reported is not None and reported.status == "detected"
-    pc.kill()
-    release_pending_records(pc)
+    # The watcher's next write of a `pending_uploads` row is made to take minutes, so it sits
+    # exactly between "the run was reported" and "the files were recorded as pending". The
+    # run's own `runs` and `detected_files` rows commit as usual.
+    with pc.stall_writes("pending_uploads"):
+        content = write_run(watch_dir, RUN, {"small.csv": SMALL})["small.csv"]
+        # The run is reported and the watcher remembers it, but the pending record is stuck.
+        wait_until(
+            lambda: (
+                pc.state_query("SELECT count(*) FROM detected_files WHERE run_id = ?", (RUN,))[0][0]
+                == 1
+            ),
+            30,
+            lambda: server.dump(pc.watcher_id, instrument_id),
+            what="the watcher to record the reported run",
+        )
+        reported = server.file(instrument_id, RUN, SMALL_PATH)
+        assert reported is not None and reported.status == "detected"
+        pc.kill()
     # The crash left nothing to retry, and the upload had not started.
     assert pending(pc) == []
     assert calls(proxy, "POST", "/request-upload-url") == []
@@ -816,4 +786,5 @@ def test_watcher_killed_after_the_run_report_uploads_the_files_after_a_restart(
     # Intended: the files of a run the watcher reported are not forgotten, so an auto-mode
     # watcher that starts again uploads them. Today nothing does.
     pc.start()
-    server.wait_for_uploaded(instrument_id, RUN, SMALL_PATH, content=content, timeout=12)
+    with known_bug():
+        server.wait_for_uploaded(instrument_id, RUN, SMALL_PATH, content=content, timeout=12)

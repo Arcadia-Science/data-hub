@@ -4,14 +4,18 @@ A test never sleeps for a fixed time and hopes. It waits for a condition with
 :func:`wait_until`, which returns as soon as the condition holds and, when the deadline
 passes, fails with what it last saw. :func:`stays_true` is the opposite check, for "this
 must not happen" assertions, where the test has to watch for a while.
+
+:func:`known_bug` is for a test of a known bug, which asserts the intended behavior and is
+marked ``xfail(strict=True, raises=KnownBugStillPresent)``.
 """
 
 from __future__ import annotations
+import contextlib
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from typing import Literal, TypeVar
 
-__all__ = ["WaitTimeout", "stays_true", "wait_until"]
+__all__ = ["KnownBugStillPresent", "WaitTimeout", "known_bug", "stays_true", "wait_until"]
 
 T = TypeVar("T")
 
@@ -23,6 +27,46 @@ DEFAULT_INTERVAL_SECONDS = 0.2
 class WaitTimeout(AssertionError):
     """A condition did not hold in time. It is an ``AssertionError`` so pytest reports
     it as a failed assertion, not an error in the test."""
+
+
+class KnownBugStillPresent(AssertionError):
+    """The behavior a known-bug test asserts is still missing, which is what the test expects.
+
+    It is raised only by :func:`known_bug`, and it is what the test's ``xfail`` lists in
+    ``raises=``. Any other failure (a precondition that broke, a wait that timed out before
+    the bug could show) is a different exception, so the test fails instead of looking like
+    the bug it is waiting for.
+    """
+
+
+@contextlib.contextmanager
+def known_bug() -> Iterator[None]:
+    """Mark the one assertion (or wait) of a known-bug test that shows the bug.
+
+    Everything before the ``with`` block is the test's precondition: the watcher is running,
+    the server holds what it should, the file was written. If any of that fails the test
+    fails, and not as an expected failure. Only the intended-behavior assertion goes inside::
+
+        @pytest.mark.xfail(strict=True, raises=KnownBugStillPresent, reason="bug-07-...: ...")
+        @pytest.mark.covers("process.stop->event_before_stopped_heartbeat")
+        def test_the_stop_event_reaches_the_server_first(...):
+            ...  # precondition
+            with known_bug():
+                assert event.created_at <= final.created_at
+
+    An ``AssertionError`` raised inside the block, a :class:`WaitTimeout` included, is
+    re-raised as :class:`KnownBugStillPresent` with the original as its cause. When the bug
+    is fixed the block no longer raises, the strict ``xfail`` turns the pass into a failure,
+    and whoever fixed the bug removes the mark and the ``with``. Other exceptions pass
+    through unchanged. A test that runs with ``--runxfail`` shows the failure coming from
+    this block.
+    """
+    try:
+        yield
+    except KnownBugStillPresent:
+        raise
+    except AssertionError as exc:
+        raise KnownBugStillPresent(f"The known bug is still present: {exc}") from exc
 
 
 def _describe(describe: Callable[[], str] | str | None) -> str:

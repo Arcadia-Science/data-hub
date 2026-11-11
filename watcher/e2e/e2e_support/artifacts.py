@@ -88,7 +88,7 @@ def collect_failure_artifacts(
 
     for number, driver in enumerate(drivers, start=1):
         folder = destination / f"watcher-{number}"
-        for path in driver.logs():
+        for path in driver.log_files():
             _copy(path, folder / path.name)
         db = driver.state_db_path()
         for suffix in ("", "-wal", "-shm"):

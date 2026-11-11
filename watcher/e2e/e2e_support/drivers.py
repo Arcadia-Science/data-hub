@@ -1,9 +1,24 @@
 """Drivers: how a scenario starts, stops, kills and inspects the watcher.
 
 A scenario never starts a process or sends a signal itself. It asks a ``WatcherDriver``, so
-the same scenario file runs against a ``data-hub-watcher watch`` process on Linux (and
-macOS) and, later, against the real Windows service. This module holds the interface, the
-shared parts, and ``CliDriver``, the POSIX implementation.
+the same scenario file runs against a ``data-hub-watcher watch`` process (on Linux, and on
+macOS for a developer) and, in the next pull request, against the real Windows service. This
+module holds the interface, the shared parts, and ``CliDriver``, the POSIX implementation.
+
+Kinds of driver
+---------------
+
+``WatcherDriver.kind`` is ``"cli"`` (a ``watch`` process) or ``"service"`` (the Windows
+service). It is what the transition catalog calls a platform: a test that only makes sense
+for one kind says so with ``@pytest.mark.platforms("cli")``, and the suite's ``conftest.py``
+skips it under the other. Which driver a run uses is ``$DATA_HUB_E2E_DRIVER`` (``cli`` unless
+set). A scenario never checks the kind itself, and never reaches for anything that only one
+driver has: it is given a ``WatcherDriver``, and a type checker refuses ``CliDriver``-only
+attributes.
+
+The wording of the watcher differs by role (``"Watcher started on ..."``, ``"Service started
+on ..."``), so a scenario asks the driver for it: ``started_prefix``, ``resumed_prefix``,
+``operator_stop_message`` and ``update_stop_message``.
 
 The seam for the Windows service
 --------------------------------
@@ -11,32 +26,108 @@ The seam for the Windows service
 A ``WindowsServiceDriver`` subclasses :class:`WatcherDriver` and fills in the abstract
 methods. The mapping, for whoever writes it:
 
-========================  =============================================================
-Driver method             Windows service
-========================  =============================================================
-``install``               ``uv tool install "<wheel>[windows-service]"`` into the default
-                          tool directory, then ``service install``
-``run_cli``               the same ``data-hub-watcher`` executable, run elevated
-``start``                 ``service start``, then wait for the SCM to say ``running``
-``request_stop``          ``service stop`` (``SvcStop``), without waiting
-``interrupt``             not supported: ``supports_interrupt`` is false
-``kill``                  ``taskkill /F /PID`` of the pid ``service status`` reports
-``wait_exit``             wait for the SCM state ``stopped``; the exit code is the
-                          service's win32 exit code (1 after an upgrade restart)
-``is_running``           the SCM state is ``running`` or a ``*_pending`` one
-``logs``                  ``C:\\ProgramData\\DataHubWatcher\\watcher.log``,
-                          ``service-bootstrap.log`` and ``upgrade-worker.log``
-``state_db_path``         beside the config file in the registry (``ConfigPath``)
-``config_dir``            the directory of that config file
-``close``                 ``service uninstall``, then wait for the service to be removed
-========================  =============================================================
+==========================  ===========================================================
+Driver method               Windows service
+==========================  ===========================================================
+``run_cli``                 the same ``data-hub-watcher`` executable, run elevated, in
+                            the test's own user profile (see "per-test isolation" below)
+``start``                   ``service start``, then wait for the SCM to say ``running``
+``request_stop``            ``service stop`` (``SvcStop``), without waiting
+``interrupt``               not supported: raise ``NotImplementedError``. A scenario that
+                            needs it is marked ``platforms("cli")``
+``kill``                    ``taskkill /F /PID`` of the pid ``service status`` reports
+``wait_exit``               wait for the SCM state ``stopped``; the exit code is the
+                            service's win32 exit code (0 after a stop)
+``await_upgrade_restart``   wait until the SCM shows ``running`` with a pid other than the
+                            one of the last start (see below)
+``is_running``              the SCM state is ``running`` or a ``*_pending`` one
+``pid``                     the pid ``service status`` reports, ``None`` unless running
+``exit_code``               the win32 exit code of the last run, ``None`` while it runs
+``installed_version``       ``data-hub-watcher --version`` of the machine's uv-tool install
+``hide_uv``                 see "hide_uv" below
+``log_files``               ``C:\\ProgramData\\DataHubWatcher\\watcher.log``,
+                            ``service-bootstrap.log`` and ``upgrade-worker.log``
+``state_db_path``           beside the config file in the registry (``ConfigPath``)
+``config_dir``              the directory of that config file
+``close``                   ``service uninstall``, then wait for the service to be removed
+==========================  ===========================================================
 
-The fault proxy, the server and every assertion are the same on both platforms. A scenario
-that needs something only one platform has (a signal, an SCM recovery action) says so with
-``driver.platform`` or ``driver.supports_interrupt`` and skips on the other.
+The fault proxy, the server and every assertion are the same under both drivers.
 
-``platform`` names the *kind* of driver: ``"linux"`` is a CLI process on any POSIX system,
-macOS included, and ``"windows"`` is the service.
+How a Windows upgrade works, because the CLI is different
+---------------------------------------------------------
+
+Under the CLI, an update ends with the process exiting with code 1 after a ``Watcher
+restarting for auto-update`` event, and something has to start it again: the driver stands in
+for that supervisor in ``await_upgrade_restart``. Under the service, the in-process updater
+does not install anything. It hands the upgrade to a scheduled-task worker, which runs
+``Stop-Service``, ``uv tool install``, then ``Start-Service``. The service therefore stops
+*cleanly* (exit code 0, a ``Service stopped`` event, never exit code 1 and never "restarting
+for auto-update"), and the worker starts a new process. A scenario that must see the exit
+code or the event of the in-process path (``selfupdate.installed->exit_for_restart``) is
+CLI-only. The rest asks for ``await_upgrade_restart(timeout)``, which is "the upgrade has
+been installed and the watcher is running again" under both.
+
+Service driver notes for PR 3
+-----------------------------
+
+Facts the notes rest on: one machine has one service and one registry ``ConfigPath``;
+``C:\\ProgramData\\DataHubWatcher\\watcher.log`` is one file shared by everything on the
+machine; the service loads its registered env file with ``override=True``; the SCM restarts a
+failed or killed service after 60 s and then 120 s.
+
+* **Per-test isolation for** ``run_cli``. Each test gets a folder with its own
+  ``USERPROFILE`` (so ``~/.data-hub`` of a one-shot command such as ``init``, ``state
+  forget`` or ``self-update`` is the test's), and ``service install`` registers
+  ``ConfigPath`` and ``EnvPath`` inside that folder. ``config_dir()``, the env file and the
+  state database (``state_db_path()`` is beside ``ConfigPath``) are then the test's own, and
+  tests don't see each other's files. The first install per session registers the service
+  and every later test points the registry at its own folder (``service install`` again, or
+  ``service reinstall``), then ``close()`` uninstalls.
+* **The shared log.** The driver records the byte offset of ``watcher.log`` when it is
+  created and builds :meth:`log_text` and :meth:`mark_logs` from that offset, plus
+  ``service-bootstrap.log`` and ``upgrade-worker.log`` (set ``self._log_baseline``). Nothing
+  may truncate or delete ``watcher.log``. ``log_files()`` can return the whole file for the
+  artifacts. Log rotation (``RotatingFileHandler``) can move the file under the offset: when
+  the file is shorter than the recorded offset, read it from the start.
+* **SCM failure actions off for the shared scenarios.** ``service install`` sets restart
+  actions after 60 s and 120 s. A scenario that kills the watcher, or one whose start is
+  refused, expects it to stay down until the scenario starts it, as a CLI process does. So
+  right after ``service install`` the driver turns the actions off (``sc failure
+  DataHubWatcher reset= 0 actions= ""``), and the real recovery is tested only in
+  ``test_windows_service.py``, which switches them on itself.
+* **A second PC for the two tests that run** ``init`` **for another one**
+  (``test_a_second_registration_for_an_instrument_with_a_live_watcher_is_refused`` and
+  ``test_init_for_an_instrument_that_has_a_watcher_names_it``). There is one service per
+  machine, so a second PC can't be a second service. It is a config-only driver: a folder
+  with its own profile whose ``run_cli`` passes the group option ``--config <path>``
+  (``global_args=("--config", str(path))``), so ``init`` writes there and the registered
+  service is left alone. It never starts.
+* **await_upgrade_restart** waits for the service to be ``running`` with a pid other than the
+  one the driver saw at its last ``start()`` (or its last ``await_upgrade_restart``). Take
+  the old pid from the last start, not from the moment of the call: the worker may have
+  restarted the service before the scenario gets there.
+* **hide_uv.** Put a minimal ``PATH`` in the env file (the service reads it with
+  ``override=True``), such as ``C:\\Windows\\System32``, and make sure the candidate
+  ``<home>\\.local\\bin\\uv.exe`` that ``self_update._sys_prefix_uv_candidates`` derives from
+  the install prefix and from ``USERPROFILE`` does not exist (a per-test profile has none; if
+  the standalone installer put one in the profile the tool was installed from, move it away
+  for the test and put it back in a ``finally``).
+* **kill() and the recovery actions.** ``taskkill /F`` is a crash for the SCM, so with the
+  failure actions on the service comes back by itself after 60 s. With them off (note above)
+  it stays down, ``wait_exit`` returns the win32 exit code of the killed process, and
+  ``restart()`` is the only supervisor. ``stall_writes`` and ``fail_writes`` below may call
+  ``kill()`` when a watcher is stuck inside a trigger.
+* **The service's** ``config_invalid`` **path.** ``_run_service_loop`` calls ``load_config``
+  outside of any ``try``, so a missing or malformed config raises an unhandled
+  ``ClickException`` (it lands in ``service-bootstrap.log``) where every other refusal logs an
+  error and exits through ``SystemExit(1)``. ``startup.config_invalid->refused`` reads the
+  message from the log, and under the service it will find it in the bootstrap log instead.
+  PR 3 should decide whether that is the behavior to test or a bug to fix, and say so in the
+  catalog.
+* **start() arguments.** ``args`` and ``global_args`` are command-line arguments of ``watch``
+  (``args=("--dry-run",)``) and of the group before it (``global_args=("--verbose",)``). A
+  service takes neither: ignore them, or refuse with ``NotImplementedError``.
 """
 
 from __future__ import annotations
@@ -61,23 +152,29 @@ from data_hub_watcher.config_io import load_config, save_config
 from data_hub_watcher.constants import RUN_DETECTION_PRESETS
 from data_hub_watcher.models import WatcherConfig
 from e2e_support.admin import revision_settings
+from e2e_support.catalog.model import DRIVER_KINDS, DriverKind
 from e2e_support.waiting import WaitTimeout, wait_until
 
 __all__ = [
     "DEFAULT_ENVIRONMENT",
     "DEFAULT_TIMER_OVERRIDES",
+    "DRIVER_VARIABLE",
     "CliDriver",
     "CliResult",
+    "DriverKind",
     "InitAnswers",
+    "LogMark",
     "NewInstrument",
-    "PlatformName",
     "RunDetection",
     "ToolInstall",
     "WatcherDriver",
+    "active_driver_kind",
+    "driver_class_for",
     "install_watcher_tool",
 ]
 
-PlatformName = Literal["linux", "windows"]
+# Which kind of driver a run uses: ``cli`` (the default) or ``service``.
+DRIVER_VARIABLE = "DATA_HUB_E2E_DRIVER"
 
 # `production` makes the first scan upload files that are already in the watch folder, and
 # the config sets `initial_scan` explicitly anyway.
@@ -96,16 +193,36 @@ DEFAULT_TIMER_OVERRIDES: dict[str, str] = {
 # Python 3.12 is what lab PCs and the Lambda image run.
 DEFAULT_PYTHON = "3.12"
 
-# Variables the watcher process must not inherit from the developer's shell, which would
-# change which interpreter, key or config it uses.
+# Variables the watcher process must not inherit from the developer's shell. Some change which
+# interpreter, key, config or package index it uses (an index variable would send the
+# watcher's own `uv tool install` to a server of the developer's choice), and a proxy would
+# send its calls to the fault proxy and the test server through the developer's proxy.
 _SCRUBBED_ENV = frozenset(
-    {"VIRTUAL_ENV", "PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP", "UV_PROJECT_ENVIRONMENT"}
+    {
+        "VIRTUAL_ENV",
+        "PYTHONPATH",
+        "PYTHONHOME",
+        "PYTHONSTARTUP",
+        "UV_PROJECT_ENVIRONMENT",
+        "UV_PYTHON",
+        "UV_EXTRA_INDEX_URL",
+        "UV_DEFAULT_INDEX",
+    }
 )
+_SCRUBBED_PREFIXES = ("DATA_HUB_", "UV_INDEX", "PIP_")
+_PROXY_VARIABLES = frozenset({"http_proxy", "https_proxy", "all_proxy", "no_proxy"})
+
+# Whatever the shell says, nothing the watcher or a test calls on this machine goes through a
+# proxy.
+_NO_PROXY = "127.0.0.1,localhost"
 
 _INSTALL_TIMEOUT_SECONDS = 900
 
 # What `watch` prints right before it installs its signal handlers.
 READY_LINE = "Press Ctrl+C to stop."
+
+# How long a graceful stop may take at the end of a test before the process is killed.
+_CLOSE_GRACE_SECONDS = 15
 
 
 # ---------------------------------------------------------------------------
@@ -122,12 +239,25 @@ def uv_executable() -> str:
 
 
 def clean_environment(base: Mapping[str, str] | None = None) -> dict[str, str]:
-    """``base`` (default: this process's environment) without what would leak into the watcher:
-    every ``DATA_HUB_*`` variable and the interpreter-selecting ones."""
+    """``base`` (default: this process's environment) without what would leak into the watcher,
+    and with ``NO_PROXY`` set so that nothing local goes through a proxy.
+
+    Removed: every ``DATA_HUB_*`` variable, the ones that select an interpreter, a project
+    environment or a package index (``UV_PYTHON``, ``UV_INDEX*``, ``UV_EXTRA_INDEX_URL``,
+    ``UV_DEFAULT_INDEX``, ``PIP_*``), and the proxy variables in any case (``HTTP_PROXY``,
+    ``HTTPS_PROXY``, ``ALL_PROXY``, ``NO_PROXY``). A machine that can reach PyPI only through a
+    proxy can't run the suite.
+    """
     source = os.environ if base is None else base
-    return {
-        k: v for k, v in source.items() if not k.startswith("DATA_HUB_") and k not in _SCRUBBED_ENV
+    env = {
+        k: v
+        for k, v in source.items()
+        if k not in _SCRUBBED_ENV
+        and not k.upper().startswith(_SCRUBBED_PREFIXES)
+        and k.lower() not in _PROXY_VARIABLES
     }
+    env["NO_PROXY"] = _NO_PROXY
+    return env
 
 
 @functools.cache
@@ -359,21 +489,40 @@ class CliResult:
 # ---------------------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class LogMark:
+    """A place in the watcher's log text, from :meth:`WatcherDriver.mark_logs`.
+
+    Pass it as ``since=`` to :meth:`WatcherDriver.log_text` or :meth:`wait_for_log` to look
+    only at what the watcher logged after it. It is opaque: a scenario never reads it.
+    """
+
+    offsets: tuple[tuple[Path, int], ...]
+
+
+_SQL_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
 class WatcherDriver(ABC):
     """One instrument PC with a watcher installed, as a scenario sees it.
 
     The constructor takes what the PC is registered as. Everything about the process lives
     in the abstract methods (see the module docstring for the Windows mapping). The rest is
     shared: writing ``config.yaml`` through ``save_config``, writing the env file, running
-    the real ``init``, and waiting for something in a log.
+    the real ``init``, reading the state database and the log, and breaking the database on
+    purpose.
 
     Attributes a scenario reads: ``instrument_id``, ``watch_dir`` (resolved), ``environment``,
     ``api_base_url`` (the fault proxy's address plus ``/api/v1``), ``api_key`` and
-    ``watcher_id``.
+    ``watcher_id``, ``kind``, ``role`` and the message properties.
     """
 
-    platform: ClassVar[PlatformName]
-    supports_interrupt: ClassVar[bool] = True
+    # "cli" or "service". The suite's conftest skips a test whose `platforms` marker leaves
+    # this kind out.
+    kind: ClassVar[DriverKind]
+    # What the watcher calls itself in its events: "Watcher" for `watch`, "Service" for the
+    # Windows service.
+    role: ClassVar[str]
 
     def __init__(
         self,
@@ -391,6 +540,9 @@ class WatcherDriver(ABC):
         self.api_base_url = api_base_url
         self.api_key = api_key
         self._watcher_id = watcher_id
+        # Where each log file starts for this driver, for a log that something else wrote to
+        # before the driver existed (the service's machine-wide `watcher.log`).
+        self._log_baseline: dict[Path, int] = {}
 
     # -- identity ---------------------------------------------------------
 
@@ -407,25 +559,71 @@ class WatcherDriver(ABC):
     def watcher_id(self, value: str) -> None:
         self._watcher_id = value
 
+    # -- what the watcher calls things (they differ by role) -----------------
+
+    @property
+    def started_prefix(self) -> str:
+        """The start of the message of a ``watcher_started`` event for a start:
+        ``Watcher started on `` or ``Service started on ``."""
+        return f"{self.role} started on "
+
+    @property
+    def resumed_prefix(self) -> str:
+        """The start of the message of the ``watcher_started`` event sent when a watcher that
+        was waiting for its folder starts watching: ``Watcher resumed on `` or
+        ``Service resumed on ``."""
+        return f"{self.role} resumed on "
+
+    @property
+    def restarted_prefix(self) -> str:
+        """The start of the ``watcher_started`` message of a rebuild in the same process (a
+        config revision): ``Watcher restarted on `` or ``Service restarted on ``."""
+        return f"{self.role} restarted on "
+
+    @property
+    def operator_stop_message(self) -> str:
+        """The message of the ``watcher_stopped`` event after :meth:`stop`: ``Watcher stopped
+        by user`` for the CLI, ``Service stopped`` for the service."""
+        return "Watcher stopped by user" if self.kind == "cli" else f"{self.role} stopped"
+
+    @property
+    def update_stop_message(self) -> str:
+        """The message of the ``watcher_stopped`` event of an update: ``Watcher restarting for
+        auto-update`` for the CLI. The service is stopped by the upgrade worker, so it says
+        ``Service stopped``."""
+        return (
+            f"{self.role} restarting for auto-update"
+            if self.kind == "cli"
+            else f"{self.role} stopped"
+        )
+
     # -- the process (abstract) ------------------------------------------
 
     @abstractmethod
-    def install(self, wheel: Path) -> None:
-        """Install the watcher from ``wheel`` for this driver, replacing any earlier install.
+    def run_cli(
+        self,
+        *args: str,
+        input: str | None = None,
+        timeout: float = 120.0,
+        global_args: Sequence[str] = (),
+    ) -> CliResult:
+        """Run a one-shot ``data-hub-watcher`` command, such as ``config validate`` or
+        ``watch --dry-run``, to completion, as this PC's operator, and capture its output.
 
-        The shared session install is handed to a driver at construction, so most scenarios
-        never call this. A scenario that updates the watcher in place calls it, or is given
-        a private install, so it doesn't change what the others run.
+        ``global_args`` go before the command, for the options of the group: ``--config
+        <path>`` and ``--verbose`` (``run_cli("init", global_args=("--verbose",))``).
         """
 
     @abstractmethod
-    def run_cli(self, *args: str, input: str | None = None, timeout: float = 120.0) -> CliResult:
-        """Run a one-shot ``data-hub-watcher`` command, such as ``config validate`` or
-        ``watch --dry-run``, to completion, as this PC's operator, and capture its output."""
-
-    @abstractmethod
-    def start(self, *, wait_ready: bool = True, args: Sequence[str] = ()) -> None:
-        """Start the watcher. ``args`` are extra command-line arguments (``["--verbose"]``).
+    def start(
+        self,
+        *,
+        wait_ready: bool = True,
+        args: Sequence[str] = (),
+        global_args: Sequence[str] = (),
+    ) -> None:
+        """Start the watcher. ``args`` are extra arguments of the ``watch`` command and
+        ``global_args`` are options of the group before it (``global_args=("--verbose",)``).
 
         With ``wait_ready`` (the default) this returns once the watcher is ready for a stop
         request, or has already exited, which is what a refused start does. A watcher that
@@ -448,7 +646,7 @@ class WatcherDriver(ABC):
     @abstractmethod
     def interrupt(self) -> None:
         """Send the watcher an interrupt (SIGINT, as Ctrl+C does) and return without waiting.
-        Only where ``supports_interrupt`` is true."""
+        Only under the CLI: a scenario that uses it is marked ``platforms("cli")``."""
 
     @abstractmethod
     def kill(self) -> None:
@@ -457,8 +655,22 @@ class WatcherDriver(ABC):
 
     @abstractmethod
     def wait_exit(self, timeout: float = 30.0) -> int:
-        """Wait for the watcher to exit and return its exit code (0 after a stop, 1 after an
-        upgrade restart, ``-9`` after SIGKILL on POSIX). Raises ``WaitTimeout`` otherwise."""
+        """Wait for the watcher to exit and return its exit code (0 after a stop, ``-9`` after
+        SIGKILL on POSIX, 1 after the in-process updater's restart). Raises ``WaitTimeout``
+        otherwise."""
+
+    @abstractmethod
+    def await_upgrade_restart(self, timeout: float) -> None:
+        """Carry an update from "the new version is being installed" to "the watcher is
+        running again", whatever drives that on this kind of driver.
+
+        CLI: the process exits with code 1 once the install is done, and this asserts that and
+        starts it again (the driver is the supervisor). Service: the upgrade worker stops the
+        service, installs and starts it, so this waits until the SCM shows ``running`` with a
+        new pid. Raises ``AssertionError`` (a ``WaitTimeout``) if that doesn't happen within
+        ``timeout`` seconds. A scenario that must see the exit code 1 or the "restarting for
+        auto-update" event checks that itself and is marked ``platforms("cli")``.
+        """
 
     @abstractmethod
     def is_running(self) -> bool:
@@ -466,12 +678,35 @@ class WatcherDriver(ABC):
 
     @property
     @abstractmethod
+    def pid(self) -> int | None:
+        """The process id of the running watcher, or ``None`` when it is not running.
+
+        Compare two readings to see whether it is the same process (a config change is
+        applied inside the process, a start is a new one)."""
+
+    @property
+    @abstractmethod
     def exit_code(self) -> int | None:
         """The exit code of the last run, or ``None`` while it runs or before any start."""
 
     @abstractmethod
-    def logs(self) -> list[Path]:
-        """Every log file of the watcher, for failure artifacts and :meth:`log_text`."""
+    def installed_version(self) -> str:
+        """The version of the watcher installed for this PC, as ``data-hub-watcher --version``
+        prints it. After an update it is the new version, before the watcher restarts."""
+
+    @abstractmethod
+    def hide_uv(self) -> None:
+        """Make the watcher unable to find ``uv``, so an update fails before it starts (the
+        ``uv executable not found`` case). Call it before :meth:`start`.
+
+        CLI: an empty directory is the only entry of ``PATH``, set in the env file the
+        watcher loads. Service: see "hide_uv" in the module docstring."""
+
+    @abstractmethod
+    def log_files(self) -> list[Path]:
+        """Every log file of the watcher, whole, for failure artifacts. Some of them repeat
+        each other (the CLI logs to the console and to ``watcher.log``); :meth:`log_text` is
+        the version to read."""
 
     @abstractmethod
     def state_db_path(self) -> Path:
@@ -495,9 +730,8 @@ class WatcherDriver(ABC):
     def restart(self, *, graceful: bool = True) -> None:
         """Stop the watcher if it runs, then start it again.
 
-        This is also the supervisor: after an update the watcher exits with code 1 and
-        expects something to start it again (the SCM's recovery action on Windows), and the
-        driver stands in for it, so call ``restart()`` then.
+        An update is a different case: use :meth:`await_upgrade_restart` for it, because
+        what restarts the watcher differs by driver.
         """
         if self.is_running():
             if graceful:
@@ -586,14 +820,35 @@ class WatcherDriver(ABC):
         settings.update(overrides)
         return settings
 
+    # -- the state database ------------------------------------------------
+
+    def _state_connection(self, timeout: float = 30.0) -> sqlite3.Connection:
+        path = self.state_db_path()
+        if not path.exists():
+            raise FileNotFoundError(
+                f"The state database {path} doesn't exist yet. Start the watcher first."
+            )
+        return sqlite3.connect(path, timeout=timeout, isolation_level=None)
+
     def state_query(self, sql: str, params: Sequence[Any] = ()) -> list[tuple[Any, ...]]:
         """Run a SELECT against the watcher's state database (``pending_uploads``,
-        ``detected_files``, ``uploaded_files``, ``meta`` ...)."""
+        ``detected_files``, ``uploaded_files``, ``meta`` ...). An empty list if the database
+        doesn't exist yet."""
         path = self.state_db_path()
         if not path.exists():
             return []
         with contextlib.closing(sqlite3.connect(path, timeout=10)) as conn:
             return conn.execute(sql, tuple(params)).fetchall()
+
+    def state_execute(self, sql: str, params: Sequence[Any] = ()) -> None:
+        """Run one statement that changes the watcher's state database, and commit it.
+
+        A scenario never opens the database itself, because under the service the file is
+        somewhere else. The watcher must have started once, so the database exists. It waits
+        up to 30 seconds for the watcher's own write to finish.
+        """
+        with contextlib.closing(self._state_connection()) as conn:
+            conn.execute(sql, tuple(params))
 
     @contextlib.contextmanager
     def lock_state_db(self) -> Iterator[None]:
@@ -615,45 +870,136 @@ class WatcherDriver(ABC):
                 conn.execute("ROLLBACK")
             conn.close()
 
-    def log_text(self) -> str:
-        """The text of every log file, for matching and for a failure message."""
+    def _install_insert_trigger(self, kind: str, table: str, body: str) -> str:
+        if _SQL_NAME.fullmatch(table) is None:
+            raise ValueError(f"{table!r} is not a plain table name")
+        name = f"e2e_{kind}_{table}"
+        self.state_execute(f"DROP TRIGGER IF EXISTS {name}")
+        self.state_execute(f"CREATE TRIGGER {name} BEFORE INSERT ON {table} BEGIN {body}; END")
+        return name
+
+    def _drop_trigger(self, name: str, *, kill_if_stuck: bool) -> None:
+        drop = f"DROP TRIGGER IF EXISTS {name}"
+        try:
+            # A stalled watcher won't let go, so don't wait long for it; another writer will.
+            with contextlib.closing(
+                self._state_connection(timeout=2 if kill_if_stuck else 30)
+            ) as conn:
+                conn.execute(drop)
+        except sqlite3.OperationalError:
+            if kill_if_stuck and self.is_running():
+                # The watcher is inside the trigger and holds the write lock, which nothing
+                # else can make it let go of. It can't go on, so it is killed.
+                self.kill()
+            with contextlib.closing(self._state_connection(timeout=30)) as conn:
+                conn.execute(drop)
+
+    @contextlib.contextmanager
+    def stall_writes(self, table: str) -> Iterator[None]:
+        """Make the watcher's next insert into ``table`` of its state database take minutes.
+
+        It adds a trigger that joins ``sqlite_master`` with itself nine times (about 2e10
+        rows) before the insert goes through, so the watcher sits exactly between the write
+        before it and this one: for ``pending_uploads``, between "the run was reported" and
+        "the files were recorded as pending". Every other write commits as usual. The watcher
+        has to be started once so the database exists, and the trigger is in place for the
+        ``with`` block.
+
+        The trigger is always dropped when the block ends. A watcher that is still stuck inside
+        it then holds the write lock, and nothing else can free it, so it is killed. A scenario
+        that wants the kill at a particular moment calls ``kill()`` inside the block.
+        """
+        cross_join = ", ".join(f"sqlite_master t{n}" for n in range(9))
+        name = self._install_insert_trigger("stall", table, f"SELECT count(*) FROM {cross_join}")
+        try:
+            yield
+        finally:
+            self._drop_trigger(name, kill_if_stuck=True)
+
+    @contextlib.contextmanager
+    def fail_writes(self, table: str, message: str = "injected") -> Iterator[None]:
+        """Make every insert into ``table`` of the watcher's state database fail, for the
+        length of a ``with`` block: the statement aborts with ``message`` (the watcher sees an
+        ``sqlite3.IntegrityError``).
+
+        The trigger is always dropped when the block ends.
+        """
+        escaped = message.replace("'", "''")
+        name = self._install_insert_trigger("fail", table, f"SELECT RAISE(ABORT, '{escaped}')")
+        try:
+            yield
+        finally:
+            self._drop_trigger(name, kill_if_stuck=False)
+
+    # -- the log ------------------------------------------------------------
+
+    def _log_text_files(self) -> list[Path]:
+        """The files :meth:`log_text` is built from, in the order of the runs, with nothing
+        twice. Defaults to :meth:`log_files`; a driver whose log files repeat each other
+        returns only one copy."""
+        return self.log_files()
+
+    def _read_log(self, path: Path, since: Mapping[Path, int]) -> str:
+        start = since.get(path, self._log_baseline.get(path, 0))
+        try:
+            data = path.read_bytes()
+        except OSError:
+            return ""
+        if start > len(data):
+            start = 0  # The file was rotated or replaced since the position was taken.
+        return data[start:].decode("utf-8", errors="replace")
+
+    def mark_logs(self) -> LogMark:
+        """A mark at the end of the log now, to read only what comes after it:
+        ``pc.log_text(since=mark)``, ``pc.wait_for_log(regex, since=mark)``."""
+        marks: list[tuple[Path, int]] = []
+        for path in self._log_text_files():
+            with contextlib.suppress(OSError):
+                marks.append((path, path.stat().st_size))
+        return LogMark(tuple(marks))
+
+    def log_text(self, since: LogMark | None = None) -> str:
+        """What the watcher has logged, each line once, runs in the order they happened.
+
+        The text starts at the driver's creation (the service shares its log with the whole
+        machine, so there it is the part that this test wrote) or, with ``since``, at a
+        :meth:`mark_logs`. It is for matching and for failure messages. To count something,
+        count in this text, never in :meth:`log_files`, where lines repeat.
+        """
+        offsets = dict(since.offsets) if since is not None else {}
         parts: list[str] = []
-        for path in self.logs():
-            try:
-                parts.append(
-                    f"=== {path.name}\n{path.read_text(encoding='utf-8', errors='replace')}"
-                )
-            except OSError:
-                continue
-        return "\n".join(parts)
+        for path in self._log_text_files():
+            text = self._read_log(path, offsets)
+            if text and not text.endswith("\n"):
+                text += "\n"
+            parts.append(text)
+        return "".join(parts)
 
     def log_tail(self, lines: int = 40) -> str:
-        """The last lines of each log file, for failure messages."""
+        """The last lines of each log, for failure messages."""
         parts: list[str] = []
-        for path in self.logs():
-            try:
-                text = path.read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                continue
+        for path in self._log_text_files():
+            text = self._read_log(path, {})
             parts.append(f"=== {path.name}\n" + "\n".join(text.splitlines()[-lines:]))
         return "\n".join(parts)
 
-    def wait_for_log(self, pattern: str, timeout: float = 30.0) -> str:
-        """Wait until a log line matches the regular expression ``pattern`` and return the line.
+    def wait_for_log(self, regex: str, timeout: float = 30.0, since: LogMark | None = None) -> str:
+        """Wait until a log line matches the regular expression ``regex`` and return the line.
 
         Prefer the server's view where there is one. Use this for what only the log shows,
-        such as the initial scan finishing.
+        such as the initial scan finishing. With ``since`` (from :meth:`mark_logs`), lines
+        logged before the mark don't count.
         """
-        regex = re.compile(pattern)
+        pattern = re.compile(regex)
 
         def found() -> str | None:
-            for line in self.log_text().splitlines():
-                if regex.search(line):
+            for line in self.log_text(since).splitlines():
+                if pattern.search(line):
                     return line
             return None
 
         return wait_until(
-            found, timeout, self.log_tail, what=f"a log line matching {pattern!r}", interval=0.25
+            found, timeout, self.log_tail, what=f"a log line matching {regex!r}", interval=0.25
         )
 
 
@@ -666,18 +1012,18 @@ class CliDriver(WatcherDriver):
     """Runs ``data-hub-watcher watch`` from a ``uv tool`` install, as a POSIX process.
 
     The process gets an isolated ``HOME`` (so ``~/.data-hub`` is ``<home>/.data-hub``), its
-    own session (so a Ctrl+C in the terminal running pytest doesn't reach it), and
-    stdout and stderr in files. It has no supervisor of its own: after an update it exits
-    with code 1 and stays down until the test calls :meth:`restart`, which stands in for
-    the SCM's recovery action.
+    own session and process group (so a Ctrl+C in the terminal running pytest doesn't reach
+    it, and the whole group can be killed at the end), and stdout and stderr in files. It has
+    no supervisor of its own: after an update it exits with code 1 and stays down until
+    :meth:`await_upgrade_restart` starts it again.
 
     ``extra_environment`` adds variables to the process, after the scrubbed copy of this
     process's environment. Put override variables in the env file with ``write_env`` instead
     where they are meant for the watcher alone.
     """
 
-    platform: ClassVar[PlatformName] = "linux"
-    supports_interrupt: ClassVar[bool] = True
+    kind: ClassVar[DriverKind] = "cli"
+    role: ClassVar[str] = "Watcher"
 
     def __init__(
         self,
@@ -705,6 +1051,8 @@ class CliDriver(WatcherDriver):
         self.extra_environment = dict(extra_environment or {})
         self._process: subprocess.Popen[bytes] | None = None
         self._run_count = 0
+        self._launched: list[int] = []
+        self._closed = False
         self._log_dir = home / "driver-logs"
 
     # -- paths ------------------------------------------------------------
@@ -715,11 +1063,27 @@ class CliDriver(WatcherDriver):
     def state_db_path(self) -> Path:
         return self.config_dir() / f"watcher-{self.environment}.db"
 
-    def logs(self) -> list[Path]:
-        paths = [self.config_dir() / "watcher.log"]
-        if self._log_dir.exists():
-            paths += sorted(self._log_dir.glob("watch-*.std*.log"))
+    def _run_logs(self) -> list[Path]:
+        """The captured stdout and stderr of every run, in the order the runs happened (run 10
+        after run 2)."""
+        paths: list[Path] = []
+        for number in range(1, self._run_count + 1):
+            for stream in ("stdout", "stderr"):
+                path = self._log_dir / f"watch-{number}.{stream}.log"
+                if path.exists():
+                    paths.append(path)
+        return paths
+
+    def log_files(self) -> list[Path]:
+        """``~/.data-hub/watcher.log`` and the stdout and stderr of every run."""
+        paths = [self.config_dir() / "watcher.log", *self._run_logs()]
         return [p for p in paths if p.exists()]
+
+    def _log_text_files(self) -> list[Path]:
+        # `cli.py` calls `logging.basicConfig`, so stderr already holds every record that
+        # `watcher.log` holds. Stdout has what the command prints. Reading `watcher.log` as
+        # well would show every line twice.
+        return self._run_logs()
 
     def process_environment(self) -> dict[str, str]:
         """The environment of the watcher process and of one-shot commands."""
@@ -732,20 +1096,19 @@ class CliDriver(WatcherDriver):
         env.update(self.extra_environment)
         return env
 
-    # -- install and one-shot commands -----------------------------------
+    # -- one-shot commands --------------------------------------------------
 
-    def install(self, wheel: Path) -> None:
-        if self.is_running():
-            raise RuntimeError("Stop the watcher before installing another build")
-        self.tool_install = install_watcher_tool(
-            self.home / "private-install", wheel, python=self.tool_install.python
-        )
-
-    def run_cli(self, *args: str, input: str | None = None, timeout: float = 120.0) -> CliResult:
+    def run_cli(
+        self,
+        *args: str,
+        input: str | None = None,
+        timeout: float = 120.0,
+        global_args: Sequence[str] = (),
+    ) -> CliResult:
         self.home.mkdir(parents=True, exist_ok=True)
         try:
             completed = subprocess.run(
-                [str(self.tool_install.executable), *args],
+                [str(self.tool_install.executable), *global_args, *args],
                 input=input,
                 capture_output=True,
                 text=True,
@@ -756,8 +1119,8 @@ class CliDriver(WatcherDriver):
             )
         except subprocess.TimeoutExpired as exc:
             raise TimeoutError(
-                f"`data-hub-watcher {' '.join(args)}` did not finish in {timeout:g} s.\n"
-                f"stdout:\n{_text(exc.stdout)}\nstderr:\n{_text(exc.stderr)}"
+                f"`data-hub-watcher {' '.join([*global_args, *args])}` did not finish in "
+                f"{timeout:g} s.\nstdout:\n{_text(exc.stdout)}\nstderr:\n{_text(exc.stderr)}"
             ) from exc
         return CliResult(
             args=tuple(args),
@@ -766,9 +1129,25 @@ class CliDriver(WatcherDriver):
             stderr=completed.stderr,
         )
 
+    def installed_version(self) -> str:
+        return self.tool_install.version()
+
+    def hide_uv(self) -> None:
+        # `uv` is looked for on the PATH, and in a few places under the home folder, which is
+        # this test's own and holds none. The env file is what `watch` loads into its process.
+        nowhere = self.home / "no-uv-here"
+        nowhere.mkdir(parents=True, exist_ok=True)
+        self.write_env(overrides={"PATH": str(nowhere)})
+
     # -- the process ------------------------------------------------------
 
-    def start(self, *, wait_ready: bool = True, args: Sequence[str] = ()) -> None:
+    def start(
+        self,
+        *,
+        wait_ready: bool = True,
+        args: Sequence[str] = (),
+        global_args: Sequence[str] = (),
+    ) -> None:
         """Start ``data-hub-watcher watch``.
 
         Ready means the command has printed ``Press Ctrl+C to stop.``, which it does right
@@ -779,10 +1158,11 @@ class CliDriver(WatcherDriver):
         self.home.mkdir(parents=True, exist_ok=True)
         self._log_dir.mkdir(parents=True, exist_ok=True)
         self._run_count += 1
+        self._closed = False
         stem = self._log_dir / f"watch-{self._run_count}"
         with open(f"{stem}.stdout.log", "wb") as out, open(f"{stem}.stderr.log", "wb") as err:
             self._process = subprocess.Popen(
-                [str(self.tool_install.executable), "watch", *args],
+                [str(self.tool_install.executable), *global_args, "watch", *args],
                 cwd=self.home,
                 env=self.process_environment(),
                 stdin=subprocess.DEVNULL,
@@ -790,6 +1170,7 @@ class CliDriver(WatcherDriver):
                 stderr=err,
                 start_new_session=True,
             )
+        self._launched.append(self._process.pid)
         if wait_ready:
             self.wait_until_ready()
 
@@ -807,9 +1188,15 @@ class CliDriver(WatcherDriver):
         return self._process
 
     @property
-    def pid(self) -> int:
-        """The process id of the watcher, for a test that needs to look at the process."""
-        return self._require_process().pid
+    def pid(self) -> int | None:
+        process = self._process
+        return process.pid if process is not None and process.poll() is None else None
+
+    @property
+    def launched_pids(self) -> tuple[int, ...]:
+        """The pid of every process this driver has started, which is also the process
+        group of each (``start_new_session``). For a test of the driver itself."""
+        return tuple(self._launched)
 
     def request_stop(self) -> None:
         self._require_process().send_signal(signal.SIGTERM)
@@ -832,6 +1219,16 @@ class CliDriver(WatcherDriver):
                 f"was asked to stop.\n--- log tail ---\n{self.log_tail()}"
             ) from None
 
+    def await_upgrade_restart(self, timeout: float) -> None:
+        """Wait for the exit that follows an install, assert it is the updater's code 1, and
+        start the watcher again, as a supervisor does."""
+        code = self.wait_exit(timeout)
+        assert code == 1, (
+            f"the watcher exited with {code} after an update, not the updater's 1.\n"
+            f"{self.log_tail()}"
+        )
+        self.start()
+
     def is_running(self) -> bool:
         return self._process is not None and self._process.poll() is None
 
@@ -851,22 +1248,49 @@ class CliDriver(WatcherDriver):
         )
 
     def close(self) -> None:
+        """Stop the watcher and everything it started. Safe to call twice.
+
+        The watcher gets a graceful stop first, so its state database is closed cleanly. Then
+        the whole process group is killed, whether or not the watcher exited: a child it left
+        behind (the ``uv`` of an update, say) belongs to the same group and would otherwise
+        outlive the test.
+        """
         process = self._process
-        if process is None or process.poll() is not None:
+        if process is None or self._closed:
             return
-        # A graceful stop first, so the state database is closed cleanly, then the whole
-        # process group, which also catches an update's `uv` child.
-        with contextlib.suppress(ProcessLookupError):
-            process.send_signal(signal.SIGTERM)
-        try:
-            process.wait(timeout=15)
-        except subprocess.TimeoutExpired:
-            with contextlib.suppress(ProcessLookupError, PermissionError):
-                os.killpg(process.pid, signal.SIGKILL)
-            process.wait()
-        else:
-            with contextlib.suppress(ProcessLookupError, PermissionError):
-                os.killpg(process.pid, signal.SIGKILL)
+        self._closed = True
+        if process.poll() is None:
+            with contextlib.suppress(ProcessLookupError):
+                process.send_signal(signal.SIGTERM)
+            try:
+                process.wait(timeout=_CLOSE_GRACE_SECONDS)
+            except subprocess.TimeoutExpired:
+                pass
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.killpg(process.pid, signal.SIGKILL)
+        if process.poll() is None:
+            with contextlib.suppress(ProcessLookupError):
+                process.kill()
+        process.wait()
+
+
+def driver_class_for(kind: DriverKind) -> type[WatcherDriver]:
+    """The driver class for a kind of driver."""
+    if kind == "cli":
+        return CliDriver
+    raise NotImplementedError(
+        "The service driver (WindowsServiceDriver) arrives in the third pull request of the "
+        "watcher end-to-end stack (PR 3). Until then only DATA_HUB_E2E_DRIVER=cli runs."
+    )
+
+
+def active_driver_kind(env: Mapping[str, str] | None = None) -> DriverKind:
+    """The kind of driver this run uses: ``$DATA_HUB_E2E_DRIVER``, ``cli`` if it is unset."""
+    raw = (os.environ if env is None else env).get(DRIVER_VARIABLE, "").strip().lower() or "cli"
+    for kind in DRIVER_KINDS:
+        if raw == kind:
+            return kind
+    raise ValueError(f"{DRIVER_VARIABLE}={raw!r} is not one of {list(DRIVER_KINDS)}")
 
 
 def _text(data: bytes | str | None) -> str:

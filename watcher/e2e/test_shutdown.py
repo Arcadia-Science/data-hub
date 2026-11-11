@@ -3,8 +3,9 @@
 A scenario stops the watcher through the driver (``stop``, ``interrupt``, ``kill``) and reads
 what the server ends up with: the stored status, the final heartbeat, the ``watcher_stopped``
 event. A graceful stop must exit with code 0 and tell the server; a kill tells it nothing, so
-the server learns only from the silence. No test sends a signal or looks at a
-platform-specific path.
+the server learns only from the silence. No test sends a signal itself. The two that only make
+sense under the CLI driver (Ctrl+C, and a stop before the signal handlers exist) are marked
+``platforms("cli")``.
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ from e2e_support.drivers import WatcherDriver
 from e2e_support.factory import WatcherFactory
 from e2e_support.files import SMALL, write_file, write_run
 from e2e_support.server import ServerView
-from e2e_support.waiting import stays_true, wait_until
+from e2e_support.waiting import KnownBugStillPresent, known_bug, stays_true, wait_until
 
 pytestmark = pytest.mark.e2e
 
@@ -86,19 +87,18 @@ def test_a_graceful_stop_exits_zero_after_telling_the_server(
     assert row.status_reason is None
     assert server.heartbeats(pc.watcher_id)[-1].status == "stopped"
     assert server.effective_status(pc.watcher_id) == "stopped"
-    assert stop_events(server, pc.watcher_id) == ["Watcher stopped by user"]
+    assert stop_events(server, pc.watcher_id) == [pc.operator_stop_message]
     # The start is reported too, and before the stop.
     summary = server.event_summary(pc.watcher_id)
     assert summary.index("watcher_started") < summary.index("watcher_stopped")
 
 
+@pytest.mark.platforms("cli")
 @pytest.mark.covers("process.interrupt->clean_exit", "event.watcher_stopped->emitted")
 def test_an_interrupt_stops_the_watcher_the_same_way(
     watcher: WatcherFactory, server: ServerView
 ) -> None:
     pc = watcher()
-    if not pc.supports_interrupt:
-        pytest.skip("This driver has no Ctrl+C")
     start_watching(pc, server)
 
     pc.interrupt()
@@ -106,7 +106,7 @@ def test_an_interrupt_stops_the_watcher_the_same_way(
     assert pc.wait_exit(30) == 0
     server.wait_for_watcher_status(pc.watcher_id, "stopped")
     assert server.heartbeats(pc.watcher_id)[-1].status == "stopped"
-    assert stop_events(server, pc.watcher_id) == ["Watcher stopped by user"]
+    assert stop_events(server, pc.watcher_id) == [pc.operator_stop_message]
 
 
 @pytest.mark.covers("process.stop->waiting_mode_clean_exit", "event.watcher_stopped->emitted")
@@ -122,7 +122,7 @@ def test_stopping_a_watcher_that_waits_for_its_folder(
     row = server.wait_for_watcher_status(pc.watcher_id, "stopped")
     assert row.status_reason is None
     assert server.heartbeats(pc.watcher_id)[-1].status == "stopped"
-    assert stop_events(server, pc.watcher_id) == ["Watcher stopped by user"]
+    assert stop_events(server, pc.watcher_id) == [pc.operator_stop_message]
 
 
 @pytest.mark.covers(
@@ -201,7 +201,7 @@ def test_a_stop_during_a_long_upload_defers_it_to_the_next_start(
     # in which case the next start's scan finds it.
     assert "RUN001/first.csv" in pending_uploads(pc)
     server.wait_for_watcher_status(pc.watcher_id, "stopped")
-    assert stop_events(server, pc.watcher_id) == ["Watcher stopped by user"]
+    assert stop_events(server, pc.watcher_id) == [pc.operator_stop_message]
 
     # The next start uploads both.
     proxy.clear_faults()
@@ -382,6 +382,7 @@ def test_a_watcher_started_again_after_a_kill_resumes_without_reporting_twice(
 
 @pytest.mark.xfail(
     strict=True,
+    raises=KnownBugStillPresent,
     reason=(
         "bug-07-stopped-heartbeat-before-event: the final `stopped` heartbeat reaches the "
         "server before the `watcher_stopped` event"
@@ -399,26 +400,27 @@ def test_the_stop_event_reaches_the_server_before_the_stopped_heartbeat(
     event = server.wait_for_event(pc.watcher_id, event_type="watcher_stopped")
     final = server.heartbeats(pc.watcher_id)[-1]
     assert final.status == "stopped"
-    assert event.created_at <= final.created_at, (
-        f"the watcher_stopped event was stored at {event.created_at}, after the stopped "
-        f"heartbeat at {final.created_at}"
-    )
+    with known_bug():
+        assert event.created_at <= final.created_at, (
+            f"the watcher_stopped event was stored at {event.created_at}, after the stopped "
+            f"heartbeat at {final.created_at}"
+        )
 
 
 @pytest.mark.xfail(
     strict=True,
+    raises=KnownBugStillPresent,
     reason=(
         "bug-09-sigterm-during-scan: a stop that arrives while the watcher is still starting "
         "(before its start-up scan ends) kills it with no stopped heartbeat and no stop event"
     ),
 )
+@pytest.mark.platforms("cli")  # The Windows service already stops cleanly while it starts.
 @pytest.mark.covers("process.stop->clean_stop_during_scan")
 def test_a_stop_during_start_up_still_ends_with_a_clean_stop(
     watcher: WatcherFactory, server: ServerView, proxy: FaultProxy
 ) -> None:
     pc = watcher()
-    if pc.platform != "linux":
-        pytest.skip("The Windows service already stops cleanly while it starts")
     # The first heartbeat is sent before the start-up scan, and a slow server holds it up.
     proxy.add_fault("delay", path=r"/heartbeat$", method="POST", delay_seconds=8, count=1)
 
@@ -432,6 +434,7 @@ def test_a_stop_during_start_up_still_ends_with_a_clean_stop(
     assert pc.is_running()
     pc.request_stop()
 
-    assert pc.wait_exit(30) == 0
-    server.wait_for_watcher_status(pc.watcher_id, "stopped")
-    server.wait_for_event(pc.watcher_id, event_type="watcher_stopped")
+    with known_bug():
+        assert pc.wait_exit(30) == 0
+        server.wait_for_watcher_status(pc.watcher_id, "stopped")
+        server.wait_for_event(pc.watcher_id, event_type="watcher_stopped")

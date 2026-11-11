@@ -1,11 +1,11 @@
 """The watcher updating itself, end to end.
 
-Each scenario that installs an upgrade runs on a ``uv tool install`` of its own
-(``private_install``), because the watcher reinstalls into the folder it runs from. The
-"newer" release is the current wheel rebuilt under a higher version (``bumped_wheel``), which
-the local package index serves in place of PyPI (``index_url=package_index.url``). Everything
-else the install needs still comes from PyPI, through uv's cache. A test that offers the newer
-release asks for ``bumped_wheel`` so that the wheel exists before the release is set.
+Each scenario that installs an upgrade runs on an install of its own
+(``watcher(own_install=True)``), because the watcher reinstalls into the folder it runs from.
+The "newer" release is the current wheel rebuilt under a higher version (``bumped_wheel``),
+which the local package index serves in place of PyPI (``index_url=package_index.url``).
+Everything else the install needs still comes from PyPI, through uv's cache. A test that offers
+the newer release asks for ``bumped_wheel`` so that the wheel exists before the release is set.
 
 What is driven and what is checked:
 
@@ -14,17 +14,17 @@ What is driven and what is checked:
   the idle-tick overrides, so a scenario takes seconds, and are shown by the server's own
   heartbeats and events, not by sleeping.
 * An install is proved by what the index was asked for (``package_index.requested_paths``),
-  by ``data-hub-watcher --version`` of the install, and by the version the restarted watcher
-  heartbeats with.
-* After the install the in-process updater makes ``watch`` exit with code 1 so that a
-  supervisor starts it again. The driver plays that supervisor (``restart()``), see
-  ``upgrade_restart``. The Windows service goes through the upgrade worker instead, which
-  stops and starts the service itself, so the service driver will need its own version of
-  that one helper.
+  by ``driver.installed_version()`` (``data-hub-watcher --version`` of the install), and by
+  the version the restarted watcher heartbeats with.
+* How the watcher comes back after an install differs by driver, so a scenario asks for
+  ``driver.await_upgrade_restart(timeout)``: the CLI process exits with code 1 and the driver
+  starts it again, and under the service the upgrade worker stops, installs and starts it. The
+  exit code 1 and the "restarting for auto-update" event belong to the CLI alone, and the one
+  scenario that checks them is marked ``platforms("cli")``, like the other ones about the
+  in-process install.
 """
 
 from __future__ import annotations
-from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -34,17 +34,13 @@ from data_hub_shared.testing_proxy import FaultProxy, RecordedRequest
 from data_hub_watcher import testing_overrides
 from data_hub_watcher.updater import UPGRADE_MARKER_FILENAME
 from e2e_support.admin import Admin
-from e2e_support.drivers import ToolInstall, WatcherDriver
+from e2e_support.drivers import WatcherDriver
 from e2e_support.factory import WatcherFactory
 from e2e_support.files import SMALL, write_file, write_run
 from e2e_support.server import HeartbeatRow, ServerView, WatcherRow
 from e2e_support.waiting import wait_until
 
 pytestmark = pytest.mark.e2e
-
-# The `private_install` fixture: `private_install()` installs the current wheel,
-# `private_install(bumped_wheel)` another one.
-PrivateInstall = Callable[..., ToolInstall]
 
 # A `uv tool install --reinstall` re-reads the metadata of every dependency from PyPI, which
 # takes seconds on a good connection and longer on a bad one.
@@ -84,17 +80,6 @@ def wait_for_wheel_request(index: LocalPackageIndex, version: str) -> None:
 def upgrade_marker(pc: WatcherDriver) -> Path:
     """The file the updater writes before it installs and the next start reads and removes."""
     return pc.config_dir() / UPGRADE_MARKER_FILENAME
-
-
-def upgrade_restart(pc: WatcherDriver) -> None:
-    """Carry an update through its restart: once the new version is installed the watcher
-    exits with code 1, and the driver, standing in for its supervisor, starts it again.
-
-    This is the one step that differs on the Windows service, where the upgrade worker
-    stops and starts the service itself.
-    """
-    assert pc.wait_exit(timeout=INSTALL_TIMEOUT) == 1, pc.log_tail()
-    pc.restart()
 
 
 def wait_for_watching_on(server: ServerView, pc: WatcherDriver, version: str) -> WatcherRow:
@@ -174,7 +159,6 @@ def assert_no_update_attempted(
 
 @pytest.mark.covers(
     "selfupdate.mandatory->started",
-    "selfupdate.installed->exit_for_restart",
     "selfupdate.restart->succeeded",
     "event.update_started->emitted",
     "event.update_succeeded->emitted",
@@ -185,25 +169,23 @@ def test_mandatory_release_installs_and_restarts_into_the_new_version(
     server: ServerView,
     admin: Admin,
     package_index: LocalPackageIndex,
-    private_install: PrivateInstall,
     bumped_wheel: Path,
     bumped_version: str,
     current_version: str,
     watch_dir: Path,
     instrument_id: str,
 ) -> None:
-    install = private_install()
     # With 50 quiet heartbeats required (100 s), a gate that applied would hold the update
     # for far longer than the waits below.
     pc = watcher(
-        tool_install=install,
+        own_install=True,
         index_url=package_index.url,
         overrides={**CHECK_EVERY_HEARTBEAT, **idle_ticks(50)},
     )
     package_index.clear_requested_paths()
     pc.start()
     server.wait_for_watcher_status(pc.watcher_id, "watching")
-    assert install.version() == current_version
+    assert pc.installed_version() == current_version
     assert server.watcher(pc.watcher_id).watcher_version == current_version
 
     # The instrument has just finished a run, so a non-mandatory release would have to wait.
@@ -223,16 +205,15 @@ def test_mandatory_release_installs_and_restarts_into_the_new_version(
     assert any(p.startswith("/simple/data-hub-watcher/") for p in package_index.requested_paths)
     assert upgrade_marker(pc).exists()
 
-    # Installed: the watcher stops with exit code 1 and says why, and the server sees it stop.
-    assert pc.wait_exit(timeout=INSTALL_TIMEOUT) == 1, pc.log_tail()
-    stopped = server.wait_for_event(pc.watcher_id, event_type="watcher_stopped")
-    assert "restarting for auto-update" in stopped.message
-    server.wait_for_watcher_status(pc.watcher_id, "stopped")
-    assert install.version() == bumped_version
-    assert server.watcher(pc.watcher_id).watcher_version == current_version  # not restarted yet
+    # Installed, and the watcher is started again. The server saw it stop first.
+    pc.await_upgrade_restart(INSTALL_TIMEOUT)
+    stopped = server.wait_for_event(
+        pc.watcher_id, event_type="watcher_stopped", message_contains=pc.update_stop_message
+    )
+    assert stopped.message == pc.update_stop_message
+    assert pc.installed_version() == bumped_version
 
-    # The supervisor starts it again, and it is on the new version.
-    pc.restart()
+    # And it is on the new version.
     succeeded = server.wait_for_event(pc.watcher_id, event_type="update_succeeded")
     assert succeeded.details["previous_version"] == current_version
     assert succeeded.details["target_version"] == bumped_version
@@ -249,21 +230,55 @@ def test_mandatory_release_installs_and_restarts_into_the_new_version(
     assert pc.is_running()
 
 
+@pytest.mark.platforms("cli")  # Under the service, the upgrade worker stops it instead.
+@pytest.mark.covers("selfupdate.installed->exit_for_restart", "event.watcher_stopped->emitted")
+def test_an_installed_update_ends_the_process_with_exit_code_one_for_its_supervisor(
+    watcher: WatcherFactory,
+    server: ServerView,
+    admin: Admin,
+    package_index: LocalPackageIndex,
+    bumped_wheel: Path,
+    bumped_version: str,
+    current_version: str,
+) -> None:
+    pc = watcher(own_install=True, index_url=package_index.url, overrides=CHECK_EVERY_HEARTBEAT)
+    package_index.clear_requested_paths()
+    pc.start()
+    server.wait_for_watcher_status(pc.watcher_id, "watching")
+
+    admin.set_release(bumped_version, mandatory=True).raise_for_status()
+    server.wait_for_event(pc.watcher_id, event_type="update_started")
+    wait_for_wheel_request(package_index, bumped_version)
+
+    # Installed: the watcher stops with exit code 1 and says why, and the server sees it stop.
+    assert pc.wait_exit(timeout=INSTALL_TIMEOUT) == 1, pc.log_tail()
+    stopped = server.wait_for_event(pc.watcher_id, event_type="watcher_stopped")
+    assert stopped.message == pc.update_stop_message
+    assert "restarting for auto-update" in stopped.message
+    server.wait_for_watcher_status(pc.watcher_id, "stopped")
+    assert pc.installed_version() == bumped_version
+    assert server.watcher(pc.watcher_id).watcher_version == current_version  # not restarted yet
+    assert not pc.is_running()
+
+
 @pytest.mark.covers("selfupdate.mandatory->rollback_installed")
 def test_mandatory_release_older_than_the_running_version_rolls_back(
     watcher: WatcherFactory,
     server: ServerView,
     admin: Admin,
     package_index: LocalPackageIndex,
-    private_install: PrivateInstall,
     bumped_wheel: Path,
     bumped_version: str,
     current_version: str,
 ) -> None:
     # A PC running the newer build, and an admin who pulls the release back to the older one.
-    install = private_install(bumped_wheel)
-    assert install.version() == bumped_version
-    pc = watcher(tool_install=install, index_url=package_index.url, overrides=CHECK_EVERY_HEARTBEAT)
+    pc = watcher(
+        own_install=True,
+        wheel=bumped_wheel,
+        index_url=package_index.url,
+        overrides=CHECK_EVERY_HEARTBEAT,
+    )
+    assert pc.installed_version() == bumped_version
     package_index.clear_requested_paths()
     pc.start()
     wait_for_watching_on(server, pc, bumped_version)
@@ -274,11 +289,11 @@ def test_mandatory_release_older_than_the_running_version_rolls_back(
     assert started.details["current_version"] == bumped_version
     assert started.details["target_version"] == current_version
     wait_for_wheel_request(package_index, current_version)
-    upgrade_restart(pc)
+    pc.await_upgrade_restart(INSTALL_TIMEOUT)
 
     server.wait_for_event(pc.watcher_id, event_type="update_succeeded")
     wait_for_watching_on(server, pc, current_version)
-    assert install.version() == current_version
+    assert pc.installed_version() == current_version
     assert not any(
         p.startswith(wheel_request_prefix(bumped_version)) for p in package_index.requested_paths
     )
@@ -291,7 +306,6 @@ def test_watcher_below_the_minimum_version_updates_and_heartbeats_again(
     admin: Admin,
     proxy: FaultProxy,
     package_index: LocalPackageIndex,
-    private_install: PrivateInstall,
     bumped_wheel: Path,
     bumped_version: str,
     current_version: str,
@@ -300,8 +314,7 @@ def test_watcher_below_the_minimum_version_updates_and_heartbeats_again(
     admin.set_release(
         bumped_version, min_supported_version=bumped_version, mandatory=True
     ).raise_for_status()
-    install = private_install()
-    pc = watcher(tool_install=install, index_url=package_index.url, overrides=CHECK_EVERY_HEARTBEAT)
+    pc = watcher(own_install=True, index_url=package_index.url, overrides=CHECK_EVERY_HEARTBEAT)
     package_index.clear_requested_paths()
     pc.start()
 
@@ -323,7 +336,7 @@ def test_watcher_below_the_minimum_version_updates_and_heartbeats_again(
 
     server.wait_for_event(pc.watcher_id, event_type="update_started")
     wait_for_wheel_request(package_index, bumped_version)
-    upgrade_restart(pc)
+    pc.await_upgrade_restart(INSTALL_TIMEOUT)
 
     # On the new version it is accepted again.
     server.wait_for_event(pc.watcher_id, event_type="update_succeeded")
@@ -332,7 +345,7 @@ def test_watcher_below_the_minimum_version_updates_and_heartbeats_again(
     refused = len(refusals())
     server.wait_for_heartbeats(pc.watcher_id, count=2)
     assert len(refusals()) == refused
-    assert install.version() == bumped_version
+    assert pc.installed_version() == bumped_version
 
 
 # ---------------------------------------------------------------------------
@@ -349,7 +362,6 @@ def test_non_mandatory_release_waits_for_quiet_uploads_then_installs(
     server: ServerView,
     admin: Admin,
     package_index: LocalPackageIndex,
-    private_install: PrivateInstall,
     bumped_wheel: Path,
     bumped_version: str,
     current_version: str,
@@ -357,9 +369,8 @@ def test_non_mandatory_release_waits_for_quiet_uploads_then_installs(
     instrument_id: str,
 ) -> None:
     quiet_needed = 4
-    install = private_install()
     pc = watcher(
-        tool_install=install,
+        own_install=True,
         index_url=package_index.url,
         overrides={**CHECK_EVERY_HEARTBEAT, **idle_ticks(quiet_needed)},
     )
@@ -399,10 +410,10 @@ def test_non_mandatory_release_waits_for_quiet_uploads_then_installs(
     )
 
     wait_for_wheel_request(package_index, bumped_version)
-    upgrade_restart(pc)
+    pc.await_upgrade_restart(INSTALL_TIMEOUT)
     server.wait_for_event(pc.watcher_id, event_type="update_succeeded")
     wait_for_watching_on(server, pc, bumped_version)
-    assert install.version() == bumped_version
+    assert pc.installed_version() == bumped_version
 
 
 @pytest.mark.covers("selfupdate.run_gate->waits_for_quiet_runs")
@@ -411,7 +422,6 @@ def test_non_mandatory_release_waits_for_a_quiet_instrument_after_a_new_run(
     server: ServerView,
     admin: Admin,
     package_index: LocalPackageIndex,
-    private_install: PrivateInstall,
     bumped_wheel: Path,
     bumped_version: str,
     watch_dir: Path,
@@ -419,12 +429,11 @@ def test_non_mandatory_release_waits_for_a_quiet_instrument_after_a_new_run(
 ) -> None:
     stability_seconds = 3
     quiet_seconds = 5 * stability_seconds  # what the watcher requires since the last new run
-    install = private_install()
     # Manual uploads: nothing is ever uploaded, so only the run gate can hold the update.
     pc = watcher(
         upload_mode="manual",
         stability_period_seconds=stability_seconds,
-        tool_install=install,
+        own_install=True,
         index_url=package_index.url,
         overrides={**CHECK_EVERY_HEARTBEAT, **idle_ticks(1)},
     )
@@ -453,8 +462,8 @@ def test_non_mandatory_release_waits_for_a_quiet_instrument_after_a_new_run(
         f"the update started {waited:.1f} s after the run, it should wait {quiet_seconds} s"
     )
     wait_for_wheel_request(package_index, bumped_version)
-    assert pc.wait_exit(timeout=INSTALL_TIMEOUT) == 1, pc.log_tail()
-    assert install.version() == bumped_version
+    pc.await_upgrade_restart(INSTALL_TIMEOUT)
+    assert pc.installed_version() == bumped_version
 
 
 # ---------------------------------------------------------------------------
@@ -509,6 +518,7 @@ def test_no_update_when_the_server_has_no_release(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.platforms("cli")  # Under the service the upgrade worker runs the install.
 @pytest.mark.covers(
     "selfupdate.install_failed->update_failed",
     "event.update_failed->emitted",
@@ -519,14 +529,12 @@ def test_failed_install_is_reported_and_the_watcher_keeps_running_until_it_can_r
     server: ServerView,
     admin: Admin,
     package_index: LocalPackageIndex,
-    private_install: PrivateInstall,
     bumped_wheel: Path,
     bumped_version: str,
     current_version: str,
 ) -> None:
-    install = private_install()
     pc = watcher(
-        tool_install=install,
+        own_install=True,
         index_url=package_index.url,
         overrides={testing_overrides.UPDATE_CHECK_INTERVAL_TICKS_ENV_VAR: "3"},
     )
@@ -551,7 +559,7 @@ def test_failed_install_is_reported_and_the_watcher_keeps_running_until_it_can_r
     # It is still the old version and still running, and the marker is gone, so the next
     # start does not report a second failure.
     assert pc.is_running()
-    assert install.version() == current_version
+    assert pc.installed_version() == current_version
     assert not upgrade_marker(pc).exists()
     server.wait_for_heartbeats(
         pc.watcher_id, count=2, after_id=server.last_heartbeat_id(pc.watcher_id)
@@ -561,10 +569,10 @@ def test_failed_install_is_reported_and_the_watcher_keeps_running_until_it_can_r
 
     # The failure is not final: when the index works again the next check installs it.
     package_index.clear_unavailable()
-    upgrade_restart(pc)
+    pc.await_upgrade_restart(INSTALL_TIMEOUT)
     server.wait_for_event(pc.watcher_id, event_type="update_succeeded")
     wait_for_watching_on(server, pc, bumped_version)
-    assert install.version() == bumped_version
+    assert pc.installed_version() == bumped_version
 
 
 @pytest.mark.covers("selfupdate.uv_missing->update_failed", "event.update_failed->emitted")
@@ -573,22 +581,14 @@ def test_update_fails_with_a_clear_reason_when_uv_cannot_be_found(
     server: ServerView,
     admin: Admin,
     package_index: LocalPackageIndex,
-    private_install: PrivateInstall,
     bumped_wheel: Path,
     bumped_version: str,
     current_version: str,
-    tmp_path: Path,
 ) -> None:
-    install = private_install()
-    # The watcher looks for `uv` on its PATH (and in a few places under its home), so a PATH
-    # that holds nothing hides it. The env file is what both drivers load into the process.
-    nowhere = tmp_path / "empty-path"
-    nowhere.mkdir()
-    pc = watcher(
-        tool_install=install,
-        index_url=package_index.url,
-        overrides={**CHECK_EVERY_HEARTBEAT, "PATH": str(nowhere)},
-    )
+    pc = watcher(own_install=True, index_url=package_index.url, overrides=CHECK_EVERY_HEARTBEAT)
+    # The watcher looks for `uv` on its PATH (and in a few places under its home): the driver
+    # makes every one of them empty.
+    pc.hide_uv()
     package_index.clear_requested_paths()
     pc.start()
     server.wait_for_watcher_status(pc.watcher_id, "watching")
@@ -606,7 +606,7 @@ def test_update_fails_with_a_clear_reason_when_uv_cannot_be_found(
     assert "update_started" not in update_events(server, pc)
     assert package_index.requested_paths == []
     assert pc.is_running()
-    assert install.version() == current_version
+    assert pc.installed_version() == current_version
     assert not upgrade_marker(pc).exists()
     server.wait_for_heartbeats(
         pc.watcher_id, count=2, after_id=server.last_heartbeat_id(pc.watcher_id)
@@ -674,7 +674,6 @@ def test_self_update_check_reports_the_target_and_installs_nothing(
     watcher: WatcherFactory,
     admin: Admin,
     package_index: LocalPackageIndex,
-    tool_install: ToolInstall,
     bumped_version: str,
     current_version: str,
 ) -> None:
@@ -707,22 +706,21 @@ def test_self_update_check_reports_the_target_and_installs_nothing(
 
     # Checking changes nothing.
     assert package_index.requested_paths == []
-    assert tool_install.version() == current_version
+    assert pc.installed_version() == current_version
 
 
+@pytest.mark.platforms("cli")  # Under the service `self-update` hands the install to the worker.
 @pytest.mark.covers("selfupdate.cli_install->installed")
 def test_self_update_installs_the_advertised_version_for_the_next_start(
     watcher: WatcherFactory,
     server: ServerView,
     admin: Admin,
     package_index: LocalPackageIndex,
-    private_install: PrivateInstall,
     bumped_wheel: Path,
     bumped_version: str,
     current_version: str,
 ) -> None:
-    install = private_install()
-    pc = watcher(tool_install=install, index_url=package_index.url)
+    pc = watcher(own_install=True, index_url=package_index.url)
     package_index.clear_requested_paths()
     admin.set_release(bumped_version).raise_for_status()
 
@@ -732,7 +730,7 @@ def test_self_update_installs_the_advertised_version_for_the_next_start(
     assert f"Upgrade to {bumped_version} complete" in result.stdout
     assert "Restart the watcher" in result.stdout
     wait_for_wheel_request(package_index, bumped_version)
-    assert install.version() == bumped_version
+    assert pc.installed_version() == bumped_version
 
     # The operator starts the watcher, and it is the new version.
     pc.start()

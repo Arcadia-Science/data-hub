@@ -20,7 +20,7 @@ from e2e_support.admin import Admin
 from e2e_support.factory import WatcherFactory
 from e2e_support.files import SMALL, write_run
 from e2e_support.server import HeartbeatRow, ServerView
-from e2e_support.waiting import stays_true, wait_until
+from e2e_support.waiting import KnownBugStillPresent, known_bug, stays_true, wait_until
 
 pytestmark = pytest.mark.e2e
 
@@ -161,6 +161,7 @@ def test_graceful_stop_shows_stopped_and_starting_again_shows_watching(
 @pytest.mark.covers("watcher.stopped->stays_stopped")
 @pytest.mark.xfail(
     strict=True,
+    raises=KnownBugStillPresent,
     reason=(
         "bug-new-stopped-reads-stale: a cleanly stopped watcher reads `stale` five minutes "
         "after its last heartbeat, although the docs list Stopped as a status of its own"
@@ -181,7 +182,8 @@ def test_a_cleanly_stopped_watcher_keeps_reading_stopped(
     # in its last heartbeat", and Unresponsive means "the process crashed, the PC is off, or
     # the network is blocking the API". A clean stop is neither of those a few minutes on.
     server.age_past_stale(pc.watcher_id)
-    assert server.effective_status(pc.watcher_id) == "stopped"
+    with known_bug():
+        assert server.effective_status(pc.watcher_id) == "stopped"
 
 
 # ---------------------------------------------------------------------------
@@ -318,6 +320,7 @@ def test_heartbeats_report_what_happened_since_the_last_one_and_start_again_from
 @pytest.mark.covers("heartbeat.failed->counts_carried")
 @pytest.mark.xfail(
     strict=True,
+    raises=KnownBugStillPresent,
     reason=(
         "bug-03-failed-heartbeat-counts-lost: the counters are reset after a heartbeat that "
         "failed to send, so the next successful one reports zero for that interval"
@@ -347,13 +350,15 @@ def test_counts_from_a_heartbeat_that_failed_are_carried_into_the_next_one(
     beats = server.heartbeats(pc.watcher_id)
     # Intended: the upload and the run report were not lost with the failed heartbeats, so
     # they reach the server with the first heartbeat that gets through.
-    assert_total(beats, "files_uploaded_since_last", 1)
-    assert_total(beats, "runs_reported_since_last", 1)
+    with known_bug():
+        assert_total(beats, "files_uploaded_since_last", 1)
+        assert_total(beats, "runs_reported_since_last", 1)
 
 
 @pytest.mark.covers("heartbeat.in_flight->counts_kept")
 @pytest.mark.xfail(
     strict=True,
+    raises=KnownBugStillPresent,
     reason=(
         "bug-new-counts-lost-during-heartbeat: the counters are reset after the heartbeat "
         "request returns, so a count added while it is in flight is never reported"
@@ -387,8 +392,9 @@ def test_counts_added_while_a_heartbeat_is_being_sent_are_reported_in_the_next_o
 
     beats = server.heartbeats(pc.watcher_id)
     # Intended: every count reaches the server in exactly one heartbeat.
-    assert_total(beats, "files_uploaded_since_last", 1)
-    assert_total(beats, "runs_reported_since_last", 1)
+    with known_bug():
+        assert_total(beats, "files_uploaded_since_last", 1)
+        assert_total(beats, "runs_reported_since_last", 1)
 
 
 # ---------------------------------------------------------------------------

@@ -3,8 +3,8 @@
 ``init`` is the real wizard with its answers piped in. ``watch`` runs through the driver, so a
 refused start is a process that exits with a message, and the server's view (the watcher row,
 its heartbeats and events) says what the watcher did. Nothing here sends a signal. The one
-POSIX-only scenario (a folder with no permissions) skips itself on other drivers, so the same
-file can run against the Windows service driver later.
+POSIX-only scenario (a folder with no permissions) is marked ``platforms("cli")``, so the same
+file can run against the Windows service driver.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from e2e_support.drivers import InitAnswers, NewInstrument, RunDetection, Watche
 from e2e_support.factory import WatcherFactory
 from e2e_support.files import SMALL, write_run
 from e2e_support.server import ServerView
-from e2e_support.waiting import stays_true
+from e2e_support.waiting import KnownBugStillPresent, known_bug, stays_true
 
 pytestmark = pytest.mark.e2e
 
@@ -75,14 +75,6 @@ def refused_start(pc: WatcherDriver) -> str:
     exit_code = pc.wait_exit(20)
     assert exit_code != 0, f"the watcher exited with 0.\n{pc.log_text()}"
     return pc.log_text()
-
-
-def can_list(folder: Path) -> bool:
-    try:
-        next(folder.iterdir(), None)
-    except PermissionError:
-        return False
-    return True
 
 
 def wait_for_status_reason(
@@ -324,7 +316,7 @@ def test_start_syncs_the_config_and_reports_watching(
     first = server.heartbeats(pc.watcher_id)[0]
     assert (first.status, first.upload_mode) == ("watching", "auto")
     started = server.wait_for_event(pc.watcher_id, event_type="watcher_started")
-    assert started.message.startswith("Watcher started on ")
+    assert started.message.startswith(pc.started_prefix)
     synced = server.wait_for_event(pc.watcher_id, event_type="config_synced")
     assert synced.details["trigger"] == "startup"
 
@@ -500,7 +492,7 @@ def test_a_missing_watch_folder_waits_and_resumes_when_it_appears(
     assert server.effective_status(pc.watcher_id) == "waiting"
     assert pc.is_running()
     started = server.wait_for_event(pc.watcher_id, event_type="watcher_started")
-    assert started.message.startswith("Watcher started on ")
+    assert started.message.startswith(pc.started_prefix)
     unavailable = server.wait_for_event(
         pc.watcher_id, event_type="error", kind="watch_directory_unavailable"
     )
@@ -517,42 +509,33 @@ def test_a_missing_watch_folder_waits_and_resumes_when_it_appears(
     resumed = server.wait_for_event(
         pc.watcher_id, event_type="watcher_started", after_id=last_event
     )
-    assert resumed.message.startswith("Watcher resumed on ")
+    assert resumed.message.startswith(pc.resumed_prefix)
 
     # It is really watching: a run written now is reported and uploaded.
     written = write_run(folder, "RUN001", {"a.csv": SMALL})
     server.wait_for_uploaded(instrument_id, "RUN001", "RUN001/a.csv", content=written["a.csv"])
 
 
+@pytest.mark.platforms("cli")  # A folder with no permissions is a POSIX setup.
 @pytest.mark.covers(
     "startup.watching->waiting_folder_unreadable",
     "event.watch_directory_unavailable->emitted",
 )
 def test_a_watch_folder_that_cannot_be_listed_waits_with_that_reason(
-    watcher: WatcherFactory, server: ServerView, tmp_path: Path
+    watcher: WatcherFactory, server: ServerView, unreadable_folder: Path
 ) -> None:
-    locked = tmp_path / "locked"
-    locked.mkdir()
-    pc = watcher(watch_dir=locked, create_watch_dir=False)
-    if pc.platform != "linux":
-        pytest.skip("A folder with no permissions is a POSIX setup")
-    locked.chmod(0o000)
-    try:
-        if can_list(locked):
-            pytest.skip("This user can list a folder with no permissions (root)")
+    pc = watcher(watch_dir=unreadable_folder, create_watch_dir=False)
 
-        pc.start()
+    pc.start()
 
-        row = server.wait_for_watcher_status(pc.watcher_id, "waiting")
-        assert row.status_reason is not None
-        assert row.status_reason.startswith("watch_directory is not readable")
-        assert str(locked) in row.status_reason
-        unavailable = server.wait_for_event(
-            pc.watcher_id, event_type="error", kind="watch_directory_unavailable"
-        )
-        assert unavailable.details["reason"] == row.status_reason
-    finally:
-        locked.chmod(0o700)
+    row = server.wait_for_watcher_status(pc.watcher_id, "waiting")
+    assert row.status_reason is not None
+    assert row.status_reason.startswith("watch_directory is not readable")
+    assert str(unreadable_folder) in row.status_reason
+    unavailable = server.wait_for_event(
+        pc.watcher_id, event_type="error", kind="watch_directory_unavailable"
+    )
+    assert unavailable.details["reason"] == row.status_reason
 
 
 @pytest.mark.covers("waiting.reason->changed", "event.watch_directory_unavailable->emitted")
@@ -637,11 +620,12 @@ def test_a_start_that_keeps_failing_backs_off_and_then_succeeds(
     row = server.wait_for_watcher_status(pc.watcher_id, "watching", timeout=60)
     assert row.status_reason is None
     resumed = server.wait_for_events(pc.watcher_id, count=2, event_type="watcher_started")
-    assert resumed[-1].message.startswith("Watcher resumed on ")
+    assert resumed[-1].message.startswith(pc.resumed_prefix)
 
 
 @pytest.mark.xfail(
     strict=True,
+    raises=KnownBugStillPresent,
     reason=(
         "bug-01-folder-vanishes: a watch folder that disappears while the watcher runs "
         "leaves it reporting `watching` instead of `waiting`"
@@ -659,9 +643,10 @@ def test_a_watch_folder_that_vanishes_puts_the_watcher_back_to_waiting(
     # The folder goes away while the watcher runs, as when a network drive drops.
     shutil.rmtree(folder)
 
-    row = server.wait_for_watcher_status(pc.watcher_id, "waiting", timeout=12)
-    assert row.status_reason is not None
-    assert row.status_reason.startswith("watch_directory not found")
+    with known_bug():
+        row = server.wait_for_watcher_status(pc.watcher_id, "waiting", timeout=12)
+        assert row.status_reason is not None
+        assert row.status_reason.startswith("watch_directory not found")
 
     # And it picks up again when the folder comes back.
     folder.mkdir()

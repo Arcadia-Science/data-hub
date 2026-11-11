@@ -13,11 +13,14 @@ Session (built once, shared):
   wheel built from this checkout (or ``$DATA_HUB_E2E_WHEEL``, which the release workflow sets
   to the wheel it is about to publish), and a "next" wheel with a higher version, built when
   a test asks for it.
+* ``driver_class``: the kind of driver the run uses (``$DATA_HUB_E2E_DRIVER``: ``cli``, the
+  default, or ``service``, which PR 3 adds).
 * ``tool_install``: ``uv tool install --python 3.12`` of the current wheel, in a folder whose
   path contains ``/uv/tools/data-hub-watcher``, so the watcher recognises it as a uv-tool
-  install. Tests share it, so no test may update it: one that updates the watcher asks for
-  ``private_install``.
-* ``package_index``: a local package index with both wheels, for self-update.
+  install. Tests share it, so no test may update it: one that updates the watcher asks the
+  ``watcher`` fixture for ``own_install=True``.
+* ``package_index``: a local package index serving the wheels in ``wheel_dir``: the current
+  one, and the bumped one once a test has asked for ``bumped_wheel``. For self-update.
 
 Per test:
 
@@ -26,7 +29,13 @@ Per test:
 * ``server``: a ``ServerView``.
 * ``watch_dir``: an empty watch folder.
 * ``watcher``: a factory for configured ``WatcherDriver`` objects. See ``WatcherFactory``.
-* ``private_install``: a factory for a ``uv tool`` install of its own.
+* ``private_install``: what ``watcher(own_install=True)`` uses for a ``uv tool`` install of
+  the test's own. A scenario doesn't ask for it: that would tie it to one kind of driver.
+* ``unreadable_folder``: a folder this user can't list, for the one scenario about it.
+
+A test that is only for one kind of driver is marked ``@pytest.mark.platforms("cli")`` (or
+``"service"``). The ``pytest_runtest_setup`` hook below skips it under the other kind, and the
+catalog check reads the marker, so the skip is never hidden from it.
 
 The watcher tables are emptied before each test. When a test fails, its logs, state database
 and server logs are copied to ``$DATA_HUB_E2E_ARTIFACTS/<test id>/``.
@@ -63,8 +72,15 @@ from data_hub_shared.testing_wheels import (
 )
 from e2e_support.admin import ADMIN_REVISION_SCOPES, WATCHER_SCOPES, Admin
 from e2e_support.artifacts import artifacts_root, collect_failure_artifacts, safe_name
-from e2e_support.drivers import ToolInstall, install_watcher_tool
+from e2e_support.drivers import (
+    ToolInstall,
+    WatcherDriver,
+    active_driver_kind,
+    driver_class_for,
+    install_watcher_tool,
+)
 from e2e_support.factory import E2EContext, WatcherFactory
+from e2e_support.platforms import platforms_skip_reason
 from e2e_support.server import ServerView
 
 WHEEL_VARIABLE = "DATA_HUB_E2E_WHEEL"
@@ -89,7 +105,72 @@ _RESET_TABLES = [
 
 
 def pytest_report_header(config: pytest.Config) -> list[str]:
-    return [f"e2e failure artifacts: {artifacts_root()}"]
+    return [
+        f"e2e driver: {active_driver_kind()}",
+        f"e2e failure artifacts: {artifacts_root()}",
+    ]
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_setup(item: Item) -> None:
+    """Skip a test whose ``platforms`` marker leaves out the kind of driver this run uses.
+
+    It runs before the fixtures, so a skipped test starts nothing. The closest marker wins
+    (function, then class, then module), which is what the catalog check assumes too. This is
+    the only skip the suite uses: the check refuses ``pytest.skip`` in the tests.
+    """
+    marker = item.get_closest_marker("platforms")
+    reason = platforms_skip_reason(
+        None if marker is None else marker.args, item.path.name, active_driver_kind()
+    )
+    if reason is not None:
+        pytest.skip(reason)
+
+
+class _Running:
+    """The test that is running, for ``pytest_keyboard_interrupt``, which is not given one."""
+
+    item: Item | None = None
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_protocol(item: Item, nextitem: Item | None) -> Iterator[None]:
+    _Running.item = item
+    result = yield
+    # Only a test that finished leaves the slot. An interrupt that ends the run passes through
+    # here as an exception, and `pytest_keyboard_interrupt` then still knows what was running.
+    _Running.item = None
+    return result  # type: ignore[return-value]
+
+
+def pytest_keyboard_interrupt(excinfo: pytest.ExceptionInfo[BaseException]) -> None:
+    """Keep the files of the test that was running when the run was interrupted.
+
+    CI cancels a run (a person, or a timeout above the step) by interrupting pytest. Nothing
+    has failed, so the usual collection at the end of a failed test doesn't happen, and the
+    interrupted test is the one whose files explain a hang. This runs before the fixtures are
+    torn down, so the watchers are still running and their logs are as they were.
+    """
+    item = _Running.item
+    if item is None:
+        return
+    funcargs = getattr(item, "funcargs", {})
+    context = funcargs.get("e2e_context")
+    env = funcargs.get("integration_env")
+    if not isinstance(context, E2EContext) or not isinstance(env, IntegrationEnv):
+        return
+    destination = artifacts_root() / safe_name(item.nodeid)
+    context.snapshot_server_views()
+    collect_failure_artifacts(
+        destination,
+        env=env,
+        server_log_offset=context.server_log_offset,
+        drivers=context.drivers,
+        proxy=context.proxy,
+        server=context.server,
+        server_views=context.server_views,
+    )
+    print(f"\ne2e artifacts of the interrupted test {item.nodeid}: {destination}")
 
 
 @pytest.hookimpl(wrapper=True)
@@ -191,11 +272,20 @@ def bumped_wheel(wheel_dir: Path, bumped_version: str) -> Path:
 
 
 @pytest.fixture(scope="session")
+def driver_class() -> type[WatcherDriver]:
+    """The driver class of this run, from ``$DATA_HUB_E2E_DRIVER`` (``cli`` unless set).
+
+    ``service`` raises ``NotImplementedError`` until the Windows service driver (PR 3) exists.
+    """
+    return driver_class_for(active_driver_kind())
+
+
+@pytest.fixture(scope="session")
 def tool_install(tmp_path_factory: pytest.TempPathFactory, current_wheel: Path) -> ToolInstall:
     """The shared ``uv tool install`` of the current wheel on Python 3.12.
 
     The watcher installs updates into the folder it runs from, so a test that updates must
-    not use this one: ask for ``private_install``.
+    not use this one: it asks the ``watcher`` fixture for ``own_install=True``.
     """
     return install_watcher_tool(tmp_path_factory.mktemp("shared-install"), current_wheel)
 
@@ -208,9 +298,13 @@ def _package_index(wheel_dir: Path, current_wheel: Path) -> Iterator[LocalPackag
 
 @pytest.fixture
 def package_index(_package_index: LocalPackageIndex) -> Iterator[LocalPackageIndex]:
-    """A local package index serving the wheels of ``wheel_dir`` (the current one, and the
-    bumped one once ``bumped_wheel`` is requested). Pass ``package_index.url`` to the watcher
-    with ``watcher(index_url=...)``. Failure switches are cleared after each test."""
+    """A local package index serving the wheels of ``wheel_dir``: the current one, and the
+    bumped one once a test has asked for ``bumped_wheel`` (the session builds it then, so it is
+    in the index from that point on, for the tests after it too). Pass ``package_index.url``
+    to the watcher with ``watcher(index_url=...)``. Each test starts with an empty request log
+    and no failure switches, and the switches are cleared again after it."""
+    _package_index.clear_requested_paths()
+    _package_index.clear_unavailable()
     yield _package_index
     _package_index.clear_unavailable()
 
@@ -312,11 +406,14 @@ def watch_dir(tmp_path: Path) -> Path:
 @pytest.fixture
 def private_install(
     tmp_path_factory: pytest.TempPathFactory, current_wheel: Path
-) -> Callable[..., ToolInstall]:
-    """A factory for a ``uv tool install`` of this test's own, for a scenario that updates the
-    watcher. ``private_install()`` installs the current wheel,
-    ``private_install(bumped_wheel)`` another one. Pass the result as ``tool_install=`` to
-    ``watcher(...)``."""
+) -> Callable[[Path | None], ToolInstall]:
+    """A factory for a ``uv tool install`` of this test's own: ``private_install()`` installs
+    the current wheel, ``private_install(bumped_wheel)`` another one.
+
+    It is what ``watcher(own_install=True, wheel=...)`` uses, and nothing else should ask for
+    it: a scenario that did would be written for the CLI driver alone, because under the
+    service there is one install for the machine.
+    """
 
     def make(wheel: Path | None = None, *, python: str = "3.12") -> ToolInstall:
         return install_watcher_tool(
@@ -327,6 +424,43 @@ def private_install(
 
 
 @pytest.fixture
+def unreadable_folder(tmp_path: Path) -> Iterator[Path]:
+    """A folder that this user can't list (mode 000), for the one scenario about it.
+
+    Root, and a user with a capability such as ``CAP_DAC_OVERRIDE``, can list it anyway, and
+    then the scenario can't run. That is a skip on a developer's machine and a failure on CI
+    (where ``$CI`` is set). The catalog check reads the test files and never sees a skip like
+    this, so the scenario stays counted as covered whatever a local run does. A quiet skip
+    on CI would make that count false without anybody noticing, so there it fails and says
+    why. This is a fixture, not a ``pytest.skip`` in the test, because the check refuses those.
+    """
+    folder = tmp_path / "locked"
+    folder.mkdir()
+    folder.chmod(0o000)
+    try:
+        if _can_list(folder):
+            message = (
+                "This user can list a folder with no permissions (root, or a capability such "
+                "as CAP_DAC_OVERRIDE), so the scenario about an unreadable watch folder "
+                "can't run. Run the suite as an ordinary user."
+            )
+            if os.environ.get("CI"):
+                pytest.fail(message, pytrace=False)
+            pytest.skip(message)
+        yield folder
+    finally:
+        folder.chmod(0o700)
+
+
+def _can_list(folder: Path) -> bool:
+    try:
+        next(folder.iterdir(), None)
+    except PermissionError:
+        return False
+    return True
+
+
+@pytest.fixture
 def watcher(
     integration_env: IntegrationEnv,
     proxy: FaultProxy,
@@ -334,7 +468,9 @@ def watcher(
     instrument_id: str,
     watch_dir: Path,
     watcher_token: str,
+    driver_class: type[WatcherDriver],
     tool_install: ToolInstall,
+    private_install: Callable[[Path | None], ToolInstall],
     server: ServerView,
     tmp_path: Path,
 ) -> Iterator[WatcherFactory]:
@@ -347,7 +483,9 @@ def watcher(
         instrument_id=instrument_id,
         watch_dir=watch_dir,
         watcher_token=watcher_token,
+        driver_class=driver_class,
         tool_install=tool_install,
+        new_install=private_install,
         tmp_path=tmp_path,
     )
     yield factory
