@@ -33,8 +33,10 @@ TRANSITIONS: tuple[Transition, ...] = (
     covered(
         MACHINE,
         "upload.batch->parallel_within_budget",
-        "Several files of a run upload at the same time, never more PUTs at once than "
-        "`upload_parallelism`, and every file ends `uploaded`.",
+        "Files are uploaded one at a time as they become stable, but when several of a run "
+        "are waiting at once (the run update that reports them failed earlier) they upload "
+        "at the same time, never more PUTs at once than `upload_parallelism` (whole files "
+        "and parts together), and every file ends `uploaded`.",
     ),
     covered(
         MACHINE,
@@ -114,9 +116,9 @@ TRANSITIONS: tuple[Transition, ...] = (
     covered(
         MACHINE,
         "upload.pending->attempts_exhausted",
-        "A pending upload that fails on three starts is dropped with an "
-        "`upload_retries_exhausted` event (`attempts` 3), and can still be requested from "
-        "the run page.",
+        "A pending upload whose retry fails at three starts in a row (the start that left it "
+        "pending doesn't count) is dropped with an `upload_retries_exhausted` event "
+        "(`attempts` 3), and can still be requested from the run page.",
     ),
     covered(
         MACHINE,
