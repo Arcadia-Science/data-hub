@@ -7,8 +7,9 @@ event that says so, and events that are lost when the watcher is killed.
 What each event says is shown by the scenario that causes it, in the file of its machine
 (``test_detection.py``, ``test_upload_auto.py``, ``test_upload_queue.py``, ``test_self_update.py``
 and the others), which names the event's ``event.*`` transition in ``covers`` next to the one it
-is really about. The kinds are listed at the top of ``data_hub_watcher/events.py``, and the
-catalog check fails if one of them has no scenario.
+is really about. The catalog lists each event type and error kind (the kinds are listed at the
+top of ``data_hub_watcher/events.py``) as an ``event.*`` transition, and the catalog check fails
+if one of them has no scenario.
 """
 
 from __future__ import annotations
