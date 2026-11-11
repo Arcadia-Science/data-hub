@@ -80,6 +80,20 @@ Integration test infrastructure used by both Lambda and watcher test suites. Pro
 - **`truncate_tables(dsn, tables)`** — truncates tables with CASCADE.
 - **`db_query(dsn, sql)`** / **`db_update(dsn, sql)`** — direct DB access for test assertions and setup.
 
+### `testing_proxy`
+
+`FaultProxy` is a reverse proxy that sits between the watcher and the test server, passes requests through, and lets a test switch on faults such as error responses, delays, dropped connections and an outage, so the test can check how the watcher copes.
+
+### `testing_index`
+
+`LocalPackageIndex` is a small package index that lists the watcher wheels in a folder and sends every other package to the real PyPI, so a test can offer the watcher a newer version to update to without publishing anything.
+
+### `testing_wheels`
+
+`build_watcher_wheel()` builds a wheel of the watcher from this checkout, optionally under a higher version number, so a test has a current build and a newer build to install and update between.
+
+The three modules use only the standard library, and `testing_wheels` also runs the `uv` program. Their tests are in `packages/shared/tests/`. The `testing_wheels` tests run `uv build`, so they need `uv` on the PATH, and network access to fetch the build tools when the `uv` cache is cold. A few `testing_index` tests install a package with `uv` from the local index and need `uv` but no network. Tests that need `uv` skip themselves when it isn't on the PATH.
+
 ## Dependencies
 
 - `boto3` — AWS SDK for S3 operations

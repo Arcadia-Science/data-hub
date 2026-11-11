@@ -19,8 +19,15 @@ run in GitHub Actions.
 
 `packages/shared/` ships `testing.py`, the shared integration-test
 infrastructure that `lambda/` and `watcher/` both depend on (see
-[below](#the-shared-test-server-start_test_server)). It has a few unit tests of
-its own in `packages/shared/tests/`, and `make py-test-unit` runs them too.
+[below](#the-shared-test-server-start_test_server)), and three helper modules
+for end-to-end tests of the watcher (see
+[below](#helpers-for-end-to-end-watcher-tests)). It has unit tests of its own in
+`packages/shared/tests/`, and `make py-test-unit` runs them too. They need
+neither Postgres nor a server. The tests for `testing_wheels` run `uv build`, so
+they need `uv` on the PATH, and network access to fetch the build tools when the
+`uv` cache is cold. A few tests for `testing_index` install a package with `uv`
+and need `uv` but no network. Tests that need `uv` skip themselves when it isn't
+on the PATH.
 
 Integration tests (Python and TypeScript alike) need Postgres reachable at
 `127.0.0.1:5432` and create/reuse a `data_hub_test` database. The Python
@@ -134,6 +141,25 @@ _DATA_TABLES = ["files", "instrument_runs"]
 def reset_db(integration_env: IntegrationEnv) -> None:
     truncate_tables(integration_env.db_dsn, _DATA_TABLES)
 ```
+
+### Helpers for end-to-end watcher tests
+
+Three more modules in `packages/shared/` help a test run the real watcher
+program and break things around it.
+
+- **`testing_proxy`:** `FaultProxy` is a reverse proxy that sits between the
+  watcher and the test server, passes requests through, and lets a test switch
+  on faults such as error responses, delays, dropped connections and an outage,
+  so the test can check how the watcher copes.
+- **`testing_index`:** `LocalPackageIndex` is a small package index that lists
+  the watcher wheels in a folder and sends every other package to the real PyPI,
+  so a test can offer the watcher a newer version to update to without
+  publishing anything. The watcher is pointed at it with the test-only
+  `DATA_HUB_WATCHER_INDEX_URL` variable, described under
+  [Test-only overrides](watcher.md#test-only-overrides).
+- **`testing_wheels`:** `build_watcher_wheel()` builds a wheel of the watcher
+  from this checkout, optionally under a higher version number, so a test has a
+  current build and a newer build to install and update between.
 
 ### Mocking S3 in Lambda integration tests
 
