@@ -856,6 +856,10 @@ class WatcherSupervisor:
 
     def start(self) -> None:
         """Sync config, apply a pending revision, then start watching or waiting."""
+        # The CLI and the Windows service have both loaded their env files and
+        # set up logging by now. Say here which test-only overrides are set:
+        # the package index is otherwise only read when an upgrade runs.
+        testing_overrides.announce_active_overrides()
         self._state = StateDB(self.db_path)
         if self._state.claim_config_revisions(self.watcher_id):
             logger.info("Dropped config revision bookkeeping from a different watcher registration")

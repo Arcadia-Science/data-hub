@@ -100,8 +100,8 @@ class TestDefaultsWhenUnset:
         for _name, accessor, _default in INTEGER_OVERRIDES:
             accessor()
         overrides.index_url()
+        overrides.announce_active_overrides()
 
-        assert overrides.active_overrides() == {}
         assert warnings_logged() == []
 
     @pytest.mark.parametrize("blank", ["", "   ", "\t"])
@@ -118,7 +118,7 @@ class TestDefaultsWhenUnset:
         for _name, accessor, default in INTEGER_OVERRIDES:
             assert accessor() == default
         assert overrides.index_url() == DEFAULT_INDEX_URL
-        assert overrides.active_overrides() == {}
+        overrides.announce_active_overrides()
         assert warnings_logged() == []
 
 
@@ -162,6 +162,9 @@ class TestValidValues:
             "https://index.example.test/simple/",
             "http://localhost:9/simple",
             "HTTP://127.0.0.1:8123/simple/",
+            "http://[::1]:8123/simple/",
+            # Only an `@` in the host part means credentials.
+            "http://127.0.0.1:8123/simple/@scope/",
         ],
     )
     def test_http_and_https_index_urls_are_used_as_given(
@@ -186,17 +189,19 @@ class TestValidValues:
 
         assert overrides.heartbeat_interval_seconds() == 86400
 
-    def test_active_overrides_lists_exactly_the_valid_ones(
-        self, monkeypatch: pytest.MonkeyPatch
+    def test_the_announcement_lists_exactly_the_valid_ones(
+        self, monkeypatch: pytest.MonkeyPatch, warnings_logged: Callable[[], list[str]]
     ) -> None:
         monkeypatch.setenv(HEARTBEAT, "2")
         monkeypatch.setenv(IDLE_TICKS, "bogus")
         monkeypatch.setenv(INDEX_URL, "http://127.0.0.1:1/simple/")
 
-        assert overrides.active_overrides() == {
-            HEARTBEAT: "2",
-            INDEX_URL: "http://127.0.0.1:1/simple/",
-        }
+        overrides.announce_active_overrides()
+
+        (announcement,) = [m for m in warnings_logged() if m.startswith("Test-only overrides")]
+        assert f"{HEARTBEAT}=2" in announcement
+        assert f"{INDEX_URL}=http://127.0.0.1:1/simple/" in announcement
+        assert IDLE_TICKS not in announcement
 
 
 class TestInvalidValues:
@@ -249,6 +254,25 @@ class TestInvalidValues:
 
         assert accessor() == 86401
 
+    @pytest.mark.parametrize(("name", "accessor", "default"), TICKS_OVERRIDES)
+    def test_ticks_stop_at_nine_digits(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        warnings_logged: Callable[[], list[str]],
+        name: str,
+        accessor: Callable[[], int],
+        default: int,
+    ) -> None:
+        # The longest value the digit pattern accepts is also the largest the
+        # tick check allows, and the warning says so.
+        monkeypatch.setenv(name, "999999999")
+        assert accessor() == 999_999_999
+        assert len(warnings_logged()) == 1  # The announcement.
+
+        monkeypatch.setenv(name, "1000000000")
+        assert accessor() == default
+        assert "from 1 to 999999999" in warnings_logged()[-1]
+
     def test_absurdly_long_number_does_not_raise(
         self, monkeypatch: pytest.MonkeyPatch, warnings_logged: Callable[[], list[str]]
     ) -> None:
@@ -286,14 +310,102 @@ class TestInvalidValues:
         assert INDEX_URL in message
         assert "http" in message
 
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            # What a stray extra word would do: the Windows upgrade worker
+            # passes the URL through `Start-Process -ArgumentList`, which
+            # splits on whitespace, so the tail would become `uv` arguments.
+            "http://127.0.0.1:8123/simple/ --no-verify-hashes",
+            "http://127.0.0.1:8123/simple/\t--extra-index-url=http://evil.test/",
+            "http://127.0.0.1:8123/sim\nple/",
+            "http://127.0.0.1:8123/sim\rple/",
+            "http://127.0.0.1:8123/sim\x01ple/",
+            "http://127.0.0.1:8123/sim\x7fple/",
+            "http://127.0.0.1:8123/sim\u00a0ple/",
+            "http://127.0.0.1:8123/sim\u2028ple/",
+            "http://127.0.0.1:8123/sim\u200bple/",
+        ],
+    )
+    def test_index_url_with_whitespace_or_control_characters_is_refused(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        warnings_logged: Callable[[], list[str]],
+        bad: str,
+    ) -> None:
+        monkeypatch.setenv(INDEX_URL, bad)
+
+        assert overrides.index_url() == DEFAULT_INDEX_URL
+
+        (message,) = warnings_logged()
+        assert INDEX_URL in message
+        assert "spaces or control characters" in message
+
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            "https://user:s3cret@index.example.test/simple/",
+            "https://user@index.example.test/simple/",
+            "https://:s3cret@index.example.test/simple/",
+            "https://@index.example.test/simple/",
+            "http://user:s3cret@127.0.0.1:8123/simple/",
+        ],
+    )
+    def test_index_url_with_credentials_is_refused_and_never_logged(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        warnings_logged: Callable[[], list[str]],
+        bad: str,
+    ) -> None:
+        # The URL is written to logs, the Windows Event Log and the
+        # `UPDATE_FAILED` event details, so one with a password in it must
+        # never get that far, and the refusal must not copy it into the log.
+        monkeypatch.setenv(INDEX_URL, bad)
+
+        assert overrides.index_url() == DEFAULT_INDEX_URL
+        overrides.announce_active_overrides()
+
+        (message,) = warnings_logged()
+        assert INDEX_URL in message
+        assert "username or password" in message
+        assert "s3cret" not in message
+        assert "index.example.test" not in message
+        assert "127.0.0.1" not in message
+
+    def test_a_credential_url_with_a_space_is_hidden_from_the_log_too(
+        self, monkeypatch: pytest.MonkeyPatch, warnings_logged: Callable[[], list[str]]
+    ) -> None:
+        # The first problem found is the one reported, so the hiding has to
+        # follow the value and not the reason it was refused.
+        monkeypatch.setenv(INDEX_URL, "https://user:s3cret@index.example.test/simple/ x")
+
+        assert overrides.index_url() == DEFAULT_INDEX_URL
+
+        (message,) = warnings_logged()
+        assert "s3cret" not in message
+
+    def test_a_refused_index_url_without_credentials_is_still_shown(
+        self, monkeypatch: pytest.MonkeyPatch, warnings_logged: Callable[[], list[str]]
+    ) -> None:
+        # Only a value with an `@` is hidden; the rest is what makes a typo
+        # easy to spot.
+        monkeypatch.setenv(INDEX_URL, "http://127.0.0.1:8123/simple/ --flag")
+
+        overrides.index_url()
+
+        (message,) = warnings_logged()
+        assert repr("http://127.0.0.1:8123/simple/ --flag") in message
+
     def test_a_bad_value_is_not_an_active_override(
         self, monkeypatch: pytest.MonkeyPatch, warnings_logged: Callable[[], list[str]]
     ) -> None:
         monkeypatch.setenv(HEARTBEAT, "0")
         monkeypatch.setenv(INDEX_URL, "ftp://x/")
 
-        assert overrides.active_overrides() == {}
+        overrides.announce_active_overrides()
+
         # Only the bad-value warnings; no "overrides are active" announcement.
+        assert len(warnings_logged()) == 2
         assert not any("Test-only overrides are active" in m for m in warnings_logged())
 
     def test_the_same_bad_value_is_reported_once(
@@ -402,22 +514,14 @@ class TestActiveOverridesWarning:
     def test_the_index_url_alone_triggers_it(
         self, monkeypatch: pytest.MonkeyPatch, warnings_logged: Callable[[], list[str]]
     ) -> None:
-        # self-update only reads the index, so it has to announce by itself.
+        # `self-update` doesn't go through the watcher's start, so the accessor
+        # announces for it.
         monkeypatch.setenv(INDEX_URL, "http://127.0.0.1:8123/simple/")
 
         overrides.index_url()
 
         (message,) = warnings_logged()
         assert INDEX_URL in message
-
-    def test_active_overrides_itself_is_quiet(
-        self, monkeypatch: pytest.MonkeyPatch, warnings_logged: Callable[[], list[str]]
-    ) -> None:
-        monkeypatch.setenv(HEARTBEAT, "2")
-
-        assert overrides.active_overrides() == {HEARTBEAT: "2"}
-
-        assert warnings_logged() == []
 
     def test_reset_warning_state_announces_again(
         self, monkeypatch: pytest.MonkeyPatch, warnings_logged: Callable[[], list[str]]
@@ -438,6 +542,108 @@ class TestActiveOverridesWarning:
         overrides.heartbeat_interval_seconds()
 
         assert len(warnings_logged()) == 2
+
+
+class TestAnnounceActiveOverrides:
+    """What the watcher calls when it starts.
+
+    The package index is only read when an upgrade is dispatched, so without
+    this a PC with just that variable left set logs nothing until it installs
+    from the index.
+    """
+
+    def test_the_index_url_alone_is_announced_without_any_accessor_call(
+        self, monkeypatch: pytest.MonkeyPatch, warnings_logged: Callable[[], list[str]]
+    ) -> None:
+        monkeypatch.setenv(INDEX_URL, "http://127.0.0.1:8123/simple/")
+
+        overrides.announce_active_overrides()
+
+        (message,) = warnings_logged()
+        assert "Test-only overrides are active" in message
+        assert f"{INDEX_URL}=http://127.0.0.1:8123/simple/" in message
+
+    @pytest.mark.parametrize(("name", "accessor", "default"), INTEGER_OVERRIDES, ids=INTEGER_IDS)
+    def test_every_override_is_announced_without_any_accessor_call(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        warnings_logged: Callable[[], list[str]],
+        name: str,
+        accessor: Callable[[], int],
+        default: int,
+    ) -> None:
+        monkeypatch.setenv(name, "2")
+
+        overrides.announce_active_overrides()
+
+        (message,) = warnings_logged()
+        assert f"{name}=2" in message
+
+    def test_one_warning_lists_every_active_override(
+        self, monkeypatch: pytest.MonkeyPatch, warnings_logged: Callable[[], list[str]]
+    ) -> None:
+        monkeypatch.setenv(HEARTBEAT, "2")
+        monkeypatch.setenv(UPLOAD_POLL, "3")
+        monkeypatch.setenv(CHECK_TICKS, "4")
+        monkeypatch.setenv(IDLE_TICKS, "5")
+        monkeypatch.setenv(INDEX_URL, "http://127.0.0.1:8123/simple/")
+
+        overrides.announce_active_overrides()
+
+        (message,) = warnings_logged()
+        for name in overrides.ALL_ENV_VARS:
+            assert f"{name}=" in message
+
+    def test_nothing_is_logged_when_nothing_is_set(
+        self, warnings_logged: Callable[[], list[str]]
+    ) -> None:
+        overrides.announce_active_overrides()
+
+        assert warnings_logged() == []
+
+    def test_it_is_logged_at_warning_level_by_the_modules_logger(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        caplog.set_level(logging.DEBUG)
+        monkeypatch.setenv(INDEX_URL, "http://127.0.0.1:8123/simple/")
+
+        overrides.announce_active_overrides()
+
+        records = [r for r in caplog.records if "Test-only overrides" in r.getMessage()]
+        assert [(r.name, r.levelno) for r in records] == [(LOGGER, logging.WARNING)]
+
+    def test_calling_it_again_does_not_repeat_it(
+        self, monkeypatch: pytest.MonkeyPatch, warnings_logged: Callable[[], list[str]]
+    ) -> None:
+        monkeypatch.setenv(INDEX_URL, "http://127.0.0.1:8123/simple/")
+
+        for _ in range(3):
+            overrides.announce_active_overrides()
+
+        assert len(warnings_logged()) == 1
+
+    def test_an_accessor_after_it_does_not_repeat_it(
+        self, monkeypatch: pytest.MonkeyPatch, warnings_logged: Callable[[], list[str]]
+    ) -> None:
+        monkeypatch.setenv(HEARTBEAT, "2")
+        monkeypatch.setenv(INDEX_URL, "http://127.0.0.1:8123/simple/")
+
+        overrides.announce_active_overrides()
+        overrides.heartbeat_interval_seconds()
+        overrides.index_url()
+
+        assert len(warnings_logged()) == 1
+
+    def test_unusable_values_are_reported_but_not_announced(
+        self, monkeypatch: pytest.MonkeyPatch, warnings_logged: Callable[[], list[str]]
+    ) -> None:
+        monkeypatch.setenv(UPLOAD_POLL, "soon")
+
+        overrides.announce_active_overrides()
+
+        (message,) = warnings_logged()
+        assert "Ignoring" in message
+        assert UPLOAD_POLL in message
 
 
 class TestReadAtCallTime:

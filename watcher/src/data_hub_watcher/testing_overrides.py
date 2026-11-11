@@ -8,7 +8,7 @@ are documented only in ``docs/developer/watcher.md``.
 
 Two rules keep them safe to ship:
 
-* They are read when a value is needed (when the runtime or the updater is
+* They are read when a value is needed (when a runtime or a waiting state is
   built, or an upgrade is dispatched), never at import time. The Windows
   service loads its registered env file after this module is imported, so an
   import-time read would miss every value set there.
@@ -16,9 +16,11 @@ Two rules keep them safe to ship:
   behavior is unchanged.
 
 A bad value never stops a watcher. It logs a warning naming the variable and
-the default is used instead. The first time any override takes effect, one
-warning per process lists all the active ones, so a log from a PC with a test
-knob left set says so.
+the default is used instead. One warning per process lists every active
+override, so a log from a PC with a test knob left set says so. The watcher
+announces them when it starts (`announce_active_overrides`), and the first
+accessor that applies one does too, for entry points that don't go through
+that start, such as ``self-update``.
 
 Keep this module free of imports from the rest of the package other than
 ``constants``: ``runtime``, ``updater``, ``self_update`` and ``cli`` all call
@@ -54,13 +56,15 @@ INDEX_URL_ENV_VAR = "DATA_HUB_WATCHER_INDEX_URL"
 # is lower on Windows). A day is far past anything a test needs and far below
 # that, so a typo can't kill the heartbeat or upload thread.
 _MAX_SECONDS = 24 * 60 * 60
-# The most a nine-digit value can be. Ticks are only compared, never waited
-# on, so this just keeps a value short enough for ``int`` to always parse.
-_MAX_TICKS = 999_999_999
 
-# ASCII digits only, so no sign, decimal point, underscore or other script's
-# digits, and few enough of them that ``int`` never hits its size limit.
-_DIGITS = re.compile(r"[0-9]{1,9}")
+# Ticks are only compared, never waited on, so the limit is just a length that
+# keeps ``int`` from ever hitting its size limit. The pattern accepts ASCII
+# digits only (no sign, decimal point, underscore or other script's digits) and
+# no more than ``_MAX_DIGITS`` of them, and the tick cap is the largest number
+# that length can hold, so the two can't drift apart.
+_MAX_DIGITS = 9
+_MAX_TICKS = 10**_MAX_DIGITS - 1
+_DIGITS = re.compile(rf"[0-9]{{1,{_MAX_DIGITS}}}")
 
 
 def _check_whole_number(value: str, *, maximum: int) -> str | None:
@@ -79,6 +83,15 @@ def _check_ticks(value: str) -> str | None:
 
 
 def _check_index_url(value: str) -> str | None:
+    """Return what is wrong with *value* as a package index URL.
+
+    The URL is handed to ``uv`` and ``pip`` as one argument. On Windows the
+    upgrade worker passes it through ``Start-Process -ArgumentList``, which
+    splits on whitespace, so a space would turn the tail into extra ``uv``
+    arguments. It is also written to logs, the Windows Event Log and the
+    ``UPDATE_FAILED`` event details, so a URL with a username or password would
+    spread the credentials. A test index needs neither.
+    """
     problem = "expected an http:// or https:// URL"
     try:
         parts = urlsplit(value)
@@ -87,6 +100,10 @@ def _check_index_url(value: str) -> str | None:
         return problem
     if parts.scheme not in ("http", "https") or not parts.netloc:
         return problem
+    if any(char.isspace() or not char.isprintable() for char in value):
+        return "a URL can't contain spaces or control characters"
+    if "@" in parts.netloc:
+        return "a URL can't contain a username or password"
     return None
 
 
@@ -133,18 +150,34 @@ def index_url() -> str:
     value = _validated(INDEX_URL_ENV_VAR)
     if value is None:
         return DEFAULT_INDEX_URL
-    _announce_once()
+    announce_active_overrides()
     return value
 
 
-def active_overrides() -> dict[str, str]:
-    """The overrides that are set to a valid value, as ``{variable: value}``."""
-    active: dict[str, str] = {}
-    for name in ALL_ENV_VARS:
-        value = _validated(name)
-        if value is not None:
-            active[name] = value
-    return active
+def announce_active_overrides() -> None:
+    """Log one warning that lists every override set to a valid value.
+
+    The watcher calls this when it starts, so a PC with a test setting left
+    behind says so even when the setting is one that is only read much later,
+    such as the package index. It also reports each value that is set but
+    unusable. Does nothing when no override is active. After the first
+    announcement the process doesn't make another, so it is safe to call from
+    every entry point.
+    """
+    global _announced
+    with _lock:
+        if _announced:
+            return
+        active = _active_overrides()
+        if not active:
+            return
+        _announced = True
+    listing = ", ".join(f"{name}={value}" for name, value in active.items())
+    logger.warning(
+        "Test-only overrides are active, so this watcher's timers or package index "
+        "differ from production: %s. Unset them on a real PC.",
+        listing,
+    )
 
 
 def reset_warning_state() -> None:
@@ -158,11 +191,21 @@ def reset_warning_state() -> None:
         _warned_invalid.clear()
 
 
+def _active_overrides() -> dict[str, str]:
+    """The overrides that are set to a valid value, as ``{variable: value}``."""
+    active: dict[str, str] = {}
+    for name in ALL_ENV_VARS:
+        value = _validated(name)
+        if value is not None:
+            active[name] = value
+    return active
+
+
 def _integer(name: str, default: int) -> int:
     value = _validated(name)
     if value is None:
         return default
-    _announce_once()
+    announce_active_overrides()
     return int(value)
 
 
@@ -183,22 +226,19 @@ def _validated(name: str) -> str | None:
         first_time = (name, value) not in _warned_invalid
         _warned_invalid.add((name, value))
     if first_time:
-        logger.warning("Ignoring %s=%r (%s); using the default.", name, value, problem)
+        logger.warning(
+            "Ignoring %s=%s (%s); using the default.", name, _for_log(name, value), problem
+        )
     return None
 
 
-def _announce_once() -> None:
-    global _announced
-    with _lock:
-        if _announced:
-            return
-        active = active_overrides()
-        if not active:
-            return
-        _announced = True
-    listing = ", ".join(f"{name}={value}" for name, value in active.items())
-    logger.warning(
-        "Test-only overrides are active, so this watcher's timers or package index "
-        "differ from production: %s. Unset them on a real PC.",
-        listing,
-    )
+def _for_log(name: str, value: str) -> str:
+    """*value* as the warning for an unusable value shows it.
+
+    A package index URL can carry a username and password, and a rejected one
+    would otherwise be copied into the log, the Windows Event Log and wherever
+    those are shipped. When it holds an ``@``, it isn't shown.
+    """
+    if name == INDEX_URL_ENV_VAR and "@" in value:
+        return "<hidden because it contains an @ and may hold credentials>"
+    return repr(value)
