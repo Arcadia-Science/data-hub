@@ -90,9 +90,9 @@ Integration test infrastructure used by both Lambda and watcher test suites. Pro
 
 ### `testing_wheels`
 
-`build_watcher_wheel()` builds a wheel of the watcher from this checkout, optionally under a higher version number, so a test has a current build and a newer build to install and update between.
+`build_watcher_wheel()` builds a wheel of the watcher from this checkout, optionally under a higher version number, so a test has a current build and a newer build to install and update between. Every build runs on a temporary copy of `watcher/`, so it writes nothing into the checkout and can't ship a module that was deleted from `src/` but still sits in an old local `watcher/build`.
 
-The three modules use only the standard library, and `testing_wheels` also runs the `uv` program. Their tests are in `packages/shared/tests/`. The `testing_wheels` tests run `uv build`, so they need `uv` on the PATH, and network access to fetch the build tools when the `uv` cache is cold. A few `testing_index` tests install a package with `uv` from the local index and need `uv` but no network. Tests that need `uv` skip themselves when it isn't on the PATH.
+The three modules use only the standard library, and `testing_wheels` also runs the `uv` program. Their tests are in `packages/shared/tests/`. The `testing_wheels` tests run `uv build` twice (the tests in that file share the two wheels), so they need `uv` on the PATH, and network access to fetch the build tools when the `uv` cache is cold. A few `testing_index` tests install a package with `uv` from the local index and need `uv` but no network. Tests that need `uv` skip themselves when it isn't on the PATH.
 
 ## Dependencies
 

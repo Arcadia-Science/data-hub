@@ -57,7 +57,15 @@ filterwarnings = ["ignore::DeprecationWarning:matplotlib"]
 
 [tool.pyright]
 include = ["lambda", "watcher", "packages/shared"]
-# `build` holds the copy of the source that a wheel build leaves in the package
-# folder (for example `watcher/build/lib`). The wheel tests in
-# packages/shared make one, and it goes stale as soon as the source changes.
-exclude = ["legacy", ".venv", "**/build"]
+# `build` folders hold the stale copy of a package's source that an old in-place wheel
+# build (`pip wheel`, `uv build`, or an older version of the wheel tests in
+# packages/shared) leaves in the package folder, such as `watcher/build/lib`. Nothing in
+# this repo writes them any more. These entries keep one a developer still has locally
+# out of the type check, without hiding a folder named `build` anywhere else.
+exclude = [
+    "legacy",
+    ".venv",
+    "lambda/build",
+    "packages/shared/build",
+    "watcher/build",
+]

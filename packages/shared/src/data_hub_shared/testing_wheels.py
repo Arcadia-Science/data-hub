@@ -63,14 +63,16 @@ def bumped_version(version: str, patch_offset: int = 1000) -> str:
 def build_watcher_wheel(out_dir: Path, *, version: str | None = None) -> Path:
     """Build the watcher wheel into ``out_dir`` and return the path to the wheel file.
 
-    With no ``version``, this builds the checkout as it is (``uv build --package
-    data-hub-watcher --wheel``) and the wheel carries the version in
-    ``watcher/pyproject.toml``.
+    The wheel carries ``version``, or the version in ``watcher/pyproject.toml`` when
+    ``version`` is left out. Either way the build runs on a temporary copy of the
+    watcher, so the checkout itself is not touched: no ``watcher/build`` or
+    ``*.egg-info`` appears in it. It also means the build can't pick up a module that was
+    deleted from ``src`` but still sits in an older ``build/lib``, because setuptools
+    never cleans that folder. The current wheel and a bumped wheel come from identical
+    trees, and the version is the only thing that differs.
 
-    With a ``version``, the build runs on a temporary copy of the watcher whose
-    ``[project].version`` is replaced, so the checkout itself is not touched. The copy
-    is built outside the uv workspace, so ``uv build --no-sources`` ignores the workspace
-    links in the watcher's ``pyproject.toml``.
+    The copy is built outside the uv workspace, so ``uv build --no-sources`` ignores the
+    workspace links in the watcher's ``pyproject.toml``.
 
     Needs ``uv`` on the PATH, and network access the first time, to fetch the build tools.
     """
@@ -80,22 +82,13 @@ def build_watcher_wheel(out_dir: Path, *, version: str | None = None) -> Path:
     if uv is None:
         raise RuntimeError("Building a watcher wheel needs `uv` on the PATH.")
 
-    if version is None:
-        built_version = watcher_project_version()
+    built_version = version or watcher_project_version()
+    with tempfile.TemporaryDirectory(prefix="watcher-wheel-", ignore_cleanup_errors=True) as tmp:
+        copy = _copy_watcher_with_version(Path(tmp) / "watcher", built_version)
         _run_uv_build(
-            [uv, "build", "--package", _PACKAGE_NAME, "--wheel", "--out-dir", str(out_dir)],
-            cwd=_REPO_ROOT,
+            [uv, "build", "--wheel", "--no-sources", "--out-dir", str(out_dir), str(copy)],
+            cwd=copy,
         )
-    else:
-        built_version = version
-        with tempfile.TemporaryDirectory(
-            prefix="watcher-wheel-", ignore_cleanup_errors=True
-        ) as tmp:
-            copy = _copy_watcher_with_version(Path(tmp) / "watcher", version)
-            _run_uv_build(
-                [uv, "build", "--wheel", "--no-sources", "--out-dir", str(out_dir), str(copy)],
-                cwd=copy,
-            )
 
     wheels = sorted(out_dir.glob(f"data_hub_watcher-{built_version}-*.whl"))
     if len(wheels) != 1:
@@ -109,7 +102,9 @@ def _copy_watcher_with_version(destination: Path, version: str) -> Path:
     """Copy what a wheel build needs from ``watcher/`` and set its version."""
     destination.mkdir(parents=True)
     # The build needs pyproject.toml plus the files it names (README, LICENSE), which sit
-    # beside it, and the source tree. Tests and build leftovers are not copied.
+    # beside it, and the source tree. Only the files directly in ``watcher/`` are copied, so
+    # ``tests/`` and an old ``build/`` folder stay behind, and the copy leaves out
+    # ``*.egg-info`` and bytecode from the source tree.
     for item in _WATCHER_DIR.iterdir():
         if item.is_file():
             shutil.copy2(item, destination / item.name)
@@ -120,7 +115,9 @@ def _copy_watcher_with_version(destination: Path, version: str) -> Path:
     )
 
     pyproject = destination / "pyproject.toml"
-    pyproject.write_text(_with_project_version(pyproject.read_text(encoding="utf-8"), version))
+    pyproject.write_text(
+        _with_project_version(pyproject.read_text(encoding="utf-8"), version), encoding="utf-8"
+    )
     with pyproject.open("rb") as file:
         written = tomllib.load(file)["project"]["version"]
     if written != version:

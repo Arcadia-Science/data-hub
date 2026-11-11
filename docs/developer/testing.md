@@ -23,9 +23,9 @@ infrastructure that `lambda/` and `watcher/` both depend on (see
 for end-to-end tests of the watcher (see
 [below](#helpers-for-end-to-end-watcher-tests)). It has unit tests of its own in
 `packages/shared/tests/`, and `make py-test-unit` runs them too. They need
-neither Postgres nor a server. The tests for `testing_wheels` run `uv build`, so
-they need `uv` on the PATH, and network access to fetch the build tools when the
-`uv` cache is cold. A few tests for `testing_index` install a package with `uv`
+neither Postgres nor a server. The tests for `testing_wheels` run `uv build` twice
+(they share the two wheels), so they need `uv` on the PATH, and network access
+to fetch the build tools when the `uv` cache is cold. A few tests for `testing_index` install a package with `uv`
 and need `uv` but no network. Tests that need `uv` skip themselves when it isn't
 on the PATH.
 
@@ -159,7 +159,10 @@ program and break things around it.
   [Test-only overrides](watcher.md#test-only-overrides).
 - **`testing_wheels`:** `build_watcher_wheel()` builds a wheel of the watcher
   from this checkout, optionally under a higher version number, so a test has a
-  current build and a newer build to install and update between.
+  current build and a newer build to install and update between. Every build
+  runs on a temporary copy of `watcher/`, so it writes nothing into the
+  checkout (no `watcher/build` or `*.egg-info`) and can't ship a module that
+  was deleted from `src/` but still sits in an old local `watcher/build`.
 
 ### Mocking S3 in Lambda integration tests
 
