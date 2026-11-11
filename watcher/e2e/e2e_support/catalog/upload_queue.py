@@ -129,7 +129,7 @@ TRANSITIONS: tuple[Transition, ...] = (
     ),
     xfail_bug(
         MACHINE,
-        "queue.deleted_run_file->excluded",
+        "queue.deleted_run_file->not_listed",
         "A queued file whose run was soft-deleted is not listed in the watcher's upload queue.",
         "bug-04-queue-lists-deleted-run-files",
     ),
