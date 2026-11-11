@@ -4,8 +4,9 @@ Code: ``events.py`` (``EventReporter``: bounded queue, flush with retry, ``event
 server side ``app/api/v1/watchers/[watcherId]/events``. The ``event.*`` transitions are the
 "every event is emitted somewhere in the suite" rule made checkable. A test that causes
 an event names its ``event.*`` ID in ``covers`` next to the transition it is really about, so
-most of these are covered by the scenario that produces the event, and a few get a small test
-of their own in ``test_events.py``. The description says where the event comes from.
+each of these is covered by the scenario that produces the event, in the file of its own
+machine, and ``test_events.py`` holds only the ``reporter.*`` scenarios. The description says
+where the event comes from.
 """
 
 from __future__ import annotations
