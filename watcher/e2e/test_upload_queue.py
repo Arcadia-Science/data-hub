@@ -634,7 +634,7 @@ def test_queued_file_that_is_missing_is_reported_once_and_cancelled_after_three_
 @pytest.mark.xfail(
     strict=True,
     raises=KnownBugStillPresent,
-    reason="bug-new-cancel-memo-not-cleared: a file requested again before the poll that "
+    reason="ENG-2123: a file requested again before the poll that "
     "forgets its cancellation is cancelled again at once, without an attempt",
 )
 @pytest.mark.covers("queue.cancelled->requested_before_next_poll")
@@ -747,7 +747,7 @@ def test_queue_entry_with_a_path_outside_the_watch_folder_is_rejected_and_cancel
     watch_dir: Path,
 ) -> None:
     # A 6-second tick, so that the one error this scenario counts is counted well inside an
-    # interval and not while a heartbeat is in flight (bug-new-counts-lost-during-heartbeat). The
+    # interval and not while a heartbeat is in flight (ENG-2125). The
     # queue is not held: a held queue fails every poll, and each failed poll counts an error too.
     pc = manual_watcher(
         watcher, server, overrides={testing_overrides.HEARTBEAT_INTERVAL_ENV_VAR: "6"}
@@ -941,8 +941,7 @@ def test_an_uploaded_file_cannot_be_dismissed(
 @pytest.mark.xfail(
     strict=True,
     raises=KnownBugStillPresent,
-    reason="bug-04-queue-lists-deleted-run-files: the upload queue still lists files of a "
-    "run that was deleted",
+    reason="ENG-2113: the upload queue still lists files of a run that was deleted",
 )
 @pytest.mark.covers("queue.deleted_run_file->not_listed")
 def test_upload_queue_does_not_list_files_of_a_deleted_run(

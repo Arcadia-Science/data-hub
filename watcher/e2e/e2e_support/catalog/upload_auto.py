@@ -139,7 +139,7 @@ TRANSITIONS: tuple[Transition, ...] = (
         "ends `uploaded` with its current bytes and `file_uploaded` carries their `sha256`. "
         "Today the restart reuses the first hash, so a file that stays changed fails the "
         "second attempt too.",
-        "bug-new-bad-digest-not-rehashed",
+        "ENG-2122",
     ),
     covered(
         MACHINE,
@@ -171,7 +171,7 @@ TRANSITIONS: tuple[Transition, ...] = (
         "upload.crash_after_report->retried_after_restart",
         "A watcher killed after its run report but before the `pending_uploads` row is "
         "written still uploads those files after a restart in auto mode.",
-        "bug-02-crash-before-pending-record",
+        "ENG-2111",
     ),
     # The same bug, reached without a crash: the run is reported and remembered in one
     # transaction and the pending record is written in another, so any interruption between them
@@ -183,7 +183,7 @@ TRANSITIONS: tuple[Transition, ...] = (
         "upload.pending_record_failed->retried_after_restart",
         "When the `pending_uploads` row of a reported run can't be written (the write fails, "
         "nothing crashes), the files are still uploaded after the next start in auto mode.",
-        "bug-02-crash-before-pending-record",
+        "ENG-2111",
     ),
     excluded(
         MACHINE,

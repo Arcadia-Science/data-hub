@@ -497,7 +497,7 @@ def _watching_gaps(beats: list[HeartbeatRow]) -> list[float]:
     strict=True,
     raises=KnownBugStillPresent,
     reason=(
-        "bug-10-service-ignores-log-level: the service sets its log level before it loads the "
+        "ENG-2119: the service sets its log level before it loads the "
         "env file, so DATA_HUB_WATCHER_LOG_LEVEL there is ignored"
     ),
 )
@@ -1052,7 +1052,7 @@ def test_uninstall_removes_the_service_its_registry_values_and_task_and_keeps_th
     strict=True,
     raises=KnownBugStillPresent,
     reason=(
-        "bug-08-deregistered-watcher-keeps-running: a service whose watcher was deregistered "
+        "ENG-2117: a service whose watcher was deregistered "
         "keeps running with 404s instead of stopping cleanly, and staying stopped"
     ),
 )
@@ -1089,7 +1089,7 @@ def test_a_deregistered_service_stops_and_the_scm_does_not_bring_it_back(
     strict=True,
     raises=KnownBugStillPresent,
     reason=(
-        "bug-new-worker-dispatch-repeats: the updater doesn't mark an upgrade it hands to the "
+        "ENG-2131: the updater doesn't mark an upgrade it hands to the "
         "worker as in progress (the in-process path does), so a check on the next heartbeat "
         "dispatches it again before the worker has stopped the service"
     ),
@@ -1147,7 +1147,7 @@ def test_an_upgrade_is_dispatched_to_the_worker_once(
     strict=True,
     raises=KnownBugStillPresent,
     reason=(
-        "bug-new-service-config-error-not-logged: `_run_service_loop` calls `load_config` "
+        "ENG-2130: `_run_service_loop` calls `load_config` "
         "outside any `try`, so the error is raised out of `SvcRun` and reaches only the Event "
         "Log, where every other start-up refusal is logged in watcher.log"
     ),
@@ -1175,7 +1175,7 @@ def test_a_config_that_does_not_load_is_logged_in_the_service_log(watcher: Watch
     strict=True,
     raises=KnownBugStillPresent,
     reason=(
-        "bug-new-locked-file-not-retried: a file that is locked after its last write counts as "
+        "ENG-2128: a file that is locked after its last write counts as "
         "stable (stability reads only the size and time), then reading it for the upload hits "
         "a sharing violation, and the file is tried again only at the next start"
     ),
@@ -1213,7 +1213,7 @@ def test_a_file_that_stays_locked_after_its_last_write_is_uploaded_once_it_is_re
     strict=True,
     raises=KnownBugStillPresent,
     reason=(
-        "bug-new-service-ignores-shutdown: the service class has no `SvcShutdown`, so `sc "
+        "ENG-2129: the service class has no `SvcShutdown`, so `sc "
         "queryex` lists IGNORES_SHUTDOWN and every reboot kills the service with no `stopped` "
         "heartbeat"
     ),

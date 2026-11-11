@@ -109,7 +109,7 @@ TRANSITIONS: tuple[Transition, ...] = (
         "service.env_file->log_level_honored",
         "`DATA_HUB_WATCHER_LOG_LEVEL` in the registered env file sets the service's log "
         "level, as it does for `watch`.",
-        "bug-10-service-ignores-log-level",
+        "ENG-2119",
         platforms=SERVICE,
     ),
     covered(
@@ -143,7 +143,7 @@ TRANSITIONS: tuple[Transition, ...] = (
         "changing), then reading it for the upload hits a sharing violation, and the file "
         "is tried again only at the next start. The test uses `ExclusiveWriter`, which "
         "writes once and holds the file past the stability period.",
-        "bug-new-locked-file-not-retried",
+        "ENG-2128",
         platforms=SERVICE,
     ),
     xfail_bug(
@@ -156,7 +156,7 @@ TRANSITIONS: tuple[Transition, ...] = (
         "lists IGNORES_SHUTDOWN, and every reboot kills the service with no `stopped` "
         "heartbeat. The test reads the controls `sc queryex` lists: a test can't send a "
         "shutdown to a service.",
-        "bug-new-service-ignores-shutdown",
+        "ENG-2129",
         platforms=SERVICE,
     ),
     # --- start-up failures and the SCM's recovery -------------------------------------------
@@ -224,7 +224,7 @@ TRANSITIONS: tuple[Transition, ...] = (
         "failed` entry, which the driver copies into the log text). The shared "
         "`startup.config_invalid->refused` is covered under the service as well, because it "
         "reads that text.",
-        "bug-new-service-config-error-not-logged",
+        "ENG-2130",
         platforms=SERVICE,
     ),
     covered(
@@ -278,10 +278,10 @@ TRANSITIONS: tuple[Transition, ...] = (
         "path does, so with a check on every heartbeat the next tick can dispatch it again "
         "before the worker has stopped the service (it queues another event, and writes the "
         "request and triggers the task again). The test checks on every heartbeat (1 s) and "
-        "holds one heartbeat while the worker stops the service, so that a tick is still "
-        "running when the stop arrives and makes its check after it. The scenarios of the "
+        "holds an upload in flight across the worker's `Stop-Service`: the stop waits up to "
+        "5 s for it, and the heartbeat keeps checking until then. The scenarios of the "
         "upgrade itself compare the events with a repeat counted once.",
-        "bug-new-worker-dispatch-repeats",
+        "ENG-2131",
         platforms=SERVICE,
     ),
     xfail_bug(
@@ -293,7 +293,7 @@ TRANSITIONS: tuple[Transition, ...] = (
         "recover), and it stays stopped. (It is the service side of "
         "`watcher.deregistered->process_exits`, which exits non-zero under `watch`; today "
         "the service keeps running with 404s.)",
-        "bug-08-deregistered-watcher-keeps-running",
+        "ENG-2117",
         platforms=SERVICE,
     ),
     # --- reinstall and uninstall ------------------------------------------------------------

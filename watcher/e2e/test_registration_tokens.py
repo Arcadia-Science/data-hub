@@ -420,7 +420,7 @@ def test_init_after_deregistration_registers_a_new_watcher_and_keeps_the_upload_
     strict=True,
     raises=KnownBugStillPresent,
     reason=(
-        "bug-08-deregistered-watcher-keeps-running: a running watcher that is deregistered "
+        "ENG-2117: a running watcher that is deregistered "
         "keeps uploading and running with 404s instead of stopping with an error"
     ),
 )
@@ -477,7 +477,7 @@ def test_a_running_watcher_stops_uploading_and_stops_once_it_is_deregistered(
     strict=True,
     raises=KnownBugStillPresent,
     reason=(
-        "bug-08-deregistered-watcher-keeps-running: a running watcher that is deregistered "
+        "ENG-2117: a running watcher that is deregistered "
         "keeps running with 404s instead of exiting with a failure code"
     ),
 )
@@ -505,7 +505,7 @@ def test_a_deregistered_watcher_exits_with_a_failure_code(
     strict=True,
     raises=KnownBugStillPresent,
     reason=(
-        "bug-08-deregistered-watcher-keeps-running: starting a watcher whose registration was "
+        "ENG-2117: starting a watcher whose registration was "
         "deleted runs it with 404s instead of refusing with a message to run init"
     ),
 )

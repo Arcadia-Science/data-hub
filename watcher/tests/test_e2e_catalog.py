@@ -15,6 +15,7 @@ check by hand, with the missing count per machine::
 """
 
 from __future__ import annotations
+import re
 import textwrap
 from pathlib import Path
 
@@ -60,10 +61,14 @@ def test_the_catalog_is_well_formed() -> None:
         catalog.transitions_for("no_such_machine")
 
 
-def test_known_bugs_have_a_slug_and_exclusions_a_reason() -> None:
+# A known bug is named by its Linear issue, or by a short slug until the issue is filed.
+KNOWN_BUG_NAME = re.compile(r"ENG-[0-9]+|bug-[a-z0-9-]+")
+
+
+def test_known_bugs_have_a_name_and_exclusions_a_reason() -> None:
     for t in catalog.ALL_TRANSITIONS:
         if t.status == "xfail_bug":
-            assert t.bug is not None and t.bug.startswith("bug-"), t.id
+            assert t.bug is not None and KNOWN_BUG_NAME.fullmatch(t.bug), t.id
         if t.status == "excluded":
             assert t.reason, t.id
 
@@ -920,7 +925,8 @@ def test_the_real_known_bug_tests_follow_the_pattern() -> None:
         assert test.strict_xfail, test.label
         assert test.xfail_raises_known_bug, test.label
         assert test.wraps_known_bug, test.label
-        assert test.xfail_reason is not None and test.xfail_reason.startswith("bug-"), test.label
+        assert test.xfail_reason is not None, test.label
+        assert KNOWN_BUG_NAME.fullmatch(test.xfail_reason.split(":")[0]), test.label
     # And no other test names a known bug.
     for test in tests:
         if not test.xfail:

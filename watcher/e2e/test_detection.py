@@ -713,7 +713,7 @@ def test_a_deleted_run_refuses_updates_and_catches_up_after_it_is_restored(
 @pytest.mark.xfail(
     strict=True,
     raises=KnownBugStillPresent,
-    reason="bug-05-rereport-deleted-run-attaches-files: the POST of a deleted run returns 200 "
+    reason="ENG-2114: the POST of a deleted run returns 200 "
     "and attaches the files instead of a 409",
 )
 @pytest.mark.covers("run.deleted->rereport_conflict")
@@ -764,7 +764,7 @@ def test_reporting_a_deleted_run_again_is_refused_and_attaches_no_files(
 @pytest.mark.xfail(
     strict=True,
     raises=KnownBugStillPresent,
-    reason="bug-new-run-id-not-url-encoded: the watcher puts the run ID into the URL path of its "
+    reason="ENG-2121: the watcher puts the run ID into the URL path of its "
     "calls as it is, so a hash or percent sign in it sends an update (manual mode) or an upload "
     "(auto mode) to another run, or nowhere",
 )
@@ -814,7 +814,7 @@ def test_a_run_with_url_characters_in_its_id_gets_its_files(
 @pytest.mark.xfail(
     strict=True,
     raises=KnownBugStillPresent,
-    reason="bug-06-dismissed-path-blocks-new-file: the dismissed file's path stays unique in "
+    reason="ENG-2115: the dismissed file's path stays unique in "
     "its run, so the report of a new file at that path is dropped without a trace",
 )
 @pytest.mark.covers("file.dismissed_path->redetected")

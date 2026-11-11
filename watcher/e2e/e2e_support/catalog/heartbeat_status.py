@@ -64,7 +64,7 @@ TRANSITIONS: tuple[Transition, ...] = (
         'alarm", and the docs list Stopped as a status of its own, while '
         "`computeEffectiveStatus` turns any status but `registered` into `stale` after five "
         "minutes.",
-        "bug-new-stopped-reads-stale",
+        "ENG-2124",
     ),
     xfail_bug(
         MACHINE,
@@ -75,7 +75,7 @@ TRANSITIONS: tuple[Transition, ...] = (
         "filter is a SQL check on the age of `last_heartbeat_at` that doesn't look at the "
         "stored status, and the status it prints comes from `computeEffectiveStatus`, so both "
         "have to change for the list to agree with the detail route.",
-        "bug-new-stopped-reads-stale",
+        "ENG-2124",
     ),
     covered(
         MACHINE,
@@ -108,7 +108,7 @@ TRANSITIONS: tuple[Transition, ...] = (
         "heartbeat.failed->counts_carried",
         "The counts from a heartbeat that failed to send are added to the next successful "
         "heartbeat instead of being lost.",
-        "bug-03-failed-heartbeat-counts-lost",
+        "ENG-2112",
     ),
     xfail_bug(
         MACHINE,
@@ -116,7 +116,7 @@ TRANSITIONS: tuple[Transition, ...] = (
         "A count added while a heartbeat request is in flight (a file uploaded during a "
         "slow heartbeat) is reported by the next heartbeat instead of being reset away "
         "when the request returns.",
-        "bug-new-counts-lost-during-heartbeat",
+        "ENG-2125",
     ),
     covered(
         MACHINE,

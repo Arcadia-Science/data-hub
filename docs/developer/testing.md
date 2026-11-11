@@ -549,7 +549,7 @@ bug:
 @pytest.mark.xfail(
     strict=True,
     raises=KnownBugStillPresent,
-    reason="bug-07-stopped-heartbeat-before-event: the final heartbeat arrives first",
+    reason="ENG-2116: the final heartbeat arrives first",
 )
 @pytest.mark.covers("process.stop->event_before_stopped_heartbeat")
 def test_the_stop_event_reaches_the_server_first(...):
@@ -563,7 +563,8 @@ def test_the_stop_event_reaches_the_server_first(...):
 block is a different failure, so the test fails and doesn't count as the bug. Put only the
 assertion that shows the intended behavior inside. The check enforces the pattern: the xfail is
 strict and has `raises=KnownBugStillPresent`, the test has a `with known_bug():` block and names
-only `xfail_bug` transitions, its reason starts with the slug of one of them (`bug-07-...:`), and
+only `xfail_bug` transitions, its reason starts with the bug of one of them (its Linear issue, such
+as `ENG-2116:`, or a short slug until the issue is filed), and
 no other test names an `xfail_bug` transition. To see that a test fails inside the block, run it
 with `--runxfail`.
 

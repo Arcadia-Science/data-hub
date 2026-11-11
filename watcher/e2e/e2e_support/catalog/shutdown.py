@@ -60,7 +60,7 @@ TRANSITIONS: tuple[Transition, ...] = (
         "process.stop->event_before_stopped_heartbeat",
         "On a graceful stop the server receives the `watcher_stopped` event before the "
         "final `stopped` heartbeat.",
-        "bug-07-stopped-heartbeat-before-event",
+        "ENG-2116",
     ),
     xfail_bug(
         MACHINE,
@@ -72,7 +72,7 @@ TRANSITIONS: tuple[Transition, ...] = (
         "and a following file, for about 5 seconds after the stop. (The in-process rebuild "
         "for a config revision stops the worker first.) The test makes a stop arrive during "
         "the first of two short files and asserts that no request for a part follows it.",
-        "bug-new-uploads-continue-after-stop",
+        "ENG-2126",
     ),
     xfail_bug(
         MACHINE,
@@ -88,7 +88,7 @@ TRANSITIONS: tuple[Transition, ...] = (
         "service after 30 s. The test holds every heartbeat and event request for longer "
         "than the client waits, asks for a stop and expects the process to be gone within "
         "30 s.",
-        "bug-new-stop-unbounded-with-hung-server",
+        "ENG-2127",
     ),
     xfail_bug(
         MACHINE,
@@ -101,7 +101,7 @@ TRANSITIONS: tuple[Transition, ...] = (
         "Windows service has no such window: `SvcStop` sets an event that its loop reads "
         "when the start has finished, so the stop is not lost. The service counterpart is "
         "`service.stop->clean_stop_during_start` in `test_windows_service.py`.",
-        "bug-09-sigterm-during-scan",
+        "ENG-2118",
         platforms=CLI,
     ),
 )

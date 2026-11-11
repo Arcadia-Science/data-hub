@@ -40,7 +40,7 @@ TRANSITIONS: tuple[Transition, ...] = (
         "reporter.queued->persisted_across_kill",
         "Events queued but not yet sent when the watcher is killed are kept in the state "
         "database and sent after the restart.",
-        "bug-11-events-lost-on-kill",
+        "ENG-2120",
     ),
     excluded(
         MACHINE,

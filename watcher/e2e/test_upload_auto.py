@@ -161,7 +161,7 @@ def test_small_file_is_uploaded_with_one_put(
     # The watcher remembers the upload and has nothing left to retry. (That a heartbeat counts the
     # upload is shown by the counters scenario in test_heartbeat_status.py, which keeps the
     # heartbeat away from the upload. Waiting for "exactly one" here would be a race with
-    # bug-new-counts-lost-during-heartbeat.)
+    # ENG-2125.)
     assert recorded_uploads(pc) == [SMALL_PATH]
     assert pending(pc) == []
 
@@ -361,7 +361,7 @@ def test_single_put_that_fails_three_times_leaves_the_file_pending(
     watch_dir: Path,
 ) -> None:
     # A 6-second tick, so the error is counted well inside one interval and not while a
-    # heartbeat is in flight (see bug-new-counts-lost-during-heartbeat). The file needs a few
+    # heartbeat is in flight (see ENG-2125). The file needs a few
     # seconds to give up on, which is time enough for the first tick to go by.
     pc = watcher(overrides={testing_overrides.HEARTBEAT_INTERVAL_ENV_VAR: "6"})
     proxy.add_fault("status", path=LOCAL_S3, method="PUT", status=503)
@@ -735,7 +735,7 @@ def test_second_checksum_rejection_aborts_the_upload_and_reports_the_failure(
 @pytest.mark.xfail(
     strict=True,
     raises=KnownBugStillPresent,
-    reason="bug-new-bad-digest-not-rehashed: the restart after a rejected checksum sends the "
+    reason="ENG-2122: the restart after a rejected checksum sends the "
     "first hash again, so a file that stays changed fails twice",
 )
 @pytest.mark.covers("upload.multipart->bad_digest_rehashed")
@@ -925,7 +925,7 @@ def test_pending_upload_for_a_file_that_vanished_is_dropped_at_the_next_start(
 @pytest.mark.xfail(
     strict=True,
     raises=KnownBugStillPresent,
-    reason="bug-02-crash-before-pending-record: a watcher killed after the run report and "
+    reason="ENG-2111: a watcher killed after the run report and "
     "before the pending record never uploads those files",
 )
 @pytest.mark.covers("upload.crash_after_report->retried_after_restart")
@@ -969,7 +969,7 @@ def test_watcher_killed_after_the_run_report_uploads_the_files_after_a_restart(
 @pytest.mark.xfail(
     strict=True,
     raises=KnownBugStillPresent,
-    reason="bug-02-crash-before-pending-record: a pending record that can't be written, with no "
+    reason="ENG-2111: a pending record that can't be written, with no "
     "crash at all, loses the file in the same way",
 )
 @pytest.mark.covers("upload.pending_record_failed->retried_after_restart")

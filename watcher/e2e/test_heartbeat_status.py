@@ -165,7 +165,7 @@ def test_graceful_stop_shows_stopped_and_starting_again_shows_watching(
     strict=True,
     raises=KnownBugStillPresent,
     reason=(
-        "bug-new-stopped-reads-stale: a cleanly stopped watcher reads `stale` five minutes "
+        "ENG-2124: a cleanly stopped watcher reads `stale` five minutes "
         "after its last heartbeat, although the docs list Stopped as a status of its own"
     ),
 )
@@ -193,7 +193,7 @@ def test_a_cleanly_stopped_watcher_keeps_reading_stopped(
     strict=True,
     raises=KnownBugStillPresent,
     reason=(
-        "bug-new-stopped-reads-stale: the watcher list shows a cleanly stopped watcher as "
+        "ENG-2124: the watcher list shows a cleanly stopped watcher as "
         "`stale` and lists it under the stale filter, five minutes after its last heartbeat"
     ),
 )
@@ -419,7 +419,7 @@ def test_heartbeats_report_what_happened_since_the_last_one_and_start_again_from
     strict=True,
     raises=KnownBugStillPresent,
     reason=(
-        "bug-03-failed-heartbeat-counts-lost: the counters are reset after a heartbeat that "
+        "ENG-2112: the counters are reset after a heartbeat that "
         "failed to send, so the next successful one reports zero for that interval"
     ),
 )
@@ -457,7 +457,7 @@ def test_counts_from_a_heartbeat_that_failed_are_carried_into_the_next_one(
     strict=True,
     raises=KnownBugStillPresent,
     reason=(
-        "bug-new-counts-lost-during-heartbeat: the counters are reset after the heartbeat "
+        "ENG-2125: the counters are reset after the heartbeat "
         "request returns, so a count added while it is in flight is never reported"
     ),
 )
