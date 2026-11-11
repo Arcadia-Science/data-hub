@@ -7,12 +7,13 @@ show that something did *not* happen (an ignored file, a deleted file, a changed
 waits for something that must happen after it (a file written later, in the same folder), then
 watches the server for a short while with ``stays_true``.
 
-The outcomes are asserted, and no filesystem-event detail is: the suite runs on FSEvents (macOS)
-and on inotify (Linux CI) with the same assertions.
+The tests assert outcomes, such as what the server holds, and never which filesystem events the
+watcher got, because the same assertions run on FSEvents (macOS) and on inotify (Linux CI).
 """
 
 from __future__ import annotations
 from pathlib import Path
+from typing import Literal
 
 import pytest
 
@@ -144,10 +145,8 @@ def test_files_that_match_no_pattern_are_ignored(
     server.wait_for_file(instrument_id, "RUN002", "RUN002/b.csv", status="detected")
 
     def only_the_matching_files() -> bool:
-        return (
-            run_names(server, instrument_id) == ["RUN002"]
-            and [e.event_type for e in server.events(pc.watcher_id) if e.event_type == "error"]
-            == []
+        return run_names(server, instrument_id) == ["RUN002"] and not error_events(
+            server, pc.watcher_id
         )
 
     stays_true(
@@ -296,8 +295,9 @@ def test_recursive_mode_detects_files_in_subfolders(
 def test_non_recursive_mode_ignores_subfolders(
     watcher: WatcherFactory, server: ServerView, instrument_id: str, watch_dir: Path
 ) -> None:
-    # The run is the part of the file name before the first underscore.
-    pc = watcher(upload_mode="manual", recursive=False, run_pattern=r"^([^_/]+)_")
+    # The run is the part of the file name before the first underscore, in whichever folder the
+    # file is, so a file in a subfolder would start a run if the watcher looked there.
+    pc = watcher(upload_mode="manual", recursive=False, run_pattern=r"^(?:.*/)?([^_/]+)_[^/]*$")
     write_file(watch_dir / "nested" / "BEFORE_data.csv")
     write_file(watch_dir / "RUNA_data.csv")
     pc.start()
@@ -531,7 +531,7 @@ def test_a_failed_run_report_is_retried_with_a_growing_delay(
     assert first_gap >= RETRY_BASE_DELAY_SECONDS - 0.5, first_gap
     assert second_gap >= 2 * RETRY_BASE_DELAY_SECONDS - 0.5, second_gap
 
-    # Three failures in a row would be noise: the run has one event, for the first.
+    # Two failures in a row would be noise: the run has one event, for the first.
     failed = error_events(server, pc.watcher_id, "run_report_failed")
     assert len(failed) == 1
     assert failed[0].details["run_id"] == "RUN001"
@@ -570,7 +570,7 @@ def test_a_deleted_run_refuses_updates_and_catches_up_after_it_is_restored(
     assert failed.details["status_code"] == 409
     assert failed.message.startswith("Failed to update run RUN001")
 
-    # A 4xx is not retried: the retry delay of a 5xx would be over well within this window.
+    # A 4xx is not retried. A 5xx would be, after the base delay, which this window outlasts.
     def patches() -> list[RecordedRequest]:
         return [r for r in run_reports(proxy, instrument_id) if r.method == "PATCH"]
 
@@ -643,6 +643,40 @@ def test_reporting_a_deleted_run_again_is_refused_and_attaches_no_files(
     )
     assert status == 409, "the server accepted a report of a deleted run"
     assert server.file(instrument_id, "RUN001", "RUN001/second.csv") is None
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="bug-new-run-id-not-url-encoded: the watcher puts the run ID into the update URL "
+    "as it is, so a hash or percent sign in it sends the update to another run, or nowhere",
+)
+@pytest.mark.covers("run.url_characters_in_id->update_reaches_run")
+def test_a_later_file_of_a_run_with_url_characters_in_its_id_reaches_that_run(
+    watcher: WatcherFactory, server: ServerView, instrument_id: str, watch_dir: Path
+) -> None:
+    pc = watcher(upload_mode="manual")
+    pc.start()
+    # "Q%41" reads as "QA" once the URL is decoded, so an update that isn't encoded lands in
+    # that run, which holds a file of its own.
+    write_file(watch_dir / "QA" / "own.csv")
+    server.wait_for_file(instrument_id, "QA", "QA/own.csv", status="detected")
+    for run_id in ("Plate#3", "Q%41"):
+        write_run(watch_dir, run_id, {"first.csv": SMALL, "second.csv": SMALL})
+    # A run with a plain ID, written last, shows the watcher has got through the others.
+    write_run(watch_dir, "PLAIN", {"first.csv": SMALL, "second.csv": SMALL})
+    server.wait_for_file(instrument_id, "PLAIN", "PLAIN/second.csv", status="detected")
+
+    for run_id in ("Plate#3", "Q%41"):
+        expected = [f"{run_id}/first.csv", f"{run_id}/second.csv"]
+        wait_until(
+            lambda run_id=run_id, expected=expected: (
+                relative_paths(server, instrument_id, run_id) == expected
+            ),
+            5,
+            lambda: server.dump(pc.watcher_id, instrument_id),
+            what=f"both files of run {run_id!r}",
+        )
+    assert relative_paths(server, instrument_id, "QA") == ["QA/own.csv"]
 
 
 @pytest.mark.xfail(
@@ -746,14 +780,14 @@ def test_a_new_only_watcher_skips_the_backlog_but_reports_later_files(
 @pytest.mark.covers("scan.restart->reported_files_skipped")
 @pytest.mark.parametrize("upload_mode", ["auto", "manual"])
 def test_a_restart_does_not_report_or_upload_known_files_again(
-    upload_mode: str,
+    upload_mode: Literal["auto", "manual"],
     watcher: WatcherFactory,
     server: ServerView,
     proxy: FaultProxy,
     instrument_id: str,
     watch_dir: Path,
 ) -> None:
-    pc = watcher(upload_mode="auto" if upload_mode == "auto" else "manual")
+    pc = watcher(upload_mode=upload_mode)
     pc.start()
     data = write_run(watch_dir, "RUN001")
     for name, content in data.items():

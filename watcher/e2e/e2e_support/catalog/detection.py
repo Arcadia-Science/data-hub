@@ -41,8 +41,9 @@ TRANSITIONS: tuple[Transition, ...] = (
     covered(
         MACHINE,
         "file.pending->abandoned_timeout",
-        "A file that keeps changing past `max_stability_wait_seconds` is dropped with a "
-        "`stability_timeout` error event and no run.",
+        "A file that keeps changing past `max_stability_wait_seconds` is dropped from the "
+        "waiting list with a `stability_timeout` error event, and no run is reported for it "
+        "while it keeps changing. A later write puts it back on the list.",
     ),
     covered(
         MACHINE,
@@ -130,16 +131,25 @@ TRANSITIONS: tuple[Transition, ...] = (
     xfail_bug(
         MACHINE,
         "run.deleted->rereport_conflict",
-        "Reporting a run that an admin soft-deleted is refused with a 409, as updating it "
-        "is, and attaches no files to it.",
+        "Reporting a run that an admin soft-deleted (a watcher that starts without that run in "
+        "its state database, for example after `state forget`) is refused with a 409, as "
+        "updating it is, and attaches no files to it.",
         "bug-05-rereport-deleted-run-attaches-files",
     ),
     xfail_bug(
         MACHINE,
         "file.dismissed_path->redetected",
         "A new file at a path whose earlier file was dismissed (a different size or "
-        "modification time) appears on the server as `detected`.",
+        "modification time), reported by a watcher that forgot the old one with "
+        "`state forget`, appears on the server as `detected`.",
         "bug-06-dismissed-path-blocks-new-file",
+    ),
+    xfail_bug(
+        MACHINE,
+        "run.url_characters_in_id->update_reaches_run",
+        "A run whose ID contains URL characters such as `#` or `%` gets its later files through "
+        "an update to that same run: the watcher percent-encodes the run ID in the URL.",
+        "bug-new-run-id-not-url-encoded",
     ),
     # --- the initial scan and restarts ------------------------------------------------------
     covered(
