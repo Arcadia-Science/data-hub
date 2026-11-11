@@ -123,6 +123,31 @@ class TestStabilityTimeout:
         assert call.args[0] == "stability_timeout"
         assert call.kwargs["max_wait_seconds"] == custom_max_wait
 
+    def test_a_file_that_changed_since_the_last_check_still_times_out(
+        self, watch_dir: Path, state_db: StateDB
+    ) -> None:
+        # A file written to more often than the checker runs has changed at every check.
+        reporter = MagicMock(spec=EventReporter)
+        monitor = _make_monitor(watch_dir, state_db, reporter=reporter)
+
+        f = watch_dir / "growing.csv"
+        f.write_text("a longer file than the check before saw")
+        st = f.stat()
+        now = time.monotonic()
+        monitor._pending[f] = _PendingFile(
+            path=f,
+            size=st.st_size - 1,
+            mtime=st.st_mtime,
+            first_seen=now - MAX_STABILITY_WAIT_SECONDS - 1,
+            last_changed=now - 1,
+        )
+
+        monitor._check_pending()
+
+        assert f not in monitor._pending
+        assert reporter.report_error.call_count == 1
+        assert reporter.report_error.call_args.args[0] == "stability_timeout"
+
     def test_no_reporter_does_not_crash(self, watch_dir: Path, state_db: StateDB) -> None:
         """A FileMonitor built without a reporter must still function.
 
