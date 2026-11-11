@@ -89,6 +89,7 @@ installed in `web/node_modules` (run `npm ci` in `web/`).
 | `s3_mirror_root` | The directory the server uses as its S3 stand-in. An object lands at `<s3_mirror_root>/<bucket>/<key>`. |
 | `cron_secret` | The bearer token the cron routes accept. |
 | `auth_secret` | The `AUTH_SECRET` that signs session cookies. |
+| `raw_bucket` | The name of the raw-data bucket the server uses. It is the first folder under `s3_mirror_root`. |
 
 `data_hub_shared.testing.AUTH_SECRET` and `CRON_SECRET` hold the same two
 secrets as module constants.
@@ -104,8 +105,8 @@ need it.
 **The S3 stand-in.** The server runs as production, so its local S3 mirror is
 off. The harness sets `INTEGRATION_TEST_S3_MIRROR` to `s3_mirror_root`,
 a fresh directory for each session, and sets the multipart threshold and part
-size to 1024 bytes. Tests should read objects from `s3_mirror_root` and never
-hard-code a path.
+size to 1024 bytes. Tests should read objects from `s3_mirror_root / raw_bucket` and never
+hard-code a path or a bucket name.
 
 **The server environment.** The harness sets `CRON_SECRET`, so a test can call
 `/api/cron/upload-queue-sweep` with `Authorization: Bearer <cron_secret>`. It

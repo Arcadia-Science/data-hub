@@ -603,6 +603,7 @@ def test_integration_env_keeps_the_original_fields_first_and_adds_the_new_ones()
         "s3_mirror_root",
         "cron_secret",
         "auth_secret",
+        "raw_bucket",
     ]
 
 
@@ -615,6 +616,7 @@ def test_integration_env_is_frozen(tmp_path: Path) -> None:
         s3_mirror_root=tmp_path / "s3",
         cron_secret=CRON_SECRET,
         auth_secret=AUTH_SECRET,
+        raw_bucket="data-hub-test-raw",
     )
     with pytest.raises(dataclasses.FrozenInstanceError):
         env.base_url = "other"  # pyright: ignore[reportAttributeAccessIssue]

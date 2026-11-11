@@ -9,7 +9,6 @@ instrument:
 """
 
 from __future__ import annotations
-import os
 import random
 import threading
 from pathlib import Path
@@ -22,6 +21,7 @@ from data_hub_shared.testing import IntegrationEnv, db_query
 from data_hub_watcher.api_client import DataHubClient
 from data_hub_watcher.events import EventReporter
 from data_hub_watcher.heartbeat import WatcherCounters
+from data_hub_watcher.models import PresignedUploadResponse
 from data_hub_watcher.state import StateDB
 from data_hub_watcher.uploader import Uploader
 
@@ -48,15 +48,6 @@ def _register_and_report(
         },
     )
     return watcher.watcher_id, run_id
-
-
-def _raw_bucket() -> str:
-    """The raw-data bucket the test server was started with.
-
-    It matches the default in `data_hub_shared.testing`, which reads the same
-    variable from the test process's environment.
-    """
-    return os.environ.get("S3_RAW_DATA_BUCKET", "data-hub-test-raw")
 
 
 def _get_file_id(dsn: str, run_id: str, filename: str) -> int:
@@ -419,6 +410,7 @@ class TestWholeFileUpload:
         instrument_id: str,
         integration_env: IntegrationEnv,
         tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         watcher_id, _run_id = _register_and_report(client, instrument_id, run_id="WHOLE-001")
         # The test server uploads in parts from 1024 bytes, so this is one PUT.
@@ -427,6 +419,25 @@ class TestWholeFileUpload:
         payload = random.Random(1).randbytes(700)
         path = tmp_path / "small.bin"
         path.write_bytes(payload)
+        # A one-part multipart upload would also leave `multipart_upload_id` empty and
+        # report one part, so the checks below can't tell it from a whole-file upload.
+        # Record what the server offered, and fail if the multipart calls are made.
+        offers: list[PresignedUploadResponse] = []
+        multipart_calls: list[str] = []
+        real_request_upload_url = client.request_upload_url
+
+        def request_upload_url(*args: Any, **kwargs: Any) -> PresignedUploadResponse:
+            offer = real_request_upload_url(*args, **kwargs)
+            offers.append(offer)
+            return offer
+
+        monkeypatch.setattr(client, "request_upload_url", request_upload_url)
+        for name in ("get_part_urls", "complete_multipart_upload", "abort_multipart_upload"):
+            monkeypatch.setattr(
+                client,
+                name,
+                lambda *_args, _name=name, **_kwargs: multipart_calls.append(_name),
+            )
         state = StateDB(tmp_path / "state.db")
         try:
             reporter = EventReporter(client, watcher_id)
@@ -444,6 +455,13 @@ class TestWholeFileUpload:
         finally:
             state.close()
 
+        assert len(offers) == 1
+        assert offers[0].upload_type != "multipart"
+        assert offers[0].upload_id is None
+        assert offers[0].part_count is None
+        assert offers[0].upload_url
+        assert multipart_calls == []
+
         rows = db_query(
             integration_env.db_dsn,
             """SELECT f.status, f.multipart_upload_id FROM files f
@@ -454,7 +472,7 @@ class TestWholeFileUpload:
         assert rows[0] == ("uploaded", None)
         stored = (
             integration_env.s3_mirror_root
-            / _raw_bucket()
+            / integration_env.raw_bucket
             / instrument_id
             / "WHOLE-001"
             / "small.bin"
@@ -511,7 +529,7 @@ class TestMultipartUpload:
         assert rows[0] == ("uploaded", None)
         stored = (
             integration_env.s3_mirror_root
-            / _raw_bucket()
+            / integration_env.raw_bucket
             / instrument_id
             / "PARTS-001"
             / "stack.bin"
@@ -590,7 +608,7 @@ class TestMultipartUpload:
         assert rows[0] == ("uploaded", None)
         stored = (
             integration_env.s3_mirror_root
-            / _raw_bucket()
+            / integration_env.raw_bucket
             / instrument_id
             / "PARTS-001"
             / "stack.bin"

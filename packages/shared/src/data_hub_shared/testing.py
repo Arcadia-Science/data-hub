@@ -123,7 +123,9 @@ class IntegrationEnv:
     stand-in: objects land at ``<s3_mirror_root>/<bucket>/<key>``. Both live
     in a temp directory made for this session. ``cron_secret`` is the bearer
     token the cron routes accept, and ``auth_secret`` is the key that signs
-    session cookies (see ``seed_admin_session``).
+    session cookies (see ``seed_admin_session``). ``raw_bucket`` is the name of the
+    raw-data bucket the server was started with, which is the first folder under
+    ``s3_mirror_root`` that an uploaded file lands in.
     """
 
     base_url: str
@@ -133,6 +135,7 @@ class IntegrationEnv:
     s3_mirror_root: Path
     cron_secret: str
     auth_secret: str
+    raw_bucket: str
 
 
 @dataclass(frozen=True)
@@ -772,6 +775,7 @@ def start_test_server() -> Generator[IntegrationEnv, None, None]:
             s3_mirror_root=s3_mirror_root,
             cron_secret=CRON_SECRET,
             auth_secret=AUTH_SECRET,
+            raw_bucket=server_env["S3_RAW_DATA_BUCKET"],
         )
     finally:
         _terminate_process_tree(server_proc)
