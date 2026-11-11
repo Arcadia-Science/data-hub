@@ -8,9 +8,9 @@ the driver builds and the parsing of what ``sc`` and friends print are tested on
 with a fake runner (``watcher/tests/test_e2e_service_driver.py``). Only :func:`run_command`,
 the default runner, touches the machine.
 
-Nothing here imports ``win32api`` or ``winreg``: the commands are the ones an operator types,
-and their output is read with regular expressions that name the numeric codes (``STATE : 4``)
-rather than the localised words, where Windows prints both.
+Nothing here imports ``win32api`` or ``winreg``: the commands are the ones an operator types.
+Their output is read with regular expressions, and the state of a service is the number ``sc``
+prints (``STATE : 4``), not the word after it.
 """
 
 from __future__ import annotations
@@ -547,9 +547,8 @@ class WindowsHost:
 
     def kill_tree(self, pid: int) -> None:
         """End the service's process and what it started (``taskkill /F /T /PID``). It is what
-        a crash is to the SCM. ``/T`` because the interpreter of a virtual environment is a
-        launcher that starts the real one: killing only the launcher would leave the watcher
-        running with nobody to stop it."""
+        a crash is to the SCM. ``/T`` so that the real interpreter, which the ``python.exe`` of a
+        virtual environment (a launcher) starts, goes with it."""
         result = self._run(["taskkill.exe", "/F", "/T", "/PID", str(pid)])
         # 128 means there is no such process: it went away on its own.
         if result.returncode not in (0, 128):

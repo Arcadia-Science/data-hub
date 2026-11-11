@@ -246,17 +246,24 @@ def test_the_watcher_list_filters_stale_watchers_by_the_age_of_their_heartbeat(
         another("stopped"),
         another("never"),
     )
-    for pc in (online, silent, stopped):
-        pc.start()
-        server.wait_for_watcher_status(pc.watcher_id, "watching")
-    assert stopped.stop() == 0
-    server.wait_for_watcher_status(stopped.watcher_id, "stopped")
+    # One PC at a time, with the one that stays online last: under the Windows service there is
+    # one service per machine, and starting the next PC takes it over from the one before.
 
     # One watcher goes quiet without a word. Its heartbeats are refused until a refusal has been
     # seen, so none is on its way when it is killed and its timestamp aged.
+    silent.start()
+    server.wait_for_watcher_status(silent.watcher_id, "watching")
     silence_heartbeats(proxy, silent.watcher_id)
     silent.kill()
     server.age_past_stale(silent.watcher_id)
+
+    stopped.start()
+    server.wait_for_watcher_status(stopped.watcher_id, "watching")
+    assert stopped.stop() == 0
+    server.wait_for_watcher_status(stopped.watcher_id, "stopped")
+
+    online.start()
+    server.wait_for_watcher_status(online.watcher_id, "watching")
 
     def shown(status: str | None) -> dict[str, str]:
         return {r["id"]: r["status"] for r in server.list_watchers(status=status)}

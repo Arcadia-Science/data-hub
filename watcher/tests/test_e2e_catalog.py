@@ -69,10 +69,9 @@ def test_known_bugs_have_a_slug_and_exclusions_a_reason() -> None:
 
 
 def test_a_service_only_transition_is_in_the_service_machine() -> None:
-    # The service suite (PR 3) covers these from test_windows_service.py. Until then the check
-    # skips them behind SERVICE_SUITE_READY, so make sure that switch is the only thing standing
-    # between a service-only transition and a missing-test failure, and that none of them hides
-    # in the catalog of a machine whose tests run under both drivers.
+    # The service suite covers these from test_windows_service.py, and the check asks for each
+    # of them (SERVICE_SUITE_READY), so make sure that none of them hides in the catalog of a
+    # machine whose tests run under both drivers.
     service_only = [t for t in catalog.ALL_TRANSITIONS if t.platforms == SERVICE]
     assert service_only
     assert {t.machine for t in service_only} == {"windows_service"}

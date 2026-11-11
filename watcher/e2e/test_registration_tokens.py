@@ -470,7 +470,7 @@ def test_a_running_watcher_stops_uploading_and_stops_once_it_is_deregistered(
 # Under the service the intended outcome is not a failure exit: a deregistered watcher can never
 # recover, so the service must stop and stay stopped, and the SCM's recovery actions (which
 # restart a service that exits with a failure) must not bring it back every minute. The
-# service-side check belongs to test_windows_service.py (PR 3).
+# service-side check is `service.deregistered->stays_stopped` in test_windows_service.py.
 @pytest.mark.platforms("cli")
 @pytest.mark.covers("watcher.deregistered->process_exits")
 @pytest.mark.xfail(

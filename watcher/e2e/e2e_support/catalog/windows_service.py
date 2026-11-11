@@ -61,6 +61,15 @@ TRANSITIONS: tuple[Transition, ...] = (
     ),
     covered(
         MACHINE,
+        "service.stop->clean_stop_during_start",
+        "A `service stop` that arrives while the service is still starting (its first "
+        "heartbeat is held up) is not lost: when the start has finished the service stops "
+        "cleanly, with a `stopped` heartbeat and a `watcher_stopped` event. (The CLI has "
+        "this window and loses the stop, which is `process.stop->clean_stop_during_scan`.)",
+        platforms=SERVICE,
+    ),
+    covered(
+        MACHINE,
         "service.stopped->running_again",
         "A stopped service starts again and resumes without reporting its files twice.",
         platforms=SERVICE,
@@ -204,6 +213,17 @@ TRANSITIONS: tuple[Transition, ...] = (
         "service.upgrade->worker_failure_reported",
         "When uv fails inside the worker, the service that comes back on the old version "
         "queues `update_failed` with the worker's error text.",
+        platforms=SERVICE,
+    ),
+    xfail_bug(
+        MACHINE,
+        "service.deregistered->stays_stopped",
+        "A running service that finds out its watcher was deregistered stops and stays "
+        "stopped: the SCM's recovery actions, which restart a service that exits with a "
+        "failure, must not bring back a watcher that can never recover. (It is the service "
+        "side of `watcher.deregistered->process_exits`; today the service keeps running with "
+        "404s.)",
+        "bug-08-deregistered-watcher-keeps-running",
         platforms=SERVICE,
     ),
     # --- reinstall and uninstall ------------------------------------------------------------

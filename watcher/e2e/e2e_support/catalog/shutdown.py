@@ -83,10 +83,8 @@ TRANSITIONS: tuple[Transition, ...] = (
         "`watcher_stopped` event. The test holds up the first heartbeat to keep the process "
         "in that window, because the scan itself is too quick to hit from outside. The "
         "Windows service has no such window: `SvcStop` sets an event that its loop reads "
-        "when the start has finished, so the stop is not lost. A service counterpart "
-        "belongs to `test_windows_service.py` in PR 3, together with a stop during a long "
-        "scan, which only takes effect when the scan ends and so has to fit the SCM's "
-        "stop wait hint.",
+        "when the start has finished, so the stop is not lost. The service counterpart is "
+        "`service.stop->clean_stop_during_start` in `test_windows_service.py`.",
         "bug-09-sigterm-during-scan",
         platforms=CLI,
     ),
