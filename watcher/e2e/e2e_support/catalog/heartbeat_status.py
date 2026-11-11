@@ -109,7 +109,8 @@ TRANSITIONS: tuple[Transition, ...] = (
         MACHINE,
         "heartbeat.below_minimum_version->rejected",
         "With `min_supported_version` above the watcher's version, the server answers every "
-        "heartbeat with 426 and stores none.",
+        "heartbeat with 426 and stores none, so a watcher refused from its first heartbeat "
+        "stays `registered`. Lifting the floor lets the next heartbeat in.",
     ),
     covered(
         MACHINE,

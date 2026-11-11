@@ -30,16 +30,22 @@ def heartbeat_requests(proxy: FaultProxy) -> list[RecordedRequest]:
     return [r for r in proxy.requests if r.method == "POST" and r.path.endswith("/heartbeat")]
 
 
+def failed_heartbeats(proxy: FaultProxy) -> int:
+    """How many heartbeats the proxy has answered with an error: a fault, or a 426 from the
+    server."""
+    return sum(
+        1
+        for r in heartbeat_requests(proxy)
+        if r.fault_mode == "status" or (r.upstream_status or 0) >= 400
+    )
+
+
 def wait_for_failed_heartbeat(proxy: FaultProxy, *, after: int = 0, timeout: float = 20.0) -> int:
-    """Wait until the proxy has answered more than ``after`` heartbeats with an error
-    (a fault, or a 426 from the server), and return how many it has answered so far."""
+    """Wait until more than ``after`` heartbeats have been answered with an error, and return
+    how many have been so far."""
 
     def failed() -> int | None:
-        count = sum(
-            1
-            for r in heartbeat_requests(proxy)
-            if r.fault_mode == "status" or (r.upstream_status or 0) >= 400
-        )
+        count = failed_heartbeats(proxy)
         return count if count > after else None
 
     return wait_until(
@@ -115,8 +121,8 @@ def test_a_watcher_that_never_checked_in_stays_registered_however_old_its_timest
     pc = watcher()
 
     assert server.effective_status(pc.watcher_id) == "registered"
-    # An old heartbeat time on a `registered` watcher (nothing sets one, but the exemption
-    # must not depend on it being empty) and one a day old: still `registered`.
+    # Whatever `last_heartbeat_at` holds, six minutes, a day or nothing, the watcher is still
+    # `registered`: the exemption doesn't depend on the timestamp.
     server.age_past_stale(pc.watcher_id)
     assert server.watcher(pc.watcher_id).status == "registered"
     assert server.effective_status(pc.watcher_id) == "registered"
@@ -329,12 +335,12 @@ def test_counts_from_a_heartbeat_that_failed_are_carried_into_the_next_one(
     server.wait_for_watcher_status(pc.watcher_id, "watching")
 
     with proxy.fault("status", path=r"/heartbeat$", status=503):
-        failed = wait_for_failed_heartbeat(proxy)
+        wait_for_failed_heartbeat(proxy)
         # A file is uploaded while no heartbeat can get through ...
         content = write_run(watch_dir, "RUN001", {"small.csv": SMALL})["small.csv"]
         server.wait_for_uploaded(instrument_id, "RUN001", "RUN001/small.csv", content=content)
-        # ... and two refused heartbeats go by, so the counts of that interval were due.
-        wait_for_failed_heartbeat(proxy, after=failed + 1)
+        # ... and two heartbeats are refused after that, each of which was due to report it.
+        wait_for_failed_heartbeat(proxy, after=failed_heartbeats(proxy) + 1)
     after = server.last_heartbeat_id(pc.watcher_id)
     server.wait_for_heartbeats(pc.watcher_id, count=2, after_id=after)
 
@@ -398,8 +404,9 @@ def test_counts_added_while_a_heartbeat_is_being_sent_are_reported_in_the_next_o
 def test_watcher_survives_a_server_outage_and_reports_the_gap_when_it_ends(
     watcher: WatcherFactory, server: ServerView, proxy: FaultProxy
 ) -> None:
-    # No queue polling, so no event is queued during the outage: a flush that fails waits
-    # between its attempts, which would stretch the ticks this test counts on.
+    # No queue polling, so no event is queued during the outage. A flush that fails waits
+    # between its attempts, which would stretch each tick and leave fewer failed heartbeats in
+    # the seven seconds below.
     pc = watcher(overrides={testing_overrides.UPLOAD_POLL_INTERVAL_ENV_VAR: "600"})
     pc.start()
     server.wait_for_watcher_status(pc.watcher_id, "watching")
