@@ -71,8 +71,11 @@ Provides a `get_named_logger(name)` helper for consistent logging setup.
 
 Integration test infrastructure used by both Lambda and watcher test suites. Provides:
 
-- **`start_test_server()`** — context manager that creates a test Postgres database, pushes the Drizzle schema, builds and starts a Next.js production server, seeds auth, and yields an `IntegrationEnv` with the base URL, API token, and DB DSN.
+- **`start_test_server()`** — context manager that creates a test Postgres database, pushes the Drizzle schema, builds and starts a Next.js production server, seeds auth, and yields an `IntegrationEnv`. It works on POSIX and on Windows. Postgres settings come from `PGHOST`, `PGPORT`, `PGUSER` and `PGPASSWORD`, and default to `127.0.0.1`, `5432`, `postgres` and `postgres`.
+- **`IntegrationEnv`** — frozen dataclass with `base_url`, `api_token`, `db_dsn`, `server_log` (the file the server's output goes to), `s3_mirror_root` (the server's S3 stand-in directory), `cron_secret` and `auth_secret`. The log and the S3 directory live in a temp directory made for each session.
+- **`AUTH_SECRET`** / **`CRON_SECRET`** — the secrets the test server runs with. `CRON_SECRET` is the bearer token for the cron routes.
 - **`seed_auth(dsn)`** — inserts a test user and personal access token, returning the plaintext token.
+- **`seed_admin_session(dsn)`** — inserts an admin user and a session, and returns an `AdminSession(user_id, cookie_header)`. `cookie_header` is a signed Better Auth session cookie, ready to send as the `Cookie` header on admin-only routes.
 - **`seed_instruments(dsn, instruments)`** — inserts instrument rows.
 - **`truncate_tables(dsn, tables)`** — truncates tables with CASCADE.
 - **`db_query(dsn, sql)`** / **`db_update(dsn, sql)`** — direct DB access for test assertions and setup.

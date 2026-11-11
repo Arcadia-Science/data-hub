@@ -17,12 +17,16 @@ run in GitHub Actions.
 | `make fe-test-integration` | `web/` | Vitest `tests/integration/` — builds/starts Next.js against Postgres |
 | `make fe-test` | `web/` | `fe-test-unit` then `fe-test-integration` |
 
-`packages/shared/` has no tests of its own — it ships `testing.py`, the shared
-integration-test infrastructure that `lambda/` and `watcher/` both depend on
-(see [below](#the-shared-test-server-start_test_server)).
+`packages/shared/` ships `testing.py`, the shared integration-test
+infrastructure that `lambda/` and `watcher/` both depend on (see
+[below](#the-shared-test-server-start_test_server)). It has a few unit tests of
+its own in `packages/shared/tests/`, and `make py-test-unit` runs them too.
 
 Integration tests (Python and TypeScript alike) need Postgres reachable at
-`127.0.0.1:5432` and create/reuse a `data_hub_test` database. They also build
+`127.0.0.1:5432` and create/reuse a `data_hub_test` database. The Python
+harness can use a different server: set `PGHOST`, `PGPORT`, `PGUSER` and
+`PGPASSWORD` (the defaults are `127.0.0.1`, `5432`, `postgres` and
+`postgres`). The TypeScript suite doesn't read these. The tests also build
 and start a real Next.js **production** server (`next build && next start`)
 rather than `next dev` — dev mode recompiles on every request, which makes a
 large suite 5–10x slower, and a production build matches actual deployment
@@ -56,9 +60,67 @@ def integration_env() -> Generator[IntegrationEnv, None, None]:
 the Drizzle schema via `npx drizzle-kit push --force`, seeds a deterministic
 `watcher_release_config` row, builds and starts `next start` on a free port,
 waits for it to respond, seeds a test user + personal access token, and yields
-an `IntegrationEnv(base_url, api_token, db_dsn)`. The server is torn down
-(`terminate()`, then `kill()` after a 10s grace period) when the `with` block
-exits.
+an `IntegrationEnv`. It reads the `PG*` variables when it is called. It finds
+`npx` with `shutil.which`, so it works on Windows, where the program is
+`npx.cmd`. It stops with a clear error if `npx` is missing.
+
+`IntegrationEnv` is a frozen dataclass with these fields:
+
+| Field | What it holds |
+| --- | --- |
+| `base_url` | The server's origin, for example `http://127.0.0.1:54321`. |
+| `api_token` | A personal access token with the `*` scope. |
+| `db_dsn` | A DSN for the `data_hub_test` database. |
+| `server_log` | The file that receives the server's stdout and stderr. |
+| `s3_mirror_root` | The directory the server uses as its S3 stand-in. An object lands at `<s3_mirror_root>/<bucket>/<key>`. |
+| `cron_secret` | The bearer token the cron routes accept. |
+| `auth_secret` | The `AUTH_SECRET` that signs session cookies. |
+
+`data_hub_shared.testing.AUTH_SECRET` and `CRON_SECRET` hold the same two
+secrets as module constants.
+
+**The server log.** The server writes straight to `server.log` in a temp
+directory made for this session (named `data-hub-it-…` in your system temp
+directory). Nothing reads a pipe, so a long run can't fill one and stall the
+server. If the server doesn't start, the error message includes the end of
+the log. The temp directory is not deleted when the session ends, so you can
+read the log and the S3 stand-in after a failure. Delete it when you no longer
+need it.
+
+**The S3 stand-in.** The server runs as production, so its local S3 mirror is
+off. The harness sets `INTEGRATION_TEST_S3_MIRROR` to `s3_mirror_root`,
+a fresh directory for each session, and sets the multipart threshold and part
+size to 1024 bytes. Tests should read objects from `s3_mirror_root` and never
+hard-code a path.
+
+**The server environment.** The harness sets `CRON_SECRET`, so a test can call
+`/api/cron/upload-queue-sweep` with `Authorization: Bearer <cron_secret>`. It
+removes `LAMBDA_FUNCTION_URL`, `STALLED_PROCESSING_AFTER_MINUTES` and `VERCEL`
+from the environment it inherits, so a developer's local settings can't change
+what the tests see. The S3 stand-in turns itself off when `VERCEL` is set.
+
+**Teardown.** `next start` runs in its own process group (its own session on
+POSIX, `CREATE_NEW_PROCESS_GROUP` on Windows), because `npx` starts the real
+server as a child. When the `with` block exits, the whole tree is stopped. On
+POSIX the harness sends SIGTERM to the group, waits 10 seconds, then sends
+SIGKILL. On Windows it runs `taskkill /T /F`.
+
+**Admin sessions.** Some routes need a signed-in admin, and a personal access
+token can't reach them. `seed_admin_session(dsn)` inserts an admin user and a
+session that expires in 7 days. It returns an `AdminSession(user_id,
+cookie_header)`. Send `cookie_header` as the `Cookie` header. It builds the
+value the way `seedSessionCookie` in `web/tests/integration/helpers.ts` does:
+`better-auth.session_token=` followed by the URL-encoded token and its
+HMAC-SHA256 signature. Pass `auth_secret=` if the server uses a different
+secret than the harness.
+
+```python
+admin = seed_admin_session(env.db_dsn)
+requests.get(
+    f"{env.base_url}/api/v1/settings/watcher-release",
+    headers={"Cookie": admin.cookie_header},
+)
+```
 
 Because the server is session-scoped, tests need to reset state between runs
 without tearing it down. Both suites do this with an `autouse` fixture that

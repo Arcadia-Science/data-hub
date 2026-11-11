@@ -439,8 +439,12 @@ class TestMultipartUpload:
             ("PARTS-001", "stack.bin"),
         )
         assert rows[0] == ("uploaded", None)
-        stored = Path(
-            f"/tmp/data-hub-integration-s3/data-hub-test-raw/{instrument_id}/PARTS-001/stack.bin"
+        stored = (
+            integration_env.s3_mirror_root
+            / "data-hub-test-raw"
+            / instrument_id
+            / "PARTS-001"
+            / "stack.bin"
         )
         assert stored.read_bytes() == payload
 
@@ -514,8 +518,12 @@ class TestMultipartUpload:
             ("PARTS-001", "stack.bin"),
         )
         assert rows[0] == ("uploaded", None)
-        stored = Path(
-            f"/tmp/data-hub-integration-s3/data-hub-test-raw/{instrument_id}/PARTS-001/stack.bin"
+        stored = (
+            integration_env.s3_mirror_root
+            / "data-hub-test-raw"
+            / instrument_id
+            / "PARTS-001"
+            / "stack.bin"
         )
         assert stored.read_bytes() == payload
 
