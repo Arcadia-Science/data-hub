@@ -61,6 +61,13 @@ TRANSITIONS: tuple[Transition, ...] = (
     # --- revisions from the web app ---------------------------------------------------------
     covered(
         MACHINE,
+        "config.revision->editable_after_first_heartbeat",
+        "The server refuses a config revision for a watcher whose version it does not know "
+        "(registered, no heartbeat yet) or that is too old to support revisions, and "
+        "accepts one once the watcher's first heartbeat has reported its version.",
+    ),
+    covered(
+        MACHINE,
         "config.revision->applied",
         "An admin's revision reaches the watcher in a heartbeat reply, is checked and "
         "written to config.yaml, takes effect by rebuilding the runtime in the same "
@@ -94,6 +101,34 @@ TRANSITIONS: tuple[Transition, ...] = (
     ),
     covered(
         MACHINE,
+        "config.revision->no_rebuild_file_rewritten",
+        "A revision equal to the running settings, while config.yaml on the PC holds an "
+        "edit the watcher has not loaded (it reads the file only at start), saves the "
+        "running settings over the file, so the edit does not come back at the next "
+        "restart. The watcher records the revision as applied, reports the result, and "
+        "pushes the rewritten file, with no rebuild. (A push that finds the server's copy "
+        "already equal to the file is skipped, so the test starts from a server that has "
+        "none, after a first push that failed.)",
+    ),
+    covered(
+        MACHINE,
+        "config.revision->rejected_foreign_config_file",
+        "A revision that would change the settings is rejected, with a reason, when "
+        "config.yaml on the PC now names another environment, watcher or instrument than "
+        "the one running (as after `config set-environment`, which asks for a restart). "
+        "The file is not overwritten, the watcher keeps running with its old config, and "
+        "the server stores `config_revision_rejected`.",
+    ),
+    covered(
+        MACHINE,
+        "config.revision->settled_by_push",
+        "When the result of an applied revision is lost, the push of the new config.yaml "
+        "that follows (it names the revision it is based on) settles it on the server: the "
+        "revision becomes `applied` without a new `pc` revision, and the result sent "
+        "later changes nothing.",
+    ),
+    covered(
+        MACHINE,
         "config.revision->result_retried",
         "A revision result the server did not receive is kept and sent after the next "
         "successful heartbeat, or first thing at the next start if the watcher was "
@@ -110,6 +145,24 @@ TRANSITIONS: tuple[Transition, ...] = (
         "config.folder_change->queue_reverted",
         "The same change makes the server revert the instrument's queued uploads to "
         "`detected`, with an `upload_requests_cancelled` event.",
+    ),
+    covered(
+        MACHINE,
+        "config.folder_change->queue_drained_when_push_fails",
+        "The server reverts the queued uploads of a folder change only in the push of the "
+        "new config.yaml. When that push fails (`config_sync_failed`), the queue is not "
+        "reverted by it: the new runtime's queue poll finds the queued files missing from "
+        "the new folder, reports `queued_file_missing`, and cancels each after three polls "
+        "(`upload_request_cancelled`), which sends it back to `detected`. So the queue "
+        "still drains without anyone's help, a few polls later.",
+    ),
+    covered(
+        MACHINE,
+        "config.rebuild_same_folder->pending_uploads_kept",
+        "A revision that leaves `watch_directory` alone rebuilds the runtime without "
+        "dropping the watcher's `pending_uploads` rows: the new runtime retries them, and "
+        "the upload finishes. (Only a folder change drops them: "
+        "`config.folder_change->pending_uploads_cleared`.)",
     ),
     covered(
         MACHINE,

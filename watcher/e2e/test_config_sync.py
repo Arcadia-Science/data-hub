@@ -22,6 +22,7 @@ import json
 import os
 import re
 import time
+import uuid
 from pathlib import Path
 from typing import Any, cast
 
@@ -285,11 +286,13 @@ def test_a_failed_config_sync_is_reported_and_the_watcher_still_starts(
     assert Revisions(admin, server, pc.watcher_id).history() == [(1, "pc", "applied")]
 
 
-def test_a_watcher_that_has_not_reported_its_version_cannot_be_edited_from_the_web(
+@pytest.mark.covers("config.revision->editable_after_first_heartbeat")
+def test_a_watcher_can_be_edited_from_the_web_once_its_first_heartbeat_reports_its_version(
     watcher: WatcherFactory, server: ServerView, admin: Admin
 ) -> None:
     """The server edits only watchers that report a version supporting config revisions."""
     pc = watcher()
+    revisions = Revisions(admin, server, pc.watcher_id)
     settings = pc.revision_settings(upload_mode="manual")
 
     # Registered, but no heartbeat yet, so the server doesn't know its version.
@@ -302,6 +305,13 @@ def test_a_watcher_that_has_not_reported_its_version_cannot_be_edited_from_the_w
     refused = admin.save_config_revision(pc.watcher_id, settings, base_revision=None)
     assert refused.status_code == 409, refused
     assert refused.body["error"]["details"]["watcher_version"] == "1.3.0"
+    assert revisions.history() == []
+
+    # The first heartbeat of the real watcher reports its version, and then the admin may edit.
+    _start(pc, server)
+    created = revisions.save(settings)
+    assert (created["revision"], created["status"]) == (2, "pending")
+    revisions.wait_for(2, "applied")
 
 
 # ---------------------------------------------------------------------------
@@ -770,6 +780,119 @@ def test_a_revision_equal_to_the_running_settings_is_applied_without_a_rebuild(
     assert f"PUT {PUSH_ROUTE}" not in _config_calls(proxy, pc.watcher_id)
 
 
+@pytest.mark.covers("config.revision->no_rebuild_file_rewritten")
+def test_a_revision_equal_to_the_running_settings_overwrites_an_unapplied_edit_of_the_file(
+    watcher: WatcherFactory,
+    server: ServerView,
+    admin: Admin,
+    proxy: FaultProxy,
+    watch_dir: Path,
+    instrument_id: str,
+) -> None:
+    pc = watcher()
+    revisions = Revisions(admin, server, pc.watcher_id)
+    # The first push fails, so the server has no copy of the file. (A push that finds the
+    # server's copy equal to the rewritten file is skipped, and this test is about the push.)
+    with proxy.fault("status", path=PUSH_PATH, method="PUT", status=503):
+        _start(pc, server)
+        server.wait_for_event(pc.watcher_id, event_type="error", kind="config_sync_failed")
+    pid = _running_pid(pc)
+    running = pc.revision_settings()
+    running_file = pc.config_path.read_bytes()
+    assert server.watcher(pc.watcher_id).config_yaml is None
+
+    # Someone edits the file while the watcher runs. It reads the file only at start, so the edit
+    # is not running.
+    _edit_config(pc, file_patterns=["*.csv", "*.txt"])
+    assert pc.config_path.read_bytes() != running_file
+    proxy.clear_log()
+
+    # An admin saves the settings that are running. The server takes it (it has no copy of the
+    # file to compare with), and the watcher finds that it needs no rebuild.
+    revisions.save(running)
+    revisions.wait_for(1, "applied")
+
+    # It saved the running settings over the edit, so the edit won't come back at the next
+    # restart, and pushed the file.
+    assert pc.config_path.read_bytes() == running_file
+    assert pc.load_config().instrument.file_patterns == ["*.csv"]
+    pushed = server.wait_for_events(
+        pc.watcher_id, event_type="config_synced", message_contains="trigger=config_revision"
+    )
+    assert [e.details for e in pushed] == [{"trigger": "config_revision"}]
+    assert _config_calls(proxy, pc.watcher_id).count(f"PUT {PUSH_ROUTE}") == 1
+    row = server.watcher(pc.watcher_id)
+    assert row.config_yaml == running_file.decode("utf-8")
+    assert row.config_checksum == _checksum(pc.config_path)
+    # The push made no `pc` revision: it is the file of revision 1, which the admin saved.
+    assert revisions.history() == [(1, "web", "applied")]
+    _wait_for_row(
+        server,
+        pc.watcher_id,
+        "the applied revision to show",
+        lambda r: r.applied_config_revision == 1,
+    )
+
+    # No rebuild: the same process, one start event, no stop.
+    assert pc.pid == pid
+    assert len(server.events(pc.watcher_id, event_type="watcher_started")) == 1
+    assert server.events(pc.watcher_id, event_type="watcher_stopped") == []
+    assert "Applying config revision" not in pc.log_text()
+
+    # And the edit stays gone after a restart: nothing to push, and a .txt isn't picked up.
+    assert pc.stop() == 0
+    proxy.clear_log()
+    _start(pc, server)
+    server.wait_for_events(pc.watcher_id, event_type="watcher_started", count=2)
+    assert pc.load_config().instrument.file_patterns == ["*.csv"]
+    assert f"PUT {PUSH_ROUTE}" not in _config_calls(proxy, pc.watcher_id)
+    assert revisions.history() == [(1, "web", "applied")]
+    write_file(watch_dir / "RUN1" / "notes.txt", 300)
+    data = write_file(watch_dir / "RUN1" / "a.csv", 300)  # Written last, so it is the barrier.
+    server.wait_for_uploaded(instrument_id, "RUN1", "RUN1/a.csv", content=data)
+    assert server.file(instrument_id, "RUN1", "RUN1/notes.txt") is None
+
+
+@pytest.mark.covers(
+    "config.revision->rejected_foreign_config_file", "event.config_revision_rejected->recorded"
+)
+def test_a_revision_is_rejected_when_the_config_file_now_belongs_to_another_watcher(
+    watcher: WatcherFactory, server: ServerView, admin: Admin
+) -> None:
+    pc = watcher()
+    revisions = Revisions(admin, server, pc.watcher_id)
+    _start(pc, server)
+    pid = _running_pid(pc)
+    config = pc.load_config()
+
+    # Someone on the PC points config.yaml at another watcher, as `config set-environment` does
+    # for another deployment, and the watcher has not been restarted.
+    pc.write_config(
+        config.model_copy(update={"watcher_ids": {config.environment: str(uuid.uuid4())}})
+    )
+    foreign_file = pc.config_path.read_bytes()
+
+    # An admin changes a setting.
+    revisions.save(pc.revision_settings(upload_mode="manual"))
+
+    rejected = revisions.wait_for(2, "rejected")
+    assert "different environment, watcher or instrument" in rejected["status_reason"]
+    event = server.wait_for_event(
+        pc.watcher_id, event_type="error", kind="config_revision_rejected"
+    )
+    assert event.details["revision"] == 2
+    assert event.details["reason"] == rejected["status_reason"]
+
+    # The file was not written over, and the watcher carries on with its old config.
+    assert pc.config_path.read_bytes() == foreign_file
+    assert pc.pid == pid
+    assert len(server.events(pc.watcher_id, event_type="watcher_started")) == 1
+    assert server.events(pc.watcher_id, event_type="watcher_stopped") == []
+    assert server.heartbeats(pc.watcher_id)[-1].upload_mode == "auto"
+    row = server.watcher(pc.watcher_id)
+    assert (row.status, row.config_revision, row.applied_config_revision) == ("watching", 2, 1)
+
+
 @pytest.mark.covers("config.revision->result_retried", "event.config_sync_failed->emitted")
 def test_a_revision_result_the_server_missed_is_sent_after_the_next_heartbeat(
     watcher: WatcherFactory, server: ServerView, admin: Admin, proxy: FaultProxy
@@ -939,6 +1062,80 @@ def test_changing_the_watch_folder_drops_pending_uploads_and_reverts_the_queue(
     server.wait_for_uploaded(instrument_id, "RUN2", "RUN2/b.csv", content=data)
 
 
+@pytest.mark.covers(
+    "config.folder_change->queue_drained_when_push_fails",
+    "config.folder_change->pending_uploads_cleared",
+    "event.config_sync_failed->emitted",
+    "event.queued_file_missing->emitted",
+    "event.upload_request_cancelled->emitted",
+)
+def test_a_folder_change_whose_push_fails_still_drains_the_queue_through_the_poll(
+    watcher: WatcherFactory,
+    server: ServerView,
+    admin: Admin,
+    proxy: FaultProxy,
+    tmp_path: Path,
+    watch_dir: Path,
+    instrument_id: str,
+) -> None:
+    pc = watcher()
+    revisions = Revisions(admin, server, pc.watcher_id)
+    new_dir = (tmp_path / "moved").resolve()
+    new_dir.mkdir()
+    _start(pc, server)
+
+    # A file is unfinished on the PC (a `pending_uploads` row) and queued on the server, and the
+    # queue can't be read, so it stays queued.
+    with (
+        proxy.fault("status", path=r"/request-upload-url$", method="POST", status=503),
+        proxy.fault("status", path=r"/upload-queue$", method="GET", status=503),
+    ):
+        write_file(watch_dir / "RUN1" / "a.csv", 300)
+        detected = server.wait_for_file(instrument_id, "RUN1", "RUN1/a.csv", status="detected")
+        wait_until(
+            lambda: _pending_upload_paths(pc) == ["RUN1/a.csv"],
+            15,
+            what="the file to be a pending upload",
+        )
+        assert admin.request_upload(instrument_id, "RUN1", [detected.id]).status_code == 200
+        server.wait_for_file(instrument_id, "RUN1", "RUN1/a.csv", status="upload_requested")
+        seen = server.last_event_id(pc.watcher_id)
+
+        # An admin moves the watcher to another folder, and the push of the new file fails.
+        with proxy.fault("status", path=PUSH_PATH, method="PUT", status=503):
+            revisions.save(pc.revision_settings(watch_directory=str(new_dir)))
+            revisions.wait_for(2, "applied")
+            failed = server.wait_for_event(
+                pc.watcher_id, event_type="error", kind="config_sync_failed", after_id=seen
+            )
+            assert failed.message.startswith("Could not push config to API")
+
+        # The watcher dropped its own rows, but the server's revert is part of the push, so the
+        # request is still queued, and the server still holds the old folder.
+        assert _pending_upload_paths(pc) == []
+        assert pc.load_config().instrument.watch_directory == new_dir
+        still_queued = server.file(instrument_id, "RUN1", "RUN1/a.csv")
+        assert still_queued is not None and still_queued.status == "upload_requested"
+        assert server.events(pc.watcher_id, kind="upload_requests_cancelled") == []
+        assert str(watch_dir) in (server.watcher(pc.watcher_id).config_yaml or "")
+
+    # With the queue readable again, the poll finds the file missing from the new folder, and
+    # after three polls cancels the request, which sends the file back to `detected`.
+    reverted = server.wait_for_file(
+        instrument_id, "RUN1", "RUN1/a.csv", status="detected", timeout=60
+    )
+    assert reverted.upload_requested_at is None
+    missing = server.wait_for_events(pc.watcher_id, event_type="error", kind="queued_file_missing")
+    assert {e.details["file_id"] for e in missing} == {detected.id}
+    [cancelled] = server.wait_for_events(
+        pc.watcher_id, event_type="error", kind="upload_request_cancelled"
+    )
+    assert cancelled.details["file_id"] == detected.id
+    # The queue was drained by the poll's cancel, not by a revert that came with a push.
+    assert server.events(pc.watcher_id, kind="upload_requests_cancelled") == []
+    assert server.upload_queue(pc.watcher_id) == []
+
+
 @pytest.mark.covers("config.scope_widened->report_only_scan")
 def test_a_wider_scope_reports_old_files_without_uploading_them(
     watcher: WatcherFactory,
@@ -977,10 +1174,11 @@ def test_a_wider_scope_reports_old_files_without_uploading_them(
 
 
 # ---------------------------------------------------------------------------
-# Related behavior that no transition names
+# More about results and rebuilds
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.covers("config.revision->settled_by_push")
 def test_the_push_after_applying_proves_a_revision_whose_result_was_lost(
     watcher: WatcherFactory, server: ServerView, admin: Admin, proxy: FaultProxy
 ) -> None:
@@ -1011,6 +1209,7 @@ def test_the_push_after_applying_proves_a_revision_whose_result_was_lost(
     assert len(server.events(pc.watcher_id, kind="config_revision_applied")) == 1
 
 
+@pytest.mark.covers("config.rebuild_same_folder->pending_uploads_kept")
 def test_a_rebuild_in_the_same_folder_keeps_the_pending_uploads(
     watcher: WatcherFactory,
     server: ServerView,
