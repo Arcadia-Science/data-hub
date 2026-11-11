@@ -430,6 +430,40 @@ def test_the_stop_event_reaches_the_server_before_the_stopped_heartbeat(
     strict=True,
     raises=KnownBugStillPresent,
     reason=(
+        "bug-new-stop-unbounded-with-hung-server: a stop against a server that has stopped "
+        "answering waits for the stuck heartbeat, the final heartbeat and the event flush, "
+        "each up to the client's read timeout, and takes up to about 95 s"
+    ),
+)
+@pytest.mark.covers("process.stop->bounded_when_server_hangs")
+def test_a_stop_completes_within_thirty_seconds_even_if_the_server_stops_answering(
+    watcher: WatcherFactory, server: ServerView, proxy: FaultProxy
+) -> None:
+    pc = watcher()
+    start_watching(pc, server)
+    # Every heartbeat and event request is held for longer than the client waits for an answer
+    # (30 s), so each one the watcher sends is stuck until it gives up on it.
+    proxy.add_fault("delay", path=r"/(heartbeat|events)$", method="POST", delay_seconds=45)
+    wait_until(
+        lambda: any(r.fault_mode == "delay" for r in proxy.requests),
+        30,
+        pc.log_tail,
+        what="a heartbeat to be held up",
+    )
+    assert pc.is_running()
+
+    pc.request_stop()
+
+    # PROPOSED bound: the process is gone within about 30 s. A test that outlasts it leaves the
+    # watcher to the driver, which stops it for good when the test ends.
+    with known_bug():
+        pc.wait_exit(30)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    raises=KnownBugStillPresent,
+    reason=(
         "bug-09-sigterm-during-scan: a stop that arrives while the watcher is still starting "
         "(before its start-up scan ends) kills it with no stopped heartbeat and no stop event"
     ),

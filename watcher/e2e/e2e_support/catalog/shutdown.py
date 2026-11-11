@@ -76,6 +76,22 @@ TRANSITIONS: tuple[Transition, ...] = (
     ),
     xfail_bug(
         MACHINE,
+        "process.stop->bounded_when_server_hangs",
+        "PROPOSED — confirm intent: a graceful stop completes within about 30 seconds even "
+        "when the server has stopped answering. Today a stop waits for the heartbeat thread "
+        "(whose request is stuck for the client's 30 s read timeout), sends the final "
+        "`stopped` heartbeat and flushes the events, each of which can wait for the same "
+        "timeout again, and the join of the thread allows 65 s, so a stop against a hung "
+        "server took up to about 95 s. For the Windows service that is worse than slow: "
+        "pywin32 reports a wait hint of 5 s that nothing updates, the SCM doesn't kill a "
+        "manual stop that is slow, and `service reinstall` gives up waiting for the "
+        "service after 30 s. The test holds every heartbeat and event request for longer "
+        "than the client waits, asks for a stop and expects the process to be gone within "
+        "30 s.",
+        "bug-new-stop-unbounded-with-hung-server",
+    ),
+    xfail_bug(
+        MACHINE,
         "process.stop->clean_stop_during_scan",
         "CLI only. A graceful stop that arrives while the watcher is still starting (the "
         "config sync, the first heartbeat and the startup scan all run before `watch` "
