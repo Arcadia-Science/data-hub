@@ -31,15 +31,20 @@ network. Tests that need `uv` skip themselves when it isn't on the PATH.
 
 Integration tests (Python and TypeScript alike) need Postgres reachable at
 `127.0.0.1:5432` and create/reuse a `data_hub_test` database. The Python
-harness can use a different server: set `DATA_HUB_TEST_PGHOST`,
-`DATA_HUB_TEST_PGPORT`, `DATA_HUB_TEST_PGUSER` and `DATA_HUB_TEST_PGPASSWORD`
-(the defaults are `127.0.0.1`, `5432`, `postgres` and `postgres`).
-`DATA_HUB_TEST_PGHOST` must be a host name or address, not a socket directory.
-The harness deliberately ignores the standard `PGHOST`, `PGPORT`, `PGUSER` and
-`PGPASSWORD`. Your shell may point `psql` at another server, and the harness
-creates a database, runs `drizzle-kit push --force` and truncates tables. The
-TypeScript suite doesn't read any of these variables. The tests also build
-and start a real Next.js **production** server (`next build && next start`)
+harness can use a different server or database: set `DATA_HUB_TEST_PGHOST`,
+`DATA_HUB_TEST_PGPORT`, `DATA_HUB_TEST_PGUSER`, `DATA_HUB_TEST_PGPASSWORD` and
+`DATA_HUB_TEST_PGDATABASE` (the defaults are `127.0.0.1`, `5432`, `postgres`,
+`postgres` and `data_hub_test`). The harness creates the database if it is
+missing, so two runs that must not share tables, such as the integration suite
+and the [end-to-end suite](#end-to-end-tests-of-the-watcher), can each use their
+own by setting `DATA_HUB_TEST_PGDATABASE`. Its value must be a plain name:
+letters, digits and underscores, not starting with a digit, at most 63
+characters. `DATA_HUB_TEST_PGHOST` must be a host name or address, not a socket
+directory. The harness deliberately ignores the standard `PGHOST`, `PGPORT`,
+`PGUSER`, `PGPASSWORD` and `PGDATABASE`. Your shell may point `psql` at another
+server, and the harness creates a database, runs `drizzle-kit push --force` and
+truncates tables. The TypeScript suite doesn't read any of these variables. The
+tests also build and start a real Next.js **production** server (`next build && next start`)
 rather than `next dev` — dev mode recompiles on every request, which makes a
 large suite 5–10x slower, and a production build matches actual deployment
 behavior. That build writes to `web/.next`, which **contends with a running
@@ -68,7 +73,8 @@ def integration_env() -> Generator[IntegrationEnv, None, None]:
         yield env
 ```
 
-`start_test_server()` creates the `data_hub_test` database if missing, pushes
+`start_test_server()` creates the test database (`data_hub_test` unless
+`DATA_HUB_TEST_PGDATABASE` says otherwise) if missing, pushes
 the Drizzle schema via `npx drizzle-kit push --force`, seeds a deterministic
 `watcher_release_config` row, builds and starts `next start` on a free port,
 waits for it to respond, seeds a test user + personal access token, and yields
@@ -84,7 +90,7 @@ installed in `web/node_modules` (run `npm ci` in `web/`).
 | --- | --- |
 | `base_url` | The server's origin, for example `http://127.0.0.1:54321`. |
 | `api_token` | A personal access token with the `*` scope. |
-| `db_dsn` | A DSN for the `data_hub_test` database. |
+| `db_dsn` | A DSN for the test database. |
 | `server_log` | The file that receives the server's stdout and stderr. |
 | `s3_mirror_root` | The directory the server uses as its S3 stand-in. An object lands at `<s3_mirror_root>/<bucket>/<key>`. |
 | `cron_secret` | The bearer token the cron routes accept. |

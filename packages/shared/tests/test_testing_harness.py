@@ -311,6 +311,50 @@ def test_postgres_url_brackets_an_ipv6_host() -> None:
     assert pg.database_url("postgres") == "postgres://postgres:postgres@[::1]:5432/postgres"
 
 
+def test_the_database_defaults_to_data_hub_test() -> None:
+    pg = testing._pg_settings_from_env({})
+
+    assert pg.database == "data_hub_test"
+    assert pg.dsn(pg.database).startswith("dbname=data_hub_test ")
+    assert pg.database_url(pg.database).endswith("/data_hub_test")
+
+
+def test_the_database_comes_from_the_harness_environment_variable() -> None:
+    pg = testing._pg_settings_from_env({"DATA_HUB_TEST_PGDATABASE": "data_hub_e2e"})
+
+    assert pg.database == "data_hub_e2e"
+    assert pg.dsn(pg.database) == (
+        "dbname=data_hub_e2e user=postgres password=postgres host=127.0.0.1 port=5432"
+    )
+    assert (
+        pg.database_url(pg.database) == "postgres://postgres:postgres@127.0.0.1:5432/data_hub_e2e"
+    )
+    # The admin connection used to create the database still goes to `postgres`.
+    assert pg.dsn("postgres").startswith("dbname=postgres ")
+
+
+def test_an_empty_database_variable_falls_back_to_the_default() -> None:
+    pg = testing._pg_settings_from_env({"DATA_HUB_TEST_PGDATABASE": ""})
+
+    assert pg.database == "data_hub_test"
+
+
+def test_the_standard_pgdatabase_variable_does_not_pick_the_database() -> None:
+    pg = testing._pg_settings_from_env({"PGDATABASE": "something_else"})
+
+    assert pg.database == "data_hub_test"
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["data-hub-e2e", "1starts_with_digit", "has space", "semi;colon", 'quo"te', "x" * 64, "é"],
+)
+def test_a_database_name_that_is_not_a_plain_identifier_is_refused(name: str) -> None:
+    # The name goes into `CREATE DATABASE`, a connection string and a URL.
+    with pytest.raises(ValueError, match="DATA_HUB_TEST_PGDATABASE must be a plain database name"):
+        testing._pg_settings_from_env({"DATA_HUB_TEST_PGDATABASE": name})
+
+
 def test_postgres_port_must_be_an_integer() -> None:
     with pytest.raises(ValueError, match="DATA_HUB_TEST_PGPORT must be an integer"):
         testing._pg_settings_from_env({"DATA_HUB_TEST_PGPORT": "not-a-port"})
@@ -351,6 +395,70 @@ def test_start_test_server_reads_the_harness_variables_when_it_is_called(
         pass
 
     assert dsns == ["dbname=postgres user=tester password=s3cret host=db.example.test port=6543"]
+
+
+class _RecordingCursor:
+    """A cursor that says no database exists yet and records what it is asked to run."""
+
+    def __init__(self, executed: list[tuple[Any, tuple[Any, ...] | None]]) -> None:
+        self._executed = executed
+
+    def __enter__(self) -> _RecordingCursor:
+        return self
+
+    def __exit__(self, *exc: object) -> bool:
+        return False
+
+    def execute(self, statement: Any, params: tuple[Any, ...] | None = None) -> None:
+        self._executed.append((statement, params))
+
+    def fetchone(self) -> None:
+        return None
+
+
+def test_start_test_server_creates_and_uses_the_database_the_variable_names(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DATA_HUB_TEST_PGDATABASE", "data_hub_e2e")
+    monkeypatch.setattr(testing.shutil, "which", lambda name: f"/fake/{name}")
+    monkeypatch.setattr(testing, "_resolve_next_cli", lambda: Path("/fake/next"))
+    dsns: list[str] = []
+    executed: list[tuple[Any, tuple[Any, ...] | None]] = []
+
+    class Conn:
+        autocommit = False
+
+        def cursor(self) -> _RecordingCursor:
+            return _RecordingCursor(executed)
+
+        def close(self) -> None:
+            pass
+
+    def fake_connect(dsn: str) -> Conn:
+        dsns.append(dsn)
+        return Conn()
+
+    pushed_urls: list[str] = []
+
+    def fake_run_npx(npx: str, args: list[str], *, what: str, env: Any) -> None:
+        pushed_urls.append(env["DATABASE_URL"])
+        raise _StopHere
+
+    monkeypatch.setattr(testing.psycopg2, "connect", fake_connect)
+    monkeypatch.setattr(testing, "_run_npx", fake_run_npx)
+
+    with pytest.raises(_StopHere), testing.start_test_server():
+        pass
+
+    # It looks for the database by name on the `postgres` database, creates it when it
+    # is missing, and points the schema push at it.
+    assert dsns == ["dbname=postgres user=postgres password=postgres host=127.0.0.1 port=5432"]
+    [(lookup, lookup_params), (create, _)] = executed
+    assert "pg_database" in lookup
+    assert lookup_params == ("data_hub_e2e",)
+    assert "CREATE DATABASE" in repr(create)
+    assert "data_hub_e2e" in repr(create)
+    assert pushed_urls == ["postgres://postgres:postgres@127.0.0.1:5432/data_hub_e2e"]
 
 
 # ---------------------------------------------------------------------------
