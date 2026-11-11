@@ -11,6 +11,7 @@ instrument:
 from __future__ import annotations
 import random
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 from urllib.parse import parse_qs, urlparse
@@ -421,7 +422,8 @@ class TestWholeFileUpload:
         path.write_bytes(payload)
         # A one-part multipart upload would also leave `multipart_upload_id` empty and
         # report one part, so the checks below can't tell it from a whole-file upload.
-        # Record what the server offered, and fail if the multipart calls are made.
+        # Record what the server offered and which multipart calls are made, and let them
+        # go through, so a regression fails on the checks that name it.
         offers: list[PresignedUploadResponse] = []
         multipart_calls: list[str] = []
         real_request_upload_url = client.request_upload_url
@@ -431,13 +433,18 @@ class TestWholeFileUpload:
             offers.append(offer)
             return offer
 
+        def record_multipart_call(name: str) -> Callable[..., Any]:
+            real = getattr(client, name)
+
+            def call(*args: Any, **kwargs: Any) -> Any:
+                multipart_calls.append(name)
+                return real(*args, **kwargs)
+
+            return call
+
         monkeypatch.setattr(client, "request_upload_url", request_upload_url)
         for name in ("get_part_urls", "complete_multipart_upload", "abort_multipart_upload"):
-            monkeypatch.setattr(
-                client,
-                name,
-                lambda *_args, _name=name, **_kwargs: multipart_calls.append(_name),
-            )
+            monkeypatch.setattr(client, name, record_multipart_call(name))
         state = StateDB(tmp_path / "state.db")
         try:
             reporter = EventReporter(client, watcher_id)
