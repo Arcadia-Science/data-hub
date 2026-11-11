@@ -36,9 +36,11 @@ TRANSITIONS: tuple[Transition, ...] = (
     covered(
         MACHINE,
         "process.stop->upload_deferred",
-        "A graceful stop during a long upload starts no new file or part and exits within "
-        "the stop bound, keeps the unfinished file's `pending_uploads` row, and the next "
-        "start uploads it.",
+        "A graceful stop during a long upload cuts it short and exits within the stop bound. "
+        "The unfinished file keeps its `pending_uploads` row, being cut off does not use up "
+        "one of the file's three starts, and the next start uploads it. (How soon the "
+        "uploader stops starting new parts and files is "
+        "`process.stop->no_new_uploads_after_stop`.)",
     ),
     covered(
         MACHINE,
@@ -62,13 +64,29 @@ TRANSITIONS: tuple[Transition, ...] = (
     ),
     xfail_bug(
         MACHINE,
+        "process.stop->no_new_uploads_after_stop",
+        "Once a graceful stop is requested, an auto-mode upload starts no new part and no "
+        "new file. `stop_runtime` joins the file monitor for up to 5 seconds before it "
+        "stops the upload worker, and the worker's stop is what sets the uploader's stop "
+        "signal, so an upload running on the monitor's own thread keeps starting parts, "
+        "and a following file, for about 5 seconds after the stop. (The in-process rebuild "
+        "for a config revision stops the worker first.) The test makes a stop arrive during "
+        "the first of two short files and asserts that no request for a part follows it.",
+        "bug-new-uploads-continue-after-stop",
+    ),
+    xfail_bug(
+        MACHINE,
         "process.stop->clean_stop_during_scan",
-        "A graceful stop that arrives while the watcher is still starting (the config "
-        "sync, the first heartbeat and the startup scan all run before it installs its "
-        "signal handlers) still sends a `stopped` heartbeat and a `watcher_stopped` event. "
-        "The Windows service already stops cleanly there. The test holds up the first "
-        "heartbeat to keep the watcher in that window, because the scan itself is too "
-        "quick to hit from outside.",
+        "CLI only. A graceful stop that arrives while the watcher is still starting (the "
+        "config sync, the first heartbeat and the startup scan all run before `watch` "
+        "installs its signal handlers) still sends a `stopped` heartbeat and a "
+        "`watcher_stopped` event. The test holds up the first heartbeat to keep the process "
+        "in that window, because the scan itself is too quick to hit from outside. The "
+        "Windows service has no such window: `SvcStop` sets an event that its loop reads "
+        "when the start has finished, so the stop is not lost. A service counterpart "
+        "belongs to `test_windows_service.py` in PR 3, together with a stop during a long "
+        "scan, which only takes effect when the scan ends and so has to fit the SCM's "
+        "stop wait hint.",
         "bug-09-sigterm-during-scan",
         platforms=CLI,
     ),

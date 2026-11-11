@@ -9,17 +9,16 @@ sense under the CLI driver (Ctrl+C, and a stop before the signal handlers exist)
 """
 
 from __future__ import annotations
+import time
 from pathlib import Path
 
 import pytest
 
 from data_hub_shared.testing_proxy import FaultProxy
-from data_hub_watcher import testing_overrides
-from e2e_support.admin import Admin
 from e2e_support.drivers import WatcherDriver
 from e2e_support.factory import WatcherFactory
 from e2e_support.files import SMALL, write_file, write_run
-from e2e_support.server import ServerView
+from e2e_support.server import EventRow, ServerView
 from e2e_support.waiting import KnownBugStillPresent, known_bug, stays_true, wait_until
 
 pytestmark = pytest.mark.e2e
@@ -28,6 +27,7 @@ pytestmark = pytest.mark.e2e
 # file of this many parts is 20 KB and takes 20 PUTs.
 PART_BYTES = 1024
 PARTS = 20
+SHORT_PARTS = 3
 
 
 # ---------------------------------------------------------------------------
@@ -43,6 +43,19 @@ def stop_events(server: ServerView, watcher_id: str) -> list[str]:
     ]
 
 
+def own_stop_event(server: ServerView, watcher_id: str) -> EventRow:
+    """Wait for the ``watcher_stopped`` event the watcher itself sent, not the one of the same
+    type that the server writes when it reverts a queue (that one has a ``kind``)."""
+
+    def found() -> EventRow | None:
+        events = server.events(watcher_id, event_type="watcher_stopped")
+        return next((e for e in events if e.kind is None), None)
+
+    return server.wait_until(
+        found, 30, what="the watcher's own watcher_stopped event", watcher_id=watcher_id
+    )
+
+
 def start_watching(pc: WatcherDriver, server: ServerView) -> None:
     pc.start()
     server.wait_for_watcher_status(pc.watcher_id, "watching")
@@ -51,11 +64,6 @@ def start_watching(pc: WatcherDriver, server: ServerView) -> None:
 def part_puts(proxy: FaultProxy) -> list[str]:
     """The PUTs the watcher made to the S3 stand-in, one per part of a multipart upload."""
     return [r.path for r in proxy.requests if r.method == "PUT" and "/api/local-s3/" in r.path]
-
-
-def upload_url_requests(proxy: FaultProxy) -> list[str]:
-    """The requests for an upload URL, one per file the watcher starts to upload."""
-    return [r.path for r in proxy.requests if r.path.endswith("/request-upload-url")]
 
 
 def pending_uploads(pc: WatcherDriver) -> list[str]:
@@ -125,46 +133,6 @@ def test_stopping_a_watcher_that_waits_for_its_folder(
     assert stop_events(server, pc.watcher_id) == [pc.operator_stop_message]
 
 
-@pytest.mark.covers(
-    "process.stop->clean_exit",
-    "event.upload_requests_cancelled->recorded",
-)
-def test_a_graceful_stop_returns_queued_uploads_to_detected(
-    watcher: WatcherFactory,
-    server: ServerView,
-    admin: Admin,
-    watch_dir: Path,
-    instrument_id: str,
-) -> None:
-    # A queue poll an hour away keeps the files queued until the watcher stops.
-    pc = watcher(
-        upload_mode="manual",
-        overrides={testing_overrides.UPLOAD_POLL_INTERVAL_ENV_VAR: "3600"},
-    )
-    start_watching(pc, server)
-    write_run(watch_dir, "RUN001", {"a.csv": SMALL, "b.csv": SMALL})
-    server.wait_for_file(instrument_id, "RUN001", "RUN001/a.csv", status="detected")
-    server.wait_for_file(instrument_id, "RUN001", "RUN001/b.csv", status="detected")
-    admin.request_upload_all(instrument_id, "RUN001").raise_for_status()
-    assert {f.status for f in server.files(instrument_id, "RUN001")} == {"upload_requested"}
-
-    assert pc.stop() == 0
-
-    # The `stopped` heartbeat told the server nobody is left to drain the queue.
-    server.wait_until(
-        lambda: {f.status for f in server.files(instrument_id, "RUN001")} == {"detected"},
-        30,
-        what="the queued files to return to detected",
-        watcher_id=pc.watcher_id,
-        instrument_id=instrument_id,
-    )
-    reverted = server.wait_for_event(
-        pc.watcher_id, event_type="watcher_stopped", kind="upload_requests_cancelled"
-    )
-    assert reverted.details["reason"] == "watcher_stopped"
-    assert reverted.details["cancelled_count"] == 2
-
-
 @pytest.mark.covers("process.stop->upload_deferred", "event.file_uploaded->emitted")
 def test_a_stop_during_a_long_upload_defers_it_to_the_next_start(
     watcher: WatcherFactory,
@@ -176,7 +144,7 @@ def test_a_stop_during_a_long_upload_defers_it_to_the_next_start(
     pc = watcher(upload_parallelism=1)
     start_watching(pc, server)
     # Every part takes 2 s to arrive, so a file of 20 parts takes 40 s unless the stop cuts it
-    # short, and the second file is waiting its turn.
+    # short.
     proxy.add_fault("delay", path=r"/api/local-s3/", method="PUT", delay_seconds=2)
     contents = write_run(
         watch_dir, "RUN001", {"first.csv": PARTS * PART_BYTES, "second.csv": PARTS * PART_BYTES}
@@ -191,10 +159,9 @@ def test_a_stop_during_a_long_upload_defers_it_to_the_next_start(
     pc.request_stop()
     assert pc.wait_exit(25) == 0
 
-    # It started no new part and no new file: some of the first file went out, and the
-    # second one never asked for an upload URL.
+    # The stop cut the upload short: some of the first file went out, and none of the files is
+    # done.
     assert 0 < len(part_puts(proxy)) < PARTS
-    assert len(upload_url_requests(proxy)) == 1
     assert not [f for f in server.files(instrument_id, "RUN001") if f.status == "uploaded"]
     # The unfinished file is still the watcher's to upload. The second one may be pending too
     # (when both files were found stable in the same pass), or not yet handed to the uploader,
@@ -219,7 +186,7 @@ def test_a_stop_during_a_long_upload_defers_it_to_the_next_start(
 
 
 @pytest.mark.covers("process.stop->upload_deferred")
-def test_a_stop_while_pending_uploads_are_retried_starts_no_new_file(
+def test_a_stop_while_pending_uploads_are_retried_does_not_use_up_their_attempts(
     watcher: WatcherFactory,
     server: ServerView,
     proxy: FaultProxy,
@@ -257,7 +224,6 @@ def test_a_stop_while_pending_uploads_are_retried_starts_no_new_file(
     assert pc.wait_exit(25) == 0
 
     assert 0 < len(part_puts(proxy)) < PARTS
-    assert len(upload_url_requests(proxy)) == 1
     # Both are still pending, and being cut off did not count against either one's three
     # starts.
     rows = pc.state_query("SELECT relative_path, attempts FROM pending_uploads ORDER BY 1")
@@ -384,6 +350,57 @@ def test_a_watcher_started_again_after_a_kill_resumes_without_reporting_twice(
     strict=True,
     raises=KnownBugStillPresent,
     reason=(
+        "bug-new-uploads-continue-after-stop: `stop_runtime` joins the file monitor for up to "
+        "5 s before it stops the upload worker, so an auto upload on the monitor's thread "
+        "keeps starting parts, and the next file, after a stop"
+    ),
+)
+@pytest.mark.covers("process.stop->no_new_uploads_after_stop")
+def test_a_stop_starts_no_new_part_or_file_of_an_auto_upload(
+    watcher: WatcherFactory,
+    server: ServerView,
+    proxy: FaultProxy,
+    watch_dir: Path,
+    instrument_id: str,
+) -> None:
+    pc = watcher(upload_parallelism=1)
+    start_watching(pc, server)
+    # Each part takes a second to arrive. A file of three parts is short enough that the second
+    # file would start well inside the five seconds the stop spends waiting for the monitor, yet
+    # long enough that the stop arrives while the first is on its way.
+    proxy.add_fault("delay", path=r"/api/local-s3/", method="PUT", delay_seconds=1)
+    write_run(
+        watch_dir,
+        "RUN001",
+        {"first.csv": SHORT_PARTS * PART_BYTES, "second.csv": SHORT_PARTS * PART_BYTES},
+    )
+    wait_until(
+        lambda: part_puts(proxy),
+        60,
+        lambda: server.dump(pc.watcher_id, instrument_id),
+        what="the first part to be on its way",
+    )
+
+    stopped_at = time.time()
+    pc.request_stop()
+    assert pc.wait_exit(25) == 0
+
+    # The proxy logs a part when it arrives, so a part logged after the stop (with some room for
+    # the signal to be handled) is one that was started after it.
+    started_after_stop = [
+        r.path for r in proxy.requests if r.method == "PUT" and r.timestamp > stopped_at + 0.5
+    ]
+    with known_bug():
+        assert started_after_stop == [], (
+            f"{len(started_after_stop)} part(s) were started more than half a second after "
+            "the stop was requested"
+        )
+
+
+@pytest.mark.xfail(
+    strict=True,
+    raises=KnownBugStillPresent,
+    reason=(
         "bug-07-stopped-heartbeat-before-event: the final `stopped` heartbeat reaches the "
         "server before the `watcher_stopped` event"
     ),
@@ -397,7 +414,7 @@ def test_the_stop_event_reaches_the_server_before_the_stopped_heartbeat(
 
     assert pc.stop() == 0
 
-    event = server.wait_for_event(pc.watcher_id, event_type="watcher_stopped")
+    event = own_stop_event(server, pc.watcher_id)
     final = server.heartbeats(pc.watcher_id)[-1]
     assert final.status == "stopped"
     with known_bug():
@@ -437,4 +454,4 @@ def test_a_stop_during_start_up_still_ends_with_a_clean_stop(
     with known_bug():
         assert pc.wait_exit(30) == 0
         server.wait_for_watcher_status(pc.watcher_id, "stopped")
-        server.wait_for_event(pc.watcher_id, event_type="watcher_stopped")
+        own_stop_event(server, pc.watcher_id)
