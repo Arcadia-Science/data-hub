@@ -4,9 +4,10 @@ Provides server lifecycle management (DB creation, schema push, Next.js
 build/start), auth seeding, instrument seeding, and direct-DB helpers so
 that both suites spin up an identical environment with minimal boilerplate.
 
-The harness runs on POSIX and on Windows. Postgres settings come from the
-standard ``PGHOST``, ``PGPORT``, ``PGUSER`` and ``PGPASSWORD`` environment
-variables and default to a local server on ``127.0.0.1:5432``.
+The harness runs on POSIX and on Windows. It uses a local Postgres server on
+``127.0.0.1:5432`` unless ``DATA_HUB_TEST_PGHOST``, ``DATA_HUB_TEST_PGPORT``,
+``DATA_HUB_TEST_PGUSER`` or ``DATA_HUB_TEST_PGPASSWORD`` say otherwise. The
+standard ``PG*`` variables are deliberately ignored.
 """
 
 from __future__ import annotations
@@ -37,6 +38,16 @@ import psycopg2
 # ---------------------------------------------------------------------------
 
 _TEST_DB = "data_hub_test"
+
+# The harness reads its own variable names, not libpq's `PGHOST`, `PGPORT`, `PGUSER` and
+# `PGPASSWORD`. Developers often leave those pointing `psql` at some other server, and the
+# harness creates a database, runs `drizzle-kit push --force` and truncates tables, so it
+# must only go to a server it was told about.
+_PG_HOST_VAR = "DATA_HUB_TEST_PGHOST"
+_PG_PORT_VAR = "DATA_HUB_TEST_PGPORT"
+_PG_USER_VAR = "DATA_HUB_TEST_PGUSER"
+_PG_PASSWORD_VAR = "DATA_HUB_TEST_PGPASSWORD"
+
 _DEFAULT_PG_HOST = "127.0.0.1"
 _DEFAULT_PG_PORT = 5432
 _DEFAULT_PG_USER = "postgres"
@@ -144,22 +155,30 @@ class _PgSettings:
 
 
 def _pg_settings_from_env(env: Mapping[str, str] | None = None) -> _PgSettings:
-    """Read ``PGHOST``, ``PGPORT``, ``PGUSER`` and ``PGPASSWORD``.
+    """Read ``DATA_HUB_TEST_PGHOST``, ``DATA_HUB_TEST_PGPORT``, ``DATA_HUB_TEST_PGUSER``
+    and ``DATA_HUB_TEST_PGPASSWORD``.
 
-    Unset or empty values fall back to the defaults, except ``PGPASSWORD``:
-    an empty value there means an empty password.
+    Unset or empty values fall back to the defaults, except the password: an empty
+    ``DATA_HUB_TEST_PGPASSWORD`` means an empty password. The standard ``PG*`` variables
+    are not read at all.
     """
     source = os.environ if env is None else env
-    raw_port = source.get("PGPORT") or str(_DEFAULT_PG_PORT)
+    raw_port = source.get(_PG_PORT_VAR) or str(_DEFAULT_PG_PORT)
     try:
         port = int(raw_port)
     except ValueError:
-        raise ValueError(f"PGPORT must be an integer, got {raw_port!r}") from None
+        raise ValueError(f"{_PG_PORT_VAR} must be an integer, got {raw_port!r}") from None
+    host = source.get(_PG_HOST_VAR) or _DEFAULT_PG_HOST
+    if host.startswith("/"):
+        # libpq accepts a socket directory as a host, but it can't go into a URL.
+        raise ValueError(
+            f"{_PG_HOST_VAR} must be a host name or address, not a socket directory, got {host!r}"
+        )
     return _PgSettings(
-        host=source.get("PGHOST") or _DEFAULT_PG_HOST,
+        host=host,
         port=port,
-        user=source.get("PGUSER") or _DEFAULT_PG_USER,
-        password=source.get("PGPASSWORD", _DEFAULT_PG_PASSWORD),
+        user=source.get(_PG_USER_VAR) or _DEFAULT_PG_USER,
+        password=source.get(_PG_PASSWORD_VAR, _DEFAULT_PG_PASSWORD),
     )
 
 
@@ -615,8 +634,9 @@ def db_update(dsn: str, sql: str, params: tuple[object, ...] | None = None) -> N
 def start_test_server() -> Generator[IntegrationEnv, None, None]:
     """Create the test DB, push schema, build + start Next.js, seed auth, and yield.
 
-    Postgres comes from ``PGHOST``, ``PGPORT``, ``PGUSER`` and ``PGPASSWORD``
-    (read when this is called). The server's output goes to
+    Postgres comes from ``DATA_HUB_TEST_PGHOST``, ``DATA_HUB_TEST_PGPORT``,
+    ``DATA_HUB_TEST_PGUSER`` and ``DATA_HUB_TEST_PGPASSWORD`` (read when this is
+    called), and defaults to ``postgres:postgres@127.0.0.1:5432``. The server's output goes to
     ``IntegrationEnv.server_log`` and its S3 stand-in to
     ``IntegrationEnv.s3_mirror_root``, both in a temp directory that is left
     in place after the run so a failure can be inspected.

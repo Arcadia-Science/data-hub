@@ -240,13 +240,13 @@ def test_postgres_defaults_match_the_old_hard_coded_values() -> None:
     )
 
 
-def test_postgres_settings_come_from_the_pg_environment_variables() -> None:
+def test_postgres_settings_come_from_the_harness_environment_variables() -> None:
     pg = testing._pg_settings_from_env(
         {
-            "PGHOST": "db.example.test",
-            "PGPORT": "6543",
-            "PGUSER": "tester",
-            "PGPASSWORD": "s3cret",
+            "DATA_HUB_TEST_PGHOST": "db.example.test",
+            "DATA_HUB_TEST_PGPORT": "6543",
+            "DATA_HUB_TEST_PGUSER": "tester",
+            "DATA_HUB_TEST_PGPASSWORD": "s3cret",
         }
     )
 
@@ -258,14 +258,38 @@ def test_postgres_settings_come_from_the_pg_environment_variables() -> None:
     )
 
 
+def test_the_standard_libpq_variables_are_ignored() -> None:
+    # A shell that points `psql` at another server must not send the harness there:
+    # it creates a database, force-pushes a schema and truncates tables.
+    pg = testing._pg_settings_from_env(
+        {
+            "PGHOST": "prod-db.example.test",
+            "PGPORT": "6543",
+            "PGUSER": "someone-else",
+            "PGPASSWORD": "not-the-harness-password",
+            "PGDATABASE": "something_else",
+        }
+    )
+
+    assert (pg.host, pg.port, pg.user, pg.password) == ("127.0.0.1", 5432, "postgres", "postgres")
+
+
 def test_postgres_settings_use_defaults_for_the_variables_that_are_unset() -> None:
-    pg = testing._pg_settings_from_env({"PGPORT": "6543"})
+    pg = testing._pg_settings_from_env({"DATA_HUB_TEST_PGPORT": "6543"})
 
     assert (pg.host, pg.port, pg.user, pg.password) == ("127.0.0.1", 6543, "postgres", "postgres")
 
 
-def test_an_empty_pgpassword_means_an_empty_password() -> None:
-    pg = testing._pg_settings_from_env({"PGPASSWORD": ""})
+def test_empty_host_port_and_user_fall_back_to_the_defaults() -> None:
+    pg = testing._pg_settings_from_env(
+        {"DATA_HUB_TEST_PGHOST": "", "DATA_HUB_TEST_PGPORT": "", "DATA_HUB_TEST_PGUSER": ""}
+    )
+
+    assert (pg.host, pg.port, pg.user) == ("127.0.0.1", 5432, "postgres")
+
+
+def test_an_empty_password_variable_means_an_empty_password() -> None:
+    pg = testing._pg_settings_from_env({"DATA_HUB_TEST_PGPASSWORD": ""})
 
     assert pg.password == ""
     assert "password=''" in pg.dsn("postgres")
@@ -273,7 +297,7 @@ def test_an_empty_pgpassword_means_an_empty_password() -> None:
 
 
 def test_postgres_settings_quote_special_characters() -> None:
-    pg = testing._pg_settings_from_env({"PGPASSWORD": "p w'd\\/@:"})
+    pg = testing._pg_settings_from_env({"DATA_HUB_TEST_PGPASSWORD": "p w'd\\/@:"})
 
     assert "password='p w\\'d\\\\/@:'" in pg.dsn("postgres")
     assert pg.database_url("postgres") == (
@@ -282,27 +306,37 @@ def test_postgres_settings_quote_special_characters() -> None:
 
 
 def test_postgres_url_brackets_an_ipv6_host() -> None:
-    pg = testing._pg_settings_from_env({"PGHOST": "::1"})
+    pg = testing._pg_settings_from_env({"DATA_HUB_TEST_PGHOST": "::1"})
 
     assert pg.database_url("postgres") == "postgres://postgres:postgres@[::1]:5432/postgres"
 
 
 def test_postgres_port_must_be_an_integer() -> None:
-    with pytest.raises(ValueError, match="PGPORT must be an integer"):
-        testing._pg_settings_from_env({"PGPORT": "not-a-port"})
+    with pytest.raises(ValueError, match="DATA_HUB_TEST_PGPORT must be an integer"):
+        testing._pg_settings_from_env({"DATA_HUB_TEST_PGPORT": "not-a-port"})
+
+
+def test_a_socket_directory_is_not_a_valid_host() -> None:
+    with pytest.raises(ValueError, match="not a socket directory"):
+        testing._pg_settings_from_env({"DATA_HUB_TEST_PGHOST": "/var/run/postgresql"})
 
 
 class _StopHere(Exception):
     pass
 
 
-def test_start_test_server_reads_the_pg_variables_when_it_is_called(
+def test_start_test_server_reads_the_harness_variables_when_it_is_called(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("PGHOST", "db.example.test")
-    monkeypatch.setenv("PGPORT", "6543")
-    monkeypatch.setenv("PGUSER", "tester")
-    monkeypatch.setenv("PGPASSWORD", "s3cret")
+    monkeypatch.setenv("DATA_HUB_TEST_PGHOST", "db.example.test")
+    monkeypatch.setenv("DATA_HUB_TEST_PGPORT", "6543")
+    monkeypatch.setenv("DATA_HUB_TEST_PGUSER", "tester")
+    monkeypatch.setenv("DATA_HUB_TEST_PGPASSWORD", "s3cret")
+    # The standard variables are set to something else, and must have no effect.
+    monkeypatch.setenv("PGHOST", "elsewhere.example.test")
+    monkeypatch.setenv("PGPORT", "1")
+    monkeypatch.setenv("PGUSER", "someone-else")
+    monkeypatch.setenv("PGPASSWORD", "nope")
     monkeypatch.setattr(testing.shutil, "which", lambda _name: "/fake/npx")
     dsns: list[str] = []
 

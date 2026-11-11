@@ -31,9 +31,14 @@ on the PATH.
 
 Integration tests (Python and TypeScript alike) need Postgres reachable at
 `127.0.0.1:5432` and create/reuse a `data_hub_test` database. The Python
-harness can use a different server: set `PGHOST`, `PGPORT`, `PGUSER` and
-`PGPASSWORD` (the defaults are `127.0.0.1`, `5432`, `postgres` and
-`postgres`). The TypeScript suite doesn't read these. The tests also build
+harness can use a different server: set `DATA_HUB_TEST_PGHOST`,
+`DATA_HUB_TEST_PGPORT`, `DATA_HUB_TEST_PGUSER` and `DATA_HUB_TEST_PGPASSWORD`
+(the defaults are `127.0.0.1`, `5432`, `postgres` and `postgres`).
+`DATA_HUB_TEST_PGHOST` must be a host name or address, not a socket directory.
+The harness deliberately ignores the standard `PGHOST`, `PGPORT`, `PGUSER` and
+`PGPASSWORD`. Your shell may point `psql` at another server, and the harness
+creates a database, runs `drizzle-kit push --force` and truncates tables. The
+TypeScript suite doesn't read any of these variables. The tests also build
 and start a real Next.js **production** server (`next build && next start`)
 rather than `next dev` — dev mode recompiles on every request, which makes a
 large suite 5–10x slower, and a production build matches actual deployment
@@ -67,7 +72,7 @@ def integration_env() -> Generator[IntegrationEnv, None, None]:
 the Drizzle schema via `npx drizzle-kit push --force`, seeds a deterministic
 `watcher_release_config` row, builds and starts `next start` on a free port,
 waits for it to respond, seeds a test user + personal access token, and yields
-an `IntegrationEnv`. It reads the `PG*` variables when it is called. It finds
+an `IntegrationEnv`. It reads the `DATA_HUB_TEST_PG*` variables when it is called. It finds
 `npx` with `shutil.which`, so it works on Windows, where the program is
 `npx.cmd`. It stops with a clear error if `npx` is missing.
 
