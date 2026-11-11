@@ -142,11 +142,16 @@ class ExclusiveWriter:
     """A writer that holds its file open for writing with sharing mode "none", as an instrument
     that locks the file it is acquiring does. Windows only.
 
-    While it is open, nothing else can open the file for reading or writing, and the folder
-    entry grows as it writes. Use it as a context manager::
+    While it is open, nothing else can open the file for reading or writing. Whether another
+    process sees the file grow is not guaranteed: the writer flushes after every write, but NTFS
+    updates the directory entry (the size and times that a listing, or a ``stat`` that falls
+    back to one, reports) lazily, often not until the file is closed. A scenario that uses this
+    can rely on the file being unreadable while the writer holds it, and on the writer's bytes
+    being in the file once it is closed, but not on the watcher seeing the size change in
+    between. Use it as a context manager::
 
         with ExclusiveWriter(watch_dir / "RUN1" / "scan.csv") as writer:
-            writer.write(b"...")   # the watcher sees the file grow, and can't read it
+            writer.write(b"...")   # nothing else can read the file now
         # closed: the file can be read, and holds writer.content
     """
 

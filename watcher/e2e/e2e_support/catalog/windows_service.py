@@ -133,6 +133,32 @@ TRANSITIONS: tuple[Transition, ...] = (
         "reported and uploaded once the writer closes it.",
         platforms=SERVICE,
     ),
+    xfail_bug(
+        MACHINE,
+        "file.locked->uploaded_after_release",
+        "PROPOSED — confirm intent: a file that an instrument keeps open with exclusive "
+        "sharing after its last write is uploaded once the instrument releases it, without "
+        "a restart of the watcher. Today the file counts as stable after the stability "
+        "period (stability reads only the size and the modification time, which stopped "
+        "changing), then reading it for the upload hits a sharing violation, and the file "
+        "is tried again only at the next start. The test uses `ExclusiveWriter`, which "
+        "writes once and holds the file past the stability period.",
+        "bug-new-locked-file-not-retried",
+        platforms=SERVICE,
+    ),
+    xfail_bug(
+        MACHINE,
+        "service.system_shutdown->clean_stop",
+        "PROPOSED — confirm intent: the service accepts a system shutdown "
+        "(`SERVICE_ACCEPT_SHUTDOWN`, which pywin32 sets when the class has a "
+        "`SvcShutdown`), so a reboot stops it as `service stop` does, with a `stopped` "
+        "heartbeat and a `watcher_stopped` event. Today the class has none, `sc queryex` "
+        "lists IGNORES_SHUTDOWN, and every reboot kills the service with no `stopped` "
+        "heartbeat. The test reads the controls `sc queryex` lists: a test can't send a "
+        "shutdown to a service.",
+        "bug-new-service-ignores-shutdown",
+        platforms=SERVICE,
+    ),
     # --- start-up failures and the SCM's recovery -------------------------------------------
     covered(
         MACHINE,
@@ -186,6 +212,21 @@ TRANSITIONS: tuple[Transition, ...] = (
         "take longer than the 120 s of the second one).",
         platforms=SERVICE,
     ),
+    xfail_bug(
+        MACHINE,
+        "service.config_invalid->logged_in_watcher_log",
+        "PROPOSED — confirm intent: a config that doesn't load (missing, malformed, "
+        "invalid) is logged in `watcher.log` and ends the service through the "
+        "`SystemExit(1)` path, like the other start-up refusals. Today `_run_service_loop` "
+        "calls `load_config` outside any `try`, so the `ClickException` is raised out of "
+        "`SvcRun`: pywin32 still stops the service with the same failure code, but nothing "
+        "reaches `watcher.log`, only the Event Log (a traceback in a `SvcRun() method "
+        "failed` entry, which the driver copies into the log text). The shared "
+        "`startup.config_invalid->refused` is covered under the service as well, because it "
+        "reads that text.",
+        "bug-new-service-config-error-not-logged",
+        platforms=SERVICE,
+    ),
     covered(
         MACHINE,
         "service.broken_install->bootstrap_log",
@@ -227,6 +268,20 @@ TRANSITIONS: tuple[Transition, ...] = (
         "service.upgrade->worker_failure_reported",
         "When uv fails inside the worker, the service that comes back on the old version "
         "queues `update_failed` with the worker's error text.",
+        platforms=SERVICE,
+    ),
+    xfail_bug(
+        MACHINE,
+        "service.upgrade->worker_dispatch_once",
+        "One upgrade is dispatched to the worker once: the server sees one `update_started` "
+        "for it. `_apply_via_worker` doesn't set `_upgrade_in_progress`, as the in-process "
+        "path does, so with a check on every heartbeat the next tick can dispatch it again "
+        "before the worker has stopped the service (it queues another event, and writes the "
+        "request and triggers the task again). The test checks on every heartbeat (1 s) and "
+        "holds one heartbeat while the worker stops the service, so that a tick is still "
+        "running when the stop arrives and makes its check after it. The scenarios of the "
+        "upgrade itself compare the events with a repeat counted once.",
+        "bug-new-worker-dispatch-repeats",
         platforms=SERVICE,
     ),
     xfail_bug(

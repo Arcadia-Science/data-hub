@@ -33,6 +33,8 @@ import pytest
 from data_hub_shared.testing_index import LocalPackageIndex
 from data_hub_shared.testing_proxy import FaultProxy
 from data_hub_watcher import testing_overrides
+from data_hub_watcher.updater import UPGRADE_MARKER_FILENAME
+from data_hub_watcher.upgrade_worker import UPGRADE_REQUEST_FILENAME, UPGRADE_RESULT_FILENAME
 from e2e_support.admin import Admin
 from e2e_support.factory import WatcherFactory
 from e2e_support.files import SMALL, ExclusiveWriter, payload, write_run
@@ -595,7 +597,10 @@ def test_a_file_its_writer_holds_open_is_reported_and_uploaded_once_it_is_closed
     target = watch_dir / "RUN001" / "scan.csv"
 
     # An instrument that opens its file with no sharing, and writes to it for longer than the
-    # stability period, a chunk a second. The watcher sees the file grow, and can't read it.
+    # stability period, a chunk a second. The watcher can't read the file, and as long as the
+    # size it sees follows the writes (see `ExclusiveWriter`: NTFS may report it lazily) it
+    # never calls it stable. A file that looks unchanged to the watcher is a different case:
+    # `file.locked->uploaded_after_release`.
     with ExclusiveWriter(target) as writer:
         for number in range(8):
             writer.write(payload(300, seed=number))
@@ -859,6 +864,12 @@ def test_a_mandatory_release_is_installed_by_the_worker_and_the_service_comes_ba
     assert started.details["via_worker"] is True
     assert started.details["mandatory"] is True
     assert started.details["pkg_spec"] == f"data-hub-watcher[windows-service]=={bumped_version}"
+    # The marker the updater writes before it dispatches is in the config directory, beside the
+    # config the service was registered with, and not in the profile of LocalSystem.
+    marker = pc.config_dir() / UPGRADE_MARKER_FILENAME
+    wait_until(
+        marker.exists, 30, pc.log_tail, what="the in-progress marker in the config directory"
+    )
     wait_for_wheel_request(pc, package_index, bumped_version)
 
     # The worker stops the service (a clean stop, not an exit for the SCM to restart), runs uv,
@@ -881,6 +892,14 @@ def test_a_mandatory_release_is_installed_by_the_worker_and_the_service_comes_ba
     assert "stopping service DataHubWatcher" in worker_log
     assert "uv exited 0" in worker_log
     assert "service started" in worker_log
+    # The worker read its request and wrote its result where the service looks (its script was
+    # rendered for the config directory, and the service read the result from there: the
+    # `worker_returncode` above), and the service that came back cleared all three sentinels.
+    # None of them was ever written for LocalSystem's own profile.
+    system_profile = pc.system_root / "System32" / "config" / "systemprofile" / ".data-hub"
+    for name in (UPGRADE_MARKER_FILENAME, UPGRADE_REQUEST_FILENAME, UPGRADE_RESULT_FILENAME):
+        assert not (pc.config_dir() / name).exists(), f"{name} was left in the config directory"
+        assert not (system_profile / name).exists(), f"{name} is in the profile of LocalSystem"
 
 
 @pytest.mark.covers("service.upgrade->worker_idle_gated")
@@ -1064,3 +1083,147 @@ def test_a_deregistered_service_stops_and_the_scm_does_not_bring_it_back(
             pc.log_tail,
             what="the SCM not to restart a deregistered service",
         )
+
+
+@pytest.mark.xfail(
+    strict=True,
+    raises=KnownBugStillPresent,
+    reason=(
+        "bug-new-worker-dispatch-repeats: the updater doesn't mark an upgrade it hands to the "
+        "worker as in progress (the in-process path does), so a check on the next heartbeat "
+        "dispatches it again before the worker has stopped the service"
+    ),
+)
+@pytest.mark.covers("service.upgrade->worker_dispatch_once")
+def test_an_upgrade_is_dispatched_to_the_worker_once(
+    watcher: WatcherFactory,
+    server: ServerView,
+    admin: Admin,
+    proxy: FaultProxy,
+    package_index: LocalPackageIndex,
+    bumped_wheel: Path,
+    bumped_version: str,
+) -> None:
+    # A heartbeat, and a check for an update, every second: the worker takes several seconds to
+    # reach `Stop-Service` (the task scheduler starts PowerShell), so the checks that come
+    # before the service stops are many.
+    pc = service_pc(
+        watcher,
+        own_install=True,
+        index_url=package_index.url,
+        overrides={**CHECK_EVERY_HEARTBEAT, testing_overrides.HEARTBEAT_INTERVAL_ENV_VAR: "1"},
+    )
+    package_index.clear_requested_paths()
+    start_watching(pc, server)
+
+    admin.set_release(bumped_version, mandatory=True).raise_for_status()
+    server.wait_for_event(pc.watcher_id, event_type="update_started")
+    # The next heartbeat is held for eight seconds. The tick that sends it is still running when
+    # the worker's `Stop-Service` arrives, and its update check comes after the stop: the stop
+    # waits for the tick, so the check is made whatever the speed of the worker.
+    proxy.add_fault("delay", path=r"/heartbeat$", method="POST", delay_seconds=8, count=1)
+    wait_for_wheel_request(pc, package_index, bumped_version)
+    pc.await_upgrade_restart(pc.install_timeout_seconds)
+    server.wait_for_event(pc.watcher_id, event_type="update_succeeded")
+    wait_for_watching_on(server, pc, bumped_version)
+
+    # One upgrade, one `update_started`.
+    dispatches = server.events(pc.watcher_id, event_type="update_started")
+    with known_bug():
+        assert len(dispatches) == 1, (
+            f"the upgrade was dispatched {len(dispatches)} times, at "
+            + ", ".join(str(e.timestamp) for e in dispatches)
+        )
+
+
+@pytest.mark.xfail(
+    strict=True,
+    raises=KnownBugStillPresent,
+    reason=(
+        "bug-new-service-config-error-not-logged: `_run_service_loop` calls `load_config` "
+        "outside any `try`, so the error is raised out of `SvcRun` and reaches only the Event "
+        "Log, where every other start-up refusal is logged in watcher.log"
+    ),
+)
+@pytest.mark.covers("service.config_invalid->logged_in_watcher_log")
+def test_a_config_that_does_not_load_is_logged_in_the_service_log(watcher: WatcherFactory) -> None:
+    pc = service_pc(watcher)
+    pc.install_service()
+    pc.write_config_text("instrument: [unclosed\n")
+
+    # The start is refused, as for any config that doesn't load, and the driver finds the
+    # message where pywin32 put it: in the Event Log's entry for the failed `SvcRun`.
+    refused_start(pc)
+    assert "Malformed YAML" in pc.log_text()
+
+    # PROPOSED: the service logs it, as it logs the other refusals, in the file an operator reads.
+    with known_bug():
+        assert "Malformed YAML" in pc.watcher_log_text(), (
+            "watcher.log has no word about the config that failed to load:\n"
+            + pc.watcher_log_text()[-1500:]
+        )
+
+
+@pytest.mark.xfail(
+    strict=True,
+    raises=KnownBugStillPresent,
+    reason=(
+        "bug-new-locked-file-not-retried: a file that is locked after its last write counts as "
+        "stable (stability reads only the size and time), then reading it for the upload hits "
+        "a sharing violation, and the file is tried again only at the next start"
+    ),
+)
+@pytest.mark.covers("file.locked->uploaded_after_release")
+def test_a_file_that_stays_locked_after_its_last_write_is_uploaded_once_it_is_released(
+    watcher: WatcherFactory, server: ServerView, watch_dir: Path, instrument_id: str
+) -> None:
+    pc = service_pc(watcher, stability_period_seconds=2)
+    start_watching(pc, server)
+    target = watch_dir / "RUN001" / "scan.csv"
+
+    with ExclusiveWriter(target) as writer:
+        # One write, and the writer keeps the file open. Nothing changes after it, so after the
+        # stability period the watcher calls the file stable, and then it can't read it.
+        writer.write(payload(300, seed=7))
+        pc.wait_for_log(r"File stable: .*scan\.csv", timeout=30)
+        stays_true(
+            lambda: pc.is_running(),
+            5,
+            pc.log_tail,
+            what="the service to carry on while the file is locked",
+        )
+        with pytest.raises(PermissionError):
+            target.read_bytes()
+
+    # PROPOSED: released, the file is uploaded, without a restart of the service.
+    with known_bug():
+        server.wait_for_uploaded(
+            instrument_id, "RUN001", "RUN001/scan.csv", content=bytes(writer.content), timeout=30
+        )
+
+
+@pytest.mark.xfail(
+    strict=True,
+    raises=KnownBugStillPresent,
+    reason=(
+        "bug-new-service-ignores-shutdown: the service class has no `SvcShutdown`, so `sc "
+        "queryex` lists IGNORES_SHUTDOWN and every reboot kills the service with no `stopped` "
+        "heartbeat"
+    ),
+)
+@pytest.mark.covers("service.system_shutdown->clean_stop")
+def test_the_service_asks_to_be_told_about_a_shutdown_of_the_system(
+    watcher: WatcherFactory, server: ServerView
+) -> None:
+    pc = service_pc(watcher)
+    start_watching(pc, server)
+
+    status = pc.service_status()
+    assert status is not None
+    assert status.state is ServiceState.RUNNING
+    # `sc queryex` lists what the service accepts, and the listing was read.
+    assert "STOPPABLE" in status.controls, status.controls
+
+    # PROPOSED: it accepts a shutdown, so that a reboot stops it as `service stop` does.
+    with known_bug():
+        assert status.accepts_shutdown is True, f"sc queryex lists {', '.join(status.controls)}"
