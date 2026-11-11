@@ -19,6 +19,8 @@ on:
   push:
     branches:
       - production
+      # TEMPORARY: lets the PR 3 branch run this workflow before it exists on staging. Remove before review.
+      - watcher-e2e-windows
   workflow_dispatch:
   workflow_call:
     inputs:
