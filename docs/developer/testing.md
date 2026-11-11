@@ -143,8 +143,10 @@ server's process id, and kills that process directly if `taskkill` fails.
 Teardown doesn't depend on the Windows process group. It kills by process id.
 
 If pytest is killed before the `with` block can exit (a second Ctrl+C, or
-SIGKILL), nothing stops the server, and it keeps running on its port. Look for
-a `node` process that was started with `next start` and stop it.
+SIGKILL), nothing stops the server, and it keeps running on its port. On macOS,
+`ps` lists it as `next-server (v<version>)`, which is the name Next.js gives the
+process. On Windows it is a `node.exe` process with `next start` in its command
+line. Stop it by hand.
 
 **Admin sessions.** Some routes need a signed-in admin, and a personal access
 token can't reach them. `seed_admin_session(dsn)` inserts an admin user and a
