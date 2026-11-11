@@ -50,7 +50,7 @@ import sqlite3
 import subprocess
 import sys
 from abc import ABC, abstractmethod
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from enum import IntEnum
 from pathlib import Path
@@ -594,6 +594,26 @@ class WatcherDriver(ABC):
             return []
         with contextlib.closing(sqlite3.connect(path, timeout=10)) as conn:
             return conn.execute(sql, tuple(params)).fetchall()
+
+    @contextlib.contextmanager
+    def lock_state_db(self) -> Iterator[None]:
+        """Hold a write lock on the watcher's state database for the length of a ``with`` block.
+
+        A watcher that wants to write waits 5 seconds for the lock and then fails with
+        ``database is locked``. Starting to watch fails that way (the first thing it does is
+        a write), which is the only way to make "the folder is there but starting to watch
+        fails" happen from outside the process: start the watcher with its folder missing so it
+        waits, take the lock, and then create the folder. Reads are not blocked (the database
+        is in WAL mode).
+        """
+        conn = sqlite3.connect(self.state_db_path(), timeout=30, isolation_level=None)
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            yield
+        finally:
+            with contextlib.suppress(sqlite3.Error):
+                conn.execute("ROLLBACK")
+            conn.close()
 
     def log_text(self) -> str:
         """The text of every log file, for matching and for a failure message."""

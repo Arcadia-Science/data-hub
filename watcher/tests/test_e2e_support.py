@@ -30,6 +30,15 @@ from e2e_support.drivers import (
     ToolInstall,
     clean_environment,
 )
+from e2e_support.files import (
+    LARGE,
+    MULTIPART_THRESHOLD_BYTES,
+    SMALL,
+    GrowingFile,
+    payload,
+    write_file,
+    write_run,
+)
 from e2e_support.waiting import WaitTimeout, stays_true, wait_until
 
 posix_only = pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
@@ -646,3 +655,89 @@ class TestCliDriver:
         assert fake_driver.state_query("SELECT relative_path FROM pending_uploads") == [
             ("RUN1/a.csv",)
         ]
+
+
+@posix_only
+def test_lock_state_db_blocks_writers_until_the_block_ends(
+    fake_driver: CliDriver,
+) -> None:
+    import sqlite3
+
+    fake_driver.config_dir().mkdir(parents=True)
+    with sqlite3.connect(fake_driver.state_db_path()) as setup:
+        setup.execute("PRAGMA journal_mode=WAL")
+        setup.execute("CREATE TABLE meta (key TEXT, value TEXT)")
+
+    with fake_driver.lock_state_db():
+        other = sqlite3.connect(fake_driver.state_db_path(), timeout=0.2)
+        with pytest.raises(sqlite3.OperationalError, match="locked"):
+            other.execute("INSERT INTO meta VALUES ('a', 'b')")
+        # Readers carry on, which is what the watcher's own reads do.
+        assert other.execute("SELECT count(*) FROM meta").fetchone() == (0,)
+        other.close()
+
+    with sqlite3.connect(fake_driver.state_db_path(), timeout=1) as after:
+        after.execute("INSERT INTO meta VALUES ('a', 'b')")
+
+
+# ---------------------------------------------------------------------------
+# File helpers
+# ---------------------------------------------------------------------------
+
+
+class TestFileHelpers:
+    def test_payload_is_repeatable_and_differs_by_seed(self) -> None:
+        assert payload(100) == payload(100)
+        assert len(payload(0)) == 0
+        assert len(payload(5000)) == 5000
+        assert payload(100, seed=1) != payload(100, seed=2)
+        assert payload(50) == payload(100)[:50]
+
+    def test_small_and_large_are_on_each_side_of_the_multipart_threshold(self) -> None:
+        assert SMALL < MULTIPART_THRESHOLD_BYTES <= LARGE
+
+    def test_write_file_creates_folders_and_returns_the_bytes(self, tmp_path: Path) -> None:
+        target = tmp_path / "RUN1" / "deep" / "a.csv"
+
+        data = write_file(target, 300)
+
+        assert target.read_bytes() == data == payload(300)
+        assert write_file(tmp_path / "b.csv", b"abc") == b"abc"
+
+    def test_write_file_can_make_a_file_look_old(self, tmp_path: Path) -> None:
+        target = tmp_path / "old.csv"
+
+        write_file(target, mtime=1_000_000.0)
+
+        assert target.stat().st_mtime == 1_000_000.0
+
+    def test_write_run_defaults_to_one_file_each_side_of_the_threshold(
+        self, tmp_path: Path
+    ) -> None:
+        written = write_run(tmp_path, "RUN7")
+
+        assert sorted(written) == ["large.csv", "small.csv"]
+        assert len(written["small.csv"]) == SMALL
+        assert (tmp_path / "RUN7" / "large.csv").read_bytes() == written["large.csv"]
+        assert len(written["large.csv"]) == LARGE
+
+    def test_write_run_takes_names_with_sizes_or_bytes(self, tmp_path: Path) -> None:
+        written = write_run(tmp_path, "RUN8", {"x.csv": 10, "y.csv": b"hello"})
+
+        assert written == {"x.csv": payload(10), "y.csv": b"hello"}
+
+    def test_a_growing_file_keeps_growing_until_stopped(self, tmp_path: Path) -> None:
+        target = tmp_path / "RUN1" / "live.csv"
+
+        with GrowingFile(target, chunk=b"ab", interval=0.02) as growing:
+            deadline = time.monotonic() + 5
+            while target.stat().st_size < 10 and time.monotonic() < deadline:
+                time.sleep(0.01)
+            grown = target.stat().st_size
+        final = target.read_bytes()
+
+        assert grown >= 10
+        assert len(final) >= grown
+        assert len(final) == growing.size
+        time.sleep(0.1)
+        assert target.read_bytes() == final

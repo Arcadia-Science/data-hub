@@ -140,10 +140,10 @@ TRANSITIONS: tuple[Transition, ...] = (
     covered(
         MACHINE,
         "waiting.start_failure->backoff_retry",
-        "When the folder exists but starting to watch fails (hold a write lock on the "
-        "state database to provoke it), the watcher waits with a `could not start "
-        "watching` reason, retries after 1, 2, 4 and 8 heartbeat intervals, and queues "
-        "events only when the reason changes.",
+        "When the folder exists but starting to watch fails (start waiting, hold "
+        "`driver.lock_state_db()`, then create the folder), the watcher waits with a "
+        "`could not start watching` reason, retries after 1, 2, 4 and 8 heartbeat "
+        "intervals, and queues events only when the reason changes.",
     ),
     xfail_bug(
         MACHINE,

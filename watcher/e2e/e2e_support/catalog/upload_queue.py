@@ -48,7 +48,7 @@ TRANSITIONS: tuple[Transition, ...] = (
         MACHINE,
         "queue.request->watcher_offline_refused",
         "Request-upload answers 409 `WATCHER_OFFLINE` and queues nothing when the "
-        "instrument's watcher has not sent a heartbeat for over five minutes.",
+        "instrument has no `watching` watcher with a heartbeat under five minutes old.",
     ),
     covered(
         MACHINE,

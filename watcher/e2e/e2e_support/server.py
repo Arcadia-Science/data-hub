@@ -270,6 +270,14 @@ class ServerView:
             for r in rows
         ]
 
+    def last_event_id(self, watcher_id: str) -> int:
+        """The id of the watcher's newest event, or 0 if it has none. Pass it as ``after_id``
+        to look only at what happens next."""
+        rows = self.query(
+            "SELECT coalesce(max(id), 0) FROM watcher_events WHERE watcher_id = %s", (watcher_id,)
+        )
+        return int(cast("int", rows[0][0]))
+
     def event_summary(self, watcher_id: str) -> list[str]:
         """``type`` or ``type:kind`` of each event, oldest first, for compact assertions."""
         return [
@@ -286,6 +294,15 @@ class ServerView:
             (watcher_id,),
         )
         return [HeartbeatRow(*cast("tuple[Any, ...]", r)) for r in rows]
+
+    def last_heartbeat_id(self, watcher_id: str) -> int:
+        """The id of the watcher's newest heartbeat, or 0. Pass it to
+        :meth:`wait_for_heartbeats` to wait for new ones."""
+        rows = self.query(
+            "SELECT coalesce(max(id), 0) FROM watcher_heartbeats WHERE watcher_id = %s",
+            (watcher_id,),
+        )
+        return int(cast("int", rows[0][0]))
 
     # ------------------------------------------------------------------
     # Runs and files
@@ -498,6 +515,38 @@ class ServerView:
             what=f"the effective status of watcher {watcher_id} to be {status!r}",
         )
 
+    def wait_for_heartbeats(
+        self, watcher_id: str, *, count: int = 1, after_id: int = 0, timeout: float = 30.0
+    ) -> list[HeartbeatRow]:
+        """Wait until at least ``count`` heartbeats were stored after ``after_id`` and return
+        them. With the 2 s test interval it is how a scenario waits for "the next tick"."""
+
+        def arrived() -> list[HeartbeatRow]:
+            fresh = [b for b in self.heartbeats(watcher_id) if b.id > after_id]
+            return fresh if len(fresh) >= count else []
+
+        return wait_until(
+            arrived,
+            timeout,
+            lambda: self.dump(watcher_id),
+            what=f"{count} heartbeat(s) after #{after_id}",
+        )
+
+    def wait_for_run_status(
+        self, instrument_id: str, run_id: str, status: str, timeout: float = 60.0
+    ) -> str:
+        """Wait until the run's derived status is ``status`` (see :meth:`run_status`)."""
+
+        def reached() -> str | None:
+            return status if self.run_status(instrument_id, run_id) == status else None
+
+        return wait_until(
+            reached,
+            timeout,
+            lambda: self.dump(instrument_id=instrument_id),
+            what=f"run {run_id!r} to be {status!r}",
+        )
+
     def wait_for_events(
         self,
         watcher_id: str,
@@ -579,7 +628,8 @@ class ServerView:
             found,
             timeout,
             lambda: self.dump(instrument_id=instrument_id),
-            what=f"file {run_id}/{relative_path} to exist" + (f" as {status!r}" if status else ""),
+            what=f"file {relative_path!r} of run {run_id!r} to exist"
+            + (f" as {status!r}" if status else ""),
         )
 
     def wait_for_uploaded(

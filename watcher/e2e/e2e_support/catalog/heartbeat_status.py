@@ -98,8 +98,9 @@ TRANSITIONS: tuple[Transition, ...] = (
     covered(
         MACHINE,
         "watcher.below_minimum_version->stale",
-        "A watcher whose heartbeats are refused with 426 reads as `stale` once its last "
-        "stored heartbeat is five minutes old, while its process keeps running.",
+        "A watcher that had checked in and is then refused with 426 stops refreshing "
+        "`last_heartbeat_at`, so it reads as `stale` once that is five minutes old, while "
+        "its process keeps running.",
     ),
     excluded(
         MACHINE,

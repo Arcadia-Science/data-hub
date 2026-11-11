@@ -14,5 +14,10 @@ finds through the ``pythonpath`` setting in the root ``pyproject.toml``.
 * :mod:`e2e_support.admin`: ``Admin``, the actions an operator takes in the web app,
   through the real REST routes.
 * :mod:`e2e_support.waiting`: ``wait_until``, the deadline poll every wait uses.
-* :mod:`e2e_support.catalog`: the transition catalog that ``@pytest.mark.covers`` names.
+* :mod:`e2e_support.files`: write run folders, files of an exact size, and a file that is
+  still growing.
+* :mod:`e2e_support.factory`: ``WatcherFactory``, the type of the ``watcher`` fixture.
+* :mod:`e2e_support.artifacts`: what is kept when a test fails.
+* :mod:`e2e_support.catalog`: the transition catalog that ``@pytest.mark.covers`` names, and
+  the check (``python -m e2e_support.catalog.check``) that compares it with the tests.
 """

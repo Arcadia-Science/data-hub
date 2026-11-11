@@ -77,8 +77,8 @@ TRANSITIONS: tuple[Transition, ...] = (
     covered(
         MACHINE,
         "selfupdate.uv_missing->update_failed",
-        "When `uv` cannot be found, the watcher queues one `update_failed` that says so, "
-        "with no `update_started`, and keeps running.",
+        "When `uv` cannot be found, the watcher queues `update_failed` (`uv executable not "
+        "found`) instead of `update_started`, and keeps running.",
     ),
     covered(
         MACHINE,
