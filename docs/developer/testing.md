@@ -153,7 +153,8 @@ cookie_header)`. Send `cookie_header` as the `Cookie` header. It builds the
 value the way `seedSessionCookie` in `web/tests/integration/helpers.ts` does:
 `better-auth.session_token=` followed by the URL-encoded token and its
 HMAC-SHA256 signature. Pass `auth_secret=` if the server uses a different
-secret than the harness.
+secret than the harness. `watcher/tests/integration/test_harness_auth.py` sends
+the cookie, and the cron secret, to the real server.
 
 ```python
 admin = seed_admin_session(env.db_dsn)
