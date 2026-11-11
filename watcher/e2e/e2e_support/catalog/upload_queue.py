@@ -40,6 +40,21 @@ TRANSITIONS: tuple[Transition, ...] = (
     ),
     covered(
         MACHINE,
+        "queue.batch->parallel_within_budget",
+        "When one poll lists several files they are uploaded at the same time (PUTs to "
+        "different objects overlap), never more PUTs at once than `upload_parallelism`, and "
+        "every file ends `uploaded`.",
+    ),
+    covered(
+        MACHINE,
+        "queue.in_flight_and_requested->uploaded_once",
+        "A file that is requested while its own automatic upload is still running is not "
+        "uploaded a second time: the poll waits for the first upload and finds the file done, "
+        "so there is one upload URL request, one set of parts, one completion, no abort, and "
+        "no cancellation.",
+    ),
+    covered(
+        MACHINE,
         "queue.auto_mode->requested_file_uploaded",
         "An auto-mode watcher also drains the queue, so a file whose automatic upload gave "
         "up can be requested and uploaded.",
@@ -89,13 +104,24 @@ TRANSITIONS: tuple[Transition, ...] = (
     covered(
         MACHINE,
         "queue.cancelled->requested_again",
-        "A cancelled file can be requested again, and gets a fresh set of three attempts.",
+        "A cancelled file can be requested again (once a poll that no longer lists it has "
+        "gone by), and gets a fresh set of three attempts.",
+    ),
+    xfail_bug(
+        MACHINE,
+        "queue.cancelled->requested_before_next_poll",
+        "A file that is requested again straight after its cancellation, before any poll "
+        "has gone by without it, also gets a fresh set of three attempts: the watcher tries to "
+        "upload it. Today it still remembers the three failures, and cancels the new request "
+        "at once with no attempt and no `queued_file_missing` event.",
+        "bug-new-cancel-memo-not-cleared",
     ),
     covered(
         MACHINE,
         "queue.unsafe_path->rejected",
         "A queue entry whose relative path leaves the watch folder is not read: the watcher "
-        "queues `unsafe_upload_path`, counts an error, and cancels the request at once.",
+        "queues `unsafe_upload_path`, counts an error (the only one, with the queue not held), "
+        "and cancels the request at once.",
     ),
     # --- the server takes files out of the queue -------------------------------------------
     covered(
