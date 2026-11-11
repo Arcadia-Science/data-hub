@@ -7,14 +7,15 @@
 //   dev mirror, or to the integration mirror (`INTEGRATION_TEST_S3_MIRROR`)
 //   when `VERCEL` is unset, via `mirrorRootForUploads`. A whole file lands at
 //   `<root>/<bucket>/<key>`, the same place a completed multipart upload goes.
+//   A write that is cut off stores nothing, as with S3: the bytes go to a
+//   temporary file that is renamed into place once the body has arrived.
 // - On a Vercel deployment GET, HEAD, and PUT all 404. `VERCEL` turns off the
 //   integration mirror, and the dev mirror is off under `NODE_ENV=production`.
 
-import { createReadStream, createWriteStream } from "node:fs";
+import { createReadStream } from "node:fs";
 import { mkdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
-import { pipeline } from "node:stream/promises";
 import type { ReadableStream as NodeWebReadableStream } from "node:stream/web";
 import type { NextRequest } from "next/server";
 import {
@@ -25,6 +26,7 @@ import {
   mirrorRootForUploads,
   parseByteRange,
   resolveMirrorPath,
+  writeStreamAtomically,
 } from "@/lib/s3-local-mirror";
 import {
   localS3CorsPreflight,
@@ -201,16 +203,15 @@ export async function PUT(request: NextRequest, { params }: RouteContext) {
 
   await mkdir(path.dirname(filePath), { recursive: true });
 
-  // `pipeline` ensures the write stream is closed even if the upload
-  // is aborted mid-stream, and surfaces backpressure errors as a
-  // rejected promise. Casting the request body to the Node web
-  // ReadableStream type lets `Readable.fromWeb` accept it without TS
-  // complaining about the DOM/Node `ReadableStream` mismatch.
-  await pipeline(
+  // The object appears at its key only once the whole body has arrived, so
+  // an aborted upload leaves nothing there, as with S3. Casting the request
+  // body to the Node web ReadableStream type lets `Readable.fromWeb` accept
+  // it without TS complaining about the DOM/Node `ReadableStream` mismatch.
+  await writeStreamAtomically(
+    filePath,
     Readable.fromWeb(
       request.body as unknown as NodeWebReadableStream<Uint8Array>
-    ),
-    createWriteStream(filePath)
+    )
   );
 
   return new Response(null, { status: 200 });

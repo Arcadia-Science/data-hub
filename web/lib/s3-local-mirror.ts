@@ -35,7 +35,7 @@
 
 import { createHash, randomBytes } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
-import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { type Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -280,6 +280,35 @@ export function mirrorRootForUploads(): string | null {
   return getLocalMirrorRoot() ?? integrationTestMirrorRoot();
 }
 
+// Write `body` to `destination` all or nothing, the way S3 stores an object:
+// a PUT that is cut off stores nothing, and it leaves any earlier object at
+// that key as it was. The bytes go to a temporary file in the same folder
+// (a rename only replaces a file atomically within one file system), and the
+// file is renamed into place once the stream has ended. If the stream fails,
+// the temporary file is removed. `through` are transforms between the body
+// and the file, such as a hasher.
+//
+// The folder of `destination` must exist. The temporary name does not
+// include the name of the destination, so a long key cannot make it too
+// long for the file system.
+export async function writeStreamAtomically(
+  destination: string,
+  body: Readable,
+  ...through: Transform[]
+): Promise<void> {
+  const temporary = path.join(
+    path.dirname(destination),
+    `.partial-${randomBytes(8).toString("hex")}`
+  );
+  try {
+    await pipeline([body, ...through, createWriteStream(temporary)]);
+    await rename(temporary, destination);
+  } catch (err) {
+    await rm(temporary, { force: true });
+    throw err;
+  }
+}
+
 interface MultipartMeta {
   bucket: string;
   contentType: string | null;
@@ -377,7 +406,9 @@ export async function localSavePart(
       callback(null, chunk);
     },
   });
-  await pipeline(body, hasher, createWriteStream(partPath));
+  // Atomic, so a part PUT that is cut off leaves an earlier upload of the
+  // same part intact, as S3 does.
+  await writeStreamAtomically(partPath, body, hasher);
   return `"${hash.digest("hex")}"`;
 }
 
