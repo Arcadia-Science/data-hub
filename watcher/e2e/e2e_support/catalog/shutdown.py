@@ -63,9 +63,12 @@ TRANSITIONS: tuple[Transition, ...] = (
     xfail_bug(
         MACHINE,
         "process.stop->clean_stop_during_scan",
-        "A graceful stop that arrives during the startup scan still sends a `stopped` "
-        "heartbeat and a `watcher_stopped` event. The Windows service already stops "
-        "cleanly there.",
+        "A graceful stop that arrives while the watcher is still starting (the config "
+        "sync, the first heartbeat and the startup scan all run before it installs its "
+        "signal handlers) still sends a `stopped` heartbeat and a `watcher_stopped` event. "
+        "The Windows service already stops cleanly there. The test holds up the first "
+        "heartbeat to keep the watcher in that window, because the scan itself is too "
+        "quick to hit from outside.",
         "bug-09-sigterm-during-scan",
         platforms=LINUX,
     ),
