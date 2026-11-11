@@ -153,10 +153,10 @@ class FaultProxy:
     Requests are forwarded with their method, path, query, headers and body unchanged,
     except that ``Host`` is rewritten to the upstream's and headers that only describe
     one connection are dropped. The proxy adds no headers of its own, so the upstream
-    server sees the client's ``Accept-Encoding`` as it was, or none. The whole upstream response is read, then sent back with a
-    ``Content-Length`` and ``Connection: close``. Closing every connection after each
-    response means a client can never keep an idle connection that would skip a
-    fault change.
+    server sees the client's ``Accept-Encoding`` as it was, or none. The whole upstream
+    response is read, then sent back with a ``Content-Length`` and ``Connection: close``.
+    Closing every connection after each response means a client can never keep an idle
+    connection that would skip a fault change.
 
     Use it as a context manager, or call :meth:`start` and :meth:`stop`::
 
