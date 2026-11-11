@@ -177,6 +177,9 @@ class WindowsServiceDriver(WatcherDriver):
     role: ClassVar[str] = "Service"
     # The service needs pywin32, which ships in this extra.
     install_extras: ClassVar[tuple[str, ...]] = ("windows-service",)
+    # The worker's `uv tool install` runs as LocalSystem, whose uv cache is empty on a new runner
+    # (see `WatcherDriver.install_timeout_seconds`).
+    install_timeout_seconds: ClassVar[float] = 300.0
 
     # The one service on this machine belongs to the driver that installed it last.
     _owner: ClassVar[WindowsServiceDriver | None] = None

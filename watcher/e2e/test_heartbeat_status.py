@@ -515,20 +515,26 @@ def test_watcher_survives_a_server_outage_and_reports_the_gap_when_it_ends(
 ) -> None:
     # No queue polling, so no event is queued during the outage. A flush that fails waits
     # between its attempts, which would stretch each tick and leave fewer failed heartbeats in
-    # the seven seconds below.
+    # the time the outage lasts.
     pc = watcher(overrides={testing_overrides.UPLOAD_POLL_INTERVAL_ENV_VAR: "600"})
     pc.start()
     server.wait_for_watcher_status(pc.watcher_id, "watching")
     last_before = server.last_heartbeat_id(pc.watcher_id)
 
+    mark = pc.mark_logs()
     proxy.go_down()
-    # Seven seconds are three ticks. The watcher keeps running and nothing is stored.
-    stays_true(
-        lambda: pc.is_running() and server.last_heartbeat_id(pc.watcher_id) == last_before,
-        7,
+    # The outage lasts until two heartbeats have been refused, however long a refused connection
+    # takes (about two seconds on Windows, which retries a connect to a port nobody listens on).
+    # A fixed time would leave fewer failures there than on Linux. The watcher keeps running and
+    # nothing is stored.
+    wait_until(
+        lambda: pc.log_text(mark).count("Heartbeat failed") >= 2,
+        60,
         lambda: server.dump(pc.watcher_id) + "\n" + pc.log_tail(),
-        what="a running watcher and no new heartbeats during the outage",
+        what="two refused heartbeats during the outage",
     )
+    assert pc.is_running()
+    assert server.last_heartbeat_id(pc.watcher_id) == last_before
     proxy.come_up()
 
     fresh = server.wait_for_heartbeats(pc.watcher_id, count=2, after_id=last_before)
@@ -538,8 +544,10 @@ def test_watcher_survives_a_server_outage_and_reports_the_gap_when_it_ends(
 
     recovered = server.wait_for_event(pc.watcher_id, event_type="error", kind="heartbeat_recovered")
     assert recovered.details["consecutive_failures"] >= 2
-    # The gap runs from the first failed heartbeat to the first one that got through.
-    assert recovered.details["gap_seconds"] >= 4
+    # The gap runs from the first failed heartbeat to the first one that got through: two waits
+    # of 2 s at least, in whole seconds (the watcher truncates), so 3 allows for a timer that
+    # fires a few milliseconds early.
+    assert recovered.details["gap_seconds"] >= 3
     assert "consecutive failure" in recovered.message
     # One event for the whole outage, not one per failed heartbeat.
     assert len(server.events(pc.watcher_id, kind="heartbeat_recovered")) == 1

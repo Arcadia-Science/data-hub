@@ -575,6 +575,13 @@ class WatcherDriver(ABC):
     # install "data-hub-watcher[<extra>]"`): the service needs pywin32, which ships in the
     # `windows-service` extra. The suite's fixtures install the wheel with these.
     install_extras: ClassVar[tuple[str, ...]] = ()
+    # How long a scenario waits for an update to be installed and the watcher to run again
+    # (`await_upgrade_restart`, the wait for the index to be asked for the wheel). A
+    # `uv tool install --reinstall` re-reads the metadata of every dependency from PyPI, which
+    # takes seconds on a good connection and longer on a bad one. The service's worker runs it as
+    # `LocalSystem`, which has a uv cache of its own, empty on a new runner, so it overrides this
+    # with a longer time. Scenarios read it from the driver and keep no constant of their own.
+    install_timeout_seconds: ClassVar[float] = 180.0
 
     def __init__(
         self,

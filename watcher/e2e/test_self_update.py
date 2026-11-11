@@ -42,10 +42,6 @@ from e2e_support.waiting import wait_until
 
 pytestmark = pytest.mark.e2e
 
-# A `uv tool install --reinstall` re-reads the metadata of every dependency from PyPI, which
-# takes seconds on a good connection and longer on a bad one.
-INSTALL_TIMEOUT = 180.0
-
 # Check for an update on every heartbeat (the default is every 5th), so a scenario does not
 # wait for the next check.
 CHECK_EVERY_HEARTBEAT = {testing_overrides.UPDATE_CHECK_INTERVAL_TICKS_ENV_VAR: "1"}
@@ -77,13 +73,15 @@ def wheel_request_prefix(version: str) -> str:
     return f"/files/data_hub_watcher-{version}-"
 
 
-def wait_for_wheel_request(index: LocalPackageIndex, version: str) -> None:
+def wait_for_wheel_request(pc: WatcherDriver, index: LocalPackageIndex, version: str) -> None:
     """Wait until the index was asked for the wheel of ``version``: the install happened
-    against the local index and not PyPI."""
+    against the local index and not PyPI. The wait is as long as this kind of driver needs for
+    an install (``pc.install_timeout_seconds``: longer under the service, whose worker has a cold
+    uv cache)."""
     prefix = wheel_request_prefix(version)
     wait_until(
         lambda: any(path.startswith(prefix) for path in index.requested_paths),
-        INSTALL_TIMEOUT,
+        pc.install_timeout_seconds,
         lambda: "index requests:\n" + "\n".join(index.requested_paths),
         what=f"the package index to be asked for the {version} wheel",
     )
@@ -120,6 +118,21 @@ def update_events(server: ServerView, pc: WatcherDriver) -> list[str]:
     """The update events the watcher has sent, oldest first."""
     kinds = {"update_started", "update_succeeded", "update_failed"}
     return [e.event_type for e in server.events(pc.watcher_id) if e.event_type in kinds]
+
+
+def update_event_sequence(server: ServerView, pc: WatcherDriver) -> list[str]:
+    """The update events in order, with a repeat of the same event counted once.
+
+    A scenario that asks "did it start, then succeed?" must not depend on how many times the
+    start was announced. Under the Windows service the updater that hands an install to the
+    worker doesn't mark the upgrade as in progress (the in-process path does), so a check on
+    the next heartbeat can dispatch it again before the worker has stopped the service, and the
+    server sees more than one ``update_started``. That is a bug of its own, shown by
+    ``service.upgrade->worker_dispatch_once`` in ``test_windows_service.py``; the scenarios
+    here are about the upgrade, and compare this sequence.
+    """
+    kinds = update_events(server, pc)
+    return [kind for index, kind in enumerate(kinds) if index == 0 or kinds[index - 1] != kind]
 
 
 def assert_no_update_attempted(
@@ -198,12 +211,12 @@ def test_mandatory_release_installs_and_restarts_into_the_new_version(
     assert started.details["target_version"] == bumped_version
     assert started.details["mandatory"] is True
     assert started.details["install_method"] == "uv-tool"
-    wait_for_wheel_request(package_index, bumped_version)
+    wait_for_wheel_request(pc, package_index, bumped_version)
     assert any(p.startswith("/simple/data-hub-watcher/") for p in package_index.requested_paths)
     assert upgrade_marker(pc).exists()
 
     # Installed, and the watcher is started again. The server saw it stop first.
-    pc.await_upgrade_restart(INSTALL_TIMEOUT)
+    pc.await_upgrade_restart(pc.install_timeout_seconds)
     stopped = server.wait_for_event(
         pc.watcher_id, event_type="watcher_stopped", message_contains=pc.update_stop_message
     )
@@ -217,13 +230,13 @@ def test_mandatory_release_installs_and_restarts_into_the_new_version(
     wait_for_watching_on(server, pc, bumped_version)
     assert not upgrade_marker(pc).exists()
     assert server.effective_status(pc.watcher_id) == "watching"
-    assert update_events(server, pc) == ["update_started", "update_succeeded"]
+    assert update_event_sequence(server, pc) == ["update_started", "update_succeeded"]
 
     # Running the advertised version, it is not updated again.
     server.wait_for_heartbeats(
         pc.watcher_id, count=3, after_id=server.last_heartbeat_id(pc.watcher_id)
     )
-    assert update_events(server, pc) == ["update_started", "update_succeeded"]
+    assert update_event_sequence(server, pc) == ["update_started", "update_succeeded"]
     assert pc.is_running()
 
 
@@ -245,10 +258,10 @@ def test_an_installed_update_ends_the_process_with_exit_code_one_for_its_supervi
 
     admin.set_release(bumped_version, mandatory=True).raise_for_status()
     server.wait_for_event(pc.watcher_id, event_type="update_started")
-    wait_for_wheel_request(package_index, bumped_version)
+    wait_for_wheel_request(pc, package_index, bumped_version)
 
     # Installed: the watcher stops with exit code 1 and says why, and the server sees it stop.
-    assert pc.wait_exit(timeout=INSTALL_TIMEOUT) == 1, pc.log_tail()
+    assert pc.wait_exit(timeout=pc.install_timeout_seconds) == 1, pc.log_tail()
     stopped = server.wait_for_event(pc.watcher_id, event_type="watcher_stopped")
     assert stopped.message == pc.update_stop_message
     assert "restarting for auto-update" in stopped.message
@@ -285,8 +298,8 @@ def test_mandatory_release_older_than_the_running_version_rolls_back(
     started = server.wait_for_event(pc.watcher_id, event_type="update_started")
     assert started.details["current_version"] == bumped_version
     assert started.details["target_version"] == current_version
-    wait_for_wheel_request(package_index, current_version)
-    pc.await_upgrade_restart(INSTALL_TIMEOUT)
+    wait_for_wheel_request(pc, package_index, current_version)
+    pc.await_upgrade_restart(pc.install_timeout_seconds)
 
     server.wait_for_event(pc.watcher_id, event_type="update_succeeded")
     wait_for_watching_on(server, pc, current_version)
@@ -315,8 +328,8 @@ def test_a_restart_that_comes_back_on_the_old_version_reports_that_the_update_di
 
     admin.set_release(bumped_version, mandatory=True).raise_for_status()
     server.wait_for_event(pc.watcher_id, event_type="update_started")
-    wait_for_wheel_request(package_index, bumped_version)
-    assert pc.wait_exit(timeout=INSTALL_TIMEOUT) == 1, pc.log_tail()
+    wait_for_wheel_request(pc, package_index, bumped_version)
+    assert pc.wait_exit(timeout=pc.install_timeout_seconds) == 1, pc.log_tail()
     assert pc.installed_version() == bumped_version
     assert upgrade_marker(pc).exists()
 
@@ -381,8 +394,8 @@ def test_watcher_below_the_minimum_version_updates_and_heartbeats_again(
     assert server.watcher(pc.watcher_id).status == "registered"
 
     server.wait_for_event(pc.watcher_id, event_type="update_started")
-    wait_for_wheel_request(package_index, bumped_version)
-    pc.await_upgrade_restart(INSTALL_TIMEOUT)
+    wait_for_wheel_request(pc, package_index, bumped_version)
+    pc.await_upgrade_restart(pc.install_timeout_seconds)
 
     # On the new version it is accepted again.
     server.wait_for_event(pc.watcher_id, event_type="update_succeeded")
@@ -458,8 +471,8 @@ def test_non_mandatory_release_waits_for_quiet_uploads_then_installs(
         f"it started after {len(quiet)} quiet heartbeats, the gate needs {quiet_needed}"
     )
 
-    wait_for_wheel_request(package_index, bumped_version)
-    pc.await_upgrade_restart(INSTALL_TIMEOUT)
+    wait_for_wheel_request(pc, package_index, bumped_version)
+    pc.await_upgrade_restart(pc.install_timeout_seconds)
     server.wait_for_event(pc.watcher_id, event_type="update_succeeded")
     wait_for_watching_on(server, pc, bumped_version)
     assert pc.installed_version() == bumped_version
@@ -510,8 +523,8 @@ def test_non_mandatory_release_waits_for_a_quiet_instrument_after_a_new_run(
     assert waited >= quiet_seconds - 1, (
         f"the update started {waited:.1f} s after the run, it should wait {quiet_seconds} s"
     )
-    wait_for_wheel_request(package_index, bumped_version)
-    pc.await_upgrade_restart(INSTALL_TIMEOUT)
+    wait_for_wheel_request(pc, package_index, bumped_version)
+    pc.await_upgrade_restart(pc.install_timeout_seconds)
     assert pc.installed_version() == bumped_version
 
 
@@ -620,7 +633,7 @@ def test_failed_install_is_reported_and_the_watcher_keeps_running_until_it_can_r
 
     # The failure is not final: when the index works again the next check installs it.
     package_index.clear_unavailable()
-    pc.await_upgrade_restart(INSTALL_TIMEOUT)
+    pc.await_upgrade_restart(pc.install_timeout_seconds)
     server.wait_for_event(pc.watcher_id, event_type="update_succeeded")
     wait_for_watching_on(server, pc, bumped_version)
     assert pc.installed_version() == bumped_version
@@ -777,12 +790,12 @@ def test_self_update_installs_the_advertised_version_for_the_next_start(
     package_index.clear_requested_paths()
     admin.set_release(bumped_version).raise_for_status()
 
-    result = pc.run_cli("self-update", timeout=INSTALL_TIMEOUT)
+    result = pc.run_cli("self-update", timeout=pc.install_timeout_seconds)
     assert result.returncode == 0, result.output
     assert f"Upgrading {current_version} -> {bumped_version}" in result.stdout
     assert f"Upgrade to {bumped_version} complete" in result.stdout
     assert "Restart the watcher" in result.stdout
-    wait_for_wheel_request(package_index, bumped_version)
+    wait_for_wheel_request(pc, package_index, bumped_version)
     assert pc.installed_version() == bumped_version
 
     # The operator starts the watcher, and it is the new version.

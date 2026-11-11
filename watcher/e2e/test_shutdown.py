@@ -381,8 +381,10 @@ def test_a_stop_starts_no_new_part_or_file_of_an_auto_upload(
         what="the first part to be on its way",
     )
 
-    stopped_at = time.time()
     pc.request_stop()
+    # Taken after the request returns: under the service `request_stop` spends a second or two in
+    # a command first, and a part that arrives meanwhile is not one the stop failed to prevent.
+    stopped_at = time.time()
     assert pc.wait_exit(25) == 0
 
     # The proxy logs a part when it arrives, so a part logged after the stop (with some room for
