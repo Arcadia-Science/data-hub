@@ -2,8 +2,10 @@
 
 ``ServerView`` reads the test database directly, and the REST API where the answer is
 computed by the server (the effective watcher status, which adds ``stale``). Tests assert
-on it and never on the watcher's own logs, because the server's view is the product: it is
-what the web app shows.
+on it rather than on the watcher's own log wherever the server shows the answer, because the
+server's view is the product: it is what the web app shows. The log is read only for what
+the server never sees (``WatcherDriver.wait_for_log``, for example that the initial scan
+finished or which request a run update was).
 
 The ageing helpers move a timestamp into the past, to cross a server timer (the 5-minute
 stale mark, the 15-minute sweep grace) without waiting for it. A running watcher
@@ -532,21 +534,6 @@ class ServerView:
             what=f"{count} heartbeat(s) after #{after_id}",
         )
 
-    def wait_for_run_status(
-        self, instrument_id: str, run_id: str, status: str, timeout: float = 60.0
-    ) -> str:
-        """Wait until the run's derived status is ``status`` (see :meth:`run_status`)."""
-
-        def reached() -> str | None:
-            return status if self.run_status(instrument_id, run_id) == status else None
-
-        return wait_until(
-            reached,
-            timeout,
-            lambda: self.dump(instrument_id=instrument_id),
-            what=f"run {run_id!r} to be {status!r}",
-        )
-
     def wait_for_events(
         self,
         watcher_id: str,
@@ -650,8 +637,17 @@ class ServerView:
             instrument_id, run_id, relative_path, status="uploaded", timeout=timeout
         )
         assert row.s3_key == f"{instrument_id}/{run_id}/{row.filename}", row.s3_key
-        stored = wait_until(
-            lambda: self.read_object(instrument_id, run_id, row.filename),
+
+        def held() -> tuple[bytes] | None:
+            # The bytes in a tuple: an empty file is `b""`, which `wait_until` would call
+            # "not yet" for ever.
+            try:
+                return (self.read_object(instrument_id, run_id, row.filename),)
+            except FileNotFoundError:
+                return None
+
+        (stored,) = wait_until(
+            held,
             timeout,
             lambda: "\n".join(f"{p} {n}" for p, n in self.mirror_listing()),
             what=f"the stand-in to hold {row.s3_key}",

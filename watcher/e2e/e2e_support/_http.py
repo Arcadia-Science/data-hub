@@ -6,7 +6,7 @@ from typing import Any
 
 import requests
 
-__all__ = ["ApiResult", "new_session"]
+__all__ = ["REQUEST_TIMEOUT_SECONDS", "ApiResult", "call", "new_session"]
 
 # Every request goes to a local server, and a slow answer is a bug the test should see.
 REQUEST_TIMEOUT_SECONDS = 30

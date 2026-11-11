@@ -166,9 +166,10 @@ def _dsn_value(value: str) -> str:
     return f"'{escaped}'"
 
 
-# A database name the harness will create. Postgres folds an unquoted name to lower case and
-# a name can be 63 bytes long. Only plain names are accepted, so the name can't carry SQL or
-# a character that a connection string or URL would have to escape.
+# A database name the harness will create. The name is quoted when the database is made, so
+# Postgres keeps it exactly as given, capitals included, and it can be 63 bytes long. Only
+# plain names are accepted, so the name can't carry SQL or a character that a connection
+# string or URL would have to escape.
 _DATABASE_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,62}")
 
 

@@ -57,7 +57,8 @@ def write_file(path: Path, content: bytes | int = SMALL, *, mtime: float | None 
 
     ``content`` is the bytes, or a size for :func:`payload`. ``mtime`` sets the modification
     time (seconds since the epoch), to make a file look old. The file is written in one call,
-    so the watcher sees it appear whole and then waits for it to be stable.
+    which is not atomic: the watcher may see it empty or partly written. Either way it waits
+    for the file to be stable before it reports it.
     """
     data = payload(content) if isinstance(content, int) else content
     path.parent.mkdir(parents=True, exist_ok=True)
