@@ -381,6 +381,7 @@ def test_non_mandatory_release_waits_for_quiet_uploads_then_installs(
     while server.last_heartbeat_id(pc.watcher_id) - offered_at < quiet_needed + 2:
         number += 1
         assert number <= 40, "the heartbeats are not advancing"
+        assert update_events(server, pc) == [], "the update started while uploads were coming in"
         name = f"file-{number}.csv"
         write_file(watch_dir / "RUN001" / name, SMALL)
         server.wait_for_uploaded(instrument_id, "RUN001", f"RUN001/{name}")
