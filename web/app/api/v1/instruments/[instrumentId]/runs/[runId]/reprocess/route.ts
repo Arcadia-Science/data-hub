@@ -11,9 +11,11 @@ interface RouteContext {
 // ---------------------------------------------------------------------------
 // POST /api/v1/instruments/:instrumentId/runs/:runId/reprocess
 //
-// Run-level convenience endpoint that reprocesses every `uploaded`,
-// `completed`, or `failed` raw file on the run. Processed artifacts
-// are skipped. Used by the runs list row/bulk actions.
+// Run-level convenience endpoint that queues every `uploaded`, `completed`,
+// `failed`, or stalled `processing` raw file on the run for reprocessing.
+// Each file starts as soon as a processing slot is free, and a file that does
+// not start right away waits as `queued`. Processed artifacts are skipped. Used
+// by the runs list row/bulk actions.
 // ---------------------------------------------------------------------------
 
 export async function POST(request: NextRequest, { params }: RouteContext) {

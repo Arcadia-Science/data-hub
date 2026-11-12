@@ -198,6 +198,7 @@ export const runListItem = z
     files_failed: z.number().int(),
     files_pending_upload: z.number().int(),
     files_uploaded: z.number().int(),
+    files_queued: z.number().int(),
     // `files_processing` counts only files still inside the stall window;
     // ones past it are in `files_stalled`.
     files_processing: z.number().int(),
@@ -236,8 +237,16 @@ export const runRestored = z.object({
 export const runReprocessed = z.object({
   instrument_id: z.string(),
   run_id: z.string(),
+  // Files accepted: started right away, or waiting as `queued`.
   files_queued: z.number().int(),
   files_failed: z.number().int(),
+});
+
+export const runQueuedCancelled = z.object({
+  instrument_id: z.string(),
+  run_id: z.string(),
+  // Queued files that became `failed`. Zero when none were queued.
+  files_cancelled: z.number().int(),
 });
 
 export const requestUploadBody = z.object({

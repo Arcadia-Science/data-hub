@@ -19,6 +19,13 @@ describe("MCP server instructions", () => {
     expect(MCP_SERVER_INSTRUCTIONS).toContain("search_changelog");
   });
 
+  it("asks clients to confirm before reprocessing or cancelling queued files", () => {
+    const oneLine = MCP_SERVER_INSTRUCTIONS.replace(/\s+/g, " ");
+    expect(oneLine).toContain(
+      "Confirm before deleting, dismissing, unclaiming, reprocessing, cancelling queued files, or changing a watcher's config."
+    );
+  });
+
   it("names the feedback tools the server registers", () => {
     expect(MCP_SERVER_INSTRUCTIONS).toContain("send_feedback");
     expect(MCP_SERVER_INSTRUCTIONS).toContain("add_run_comment");

@@ -19,7 +19,8 @@ the entries. Leave out its query to list changes by date.
 
 Writes need the write scope and otherwise fail with "Token is missing required
 scope: write"; ask the user to re-authorize instead of retrying. Confirm before
-deleting, dismissing, unclaiming, reprocessing, or changing a watcher's config.
+deleting, dismissing, unclaiming, reprocessing, cancelling queued files, or
+changing a watcher's config.
 Claims and comments always act as the signed-in user.
 
 Dates: dateFrom/dateTo are inclusive UTC days, matched on a run's acquired

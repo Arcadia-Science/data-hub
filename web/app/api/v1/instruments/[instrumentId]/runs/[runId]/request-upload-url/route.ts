@@ -30,6 +30,7 @@ const UPLOAD_URL_EXPIRY_SECONDS = 60 * 60; // 1 hour
 
 const UPLOADED_OR_LATER_STATUSES = new Set([
   "uploaded",
+  "queued",
   "processing",
   "completed",
   "failed",

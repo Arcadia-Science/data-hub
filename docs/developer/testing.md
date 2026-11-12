@@ -256,13 +256,29 @@ thing the Python side doesn't need: an in-process HTTP server on a free port
 that captures outgoing Slack webhook calls (`slack_channel_config` is seeded to
 point at it) and Slack Web API `chat.postMessage` calls (DMs), so
 notification-related tests can assert on captured payloads without hitting
-Slack. It also sets `LAMBDA_FUNCTION_URL`, `AWS_ROLE_ARN` and
-`STALLED_PROCESSING_AFTER_MINUTES` to empty strings in the spawned server's
-environment, so "Lambda not configured" code paths are exercised regardless of
-the developer's local `.env` (Next.js only fills in variables that are missing,
-so an empty value can't be refilled from `web/.env.local`). Tests that need a
-stubbed Lambda call should mock `fetch` instead of relying on a real Function
-URL. Values that
+Slack. It also sets `LAMBDA_FUNCTION_URL`, `AWS_ROLE_ARN`,
+`STALLED_PROCESSING_AFTER_MINUTES` and `PROCESSING_CONCURRENCY_LIMIT` to empty
+strings in the spawned server's environment, so "Lambda not configured" code
+paths are exercised regardless of the developer's local `.env` (Next.js only
+fills in variables that are missing, so an empty value can't be refilled from
+`web/.env.local`).
+
+Tests that need a Lambda call to happen use a second server. Global setup
+starts it from the same build with `LAMBDA_FUNCTION_URL` pointed at an
+in-process stub that records the S3 location of each invocation and answers
+`200` at once. A test can make the stub answer a chosen file with another HTTP
+status, after a delay, or by closing the connection (`setLambdaResponse`).
+Test files cannot mock the `fetch` that the server makes, because it runs in
+another process. `lambdaApi`, `waitForLambdaInvocations`,
+`settleLambdaInvocations`, and `waitForLambdaQuiet` in
+`tests/integration/helpers.ts` talk to that server and the stub.
+`reprocess-queue.test.ts` uses them. The server sends its Lambda calls after
+the response, so a test that starts a dispatch waits for the calls it expects,
+and its `afterEach` waits for the stub to go quiet before the next test clears
+the record. If the second server fails to start, global setup stops the first
+server and the stub before it throws. Both servers share one database, and
+both have an empty `PROCESSING_CONCURRENCY_LIMIT`, so the queue tests run
+against the default limit of 10. Values that
 test files need (`base_url`, `databaseUrl`, capture-server URLs) are passed
 back via `process.env`, since Vitest's global setup runs in a separate worker
 from the tests themselves.

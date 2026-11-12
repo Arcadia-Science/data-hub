@@ -65,7 +65,7 @@ LOCAL_S3_MIRROR=../lambda/.local-s3
 
 Explicitly **do not** set the following — leaving them unset is what makes the relevant features short-circuit cleanly:
 
-- `LAMBDA_FUNCTION_URL` — file reprocessing and "Download all" buttons surface a 503 / "Lambda not configured" message instead of trying to invoke a Function URL.
+- `LAMBDA_FUNCTION_URL` — file reprocessing and "Download all" buttons surface a 503 / "Lambda not configured" message instead of trying to invoke a Function URL. With a URL set, reprocessing queues files and starts at most `PROCESSING_CONCURRENCY_LIMIT` (10 by default) at a time; see [The reprocess queue](lambda.md#the-reprocess-queue). `make dev` does not run the reprocess-queue cron, so queued files start when a file completes or fails, or when a later reprocess request finds a free slot.
 - `SLACK_BOT_TOKEN`, `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET` — Slack DM/OAuth features are disabled when unset and no admin has saved them under Settings > Integrations. The Settings > Notifications page renders a "Connect to Slack" button that is inert without a client ID and secret.
 - `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` — Google sign-in is unused locally; the non-production email/password path handles auth. Deployed environments need a real client, from [Create a Google OAuth client](first-time-deployment.md#create-a-google-oauth-client).
 - `AWS_ROLE_ARN` — Vercel OIDC federation is for production. The local AWS SDK falls back to the static credentials above.

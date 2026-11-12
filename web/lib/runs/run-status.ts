@@ -4,6 +4,7 @@ import {
   CircleDashed,
   CircleX,
   Clock,
+  Hourglass,
   LoaderCircle,
   type LucideIcon,
   TriangleAlert,
@@ -15,11 +16,16 @@ import {
 // `stalled` sits directly under `failed` because both need an operator to act.
 // A run that also has files waiting to upload would otherwise read as
 // "pending" and hide the stall, and the pending files resolve on their own.
+//
+// `queued` sits between `uploaded` and `processing`: queued files are waiting
+// for a free processing slot, so a run with both queued and processing files
+// still reads as waiting.
 export const RUN_STATUS_VALUES = [
   "failed",
   "stalled",
   "pending",
   "uploaded",
+  "queued",
   "processing",
   "completed",
   "empty",
@@ -56,8 +62,15 @@ export const RUN_STATUS_META: Record<RunStatus, RunStatusMeta> = {
   },
   uploaded: {
     label: "Uploaded",
-    description: "Files are uploaded and waiting in the processing queue",
+    description: "Files are uploaded and waiting for their first processing",
     Icon: CircleDashed,
+    colorClassName: "text-muted-foreground",
+  },
+  queued: {
+    label: "Queued",
+    description:
+      "Files are queued for reprocessing and start when a processing slot is free",
+    Icon: Hourglass,
     colorClassName: "text-muted-foreground",
   },
   processing: {
@@ -93,6 +106,7 @@ export interface RunStatusCounts {
   // Only files still inside the stall window. `processing` rows past it are
   // counted in `filesStalled` instead, so the two buckets stay exclusive.
   filesProcessing: number;
+  filesQueued: number;
   filesStalled: number;
   filesUploaded: number;
 }
@@ -112,6 +126,9 @@ export function deriveRunStatus(counts: RunStatusCounts): RunStatus {
   }
   if (counts.filesUploaded > 0) {
     return "uploaded";
+  }
+  if (counts.filesQueued > 0) {
+    return "queued";
   }
   if (counts.filesProcessing > 0) {
     return "processing";

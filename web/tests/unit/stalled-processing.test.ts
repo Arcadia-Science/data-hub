@@ -26,14 +26,25 @@ describe("stalledProcessingAfterMs", () => {
     );
   });
 
-  it("reads a positive minute count from STALLED_PROCESSING_AFTER_MINUTES", () => {
-    process.env.STALLED_PROCESSING_AFTER_MINUTES = "5";
-    expect(stalledProcessingAfterMs()).toBe(5 * 60 * 1000);
+  it("reads a longer window from STALLED_PROCESSING_AFTER_MINUTES", () => {
+    process.env.STALLED_PROCESSING_AFTER_MINUTES = "45";
+    expect(stalledProcessingAfterMs()).toBe(45 * 60 * 1000);
   });
 
   it("trims whitespace around the env value", () => {
-    process.env.STALLED_PROCESSING_AFTER_MINUTES = "  10  ";
-    expect(stalledProcessingAfterMs()).toBe(10 * 60 * 1000);
+    process.env.STALLED_PROCESSING_AFTER_MINUTES = "  30  ";
+    expect(stalledProcessingAfterMs()).toBe(30 * 60 * 1000);
+  });
+
+  it("raises a window shorter than the default to the default", () => {
+    // Lambda can run for 15 minutes, so a shorter window would count a
+    // running Lambda as stalled.
+    for (const value of ["1", "5", "15", "19.5"]) {
+      process.env.STALLED_PROCESSING_AFTER_MINUTES = value;
+      expect(stalledProcessingAfterMs()).toBe(
+        DEFAULT_STALLED_PROCESSING_AFTER_MS
+      );
+    }
   });
 
   it("falls back to the default for empty, zero, negative, or non-numeric values", () => {
@@ -101,19 +112,32 @@ describe("isStalledProcessing", () => {
   });
 
   it("uses the configured stall window", () => {
-    process.env.STALLED_PROCESSING_AFTER_MINUTES = "5";
-    const started = new Date(now.getTime() - 6 * 60 * 1000);
+    process.env.STALLED_PROCESSING_AFTER_MINUTES = "30";
+    const started = new Date(now.getTime() - 25 * 60 * 1000);
+    expect(
+      isStalledProcessing(
+        { status: "processing", processingStartedAt: started },
+        now
+      )
+    ).toBe(false);
+
+    process.env.STALLED_PROCESSING_AFTER_MINUTES = "20";
     expect(
       isStalledProcessing(
         { status: "processing", processingStartedAt: started },
         now
       )
     ).toBe(true);
+  });
 
-    process.env.STALLED_PROCESSING_AFTER_MINUTES = "10";
+  it("does not count a start younger than 20 minutes as stalled, even with a shorter window set", () => {
+    process.env.STALLED_PROCESSING_AFTER_MINUTES = "5";
     expect(
       isStalledProcessing(
-        { status: "processing", processingStartedAt: started },
+        {
+          status: "processing",
+          processingStartedAt: new Date(now.getTime() - 16 * 60 * 1000),
+        },
         now
       )
     ).toBe(false);

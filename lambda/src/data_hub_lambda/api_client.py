@@ -1,11 +1,13 @@
 from __future__ import annotations
 import logging
 import os
+import random
 import time
 from typing import Any
 
 import requests
 
+from data_hub_lambda.deadline import seconds_until_time_limit
 from data_hub_lambda.models import (
     ApiErrorDetail,
     FileResponse,
@@ -41,6 +43,29 @@ DEFAULT_TIMEOUT: tuple[float, float] = (5, 30)
 # at the function's full memory size.
 _GET_INSTRUMENT_ATTEMPTS = 2
 _GET_INSTRUMENT_BACKOFF_SECONDS = (0.5,)
+
+# Every call waits this long before each retry, which makes four attempts and
+# 7 seconds of waiting before jitter. That rides out a short database outage
+# without waiting for a Lambda async retry.
+_RETRY_BACKOFF_SECONDS = (1.0, 2.0, 4.0)
+
+# Each wait gets a random extra of up to this fraction of itself. Lambdas that
+# hit the same outage then retry at different times instead of all at once.
+_RETRY_JITTER_FRACTION = 0.5
+
+# A retry only starts when the invocation has its wait, one read timeout, and
+# this many more seconds left before the Lambda time limit. The extra covers
+# connecting and the time spent between calls.
+_RETRY_DEADLINE_MARGIN_SECONDS = 5.0
+
+
+def _jittered(delay: float) -> float:
+    """Return *delay* plus a random extra of up to ``_RETRY_JITTER_FRACTION`` of it.
+
+    Tests patch this so the waits stay fixed.
+    """
+    return delay + random.uniform(0, delay * _RETRY_JITTER_FRACTION)
+
 
 # Warm-container cache: multi-file runs hit the same instrument repeatedly.
 _INSTRUMENT_CACHE_TTL_SECONDS = 60.0
@@ -88,9 +113,14 @@ class DataHubClient:
                 detail = ApiErrorDetail.model_validate(body["error"])
                 msg = detail.message
             else:
-                msg = resp.text
+                msg = resp.text.strip()
         except Exception:
-            msg = resp.text
+            msg = resp.text.strip()
+        # Next.js answers a thrown route handler with a 500 and an empty body.
+        # Processors store str(error) on the file, so a blank message would
+        # show as a blank error in the UI.
+        if not msg.strip():
+            msg = f"Data Hub API returned HTTP {resp.status_code} with no error message"
         raise ApiError(msg, status_code=resp.status_code, detail=detail)
 
     def _request(
@@ -110,6 +140,61 @@ class DataHubClient:
         if not resp.ok:
             self._handle_error(resp)
         return resp
+
+    # Every call except get_instrument goes through here, and retries on a
+    # connection error, a timeout, or a 5xx. Each leaves the same record behind
+    # however many times it runs: the server returns the existing run or file
+    # for a repeated POST, the PATCHes overwrite the same fields, and a repeat
+    # of a file's final status (completed or failed) is accepted. If the first
+    # attempt reached the server and only the response was lost, the repeat
+    # succeeds instead of failing a write that landed.
+    #
+    # A 4xx is raised at once. A retry also stops when the invocation could not
+    # finish it: the last error is raised once the time left before the Lambda
+    # limit is less than the next wait plus one read timeout plus a small
+    # margin. Outside a Lambda invocation there is no limit, so the full
+    # schedule runs. Each wait gets random jitter (see `_jittered`).
+    def _request_with_retry(
+        self,
+        method: str,
+        path: str,
+        *,
+        json: dict[str, Any] | None = None,
+    ) -> requests.Response:
+        for attempt, base_delay in enumerate(_RETRY_BACKOFF_SECONDS, start=1):
+            try:
+                return self._request(method, path, json=json)
+            except ApiError as exc:
+                if exc.status_code != 0 and exc.status_code < 500:
+                    raise
+                delay = _jittered(base_delay)
+                seconds_left = seconds_until_time_limit()
+                needed = delay + self._timeout[1] + _RETRY_DEADLINE_MARGIN_SECONDS
+                if seconds_left is not None and seconds_left < needed:
+                    logger.warning(
+                        "Transient error on %s %s (attempt %d/%d): %s; "
+                        "not retrying, %.1fs left and a retry needs %.1fs",
+                        method,
+                        path,
+                        attempt,
+                        len(_RETRY_BACKOFF_SECONDS) + 1,
+                        exc,
+                        seconds_left,
+                        needed,
+                    )
+                    raise
+                logger.warning(
+                    "Transient error on %s %s (attempt %d/%d): %s; retrying in %.1fs",
+                    method,
+                    path,
+                    attempt,
+                    len(_RETRY_BACKOFF_SECONDS) + 1,
+                    exc,
+                    delay,
+                )
+                time.sleep(delay)
+        # The last attempt has nothing left to wait for, so its error propagates.
+        return self._request(method, path, json=json)
 
     # ------------------------------------------------------------------
     # Instruments
@@ -170,7 +255,7 @@ class DataHubClient:
         If no run exists (e.g., direct S3 upload), auto-creates it with
         `source: "lambda"` so it shows the correct origin in the UI.
         """
-        resp = self._request(
+        resp = self._request_with_retry(
             "POST",
             f"/instruments/{instrument_id}/runs",
             json={"run_id": run_id, "source": "lambda"},
@@ -184,7 +269,7 @@ class DataHubClient:
         the same capture folder. A renamed sidecar (`run~<hash>.json`) is
         indistinguishable from `run.json` without that path.
         """
-        resp = self._request("GET", f"/instruments/{instrument_id}/runs/{run_id}")
+        resp = self._request_with_retry("GET", f"/instruments/{instrument_id}/runs/{run_id}")
         return RunDetailResponse.model_validate(resp.json())
 
     def update_run(
@@ -204,7 +289,7 @@ class DataHubClient:
         if metadata is not None:
             payload["metadata"] = metadata
 
-        resp = self._request(
+        resp = self._request_with_retry(
             "PATCH",
             f"/instruments/{instrument_id}/runs/{run_id}",
             json=payload,
@@ -244,7 +329,7 @@ class DataHubClient:
         if size_bytes is not None:
             payload["size_bytes"] = size_bytes
 
-        resp = self._request(
+        resp = self._request_with_retry(
             "POST",
             f"/instruments/{instrument_id}/runs/{run_id}/files",
             json=payload,
@@ -267,6 +352,11 @@ class DataHubClient:
         `size_bytes` and `content_type` are objective properties of the S3 object
         and may be PATCHed after the record is created (e.g. for processed
         artifacts whose size is only known post-upload).
+
+        Every call retries transient errors (see ``_request_with_retry``),
+        including one that sets ``"completed"`` or ``"failed"``. The API accepts
+        a repeat of the same final status, so a retry after a lost response
+        succeeds.
         """
         payload: dict[str, Any] = {}
         if status is not None:
@@ -280,7 +370,7 @@ class DataHubClient:
         if content_type is not None:
             payload["content_type"] = content_type
 
-        resp = self._request("PATCH", f"/files/{file_id}", json=payload)
+        resp = self._request_with_retry("PATCH", f"/files/{file_id}", json=payload)
         return FileResponse.model_validate(resp.json())
 
     # ------------------------------------------------------------------
@@ -302,6 +392,9 @@ class DataHubClient:
         Authenticates with the standard ``DATA_HUB_API_KEY`` PAT — same
         credential used for every other Lambda → API call. The response
         body is discarded; callers only care that the PATCH didn't raise.
+
+        The API has no status machine for jobs and the PATCH overwrites the same
+        fields each time, so a transient error is retried even for a final status.
         """
         payload: dict[str, Any] = {"status": status}
         if archive_bucket is not None:
@@ -313,7 +406,7 @@ class DataHubClient:
         if error_message is not None:
             payload["error_message"] = error_message
 
-        self._request("PATCH", f"/archive-jobs/{job_id}", json=payload)
+        self._request_with_retry("PATCH", f"/archive-jobs/{job_id}", json=payload)
 
 
 # ---------------------------------------------------------------------------

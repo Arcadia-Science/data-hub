@@ -1,7 +1,10 @@
 import type { ChildProcess } from "node:child_process";
 import { execSync, spawn } from "node:child_process";
+import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import net from "node:net";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { startLinearFakeServer } from "@arcadiascience/app-feedback-toolkit/testing";
 import { Client, Pool } from "pg";
 import { CREATE_NATURAL_FILENAME_COLLATION } from "@/lib/db/collations";
@@ -12,7 +15,14 @@ const TEST_DB = "data_hub_test";
 const PG_URL = "postgres://postgres:postgres@127.0.0.1:5432";
 
 let serverProcess: ChildProcess | null = null;
+// Second server from the same build, with the Lambda Function URL pointed at
+// `lambdaStubServer`. The main server leaves the URL unset.
+let lambdaServerProcess: ChildProcess | null = null;
+let lambdaStubServer: http.Server | null = null;
 let slackCaptureServer: http.Server | null = null;
+// Where the main server's stderr goes, so a test can check what the server
+// logged (see `readServerLogSince` in helpers.ts). Removed at teardown.
+let serverLogDir: string | null = null;
 let closeLinearFake: (() => Promise<void>) | null = null;
 
 // Captured Slack DM calls (chat.postMessage). Separate from the webhook buffer
@@ -23,6 +33,21 @@ interface CapturedDm {
   text: string;
 }
 const capturedDms: CapturedDm[] = [];
+
+// S3 location of one Lambda invocation, read from the synthetic S3 event the
+// web app posts to the Function URL (see `invokeLambdaForFile`).
+interface RecordedInvocation {
+  bucket: string;
+  key: string;
+}
+const lambdaInvocations: RecordedInvocation[] = [];
+
+// How the stub answers the invocation for one S3 key. A key with no entry gets
+// a 200. Set through `POST /respond` and cleared along with the invocations.
+type LambdaResponsePlan =
+  | { status: number; delayMs?: number }
+  | { reset: true };
+const lambdaResponsePlans = new Map<string, LambdaResponsePlan>();
 
 // Bind to port 0, let the OS assign a free port, then immediately release it.
 // This avoids hardcoding a port that might collide with other services.
@@ -214,6 +239,84 @@ export async function setup() {
   );
   const slackCaptureBaseUrl = `http://127.0.0.1:${slackPort}`;
 
+  // Stand in for the Lambda Function URL. The real Function URL answers after
+  // processing finishes; the stub records the call and answers at once.
+  //   POST /invoke               — Function URL (LAMBDA_FUNCTION_URL)
+  //   GET  /invocations          — read the recorded S3 locations
+  //   POST /invocations/clear    — reset the record and the response plans
+  //   POST /respond              — {"key", "status", "delayMs"?} answers the
+  //                                invocation for that S3 key with an HTTP
+  //                                status, after the delay;
+  //                                {"key", "reset": true} closes the
+  //                                connection without answering
+  const lambdaStubPort = await getFreePort();
+  lambdaStubServer = http.createServer((req, res) => {
+    if (req.method === "POST" && req.url === "/invoke") {
+      let raw = "";
+      req.on("data", (chunk) => {
+        raw += chunk;
+      });
+      req.on("end", () => {
+        let plan: LambdaResponsePlan | undefined;
+        try {
+          const record = JSON.parse(raw).Records?.[0]?.s3;
+          // The web app URL-encodes the key like a real S3 event does.
+          const key = decodeURIComponent(
+            record.object.key.replaceAll("+", " ")
+          );
+          lambdaInvocations.push({ bucket: record.bucket.name, key });
+          plan = lambdaResponsePlans.get(key);
+        } catch {
+          // ignore bodies that are not an S3 event
+        }
+        if (plan && "reset" in plan) {
+          req.socket.destroy();
+          return;
+        }
+        // The real Function URL answers when processing ends, so a plan can
+        // hold the answer back while the file is still processing.
+        setTimeout(() => {
+          res.writeHead(plan?.status ?? 200, { "content-type": "text/plain" });
+          res.end(plan ? "stub error" : "ok");
+        }, plan?.delayMs ?? 0);
+      });
+      return;
+    }
+    if (req.method === "POST" && req.url === "/respond") {
+      let raw = "";
+      req.on("data", (chunk) => {
+        raw += chunk;
+      });
+      req.on("end", () => {
+        const { key, ...plan } = JSON.parse(raw) as {
+          key: string;
+        } & LambdaResponsePlan;
+        lambdaResponsePlans.set(key, plan as LambdaResponsePlan);
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end("ok");
+      });
+      return;
+    }
+    if (req.method === "GET" && req.url === "/invocations") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(lambdaInvocations));
+      return;
+    }
+    if (req.method === "POST" && req.url === "/invocations/clear") {
+      lambdaInvocations.length = 0;
+      lambdaResponsePlans.clear();
+      res.writeHead(200, { "content-type": "text/plain" });
+      res.end("ok");
+      return;
+    }
+    res.writeHead(404);
+    res.end();
+  });
+  await new Promise<void>((resolve) =>
+    lambdaStubServer?.listen(lambdaStubPort, "127.0.0.1", resolve)
+  );
+  const lambdaStubUrl = `http://127.0.0.1:${lambdaStubPort}`;
+
   // 2. Push schema via drizzle-kit. --force skips the interactive confirmation
   //    prompt that drizzle-kit shows when it detects destructive changes.
   execSync("npx drizzle-kit push --force", {
@@ -313,8 +416,12 @@ export async function setup() {
   //
   // Blank the Lambda Function URL so "not configured" test cases work
   // regardless of the developer's local .env. Tests that need a stubbed
-  // Lambda HTTP call should mock fetch rather than set this URL.
+  // Lambda HTTP call use the second server started below (`lambdaApi` in
+  // helpers.ts): the server's own `fetch` cannot be mocked from a test file.
   serverEnv.LAMBDA_FUNCTION_URL = "";
+  // Likewise keep a developer's local limit from changing what the queue
+  // tests count.
+  serverEnv.PROCESSING_CONCURRENCY_LIMIT = "";
   // Pin the stall window to the default so a local override cannot make
   // the 21-minute backdate in files.test.ts look still in-flight.
   serverEnv.STALLED_PROCESSING_AFTER_MINUTES = "";
@@ -347,7 +454,14 @@ export async function setup() {
     }
   );
 
+  // `console.warn` and `console.error` from the server's routes land here. A
+  // route that only logs, such as the reprocess-queue cron's warning when the
+  // Lambda is not configured, can be checked from the log.
+  serverLogDir = mkdtempSync(path.join(tmpdir(), "data-hub-test-server-"));
+  const serverLogPath = path.join(serverLogDir, "stderr.log");
+  writeFileSync(serverLogPath, "");
   serverProcess.stderr?.on("data", (data: Buffer) => {
+    appendFileSync(serverLogPath, data);
     const msg = data.toString();
     if (msg.includes("Error") || msg.includes("error")) {
       console.error("[next start stderr]", msg);
@@ -356,10 +470,50 @@ export async function setup() {
 
   await waitForServer(baseUrl);
 
+  // A second server from the same build, with the Lambda Function URL set. The
+  // test processes cannot mock the `fetch` the server makes, so the URL points
+  // at the stub above. The processing limit is left unset so the default of 10
+  // is what the queue tests exercise.
+  const lambdaPort = await getFreePort();
+  const lambdaBaseUrl = `http://127.0.0.1:${lambdaPort}`;
+  try {
+    lambdaServerProcess = spawn(
+      "npx",
+      ["next", "start", "-p", String(lambdaPort)],
+      {
+        cwd: import.meta.dirname
+          ? `${import.meta.dirname}/../..`
+          : process.cwd(),
+        env: {
+          ...serverEnv,
+          BETTER_AUTH_URL: lambdaBaseUrl,
+          LAMBDA_FUNCTION_URL: `${lambdaStubUrl}/invoke`,
+        },
+        stdio: "pipe",
+      }
+    );
+    lambdaServerProcess.stderr?.on("data", (data: Buffer) => {
+      const msg = data.toString();
+      if (msg.includes("Error") || msg.includes("error")) {
+        console.error("[next start (lambda) stderr]", msg);
+      }
+    });
+    await waitForServer(lambdaBaseUrl);
+  } catch (err) {
+    // The first server and the stub are already running. Vitest does not
+    // call the teardown when setup throws, so stop them here or they keep
+    // running after the failed run.
+    await teardown();
+    throw err;
+  }
+
   // Vitest global setup runs in a separate worker from tests. The only way
   // to pass dynamic values (port, DB URL) to test files is via process.env,
   // which Vitest propagates to test workers automatically.
   process.env.__TEST_BASE_URL = baseUrl;
+  process.env.__TEST_LAMBDA_BASE_URL = lambdaBaseUrl;
+  process.env.__TEST_LAMBDA_STUB_URL = lambdaStubUrl;
+  process.env.__TEST_SERVER_LOG = serverLogPath;
   process.env.__TEST_DATABASE_URL = databaseUrl;
   process.env.__TEST_AUTH_SECRET = authSecret;
   process.env.__TEST_SLACK_CAPTURE_URL = slackCaptureBaseUrl;
@@ -382,20 +536,40 @@ export async function setup() {
   // spawned Next.js server already gets the test DB via `serverEnv`.
   process.env.DATABASE_URL = databaseUrl;
 
-  return async () => {
-    if (serverProcess) {
-      serverProcess.kill("SIGTERM");
-      serverProcess = null;
-    }
-    if (slackCaptureServer) {
-      await new Promise<void>((resolve, reject) =>
-        slackCaptureServer?.close((err) => (err ? reject(err) : resolve()))
-      );
-      slackCaptureServer = null;
-    }
-    if (closeLinearFake) {
-      await closeLinearFake();
-      closeLinearFake = null;
-    }
-  };
+  return teardown;
+}
+
+// Stops every process and stub that `setup` started. Vitest calls it after the
+// run. `setup` also calls it when the second server fails to start, because
+// Vitest does not run the teardown of a setup that threw.
+async function teardown() {
+  if (serverProcess) {
+    serverProcess.kill("SIGTERM");
+    serverProcess = null;
+  }
+  if (lambdaServerProcess) {
+    lambdaServerProcess.kill("SIGTERM");
+    lambdaServerProcess = null;
+  }
+  if (lambdaStubServer) {
+    lambdaStubServer.closeAllConnections();
+    await new Promise<void>((resolve, reject) =>
+      lambdaStubServer?.close((err) => (err ? reject(err) : resolve()))
+    );
+    lambdaStubServer = null;
+  }
+  if (slackCaptureServer) {
+    await new Promise<void>((resolve, reject) =>
+      slackCaptureServer?.close((err) => (err ? reject(err) : resolve()))
+    );
+    slackCaptureServer = null;
+  }
+  if (serverLogDir) {
+    rmSync(serverLogDir, { recursive: true, force: true });
+    serverLogDir = null;
+  }
+  if (closeLinearFake) {
+    await closeLinearFake();
+    closeLinearFake = null;
+  }
 }

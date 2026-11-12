@@ -40,6 +40,7 @@ const {
     files_failed: 0,
     files_pending_upload: 0,
     files_uploaded: 0,
+    files_queued: 0,
     files_processing: 0,
     files_stalled: 0,
     total_size_bytes: 1234,
@@ -193,6 +194,7 @@ const {
       uploadedAt: new Date("2025-01-01T00:00:00Z"),
       processedAt: new Date("2025-01-01T00:00:00Z"),
       processingStartedAt: null,
+      queuedAt: null,
       fileCreatedAt: null,
       createdAt: new Date("2025-01-01T00:00:00Z"),
       deletedAt: null,
@@ -525,7 +527,11 @@ vi.mock("@/lib/api/run-archive", () => ({
 vi.mock("@/lib/api/file-reprocessing", () => ({
   reprocessFile: vi.fn().mockImplementation((id: number) => {
     if (id === 42) {
-      return { ok: true, fileId: id };
+      return { ok: true, fileId: id, fileStatus: "processing" };
+    }
+    // The processing limit is reached, so the file waits in the queue.
+    if (id === 43) {
+      return { ok: true, fileId: id, fileStatus: "queued" };
     }
     return {
       ok: false,
@@ -541,6 +547,19 @@ vi.mock("@/lib/api/file-reprocessing", () => ({
     filesQueued: 1,
     filesFailed: 0,
   }),
+  cancelQueuedFilesForRun: vi
+    .fn()
+    .mockImplementation((instrumentId: string, runId: string) => {
+      if (runId === "run-1") {
+        return { ok: true, instrumentId, runId, filesCancelled: 3 };
+      }
+      return {
+        ok: false,
+        status: 404,
+        code: "NOT_FOUND",
+        message: `Run '${runId}' not found for instrument '${instrumentId}'`,
+      };
+    }),
 }));
 
 vi.mock("@/lib/api/run-lifecycle", () => ({
@@ -690,6 +709,7 @@ describe("MCP Protocol (in-memory)", () => {
     "edit_run_comment",
     "delete_run_comment",
     "reprocess_run",
+    "cancel_queued_files",
     "delete_run",
     "restore_run",
     "request_run_upload",
@@ -842,7 +862,7 @@ describe("MCP Protocol (in-memory)", () => {
 
   it("every registered tool advertises outputSchema", async () => {
     const { tools } = await client.listTools();
-    expect(tools).toHaveLength(41);
+    expect(tools).toHaveLength(42);
     for (const tool of tools) {
       const schema = tool.outputSchema as
         | { type?: string; oneOf?: unknown; anyOf?: unknown }
@@ -1578,6 +1598,21 @@ describe("MCP Protocol (in-memory)", () => {
     expect(parsed.fileId).toBe(42);
   });
 
+  it("reprocess_file reports a file that is waiting for a processing slot as queued", async () => {
+    const result = await client.callTool({
+      name: "reprocess_file",
+      arguments: { fileId: 43 },
+    });
+    expect(result.isError).toBeFalsy();
+    expectStructuredMatchesText(result);
+    const parsed = parseText(result.content) as {
+      status: string;
+      fileId: number;
+    };
+    expect(parsed.status).toBe("queued");
+    expect(parsed.fileId).toBe(43);
+  });
+
   it("dismiss_file returns the soft-deleted file", async () => {
     const result = await client.callTool({
       name: "dismiss_file",
@@ -1818,6 +1853,28 @@ describe("MCP Protocol (in-memory)", () => {
     expect(text).toContain("[NOT_FOUND]");
   });
 
+  it("reprocess tool descriptions and status filters name the queued status", async () => {
+    const { tools } = await client.listTools();
+    const byName = (name: string) => tools.find((t) => t.name === name);
+
+    expect(byName("reprocess_file")?.description).toContain("'queued'");
+    expect(byName("reprocess_run")?.description).toContain("'queued'");
+
+    const fileStatuses = (
+      byName("list_run_files")?.inputSchema.properties?.status as {
+        items: { enum: string[] };
+      }
+    ).items.enum;
+    expect(fileStatuses).toContain("queued");
+
+    const runStatuses = (
+      byName("search_runs")?.inputSchema.properties?.status as {
+        items: { enum: string[] };
+      }
+    ).items.enum;
+    expect(runStatuses).toContain("queued");
+  });
+
   it("reprocess_file is annotated as destructive", async () => {
     const { tools } = await client.listTools();
     const tool = tools.find((t) => t.name === "reprocess_file");
@@ -1866,6 +1923,39 @@ describe("MCP Protocol (in-memory)", () => {
     expect(parsed.filesQueued).toBe(1);
     expect(parsed.filesFailed).toBe(0);
     expectStructuredMatchesText(result);
+  });
+
+  it("cancel_queued_files returns the number of files cancelled", async () => {
+    const result = await client.callTool({
+      name: "cancel_queued_files",
+      arguments: { instrumentId: "test-plate-reader", runId: "run-1" },
+    });
+    expect(result.isError).toBeFalsy();
+    expect(parseText(result.content)).toEqual({
+      instrumentId: "test-plate-reader",
+      runId: "run-1",
+      filesCancelled: 3,
+    });
+    expectStructuredMatchesText(result);
+  });
+
+  it("cancel_queued_files reports an unknown run as an error", async () => {
+    const result = await client.callTool({
+      name: "cancel_queued_files",
+      arguments: { instrumentId: "test-plate-reader", runId: "no-such-run" },
+    });
+    expect(result.isError).toBe(true);
+    const text = (result.content as Array<{ type: string; text: string }>)[0]
+      .text;
+    expect(text).toContain("not found");
+  });
+
+  it("cancel_queued_files is a write tool that does not delete anything", async () => {
+    const { tools } = await client.listTools();
+    const tool = tools.find((t) => t.name === "cancel_queued_files");
+    expect(tool?.annotations?.readOnlyHint).toBe(false);
+    expect(tool?.annotations?.destructiveHint).toBe(false);
+    expect(tool?.description).toContain("'failed'");
   });
 
   it("delete_run and restore_run return structured lifecycle payloads", async () => {
@@ -2082,6 +2172,16 @@ describe("MCP Protocol (in-memory)", () => {
     expect(parsed).toHaveProperty("runStatus");
     expect(parsed).toHaveProperty("dates");
     expect(parsed).not.toHaveProperty("toolRouting");
+    // Queued sits between uploaded and processing, in the values and in the
+    // priority order the derivation text spells out.
+    const values = parsed.runStatus.values.map(
+      (v: { value: string }) => v.value
+    );
+    expect(values.indexOf("queued")).toBe(values.indexOf("uploaded") + 1);
+    expect(values.indexOf("processing")).toBe(values.indexOf("queued") + 1);
+    expect(parsed.runStatus.derivation).toMatch(
+      /uploaded > queued[^>]*> processing/
+    );
   });
 
   it("exposes server instructions after initialize", () => {

@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
+import { readFileSync, statSync } from "node:fs";
 import { makeSignature } from "better-auth/crypto";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
@@ -146,9 +147,10 @@ export function getBaseUrl(): string {
   return url;
 }
 
-export async function api(
+async function apiAt(
+  baseUrl: string,
   path: string,
-  options: ApiOptions = {}
+  options: ApiOptions
 ): Promise<Response> {
   const { token, body, headers: extraHeaders, ...rest } = options;
 
@@ -161,11 +163,176 @@ export async function api(
     headers.Authorization = `Bearer ${token}`;
   }
 
-  return await fetch(`${getBaseUrl()}${path}`, {
+  return await fetch(`${baseUrl}${path}`, {
     ...rest,
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
   });
+}
+
+export function api(path: string, options: ApiOptions = {}): Promise<Response> {
+  return apiAt(getBaseUrl(), path, options);
+}
+
+// ---------------------------------------------------------------------------
+// Lambda-configured server. The main test server has no `LAMBDA_FUNCTION_URL`,
+// so the "not configured" cases keep working. Global setup starts a second
+// server from the same build with the URL pointed at a stub that records each
+// invocation instead of running a processor. `lambdaApi` talks to that server,
+// and the helpers below read and reset what the stub recorded. Both servers
+// share one database.
+// ---------------------------------------------------------------------------
+
+function getLambdaServerUrl(): string {
+  const url = process.env.__TEST_LAMBDA_BASE_URL;
+  if (!url) {
+    throw new Error("__TEST_LAMBDA_BASE_URL not set — global setup failed?");
+  }
+  return url;
+}
+
+function getLambdaStubUrl(): string {
+  const url = process.env.__TEST_LAMBDA_STUB_URL;
+  if (!url) {
+    throw new Error("__TEST_LAMBDA_STUB_URL not set — global setup failed?");
+  }
+  return url;
+}
+
+export function lambdaApi(
+  path: string,
+  options: ApiOptions = {}
+): Promise<Response> {
+  return apiAt(getLambdaServerUrl(), path, options);
+}
+
+export interface LambdaInvocation {
+  bucket: string;
+  key: string;
+}
+
+export async function getLambdaInvocations(): Promise<LambdaInvocation[]> {
+  const res = await fetch(`${getLambdaStubUrl()}/invocations`);
+  if (!res.ok) {
+    throw new Error(`Lambda stub /invocations returned ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function clearLambdaInvocations(): Promise<void> {
+  await fetch(`${getLambdaStubUrl()}/invocations/clear`, { method: "POST" });
+}
+
+/**
+ * Poll until the stub has recorded at least `count` invocations, then return
+ * them. The server invokes the Lambda in `after()`, so a call lands shortly
+ * after the response that caused it. To assert that no more arrive, follow
+ * this with `settleLambdaInvocations`.
+ */
+export async function waitForLambdaInvocations(
+  count: number,
+  timeoutMs = 10_000
+): Promise<LambdaInvocation[]> {
+  const start = Date.now();
+  let latest: LambdaInvocation[] = [];
+  while (Date.now() - start < timeoutMs) {
+    latest = await getLambdaInvocations();
+    if (latest.length >= count) {
+      return latest;
+    }
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  throw new Error(
+    `Expected ${count} Lambda invocations, saw ${latest.length} after ${timeoutMs}ms`
+  );
+}
+
+/**
+ * Wait long enough for any invocation the server is about to make, then
+ * return what the stub has recorded. For asserting that nothing more started.
+ */
+export async function settleLambdaInvocations(
+  settleMs = 1000
+): Promise<LambdaInvocation[]> {
+  await new Promise((r) => setTimeout(r, settleMs));
+  return await getLambdaInvocations();
+}
+
+/**
+ * Wait until the stub has gone quiet: its count has not changed for `quietMs`.
+ * Call it when a test ends. A dispatch that the test started but did not wait
+ * for would otherwise reach the stub after the next test has cleared it.
+ */
+export async function waitForLambdaQuiet(
+  quietMs = 500,
+  timeoutMs = 10_000
+): Promise<void> {
+  const start = Date.now();
+  let count = (await getLambdaInvocations()).length;
+  let changedAt = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    await new Promise((r) => setTimeout(r, 100));
+    const latest = (await getLambdaInvocations()).length;
+    if (latest !== count) {
+      count = latest;
+      changedAt = Date.now();
+    } else if (Date.now() - changedAt >= quietMs) {
+      return;
+    }
+  }
+  throw new Error(
+    `Lambda stub still receiving invocations after ${timeoutMs}ms`
+  );
+}
+
+// ---------------------------------------------------------------------------
+// The main test server's stderr. Global setup writes it to a file, so a test
+// can check what a route logged with `console.warn` or `console.error`.
+// Record the size before the request and read what came after it.
+// ---------------------------------------------------------------------------
+
+function getServerLogPath(): string {
+  const logPath = process.env.__TEST_SERVER_LOG;
+  if (!logPath) {
+    throw new Error("__TEST_SERVER_LOG not set — global setup failed?");
+  }
+  return logPath;
+}
+
+export function serverLogSize(): number {
+  return statSync(getServerLogPath()).size;
+}
+
+/**
+ * The server's stderr written after `offset` (from `serverLogSize`). Waits a
+ * moment first, because the server's output reaches the file a little after
+ * the response is sent.
+ */
+export async function readServerLogSince(
+  offset: number,
+  settleMs = 500
+): Promise<string> {
+  await new Promise((r) => setTimeout(r, settleMs));
+  return readFileSync(getServerLogPath()).subarray(offset).toString("utf8");
+}
+
+/**
+ * Make the stub answer the invocation for one S3 key with an HTTP status
+ * (after `delayMs`, to keep the file processing for a while), or close the
+ * connection without answering. The plan lasts until `clearLambdaInvocations`
+ * or until another plan replaces it.
+ */
+export async function setLambdaResponse(
+  key: string,
+  plan: { status: number; delayMs?: number } | { reset: true }
+): Promise<void> {
+  const res = await fetch(`${getLambdaStubUrl()}/respond`, {
+    method: "POST",
+    body: JSON.stringify({ key, ...plan }),
+  });
+  if (!res.ok) {
+    throw new Error(`Lambda stub /respond returned ${res.status}`);
+  }
 }
 
 /**

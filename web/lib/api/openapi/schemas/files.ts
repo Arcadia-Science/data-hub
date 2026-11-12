@@ -58,7 +58,9 @@ export const fileDismissed = z.object({
 });
 
 export const fileReprocessed = z.object({
-  status: z.literal("processing"),
+  // `processing` when the file started right away, `queued` when it is
+  // waiting for a free processing slot.
+  status: z.enum(["processing", "queued"]),
   file_id: z.number().int(),
 });
 

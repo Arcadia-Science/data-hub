@@ -14,6 +14,10 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  REPROCESS_REQUEST_CONCURRENCY,
+  settleWithConcurrency,
+} from "@/lib/runs/settle-with-concurrency";
 
 export interface ReprocessRunTarget {
   // Pre-summed by the caller via `reprocessableFileCount` so the dialog never
@@ -34,8 +38,11 @@ export interface ReprocessRunTarget {
 async function fanOut(
   runs: ReprocessRunTarget[]
 ): Promise<{ ok: number; failed: number; filesQueued: number }> {
-  const results = await Promise.allSettled(
-    runs.map(async (r) => {
+  // A few runs at a time: each request queues every eligible file of its run.
+  const results = await settleWithConcurrency(
+    runs,
+    REPROCESS_REQUEST_CONCURRENCY,
+    async (r) => {
       const url = `/api/v1/instruments/${r.instrumentId}/runs/${encodeURIComponent(
         r.runId
       )}/reprocess`;
@@ -45,7 +52,7 @@ async function fanOut(
       }
       const body = (await res.json()) as { files_queued?: number };
       return body.files_queued ?? 0;
-    })
+    }
   );
   let ok = 0;
   let failed = 0;
@@ -84,13 +91,13 @@ export function ReprocessRunsDialog({
       const { ok, failed, filesQueued } = await fanOut(runs);
       if (failed === 0) {
         toast.success(
-          `Reprocessing ${filesQueued} ${filesQueued === 1 ? "file" : "files"} across ${ok} ${ok === 1 ? "run" : "runs"}`
+          `Queued ${filesQueued} ${filesQueued === 1 ? "file" : "files"} for reprocessing across ${ok} ${ok === 1 ? "run" : "runs"}`
         );
       } else if (ok === 0) {
         toast.error(`Failed to start reprocessing for ${failed} runs`);
       } else {
         toast.warning(
-          `Reprocessing ${ok} ${ok === 1 ? "run" : "runs"}; ${failed} failed`
+          `Queued ${ok} ${ok === 1 ? "run" : "runs"} for reprocessing; ${failed} failed`
         );
       }
       onOpenChange(false);
@@ -110,12 +117,13 @@ export function ReprocessRunsDialog({
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription>
-            This will re-run the processing pipeline on{" "}
-            <strong>{eligibleFiles}</strong>{" "}
-            {eligibleFiles === 1 ? "file" : "files"} currently in the{" "}
+            This will queue <strong>{eligibleFiles}</strong>{" "}
+            {eligibleFiles === 1 ? "file" : "files"} for reprocessing.{" "}
+            {eligibleFiles === 1 ? "It is" : "They are"} currently in the{" "}
             <em>uploaded</em>, <em>completed</em>, or <em>failed</em> state, or
-            stuck in <em>processing</em>. Results will overwrite any existing
-            processed artifacts.
+            stuck in <em>processing</em>. Each file starts as soon as a
+            processing slot is free, so some may wait as <em>queued</em>.
+            Results will overwrite any existing processed artifacts.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

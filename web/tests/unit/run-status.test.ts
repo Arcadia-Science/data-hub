@@ -16,6 +16,7 @@ const ZERO: RunStatusCounts = {
   filesCompleted: 0,
   filesFailed: 0,
   filesPendingUpload: 0,
+  filesQueued: 0,
   filesProcessing: 0,
   filesStalled: 0,
   filesUploaded: 0,
@@ -35,6 +36,7 @@ describe("deriveRunStatus", () => {
     expect(deriveRunStatus(counts({ filesStalled: 1 }))).toBe("stalled");
     expect(deriveRunStatus(counts({ filesPendingUpload: 1 }))).toBe("pending");
     expect(deriveRunStatus(counts({ filesUploaded: 1 }))).toBe("uploaded");
+    expect(deriveRunStatus(counts({ filesQueued: 1 }))).toBe("queued");
     expect(deriveRunStatus(counts({ filesProcessing: 1 }))).toBe("processing");
     expect(deriveRunStatus(counts({ filesCompleted: 1 }))).toBe("completed");
   });
@@ -47,6 +49,7 @@ describe("deriveRunStatus", () => {
           filesStalled: 1,
           filesPendingUpload: 1,
           filesUploaded: 1,
+          filesQueued: 1,
           filesProcessing: 1,
           filesCompleted: 1,
         })
@@ -63,6 +66,7 @@ describe("deriveRunStatus", () => {
           filesStalled: 1,
           filesPendingUpload: 1,
           filesUploaded: 1,
+          filesQueued: 1,
           filesProcessing: 1,
           filesCompleted: 1,
         })
@@ -86,12 +90,40 @@ describe("deriveRunStatus", () => {
     ).toBe("pending");
   });
 
-  it("prefers 'uploaded' over 'processing' and 'completed'", () => {
+  it("prefers 'uploaded' over 'queued', 'processing' and 'completed'", () => {
     expect(
       deriveRunStatus(
-        counts({ filesUploaded: 1, filesProcessing: 1, filesCompleted: 1 })
+        counts({
+          filesUploaded: 1,
+          filesQueued: 1,
+          filesProcessing: 1,
+          filesCompleted: 1,
+        })
       )
     ).toBe("uploaded");
+  });
+
+  // Queued ranks between uploaded and processing: a run that is still
+  // waiting on files reads as waiting even while other files process, and it
+  // still reads as pending, stalled, or failed when those apply.
+  it("prefers 'queued' over 'processing' and 'completed'", () => {
+    expect(
+      deriveRunStatus(
+        counts({ filesQueued: 1, filesProcessing: 1, filesCompleted: 1 })
+      )
+    ).toBe("queued");
+    expect(
+      deriveRunStatus(counts({ filesQueued: 70, filesCompleted: 10 }))
+    ).toBe("queued");
+  });
+
+  it("ranks 'queued' directly between 'uploaded' and 'processing'", () => {
+    expect(RUN_STATUS_VALUES.indexOf("queued")).toBe(
+      RUN_STATUS_VALUES.indexOf("uploaded") + 1
+    );
+    expect(RUN_STATUS_VALUES.indexOf("processing")).toBe(
+      RUN_STATUS_VALUES.indexOf("queued") + 1
+    );
   });
 
   it("prefers 'processing' over 'completed'", () => {

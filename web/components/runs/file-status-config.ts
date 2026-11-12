@@ -5,6 +5,7 @@ import {
   Clock,
   Cloud,
   CloudUpload,
+  Hourglass,
   LoaderCircle,
   Trash2,
   TriangleAlert,
@@ -15,6 +16,7 @@ export type FileStatusDisplayKey =
   | "pending"
   | "uploading"
   | "uploaded"
+  | "queued"
   | "processing"
   | "stalled"
   | "completed"
@@ -53,14 +55,20 @@ export function getFileStatusKey(
       return "uploading";
     case "uploaded":
       return "uploaded";
+    case "queued":
+      return "queued";
     case "processing":
       return "processing";
     case "completed":
       return "completed";
     case "failed":
       return "failed";
-    default:
-      return "pending";
+    default: {
+      // A new file status without a case here would otherwise read as
+      // "pending" and hide where the file really is.
+      const unhandled: never = file.status;
+      return unhandled;
+    }
   }
 }
 
@@ -78,6 +86,12 @@ export const FILE_STATUS_CONFIG: Record<
     label: "Uploaded",
     description: "stored, awaiting processing",
     Icon: Cloud,
+    className: "text-muted-foreground",
+  },
+  queued: {
+    label: "Queued",
+    description: "waiting for a free processing slot",
+    Icon: Hourglass,
     className: "text-muted-foreground",
   },
   uploading: {
@@ -127,7 +141,7 @@ export const FILE_STATUS_LEGEND_SECTIONS: {
   {
     key: "waiting",
     title: "Waiting",
-    statuses: ["pending", "uploaded"],
+    statuses: ["pending", "uploaded", "queued"],
   },
   {
     key: "in_motion",

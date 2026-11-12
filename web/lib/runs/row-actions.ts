@@ -15,6 +15,7 @@ import { isProcessableInstrumentType } from "@/lib/instruments/processable-types
 //              or `upload_requested`).
 // - Reprocess: instrument_type has a Lambda processor and at least one raw
 //              file is in `uploaded`, `completed`, `failed`, or stalled.
+//              Queued files are already waiting, so they do not count.
 // - Delete:    the run isn't already soft-deleted.
 // ---------------------------------------------------------------------------
 

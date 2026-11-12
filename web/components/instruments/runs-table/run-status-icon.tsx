@@ -19,6 +19,7 @@ export type RunStatusRow = Pick<
   | "files_failed"
   | "files_pending_upload"
   | "files_processing"
+  | "files_queued"
   | "files_stalled"
   | "files_uploaded"
 >;
@@ -33,6 +34,7 @@ export function RunStatusIcon({ run }: { run: RunStatusRow }) {
     filesFailed: run.files_failed,
     filesPendingUpload: run.files_pending_upload,
     filesProcessing: run.files_processing,
+    filesQueued: run.files_queued,
     filesStalled: run.files_stalled,
     filesUploaded: run.files_uploaded,
   });
@@ -60,6 +62,9 @@ export function RunStatusIcon({ run }: { run: RunStatusRow }) {
   }
   if (run.files_uploaded > 0) {
     lines.push(`${plural(run.files_uploaded, "file")} uploaded`);
+  }
+  if (run.files_queued > 0) {
+    lines.push(`${plural(run.files_queued, "file")} queued for processing`);
   }
   if (run.files_processing > 0) {
     lines.push(`${plural(run.files_processing, "file")} processing`);

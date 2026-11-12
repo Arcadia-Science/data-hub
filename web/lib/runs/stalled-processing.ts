@@ -1,12 +1,19 @@
 import type { files } from "@/lib/db/schema";
 
-// Lambda's hard limit is 900s (`infra/template.yaml`). Default is 5 minutes
-// past that so a live invoke is not treated as stalled.
+// Lambda's hard limit is 900s (`infra/template.yaml`). The default is 5
+// minutes past that so a live invoke is not treated as stalled. It is also the
+// shortest window allowed.
 export const DEFAULT_STALLED_PROCESSING_AFTER_MS = 20 * 60 * 1000;
 
 // Read at call time so API/MCP see the current Vercel value. Client code
 // that imports this module keeps the default: the var is not `NEXT_PUBLIC_`,
 // and the files table already trusts the server-stamped `stalledProcessing`.
+//
+// `STALLED_PROCESSING_AFTER_MINUTES` can make the window longer, never
+// shorter. A stalled file frees its processing slot, can be reprocessed, and
+// can be put back in the queue by the cron. With a window under 15 minutes,
+// all three could happen while its Lambda is still running, and two Lambdas
+// would then work on the same file.
 export function stalledProcessingAfterMs(): number {
   const raw = process.env.STALLED_PROCESSING_AFTER_MINUTES;
   if (raw === undefined) {
@@ -16,7 +23,7 @@ export function stalledProcessingAfterMs(): number {
   if (!Number.isFinite(minutes) || minutes <= 0) {
     return DEFAULT_STALLED_PROCESSING_AFTER_MS;
   }
-  return minutes * 60 * 1000;
+  return Math.max(minutes * 60 * 1000, DEFAULT_STALLED_PROCESSING_AFTER_MS);
 }
 
 export type StalledProcessingFile = Pick<

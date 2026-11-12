@@ -129,7 +129,10 @@ export function registerFileTools(server: McpServer) {
       if (!result.ok) {
         return errorResult(`[${result.code}] ${result.message}`);
       }
-      return structuredResult({ status: "processing", fileId: result.fileId });
+      return structuredResult({
+        status: result.fileStatus,
+        fileId: result.fileId,
+      });
     }
   );
 
