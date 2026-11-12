@@ -101,6 +101,7 @@ Older watchers try again only when another file in the run finishes or the watch
 
 - In **manual** mode, files wait for approval in the upload queue; see [Manage the watcher fleet](/docs/manage-watchers#approving-manual-uploads)
 - Check the log for `upload_failed`
+- A `state_write_failed` event in the watcher’s event log means the PC’s disk is full or the watcher’s state file can’t be written. Free up space; the watcher retries on its own and uploads the files once it can write again
 - A revoked or expired token surfaces as `401 Unauthorized`. Create a new token and re-run `init`; see [Issue and revoke tokens](/docs/manage-tokens#after-revoking-a-token)
 
 ### A requested upload stays on Uploading
