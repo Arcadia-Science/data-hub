@@ -762,6 +762,9 @@ def test_reporting_a_deleted_run_again_is_refused_and_attaches_no_files(
         assert server.file(instrument_id, "RUN001", "RUN001/second.csv") is None
 
 
+# The test server is `next start`, which decodes a route parameter once. On Vercel, Next.js decodes
+# it a second time, so a run ID with `%` followed by two hex digits (such as `Q%41`) is still
+# misread there. That is a server issue, tracked separately.
 @pytest.mark.covers("run.url_characters_in_id->update_reaches_run")
 @pytest.mark.parametrize("upload_mode", ["manual", "auto"])
 def test_a_run_with_url_characters_in_its_id_gets_its_files(

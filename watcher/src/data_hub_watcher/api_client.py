@@ -59,11 +59,16 @@ DEFAULT_TIMEOUT: tuple[float, float] = (5, 30)  # (connect, read) seconds
 def _path_segment(value: str) -> str:
     """Percent-encode *value* so it is one literal segment of a URL path.
 
-    A run ID is the name of a folder on the instrument PC, so it can hold any
-    character a folder name allows. Put into a path as it is, a `#` ends the
-    path (the rest becomes a fragment that is never sent) and `%41` is sent as
-    `A`, so the call reaches another run or none. `requests` doesn't encode
-    these for us, so it has to be done here.
+    A run ID comes from a folder name, a file name or a custom pattern, so it
+    can hold characters that mean something in a URL. Put into a path as it is,
+    a `#` ends the path (the rest becomes a fragment that is never sent) and
+    `%41` is sent as `A`, so the call reaches another run or none. `requests`
+    doesn't encode these for us, so it has to be done here.
+
+    Two kinds of ID still can't reach their run. `.` and `..` are removed as dot
+    segments by `urllib3`. On Vercel, Next.js decodes the route parameter a
+    second time, so an ID with `%` followed by two hex digits (such as `Q%41`)
+    can be misread there.
     """
     return quote(value, safe="")
 

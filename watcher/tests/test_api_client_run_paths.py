@@ -1,12 +1,14 @@
 """A run ID is sent as one literal segment of the URL path.
 
-Run IDs come from folder names, so they can hold characters that mean something in a URL. The
-tests send real requests through a `requests` session whose transport is replaced, so they check
-the path that goes on the wire, after `requests` has had its say.
+Run IDs come from folder names, file names and custom patterns, so they can hold characters that
+mean something in a URL. The tests send real requests through a `requests` session whose
+transport is replaced, so they check the path that goes on the wire, after `requests` has had its
+say.
 """
 
 from __future__ import annotations
 import json
+import re
 from typing import Any
 from urllib.parse import unquote
 
@@ -16,13 +18,13 @@ from requests.adapters import BaseAdapter
 
 from data_hub_watcher.api_client import DataHubClient
 
-INSTRUMENT_ID = "mass-spec"
+INSTRUMENT_ID = "example-instrument"
 RUNS_PATH = f"/api/v1/instruments/{INSTRUMENT_ID}/runs"
 
 RUN_DETAIL = {
     "id": "00000000-0000-0000-0000-000000000001",
     "instrument_id": INSTRUMENT_ID,
-    "instrument_display_name": "Mass spec",
+    "instrument_display_name": "Example instrument",
     "run_id": "RUN001",
     "source": "watcher",
     "created_at": "2026-01-01T00:00:00Z",
@@ -36,7 +38,8 @@ UPLOAD = {
     "file_id": 1,
 }
 
-# IDs a folder name allows, with the characters that matter in a URL.
+# Run IDs with characters that mean something in a URL. `.` and `..` are left out, because
+# `urllib3` removes them from the path as dot segments.
 AWKWARD_RUN_IDS = [
     "Plate#3",
     "Q%41",
@@ -54,6 +57,9 @@ AWKWARD_RUN_IDS = [
     "#",
     "%",
 ]
+
+# A segment that is encoded all the way: each character is unreserved or a `%XX` escape.
+ENCODED_SEGMENT = re.compile(r"(?:[A-Za-z0-9._~-]|%[0-9A-F]{2})*")
 
 
 class _RecordingAdapter(BaseAdapter):
@@ -104,6 +110,9 @@ def _run_segment(request: requests.PreparedRequest, suffix: str = "") -> str:
     assert "?" not in path, f"part of the run ID went out as a query string: {path}"
     segments = path.removeprefix(RUNS_PATH + "/").removesuffix(suffix).split("/")
     assert len(segments) == 1, f"the run ID spread over several segments: {path}"
+    # Also require every character to be unreserved or a `%XX` escape, which `unquote` doesn't
+    # check, so that nothing is left for a server to read differently.
+    assert ENCODED_SEGMENT.fullmatch(segments[0]), f"the run ID is not fully encoded: {path}"
     return segments[0]
 
 
@@ -115,7 +124,7 @@ def test_an_update_names_the_run_by_its_exact_id(run_id: str) -> None:
 
     request = _only_request(adapter)
     assert request.method == "PATCH"
-    # What the server reads from the path is the ID the watcher meant.
+    # A server that decodes the path once reads the ID the watcher meant.
     assert unquote(_run_segment(request)) == run_id
 
 
