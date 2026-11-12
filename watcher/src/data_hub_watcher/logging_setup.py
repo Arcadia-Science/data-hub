@@ -140,8 +140,32 @@ def setup_file_logging() -> Path:
     return log_path
 
 
+class _EventLogFilter(logging.Filter):
+    """Pass WARNING and above, and lower-level records only from one logger.
+
+    *info_from* is the name of the service's own logger. With ``None``,
+    nothing below WARNING passes.
+    """
+
+    def __init__(self, info_from: str | None = None) -> None:
+        super().__init__()
+        self.info_from = info_from
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return record.levelno >= logging.WARNING or record.name == self.info_from
+
+
 class _ServiceManagerHandler(logging.Handler):
     """Forward log records to ``servicemanager.Log*Msg`` so they reach the Windows Event Log.
+
+    Only some records are forwarded: every ``WARNING``, ``ERROR`` and
+    ``CRITICAL`` record, and the INFO (and lower) records of the
+    service's own logger, named by *info_from*, which are its lifecycle
+    lines such as "starting", "is running" and "stopped". The INFO lines
+    that other loggers write for each file stay in ``watcher.log``,
+    which has the full detail. Without that limit a run of thousands of
+    files would write thousands of entries to the shared Application log
+    and push older warnings and errors out of it.
 
     Routing is by record level:
 
@@ -165,10 +189,11 @@ class _ServiceManagerHandler(logging.Handler):
        in ``watcher.log``.
     """
 
-    def __init__(self, sm: Any) -> None:
+    def __init__(self, sm: Any, info_from: str | None = None) -> None:
         super().__init__()
         self._sm = sm
         self._local = threading.local()
+        self.addFilter(_EventLogFilter(info_from))
 
     def emit(self, record: logging.LogRecord) -> None:
         if getattr(self._local, "in_emit", False):
@@ -203,15 +228,24 @@ class _ServiceManagerHandler(logging.Handler):
             self._local.in_emit = False
 
 
-def attach_servicemanager_handler(sm: Any) -> _ServiceManagerHandler:
+def attach_servicemanager_handler(sm: Any, info_from: str | None = None) -> _ServiceManagerHandler:
     """Attach a :class:`_ServiceManagerHandler` for *sm* to the root logger.
 
+    The Event Log gets every ``WARNING`` and above from any logger, and
+    the lower-level records (INFO and DEBUG) of the logger named
+    *info_from* only: pass the service module's own logger name, whose
+    lifecycle lines belong there. INFO lines from other loggers go to
+    ``watcher.log`` alone, so a run of thousands of files can't flood
+    the Application log. With ``info_from=None`` only warnings and
+    errors get through.
+
     Idempotent: if a handler is already attached for the same *sm*
-    object, the existing handler is returned unchanged. Callers should
-    typically invoke this exactly once at service startup, immediately
-    after :func:`setup_file_logging`, so every subsequent ``logger.*``
-    call from the watcher's library code reaches both the rotating
-    file log AND the Windows Event Log.
+    object, the existing handler is returned unchanged, *info_from*
+    included. Callers should typically invoke this exactly once at
+    service startup, immediately after :func:`setup_file_logging`, so
+    every ``logger.*`` call from the watcher's library code reaches the
+    rotating file log, and the ones above reach the Windows Event Log
+    too.
     """
     _apply_root_level()
     root = logging.getLogger()
@@ -220,7 +254,7 @@ def attach_servicemanager_handler(sm: Any) -> _ServiceManagerHandler:
         if isinstance(existing, _ServiceManagerHandler) and existing._sm is sm:
             return existing
 
-    handler = _ServiceManagerHandler(sm)
+    handler = _ServiceManagerHandler(sm, info_from=info_from)
     handler.setFormatter(logging.Formatter(EVENT_LOG_FORMAT))
     root.addHandler(handler)
     return handler

@@ -1418,6 +1418,9 @@ class TestRunServiceLoopLogging:
          ``_run_service_loop`` are routed back to ``sm.LogErrorMsg``
          via the attached ``_ServiceManagerHandler``, preserving the
          operator-visible Windows event log behavior.
+      3. Only the service's own INFO lines and warnings and errors
+         reach the Event Log; the INFO lines of other modules stay in
+         ``watcher.log``.
     """
 
     def test_setup_file_logging_runs_before_registry_read(
@@ -1499,6 +1502,44 @@ class TestRunServiceLoopLogging:
             "starting" in m.lower() and "pid=" in m.lower() and "log=" in m.lower()
             for m in info_messages
         )
+
+    def test_info_lines_from_other_modules_stay_out_of_the_event_log(
+        self,
+        harness: _LoopHarness,
+    ) -> None:
+        # Every uploaded file logs several INFO lines from other
+        # modules (``monitor``, ``uploader``); they belong in
+        # ``watcher.log``, and a run of thousands of files must not
+        # flood the Application log. Warnings and errors from those
+        # modules, and the service's own lifecycle lines, still go there.
+        stop_event = threading.Event()
+        stop_event.set()
+        harness.svc._run_service_loop(stop_event, harness.sm)
+        harness.sm.reset_mock()
+
+        monitor_logger = logging.getLogger("data_hub_watcher.monitor")
+        monitor_logger.info("File stable: a.csv")
+        monitor_logger.warning("Upload is slow: a.csv")
+
+        harness.sm.LogInfoMsg.assert_not_called()
+        harness.sm.LogWarningMsg.assert_called_once()
+        assert "Upload is slow" in harness.sm.LogWarningMsg.call_args.args[0]
+
+    def test_service_lifecycle_lines_reach_the_event_log(
+        self,
+        harness: _LoopHarness,
+    ) -> None:
+        # The end-to-end suite waits for "is running" in the Application
+        # log, so the service's own logger has to stay exempt from the
+        # limit on INFO lines. Its name is ``__main__`` when the SCM runs
+        # the file, so the exemption follows ``logger.name``.
+        stop_event = threading.Event()
+        stop_event.set()
+        harness.svc._run_service_loop(stop_event, harness.sm)
+
+        info_messages = [c.args[0] for c in harness.sm.LogInfoMsg.call_args_list]
+        assert any("is running" in m for m in info_messages)
+        assert any(m.endswith("stopped") for m in info_messages)
 
 
 class TestBootstrapFailureLog:
