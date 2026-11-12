@@ -8,11 +8,13 @@ uploading:
 """
 
 from __future__ import annotations
+from unittest.mock import MagicMock
 
 import pytest
 
 from data_hub_shared.testing import IntegrationEnv, db_query, db_update
 from data_hub_watcher.api_client import DataHubClient
+from data_hub_watcher.heartbeat import HeartbeatLoop
 
 pytestmark = pytest.mark.integration
 
@@ -165,3 +167,72 @@ class TestManualUploadQueue:
 
         assert {f.filename for f in queue_a.files} == {"a.csv"}
         assert {f.filename for f in queue_b.files} == {"b.csv"}
+
+
+class TestStopWithRequestedUploads:
+    """What the server does with queued upload requests when the watcher stops.
+
+    A stop caused by Windows shutting down or restarting keeps them queued, so the
+    watcher uploads them after the PC starts again. Any other stop cancels them.
+    This runs the watcher's own final heartbeat against the real server, so the
+    reason the watcher sends and the one the server expects can't drift apart.
+    """
+
+    @staticmethod
+    def _stop_the_watcher(client: DataHubClient, watcher_id: str, **stop_kwargs: bool) -> None:
+        loop = HeartbeatLoop(
+            client=client,
+            watcher_id=watcher_id,
+            interval_seconds=60,
+            event_reporter=MagicMock(),
+            instrument_id="watcher-contract-test",
+            watch_directory="/tmp/watch",
+            upload_mode="manual",
+        )
+        loop.stop(**stop_kwargs)
+
+    @staticmethod
+    def _request_the_upload(
+        client: DataHubClient, integration_env: IntegrationEnv
+    ) -> tuple[str, int]:
+        watcher_id = _setup_run_with_file(client, "watcher-contract-test")
+        file_id = _get_file_id(integration_env.db_dsn, "MANUAL-001", "data.csv")
+        db_update(
+            integration_env.db_dsn,
+            "UPDATE files SET upload_requested_at = NOW(),"
+            " status = 'upload_requested' WHERE id = %s",
+            (file_id,),
+        )
+        return watcher_id, file_id
+
+    @staticmethod
+    def _file_status(integration_env: IntegrationEnv, file_id: int) -> str:
+        rows = db_query(
+            integration_env.db_dsn, "SELECT status FROM files WHERE id = %s", (file_id,)
+        )
+        return str(rows[0][0])
+
+    def test_a_stop_for_a_system_shutdown_keeps_the_request_queued(
+        self, client: DataHubClient, integration_env: IntegrationEnv
+    ) -> None:
+        watcher_id, file_id = self._request_the_upload(client, integration_env)
+
+        self._stop_the_watcher(client, watcher_id, system_shutdown=True)
+
+        watchers = db_query(
+            integration_env.db_dsn, "SELECT status FROM watchers WHERE id = %s", (watcher_id,)
+        )
+        assert watchers[0][0] == "stopped"
+        assert self._file_status(integration_env, file_id) == "upload_requested"
+        # Once the PC is back and the watcher has started, it finds the request in its queue.
+        client.send_heartbeat(watcher_id, {"status": "watching"})
+        assert [f.id for f in client.get_upload_queue(watcher_id).files] == [file_id]
+
+    def test_any_other_stop_cancels_the_request(
+        self, client: DataHubClient, integration_env: IntegrationEnv
+    ) -> None:
+        watcher_id, file_id = self._request_the_upload(client, integration_env)
+
+        self._stop_the_watcher(client, watcher_id)
+
+        assert self._file_status(integration_env, file_id) == "detected"

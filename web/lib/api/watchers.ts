@@ -159,9 +159,18 @@ export async function revertPendingUploadRequests(
   return reverted.map((row) => row.id);
 }
 
-// Sweep-only grace window, wider than the 5-minute online threshold so a brief
-// heartbeat blip doesn't churn the queue. The graceful-stop path skips it: an
-// explicit stop is intentional and reverts immediately.
+// The `status_reason` on the `stopped` heartbeat of a watcher that stopped
+// because Windows is shutting down or restarting. Such a PC is expected back, so
+// the heartbeat route keeps its instrument's upload requests queued for the
+// watcher to drain after the restart. Must match the watcher's
+// `SYSTEM_SHUTDOWN_STATUS_REASON`.
+export const SYSTEM_SHUTDOWN_STATUS_REASON = "system_shutdown";
+
+// Sweep window, wider than the 5-minute online threshold so a brief heartbeat
+// blip doesn't churn the queue. The graceful-stop path skips it: an explicit
+// stop is intentional and reverts immediately. The exception is a stop for a
+// system shutdown, which waits for this window like a watcher that died: the
+// sweep cancels its requests if the PC doesn't come back.
 export const UPLOAD_REQUEST_REVERT_GRACE_MS = 15 * 60 * 1000;
 
 type UploadRevertReason =
