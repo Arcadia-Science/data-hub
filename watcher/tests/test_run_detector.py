@@ -685,33 +685,297 @@ class TestRunReportRetries:
         detector.retry_failed_reports()
         assert detector._runs["R1"].reported
 
-    def test_error_after_a_successful_report_is_not_retried(
-        self, tmp_path: Path, client: MagicMock, reporter: MagicMock, clock: _Clock
-    ) -> None:
+    def _detector_with_state_db(
+        self,
+        tmp_path: Path,
+        client: MagicMock,
+        reporter: MagicMock,
+        counters: WatcherCounters,
+        record_report: list[object] | Exception,
+        *,
+        auto: bool = True,
+    ) -> tuple[RunDetector, MagicMock, MagicMock]:
+        """A detector whose state DB writes fail or work as *record_report* says.
+
+        Returns it with the state DB and the upload callback stand-ins.
+        """
         client.report_run.return_value = SimpleNamespace(id="run")
         state_db = MagicMock()
-        state_db.record_report.side_effect = [sqlite3.OperationalError("disk full"), None]
+        state_db.record_report.side_effect = record_report
         detector = _make_detector(
-            r"^(R\d)_", tmp_path, client=client, reporter=reporter, state_db=state_db
+            r"^(R\d)_",
+            tmp_path,
+            client=client,
+            reporter=reporter,
+            counters=counters,
+            state_db=state_db,
+        )
+        upload = MagicMock(side_effect=lambda run_id, files: len(files))
+        if auto:
+            detector._upload_cb = upload
+        return detector, state_db, upload
+
+    @staticmethod
+    def _recorded(state_db: MagicMock, call: int = -1) -> tuple[bool, list[str], list[str]]:
+        """What a `record_report` call wrote: `new_run`, the manifest and the pending paths."""
+        args, kwargs = state_db.record_report.call_args_list[call]
+        return (
+            kwargs["new_run"],
+            [row[1] for row in args[1]],
+            kwargs.get("pending_relative_paths", []),
         )
 
-        # The monitor records `stable_callback_failed` for this, as before retries existed.
-        with pytest.raises(sqlite3.OperationalError):
-            detector.on_stable_file(self._file(tmp_path, "R1_a.csv"))
+    def test_a_write_that_fails_after_the_post_is_retried_without_another_request(
+        self,
+        tmp_path: Path,
+        client: MagicMock,
+        reporter: MagicMock,
+        counters: WatcherCounters,
+        clock: _Clock,
+    ) -> None:
+        detector, state_db, upload = self._detector_with_state_db(
+            tmp_path,
+            client,
+            reporter,
+            counters,
+            [sqlite3.OperationalError("disk full"), None],
+        )
 
-        # Nothing is retried on a timer, and the run is not remembered as reported: the
-        # state DB has nothing about it, so the in-memory state doesn't either.
-        assert not detector._runs["R1"].reported
-        assert detector._retry_at == {}
-        assert self._kinds(reporter) == []
+        # The monitor would log and report an exception from this call, and send no more.
+        detector.on_stable_file(self._file(tmp_path, "R1_a.csv"))
 
-        # The next file of the run reports it again, with both files, and this time it sticks.
-        detector.on_stable_file(self._file(tmp_path, "R1_b.csv"))
-        assert client.report_run.call_count == 2
-        sent = client.report_run.call_args.args[1]["detected_files"]
-        assert [f["filename"] for f in sent] == ["R1_a.csv", "R1_b.csv"]
-        assert detector._runs["R1"].reported
+        # The server has the run, so the run counts as reported and is not POSTed again.
+        run = detector._runs["R1"]
+        assert run.reported and run.unrecorded == "create"
+        assert run.patched_file_count == 1
+        assert counters.runs_reported == 1
+        # The failure is reported as an event once, counted, and retried on the usual backoff.
+        [event] = reporter.report_error.call_args_list
+        assert event.args[0] == "state_write_failed"
+        assert event.kwargs["run_id"] == "R1"
+        assert event.kwargs["file_count"] == 1
+        assert event.kwargs["error"] == "OperationalError: disk full"
+        assert counters.errors == 1
+        assert detector._retry_at == {"R1": clock.now + RUN_REPORT_RETRY_BASE_DELAY_SECONDS}
+        # The file is not uploaded before the state DB has its pending row.
+        upload.assert_not_called()
+        assert run.uploaded_file_count == 0
+
+        clock.advance_to(RUN_REPORT_RETRY_BASE_DELAY_SECONDS)
+        detector.retry_failed_reports()
+
+        # The retry only writes: the run, the file, and the pending row.
+        client.report_run.assert_called_once()
         client.update_run.assert_not_called()
+        assert self._recorded(state_db) == (True, ["R1_a.csv"], ["R1_a.csv"])
+        upload.assert_called_once()
+        assert [f.filename for f in upload.call_args.args[1]] == ["R1_a.csv"]
+        assert run.unrecorded is None and run.uploaded_file_count == 1
+        assert detector._retry_at == {} and run.retry_attempts == 0
+        assert self._kinds(reporter) == ["state_write_failed"]
+
+    def test_a_write_that_keeps_failing_costs_one_event_and_small_requests(
+        self,
+        tmp_path: Path,
+        client: MagicMock,
+        reporter: MagicMock,
+        counters: WatcherCounters,
+        clock: _Clock,
+    ) -> None:
+        detector, state_db, upload = self._detector_with_state_db(
+            tmp_path, client, reporter, counters, sqlite3.OperationalError("disk full")
+        )
+        names = [f"R1_{n}.csv" for n in range(6)]
+        for n, name in enumerate(names):
+            clock.advance_to(n)
+            detector.on_stable_file(self._file(tmp_path, name))
+
+        # One POST, then a PATCH of just the new file each time: the manifest isn't sent again.
+        assert client.report_run.call_count == 1
+        sent = [c.args[2]["detected_files"] for c in client.update_run.call_args_list]
+        assert [[f["filename"] for f in files] for files in sent] == [[name] for name in names[1:]]
+        # One event, however many files, and the backoff keeps doubling.
+        assert self._kinds(reporter) == ["state_write_failed"]
+        run = detector._runs["R1"]
+        base = RUN_REPORT_RETRY_BASE_DELAY_SECONDS
+        assert run.retry_attempts == len(names)
+        assert run.retry_delay == min(
+            base * 2 ** (len(names) - 1), RUN_REPORT_RETRY_MAX_DELAY_SECONDS
+        )
+        assert counters.errors == len(names)
+        upload.assert_not_called()
+
+        # Once there is room again the next retry writes everything and uploads every file.
+        state_db.record_report.side_effect = None
+        state_db.record_report.reset_mock()
+        clock.advance_to(10_000)
+        detector.retry_failed_reports()
+
+        assert client.update_run.call_count == len(names) - 1
+        assert state_db.record_report.call_count == 1
+        assert self._recorded(state_db) == (True, names, names)
+        [(run_id, uploaded)] = [c.args for c in upload.call_args_list]
+        assert run_id == "R1" and [f.filename for f in uploaded] == names
+        assert run.unrecorded is None and run.uploaded_file_count == len(names)
+        assert run.write_failures == 0 and run.retry_attempts == 0
+
+    def test_a_write_that_fails_after_a_patch_is_retried_without_another_request(
+        self,
+        tmp_path: Path,
+        client: MagicMock,
+        reporter: MagicMock,
+        counters: WatcherCounters,
+        clock: _Clock,
+    ) -> None:
+        detector, state_db, upload = self._detector_with_state_db(
+            tmp_path,
+            client,
+            reporter,
+            counters,
+            [None, sqlite3.OperationalError("disk full"), None],
+        )
+        detector.on_stable_file(self._file(tmp_path, "R1_a.csv"))
+
+        detector.on_stable_file(self._file(tmp_path, "R1_b.csv"))
+
+        run = detector._runs["R1"]
+        assert run.unrecorded == "update" and run.patched_file_count == 2
+        assert self._kinds(reporter) == ["state_write_failed"]
+        assert upload.call_count == 1  # Only the first file's upload started.
+
+        clock.advance_to(RUN_REPORT_RETRY_BASE_DELAY_SECONDS)
+        detector.retry_failed_reports()
+
+        # The run's own row is not written again (that would move its reported time).
+        assert client.update_run.call_count == 1
+        assert self._recorded(state_db) == (False, ["R1_a.csv", "R1_b.csv"], ["R1_b.csv"])
+        assert [f.filename for f in upload.call_args.args[1]] == ["R1_b.csv"]
+        assert run.unrecorded is None and run.uploaded_file_count == 2
+
+    def test_a_write_that_failed_with_the_post_still_writes_the_run_after_a_later_patch(
+        self,
+        tmp_path: Path,
+        client: MagicMock,
+        reporter: MagicMock,
+        counters: WatcherCounters,
+        clock: _Clock,
+    ) -> None:
+        detector, state_db, _ = self._detector_with_state_db(
+            tmp_path, client, reporter, counters, [sqlite3.OperationalError("disk full"), None]
+        )
+        detector.on_stable_file(self._file(tmp_path, "R1_a.csv"))
+
+        detector.on_stable_file(self._file(tmp_path, "R1_b.csv"))
+
+        # The PATCH is what carries the run's row to the state DB here.
+        assert client.report_run.call_count == 1
+        assert self._recorded(state_db) == (
+            True,
+            ["R1_a.csv", "R1_b.csv"],
+            ["R1_a.csv", "R1_b.csv"],
+        )
+        assert detector._runs["R1"].unrecorded is None
+        assert detector._retry_at == {}
+
+    def test_a_manual_mode_write_that_fails_is_retried_and_queues_no_uploads(
+        self,
+        tmp_path: Path,
+        client: MagicMock,
+        reporter: MagicMock,
+        counters: WatcherCounters,
+        clock: _Clock,
+    ) -> None:
+        detector, state_db, upload = self._detector_with_state_db(
+            tmp_path,
+            client,
+            reporter,
+            counters,
+            [sqlite3.OperationalError("disk full"), None],
+            auto=False,
+        )
+        detector.on_stable_file(self._file(tmp_path, "R1_a.csv"))
+
+        clock.advance_to(RUN_REPORT_RETRY_BASE_DELAY_SECONDS)
+        detector.retry_failed_reports()
+
+        assert self._recorded(state_db) == (True, ["R1_a.csv"], [])
+        upload.assert_not_called()
+        assert detector._runs["R1"].unrecorded is None
+
+    def test_report_only_files_get_no_pending_row_in_a_retried_write(
+        self,
+        tmp_path: Path,
+        client: MagicMock,
+        reporter: MagicMock,
+        counters: WatcherCounters,
+        clock: _Clock,
+    ) -> None:
+        detector, state_db, upload = self._detector_with_state_db(
+            tmp_path, client, reporter, counters, [sqlite3.OperationalError("disk full"), None]
+        )
+        detector.on_stable_file(self._file(tmp_path, "R1_old.csv"), upload=False)
+
+        detector.on_stable_file(self._file(tmp_path, "R1_new.csv"))
+
+        assert self._recorded(state_db) == (True, ["R1_old.csv", "R1_new.csv"], ["R1_new.csv"])
+        assert [f.filename for f in upload.call_args.args[1]] == ["R1_new.csv"]
+        assert detector._runs["R1"].uploaded_file_count == 2
+
+    def test_a_write_that_fails_in_a_retry_is_reported_too(
+        self,
+        tmp_path: Path,
+        client: MagicMock,
+        reporter: MagicMock,
+        counters: WatcherCounters,
+        clock: _Clock,
+    ) -> None:
+        # A retry runs from the monitor's tick, which logs an exception and sends no event.
+        detector, state_db, _ = self._detector_with_state_db(
+            tmp_path, client, reporter, counters, [sqlite3.OperationalError("disk full")]
+        )
+        client.report_run.side_effect = [ApiError("down", 503), SimpleNamespace(id="run")]
+        detector.on_stable_file(self._file(tmp_path, "R1_a.csv"))
+        assert self._kinds(reporter) == ["run_report_failed"]
+
+        clock.advance_to(RUN_REPORT_RETRY_BASE_DELAY_SECONDS)
+        detector.retry_failed_reports()  # Must not raise.
+
+        # The POST went through and the write failed: a second event, with its own kind.
+        assert self._kinds(reporter) == ["run_report_failed", "state_write_failed"]
+        run = detector._runs["R1"]
+        assert run.reported and run.unrecorded == "create"
+        # The backoff goes on from the failed POST.
+        assert run.retry_delay == RUN_REPORT_RETRY_BASE_DELAY_SECONDS * 2
+        assert detector._retry_at == {
+            "R1": clock.now + RUN_REPORT_RETRY_BASE_DELAY_SECONDS * 2,
+        }
+
+    def test_a_failed_patch_while_a_write_is_owed_keeps_the_write_owed(
+        self,
+        tmp_path: Path,
+        client: MagicMock,
+        reporter: MagicMock,
+        counters: WatcherCounters,
+        clock: _Clock,
+    ) -> None:
+        detector, state_db, _ = self._detector_with_state_db(
+            tmp_path, client, reporter, counters, [sqlite3.OperationalError("disk full"), None]
+        )
+        client.update_run.side_effect = [ApiError("down", 503), MagicMock()]
+        detector.on_stable_file(self._file(tmp_path, "R1_a.csv"))  # POST fine, write fails.
+        detector.on_stable_file(self._file(tmp_path, "R1_b.csv"))  # PATCH fails.
+        assert detector._runs["R1"].unrecorded == "create"
+
+        clock.advance_to(10_000)
+        detector.retry_failed_reports()  # PATCH of b goes through, and the write.
+
+        assert self._recorded(state_db) == (
+            True,
+            ["R1_a.csv", "R1_b.csv"],
+            ["R1_a.csv", "R1_b.csv"],
+        )
+        assert detector._runs["R1"].unrecorded is None
+        assert client.report_run.call_count == 1
 
     def test_unexpected_error_during_a_retry_counts_as_a_failed_attempt(
         self,

@@ -10,7 +10,9 @@ is written in one transaction (`StateDB.record_report`): the run, the file
 manifest and, in auto mode, a `pending_uploads` row for each file to upload.
 Nothing is remembered before the server has accepted the report, and a write
 that fails or is cut short by a kill remembers nothing, so the next start's
-initial scan reports the files again.
+initial scan reports the files again. A write that fails while the process
+goes on is retried with the backoff of a failed report, and nothing is
+uploaded until it has gone through.
 """
 
 from __future__ import annotations
@@ -47,6 +49,21 @@ def file_created_at(st: os.stat_result) -> float:
     interface) — this is the closest universally-available approximation.
     """
     return getattr(st, "st_birthtime", None) or st.st_mtime
+
+
+def relative_key(path: Path, watch_dir: Path) -> str:
+    """Return *path* as a forward-slash path relative to *watch_dir*.
+
+    This is the key of a file in the state DB (`pending_uploads`,
+    `detected_files`, `uploaded_files`). The run detector writes a file's
+    `pending_uploads` row and the uploader clears it, so both compute the key
+    here. Falls back to the basename for a path outside the watch directory
+    (e.g. one-shot `upload --file /abs/path`) so recording never raises.
+    """
+    try:
+        return path.relative_to(watch_dir).as_posix()
+    except ValueError:
+        return path.name
 
 
 @dataclass
@@ -92,8 +109,22 @@ class RunState:
     # field when a later-stabilising file reveals an earlier creation
     # time than what the server already knows.
     acquired_at_sent: float | None = None
-    # Failed reports since the last success, and the wait before the next
-    # retry. The due time itself lives on `RunDetector._retry_at`.
+    # The oldest report the server accepted that the state DB doesn't hold yet,
+    # or None when it holds them all. It is "create" while the run's own row
+    # isn't there (the write after the POST failed), "update" while only the
+    # files of a PATCH are missing. The cursors above move when the server
+    # accepts a report, whether or not the write worked, so a failing write
+    # never makes the next report longer: the next `_update_run` sends the
+    # files added since and then writes everything. Never persisted. A kill
+    # leaves the state DB without those reports, and the next start's initial
+    # scan finds the files again.
+    unrecorded: ReportOperation | None = None
+    # Failed writes of an accepted report since the last write that worked.
+    # Only the first of a row is reported as an event.
+    write_failures: int = 0
+    # Failed reports (and failed writes of an accepted report) since the last
+    # success, and the wait before the next retry. The due time itself lives
+    # on `RunDetector._retry_at`.
     retry_attempts: int = 0
     retry_delay: int = 0
 
@@ -282,6 +313,34 @@ class RunDetector:
         else:
             self._clear_retry(run)
 
+    def _handle_write_failure(self, run: RunState, exc: Exception) -> None:
+        """Count a failed write of a report the server accepted, report it, and retry it.
+
+        The retry sends no request when the server already has everything
+        (`_update_run`): it only writes. It shares the backoff of a failed
+        POST or PATCH, and only the first failed write in a row is reported,
+        so a state DB that stays unwritable (a full disk) costs one event, not
+        one per file, and no new file of the run restarts the backoff. The
+        detector reports the failure itself, and doesn't raise it, because a
+        retry runs from the monitor's tick, which logs an exception and sends
+        no event.
+        """
+        error = f"{type(exc).__name__}: {exc}"
+        logger.warning(
+            "Failed to record run %s in the state DB: %s", run.run_id, error, exc_info=exc
+        )
+        self._counters.errors += 1
+        run.write_failures += 1
+        if run.write_failures == 1:
+            self._reporter.report_error(
+                "state_write_failed",
+                f"Failed to record run {run.run_id} in the state database: {error}",
+                run_id=run.run_id,
+                error=error,
+                file_count=len(run.files),
+            )
+        self._schedule_retry(run)
+
     def _schedule_retry(self, run: RunState) -> None:
         run.retry_delay = (
             min(run.retry_delay * 2, RUN_REPORT_RETRY_MAX_DELAY_SECONDS)
@@ -331,12 +390,8 @@ class RunDetector:
     # ------------------------------------------------------------------
 
     def _file_payload(self, info: FileInfo) -> dict[str, object]:
-        try:
-            relative_path = info.path.relative_to(self._watch_dir).as_posix()
-        except ValueError:
-            relative_path = info.filename
         payload: dict[str, object] = {
-            "relative_path": relative_path,
+            "relative_path": relative_key(info.path, self._watch_dir),
             "filename": info.filename,
             "size_bytes": info.size_bytes,
         }
@@ -346,29 +401,26 @@ class RunDetector:
             ).isoformat()
         return payload
 
-    def _relative_path(self, info: FileInfo) -> str:
-        try:
-            return info.path.relative_to(self._watch_dir).as_posix()
-        except ValueError:
-            return info.filename
-
-    def _record_accepted_report(
-        self, run: RunState, *, new_run: bool, to_upload: list[FileInfo]
-    ) -> None:
-        """Remember in the state DB a report the server has accepted.
+    def _record_accepted_report(self, run: RunState, *, to_upload: list[FileInfo]) -> bool:
+        """Remember in the state DB the reports the server has accepted for *run*.
 
         Stores the current `run.files` manifest, so that on restart the
         initial scan can skip these files and the run can be hydrated back
-        into `_runs` without re-reporting, and (with *new_run*) the run
-        itself. In auto mode it also queues the *to_upload* files in
-        `pending_uploads`, so the next start retries any upload that did not
-        finish. Everything goes in one transaction (see
-        `StateDB.record_report`). Raises if the write fails, and then none of
-        it was written.
+        into `_runs` without re-reporting, and (while `run.unrecorded` is
+        "create") the run itself. In auto mode it also queues the *to_upload*
+        files in `pending_uploads`, so the next start retries any upload that
+        did not finish. Everything goes in one transaction (see
+        `StateDB.record_report`), so a write that fails leaves none of it.
+
+        Returns False after a failed write, with a retry scheduled and the
+        failure reported. The caller then goes no further: the files are not
+        uploaded until a write has recorded them, so a kill during an upload
+        always leaves a `pending_uploads` row. Returns True once the state DB
+        holds everything, which also ends any retry.
         """
         rows = [
             (
-                self._relative_path(info),
+                relative_key(info.path, self._watch_dir),
                 info.filename,
                 info.size_bytes,
                 info.mtime,
@@ -376,12 +428,20 @@ class RunDetector:
             )
             for info in run.files
         ]
-        self._state_db.record_report(
-            run.run_id,
-            rows,
-            new_run=new_run,
-            pending_relative_paths=[self._relative_path(info) for info in to_upload],
-        )
+        try:
+            self._state_db.record_report(
+                run.run_id,
+                rows,
+                new_run=run.unrecorded == "create",
+                pending_relative_paths=[relative_key(f.path, self._watch_dir) for f in to_upload],
+            )
+        except Exception as exc:
+            self._handle_write_failure(run, exc)
+            return False
+        run.unrecorded = None
+        run.write_failures = 0
+        self._note_report_success(run)
+        return True
 
     def _report_new_run(self, run: RunState) -> None:
         acquired = _run_acquired_at(run.files)
@@ -398,21 +458,14 @@ class RunDetector:
         except Exception as exc:
             self._handle_report_failure(run, "create", exc)
             return
-        self._note_report_success(run)
 
-        uploadable = [f for f in run.files if f.upload]
-        to_upload = uploadable if self._upload_cb else []
-        # The run counts as reported, here and in the state DB, only once this
-        # write has gone through. If it raises, the monitor records
-        # `stable_callback_failed` and nothing is retried here, as before. The
-        # run stays unreported, so the next stable file of the run reports it
-        # again along with the files seen so far, and so does the next start.
-        # The server accepts a repeated report and keeps one row per file.
-        self._record_accepted_report(run, new_run=True, to_upload=to_upload)
+        # The server has the run and every file so far, so the cursors move now
+        # and the run is POSTed no more, even if the write below fails.
         run.reported = True
         run.api_run_id = resp.id
         run.patched_file_count = len(run.files)
         run.acquired_at_sent = acquired
+        run.unrecorded = "create"
         self._counters.runs_reported += 1
 
         self._reporter.queue_event(
@@ -424,6 +477,9 @@ class RunDetector:
         )
         logger.info("Reported new run %s (%d files)", run.run_id, len(run.files))
 
+        uploadable = [f for f in run.files if f.upload]
+        if not self._record_accepted_report(run, to_upload=uploadable if self._upload_cb else []):
+            return
         if self._upload_cb and uploadable:
             succeeded = self._upload_cb(run.run_id, uploadable)
             # Report-only files count as handled so the cursor moves past them.
@@ -442,10 +498,14 @@ class RunDetector:
 
         On failure the PATCH cursor is left untouched, so a scheduled retry
         or the next stable file's PATCH carries the backlog (plus the new
-        entry). The same goes when the PATCH went through and writing it to
-        the state DB failed. The upload callback continues to receive only
-        files the uploader hasn't seen yet (`uploaded_file_count` is
-        independent of the PATCH cursor).
+        entry). When the PATCH went through and writing it to the state DB
+        failed, the cursor has moved, because the server has the files. The
+        scheduled retry then only writes (nothing is sent when no file is
+        waiting), and a new file's PATCH carries just that file and writes
+        everything the state DB is missing (`RunState.unrecorded`). The upload
+        callback continues to receive only files the uploader hasn't seen yet
+        (`uploaded_file_count` is independent of the PATCH cursor, and a
+        failed write leaves it where it was).
         """
         new_files = run.files[run.patched_file_count :]
         # An out-of-order stable file may carry an older birthtime than
@@ -458,42 +518,42 @@ class RunDetector:
             and (run.acquired_at_sent is None or acquired < run.acquired_at_sent)
             else None
         )
-        if not new_files and earlier_acquired is None:
-            # Nothing is waiting to be sent, so a queued retry has no work left.
+        if not new_files and earlier_acquired is None and run.unrecorded is None:
+            # Nothing is waiting to be sent or written, so a queued retry has
+            # no work left.
             self._clear_retry(run)
             return
 
-        payload: dict[str, object] = {
-            "detected_files": [self._file_payload(f) for f in new_files],
-        }
-        if earlier_acquired is not None:
-            payload["acquired_at"] = datetime.fromtimestamp(
-                earlier_acquired, tz=timezone.utc
-            ).isoformat()
-        try:
-            self._client.update_run(self._instrument_id, run.run_id, payload)
-        except Exception as exc:
-            self._handle_report_failure(run, "update", exc)
-            return
-        self._note_report_success(run)
+        # With nothing new for the server, only a write is owed: the retry of
+        # a write that failed.
+        if new_files or earlier_acquired is not None:
+            payload: dict[str, object] = {
+                "detected_files": [self._file_payload(f) for f in new_files],
+            }
+            if earlier_acquired is not None:
+                payload["acquired_at"] = datetime.fromtimestamp(
+                    earlier_acquired, tz=timezone.utc
+                ).isoformat()
+            try:
+                self._client.update_run(self._instrument_id, run.run_id, payload)
+            except Exception as exc:
+                self._handle_report_failure(run, "update", exc)
+                return
+            run.patched_file_count = len(run.files)
+            if earlier_acquired is not None:
+                run.acquired_at_sent = earlier_acquired
+            run.unrecorded = run.unrecorded or "update"
+            logger.info(
+                "Updated run %s (sent %d new file(s), %d total)",
+                run.run_id,
+                len(new_files),
+                len(run.files),
+            )
 
         not_uploaded = run.files[run.uploaded_file_count :]
         upload_new = [f for f in not_uploaded if f.upload]
-        to_upload = upload_new if self._upload_cb else []
-        # As in `_report_new_run`, the cursor moves only once this write has
-        # gone through. If it raises, the next PATCH, from a new file, sends
-        # the backlog again, and so does the initial scan of the next start.
-        self._record_accepted_report(run, new_run=False, to_upload=to_upload)
-        run.patched_file_count = len(run.files)
-        if earlier_acquired is not None:
-            run.acquired_at_sent = earlier_acquired
-        logger.info(
-            "Updated run %s (sent %d new file(s), %d total)",
-            run.run_id,
-            len(new_files),
-            len(run.files),
-        )
-
+        if not self._record_accepted_report(run, to_upload=upload_new if self._upload_cb else []):
+            return
         if self._upload_cb and upload_new:
             succeeded = self._upload_cb(run.run_id, upload_new)
             # Report-only files count as handled so the cursor moves past them.

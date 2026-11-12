@@ -38,7 +38,7 @@ from data_hub_watcher.models import (
     PresignedUploadResponse,
     UploadQueueFile,
 )
-from data_hub_watcher.run_detector import FileInfo, file_created_at
+from data_hub_watcher.run_detector import FileInfo, file_created_at, relative_key
 from data_hub_watcher.state import PendingUploadRecord, StateDB
 from data_hub_watcher.util import DigestCancelled, file_digests
 
@@ -402,19 +402,6 @@ def _resolve_within(watch_dir: Path, relative: str) -> Path | None:
     return None
 
 
-def _relative_path(path: Path, watch_dir: Path) -> str:
-    """Return *path* as a forward-slash relative to *watch_dir*.
-
-    Falls back to the basename for paths outside the watch directory
-    (e.g. one-shot `upload --file /abs/path`) so we never raise during
-    upload recording.
-    """
-    try:
-        return path.relative_to(watch_dir).as_posix()
-    except ValueError:
-        return path.name
-
-
 class Uploader:
     """Uploads files via presigned S3 PUT URLs and notifies the Data Hub API.
 
@@ -611,7 +598,7 @@ class Uploader:
         """Upload an auto-mode file and clear its `pending_uploads` row on success."""
         if not self._upload_single(path, run_id):
             return False
-        self._state_db.clear_pending_upload(_relative_path(path, self._watch_dir))
+        self._state_db.clear_pending_upload(relative_key(path, self._watch_dir))
         return True
 
     def retry_pending_uploads(self) -> None:
@@ -1316,7 +1303,7 @@ class Uploader:
                 if self._stop_requested():
                     return False
                 st = path.stat()
-                rel_path = _relative_path(path, self._watch_dir)
+                rel_path = relative_key(path, self._watch_dir)
                 if self._state_db.has_stat_match(rel_path, st.st_size, st.st_mtime):
                     return True
             return self._upload_single_unlocked(path, run_id)
@@ -1340,7 +1327,7 @@ class Uploader:
         """
         content_type = _guess_content_type(path)
         stat = path.stat()
-        rel_path = _relative_path(path, self._watch_dir)
+        rel_path = relative_key(path, self._watch_dir)
 
         # Kick off both the SHA-256 and the presigned-URL request in
         # parallel. ``ThreadPoolExecutor(2)`` is plenty: hashing is

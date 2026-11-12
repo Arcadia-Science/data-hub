@@ -955,6 +955,8 @@ def test_watcher_killed_after_the_run_report_uploads_the_files_after_a_restart(
         pc.kill()
     # The kill left no pending row and no remembered run, and the upload had not started.
     assert pending(pc) == []
+    assert pc.state_query("SELECT run_id FROM runs") == []
+    assert pc.state_query("SELECT relative_path FROM detected_files") == []
     assert calls(proxy, "POST", "/request-upload-url") == []
 
     # The write was cut short and left nothing, so the next start finds the file again in its
@@ -965,7 +967,9 @@ def test_watcher_killed_after_the_run_report_uploads_the_files_after_a_restart(
     assert pc.state_query("SELECT relative_path FROM baseline_files") == []
 
 
-@pytest.mark.covers("upload.pending_record_failed->retried_after_restart")
+@pytest.mark.covers(
+    "upload.pending_record_failed->retried_after_restart", "event.state_write_failed->emitted"
+)
 def test_a_pending_record_that_cannot_be_written_does_not_lose_the_file(
     watcher: WatcherFactory,
     server: ServerView,
@@ -979,20 +983,53 @@ def test_a_pending_record_that_cannot_be_written_does_not_lose_the_file(
     # Writing the `pending_uploads` row fails (as it would on a full disk). The server has the
     # run by then, and the watcher records the run, its files and the pending row in one
     # transaction, so the failed write leaves none of them. Nothing crashes: the watcher
-    # reports the failed callback and carries on.
+    # reports the failed write, retries it, and uploads nothing until it has gone through.
     with pc.fail_writes("pending_uploads", "disk or database is full"):
         content = write_run(watch_dir, RUN, {"small.csv": SMALL})["small.csv"]
         failed = server.wait_for_event(
-            pc.watcher_id, event_type="error", kind="stable_callback_failed", timeout=30
+            pc.watcher_id, event_type="error", kind="state_write_failed", timeout=30
         )
         assert "disk or database is full" in failed.details["error"]
+        assert failed.details["run_id"] == RUN
         assert pc.is_running()
         assert calls(proxy, "POST", "/request-upload-url") == []
+        # The watcher stops before there is room again, so the retry never gets to write.
+        pc.stop()
     assert pending(pc) == []
     assert pc.state_query("SELECT run_id FROM runs") == []
     assert pc.state_query("SELECT relative_path FROM detected_files") == []
 
     # As after a kill, the next start finds the file again, reports the run again and uploads it.
-    pc.restart()
+    pc.start()
     server.wait_for_uploaded(instrument_id, RUN, SMALL_PATH, content=content, timeout=12)
     wait_for_pending(pc, [])
+
+
+@pytest.mark.covers("upload.pending_record_failed->retried_in_process")
+def test_a_pending_record_that_cannot_be_written_is_retried_by_the_running_watcher(
+    watcher: WatcherFactory,
+    server: ServerView,
+    proxy: FaultProxy,
+    instrument_id: str,
+    watch_dir: Path,
+) -> None:
+    pc = watcher()
+    start_watching(pc, server)
+
+    with pc.fail_writes("pending_uploads", "disk or database is full"):
+        content = write_run(watch_dir, RUN, {"small.csv": SMALL})["small.csv"]
+        server.wait_for_event(
+            pc.watcher_id, event_type="error", kind="state_write_failed", timeout=30
+        )
+        assert calls(proxy, "POST", "/request-upload-url") == []
+        assert pc.state_query("SELECT run_id FROM runs") == []
+
+    # There is room again. The watcher's next retry (every 5 s at first, then longer) writes the
+    # run, the file and the pending row, and uploads the file, with no restart and no new file.
+    server.wait_for_uploaded(instrument_id, RUN, SMALL_PATH, content=content, timeout=60)
+    wait_for_pending(pc, [])
+    assert pc.state_query("SELECT run_id FROM runs") == [(RUN,)]
+    assert pc.state_query("SELECT relative_path FROM detected_files") == [(SMALL_PATH,)]
+    # The server was told about the run once: the retry only wrote.
+    assert len(calls(proxy, "POST", f"/instruments/{instrument_id}/runs")) == 1
+    assert calls(proxy, "PATCH", f"/instruments/{instrument_id}/runs/{RUN}") == []

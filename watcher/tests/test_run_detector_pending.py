@@ -4,14 +4,15 @@ A kill, or a write that fails, after the server accepted a run report used to le
 remembered as reported with no `pending_uploads` row: the next start had nothing to retry and
 the initial scan skipped the files, so they stayed `detected` for good. The state DB now gets the
 run, its manifest and the pending rows in one transaction after the server accepted the report.
-A write that doesn't go through leaves none of it, and the next start reports the files again.
+A write that doesn't go through leaves none of it. A process that goes on retries the write, and
+sends the server only the files it has not seen. A process that is killed leaves nothing, and the
+next start reports the files again.
 
 These tests use a real `StateDB`, `RunDetector` and `FileMonitor`, and a stand-in for the server
 and the uploader.
 """
 
 from __future__ import annotations
-import sqlite3
 from collections.abc import Callable, Generator
 from dataclasses import dataclass
 from pathlib import Path
@@ -130,6 +131,13 @@ def _allow_pending_rows(state_db: StateDB) -> None:
     state_db._conn.commit()
 
 
+def _retry_now(watcher: Watcher) -> None:
+    """Make the scheduled retries due and run the monitor's tick, which retries one."""
+    for run_id in watcher.detector._retry_at:
+        watcher.detector._retry_at[run_id] = 0.0
+    watcher.detector.retry_failed_reports()
+
+
 def _state(state_db: StateDB, run_id: str) -> tuple[bool, list[str], list[str]]:
     """Whether the run is remembered, its manifest, and its pending uploads."""
     return (
@@ -218,22 +226,23 @@ class TestWhatIsRecordedWithTheReport:
 
 
 class TestAWriteThatFails:
-    def test_nothing_is_remembered_and_the_files_are_not_uploaded(
+    def test_nothing_is_remembered_the_files_are_not_uploaded_and_the_run_counts_as_reported(
         self, processes: Callable[..., Watcher], watch_dir: Path
     ) -> None:
         w = processes()
         _refuse_pending_rows(w.state_db)
         path = _write(watch_dir, "RUN1/a.csv")
 
-        # The monitor reports `stable_callback_failed` for this, so it is called directly.
-        with pytest.raises(sqlite3.IntegrityError, match="database or disk is full"):
-            w.detector.on_stable_file(path)
+        w.detector.on_stable_file(path)  # Does not raise: the detector retries and reports it.
 
         w.client.report_run.assert_called_once()
         assert _state(w.state_db, "RUN1") == (False, [], [])
         assert w.state_db.get_reported_run_ids_with_files() == []
         assert w.uploads == []
-        assert not w.detector._runs["RUN1"].reported
+        run = w.detector._runs["RUN1"]
+        # The server has the run, so the run is never POSTed again for this.
+        assert run.reported and run.unrecorded == "create" and run.patched_file_count == 1
+        assert "RUN1" in w.detector._retry_at
 
     @pytest.mark.parametrize("initial_scan", ["full", "new-only"])
     def test_the_next_start_reports_the_run_again_and_uploads_its_files(
@@ -243,10 +252,10 @@ class TestAWriteThatFails:
         _refuse_pending_rows(first.state_db)
         path = _write(watch_dir, "RUN1/a.csv")
         first.monitor._enqueue(path)
-        first.settle()  # The monitor logs the failure and goes on.
+        first.settle()  # The detector reports the failure and goes on.
         assert _state(first.state_db, "RUN1") == (False, [], [])
         _allow_pending_rows(first.state_db)  # There is room again by the next start.
-        first.state_db.close()
+        first.state_db.close()  # The process dies before its retry.
 
         # The next start: the file is no baseline file and no known one, so the scan finds it.
         second = processes(initial_scan=initial_scan)
@@ -263,31 +272,108 @@ class TestAWriteThatFails:
         assert _state(second.state_db, "RUN1") == (True, ["RUN1/a.csv"], ["RUN1/a.csv"])
         assert list(second.state_db.iter_baseline_stat_keys()) == []
 
-    def test_the_next_file_of_the_run_reports_it_again_in_the_same_session(
+    @pytest.mark.parametrize("initial_scan", ["full", "new-only"])
+    def test_the_next_start_finds_every_file_the_process_could_not_record(
+        self, processes: Callable[..., Watcher], watch_dir: Path, initial_scan: InitialScan
+    ) -> None:
+        first = processes(initial_scan=initial_scan)
+        _refuse_pending_rows(first.state_db)
+        paths = [_write(watch_dir, f"RUN1/{name}.csv") for name in ("a", "b", "c")]
+        for path in paths:
+            _arrive(first, path)  # One POST, then a PATCH for each later file.
+        assert _state(first.state_db, "RUN1") == (False, [], [])
+        _allow_pending_rows(first.state_db)
+        first.state_db.close()
+
+        second = processes(initial_scan=initial_scan)
+        assert second.monitor._pending.keys() == set(paths)
+        second.settle()
+
+        # The first file found is a POST and the others PATCHes, and together they carry all three.
+        second.client.report_run.assert_called_once()
+        sent = [second.client.report_run.call_args.args[1]["detected_files"]]
+        sent += [c.args[2]["detected_files"] for c in second.client.update_run.call_args_list]
+        assert sorted(f["relative_path"] for files in sent for f in files) == [
+            "RUN1/a.csv",
+            "RUN1/b.csv",
+            "RUN1/c.csv",
+        ]
+        assert sorted(name for _, names in second.uploads for name in names) == [
+            "a.csv",
+            "b.csv",
+            "c.csv",
+        ]
+        recorded, manifest, pending = _state(second.state_db, "RUN1")
+        assert recorded
+        assert sorted(manifest) == sorted(pending) == ["RUN1/a.csv", "RUN1/b.csv", "RUN1/c.csv"]
+
+    def test_the_next_file_of_the_run_is_a_patch_that_carries_the_run_to_the_state_db(
         self, processes: Callable[..., Watcher], watch_dir: Path
     ) -> None:
         w = processes()
         _refuse_pending_rows(w.state_db)
-        with pytest.raises(sqlite3.IntegrityError):
-            w.detector.on_stable_file(_write(watch_dir, "RUN1/a.csv"))
+        w.detector.on_stable_file(_write(watch_dir, "RUN1/a.csv"))
         _allow_pending_rows(w.state_db)
 
         w.detector.on_stable_file(_write(watch_dir, "RUN1/b.csv"))
 
-        # A second POST (the server keeps one row per file), not a PATCH of a run that was
-        # never remembered, and both files are uploaded.
-        assert w.client.report_run.call_count == 2
-        w.client.update_run.assert_not_called()
-        sent = w.client.report_run.call_args.args[1]["detected_files"]
-        assert [f["relative_path"] for f in sent] == ["RUN1/a.csv", "RUN1/b.csv"]
+        # The server has the run, so a PATCH of the new file and no second POST. The write
+        # after it records the run, both files and both pending rows, and both are uploaded.
+        w.client.report_run.assert_called_once()
+        sent = w.client.update_run.call_args.args[2]["detected_files"]
+        assert [f["relative_path"] for f in sent] == ["RUN1/b.csv"]
         assert w.uploads == [("RUN1", ["a.csv", "b.csv"])]
         assert _state(w.state_db, "RUN1") == (
             True,
             ["RUN1/a.csv", "RUN1/b.csv"],
             ["RUN1/a.csv", "RUN1/b.csv"],
         )
+        assert w.detector._retry_at == {}
 
-    def test_a_patch_that_is_not_recorded_is_sent_again_with_the_next_file(
+    def test_a_retry_records_the_run_without_a_new_file_or_a_request(
+        self, processes: Callable[..., Watcher], watch_dir: Path
+    ) -> None:
+        w = processes()
+        _refuse_pending_rows(w.state_db)
+        w.detector.on_stable_file(_write(watch_dir, "RUN1/a.csv"))
+        _retry_now(w)  # Still no room.
+        assert _state(w.state_db, "RUN1") == (False, [], [])
+        _allow_pending_rows(w.state_db)
+
+        _retry_now(w)
+
+        w.client.report_run.assert_called_once()
+        w.client.update_run.assert_not_called()
+        assert w.uploads == [("RUN1", ["a.csv"])]
+        assert _state(w.state_db, "RUN1") == (True, ["RUN1/a.csv"], ["RUN1/a.csv"])
+        assert w.detector._retry_at == {}
+
+    def test_a_run_that_cannot_be_written_for_many_files_sends_small_requests(
+        self, processes: Callable[..., Watcher], watch_dir: Path
+    ) -> None:
+        w = processes()
+        _refuse_pending_rows(w.state_db)
+        names = [f"f{n}.csv" for n in range(8)]
+        for name in names:
+            _arrive(w, _write(watch_dir, f"RUN1/{name}"))
+
+        # One POST and a PATCH of one file each, not a POST of every file seen so far.
+        w.client.report_run.assert_called_once()
+        sent = [c.args[2]["detected_files"] for c in w.client.update_run.call_args_list]
+        assert [[f["filename"] for f in files] for files in sent] == [[n] for n in names[1:]]
+        assert w.uploads == []
+        _allow_pending_rows(w.state_db)
+
+        _retry_now(w)
+
+        assert _state(w.state_db, "RUN1") == (
+            True,
+            [f"RUN1/{n}" for n in names],
+            [f"RUN1/{n}" for n in names],
+        )
+        assert w.uploads == [("RUN1", names)]
+
+    def test_a_patch_that_is_not_recorded_is_not_sent_again_with_the_next_file(
         self, processes: Callable[..., Watcher], watch_dir: Path
     ) -> None:
         w = processes()
@@ -295,18 +381,21 @@ class TestAWriteThatFails:
         w.state_db.clear_pending_upload("RUN1/a.csv")
         _refuse_pending_rows(w.state_db)
 
-        with pytest.raises(sqlite3.IntegrityError):
-            w.detector.on_stable_file(_write(watch_dir, "RUN1/b.csv"))
+        w.detector.on_stable_file(_write(watch_dir, "RUN1/b.csv"))
 
-        # The first file's rows are still there, and nothing of the second.
+        # The first file's rows are still there, and nothing of the second. The server has it.
         assert _state(w.state_db, "RUN1") == (True, ["RUN1/a.csv"], [])
-        assert w.detector._runs["RUN1"].patched_file_count == 1
+        run = w.detector._runs["RUN1"]
+        assert run.patched_file_count == 2 and run.unrecorded == "update"
         _allow_pending_rows(w.state_db)
 
         w.detector.on_stable_file(_write(watch_dir, "RUN1/c.csv"))
 
-        sent = w.client.update_run.call_args.args[2]["detected_files"]
-        assert [f["relative_path"] for f in sent] == ["RUN1/b.csv", "RUN1/c.csv"]
+        sent = [c.args[2]["detected_files"] for c in w.client.update_run.call_args_list]
+        assert [[f["relative_path"] for f in files] for files in sent] == [
+            ["RUN1/b.csv"],
+            ["RUN1/c.csv"],
+        ]
         assert w.uploads == [("RUN1", ["a.csv"]), ("RUN1", ["b.csv", "c.csv"])]
         assert _state(w.state_db, "RUN1") == (
             True,
