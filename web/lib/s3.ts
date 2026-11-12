@@ -28,7 +28,7 @@ import {
   localObjectChecksum,
   localPartUploadUrl,
   MirrorMultipartError,
-  mirrorRootForMultipart,
+  mirrorRootForUploads,
   resolveMirrorPath,
 } from "@/lib/s3-local-mirror";
 
@@ -238,12 +238,13 @@ export async function getPresignedUploadUrl(
   contentType?: string,
   expiresIn: number = DEFAULT_UPLOAD_EXPIRY_SECONDS
 ): Promise<string> {
-  // Local-mirror branch: return a same-origin URL routed to the
-  // `PUT` handler in `app/api/local-s3/[bucket]/[...key]/route.ts`,
-  // which writes the request body to disk under the mirror root.
+  // Stand-in branch: return a same-origin URL routed to the `PUT` handler in
+  // `app/api/local-s3/[bucket]/[...key]/route.ts`, which writes the request
+  // body to disk under the mirror root. Both the dev mirror and the
+  // integration mirror (off when `VERCEL` is set) take this branch.
   // `contentType` is intentionally unused locally — the local route
   // doesn't enforce it the way a presigned PUT does.
-  if (getLocalMirrorRoot()) {
+  if (mirrorRootForUploads()) {
     return localMirrorUploadUrl(bucket, key);
   }
 
@@ -290,7 +291,7 @@ export async function createMultipartUpload(
   key: string,
   contentType?: string
 ): Promise<string> {
-  const mirror = mirrorRootForMultipart();
+  const mirror = mirrorRootForUploads();
   if (mirror) {
     return await localCreateMultipartUpload(mirror, bucket, key, contentType);
   }
@@ -326,7 +327,7 @@ export async function getPresignedUploadPartUrl(
   partNumber: number,
   expiresIn: number = PART_URL_EXPIRY_SECONDS
 ): Promise<string> {
-  const mirror = mirrorRootForMultipart();
+  const mirror = mirrorRootForUploads();
   if (mirror) {
     return localPartUploadUrl(bucket, key, uploadId, partNumber);
   }
@@ -347,7 +348,7 @@ export async function completeMultipartUpload(input: {
   checksumCrc64nvme: string;
   sizeBytes: number;
 }): Promise<void> {
-  const mirror = mirrorRootForMultipart();
+  const mirror = mirrorRootForUploads();
   if (mirror) {
     try {
       await localCompleteMultipartUpload(
@@ -389,7 +390,7 @@ export async function abortMultipartUpload(
   key: string,
   uploadId: string
 ): Promise<void> {
-  const mirror = mirrorRootForMultipart();
+  const mirror = mirrorRootForUploads();
   if (mirror) {
     await localAbortMultipartUpload(mirror, uploadId);
     return;
@@ -414,7 +415,7 @@ export async function headObjectChecksum(
   bucket: string,
   key: string
 ): Promise<{ sizeBytes: number; checksumCrc64nvme: string | null } | null> {
-  const mirror = mirrorRootForMultipart();
+  const mirror = mirrorRootForUploads();
   if (mirror) {
     return await localObjectChecksum(mirror, bucket, key);
   }

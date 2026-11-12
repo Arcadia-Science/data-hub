@@ -35,6 +35,7 @@ import pytest
 
 from data_hub_watcher.api_client import ApiError
 from data_hub_watcher.models import (
+    ConfigChecksumResponse,
     InstrumentConfig,
     InstrumentDetailResponse,
     RunDetectionConfig,
@@ -1048,7 +1049,14 @@ class _LoopHarness:
         self.client = MagicMock(name="DataHubClient")
         self.client.get_instrument.return_value = _make_instrument_detail("active")
         self.client.get_config_checksum.return_value = None
+        # No config revisions on the server, so startup has nothing to apply.
+        self.client.get_latest_config_revision.return_value = None
+        self.client.push_config.return_value = ConfigChecksumResponse(config_checksum="deadbeef")
         self.runtime = MagicMock(name="WatcherRuntime")
+        # The supervisor owns one reporter for every runtime it builds; make it
+        # the runtime's too so assertions can read either.
+        self.reporter = MagicMock(name="EventReporter")
+        self.runtime.reporter = self.reporter
         # Replace the auto-update plumbing fields with real Events so the
         # service loop's wait-and-test sequence behaves naturally rather
         # than always seeing truthy MagicMock attributes.
@@ -1080,6 +1088,7 @@ class _LoopHarness:
         from data_hub_watcher import api_client, config_io, constants, runtime
 
         monkeypatch.setattr(api_client, "DataHubClient", lambda *_a, **_kw: self.client)
+        monkeypatch.setattr(runtime, "EventReporter", lambda *_a, **_kw: self.reporter)
         monkeypatch.setattr(config_io, "load_config", lambda _p: self.cfg)
         monkeypatch.setattr(config_io, "config_checksum", lambda _p: "deadbeef")
         # env_file_path is called with no argument in _run_service_loop;
@@ -1098,7 +1107,7 @@ class _LoopHarness:
         monkeypatch.setattr(
             runtime,
             "start_runtime",
-            lambda rt, started_message="": self.start_calls.append((rt, started_message)),
+            lambda rt, started_message="", **_kw: self.start_calls.append((rt, started_message)),
         )
         monkeypatch.setattr(
             runtime,
@@ -1217,6 +1226,41 @@ class TestRunServiceLoopHappyPath:
         assert "override" not in first_kwargs or first_kwargs["override"] is False
         assert second_args == (harness.env_path,)
         assert second_kwargs == {"override": True}
+
+    def test_a_test_only_override_in_the_registered_env_file_is_announced(
+        self, harness: _LoopHarness
+    ) -> None:
+        # The service loads its env file after the modules are imported, and
+        # the package index is only read when an upgrade runs. The startup
+        # announcement has to come after the load, and reach the Event Log.
+        index_url = "http://127.0.0.1:8123/simple/"
+        index_var = "DATA_HUB_WATCHER_INDEX_URL"
+
+        def load_env_file(*args: Any, **kwargs: Any) -> None:
+            harness.dotenv_calls.append((args, kwargs))
+            if kwargs.get("override"):
+                harness.monkeypatch.setenv(index_var, index_url)
+
+        import dotenv
+
+        harness.monkeypatch.setattr(dotenv, "load_dotenv", load_env_file)
+        stop_event = threading.Event()
+        stop_event.set()
+
+        harness.svc._run_service_loop(stop_event, harness.sm)
+
+        warnings = [str(call.args[0]) for call in harness.sm.LogWarningMsg.call_args_list]
+        (announcement,) = [w for w in warnings if "Test-only overrides are active" in w]
+        assert f"{index_var}={index_url}" in announcement
+
+    def test_nothing_is_announced_without_a_test_only_override(self, harness: _LoopHarness) -> None:
+        stop_event = threading.Event()
+        stop_event.set()
+
+        harness.svc._run_service_loop(stop_event, harness.sm)
+
+        warnings = [str(call.args[0]) for call in harness.sm.LogWarningMsg.call_args_list]
+        assert not any("Test-only overrides" in w for w in warnings)
 
 
 class TestRunServiceLoopFailures:

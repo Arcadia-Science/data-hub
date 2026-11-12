@@ -7,6 +7,7 @@ a whole multipart object. Python's standard library does not implement it.
 from __future__ import annotations
 import base64
 import hashlib
+import threading
 from pathlib import Path
 
 from awscrt import checksums
@@ -22,17 +23,24 @@ from awscrt import checksums
 HASH_CHUNK_SIZE = 1 << 20
 
 
-def file_digests(path: Path) -> tuple[str, str]:
+class DigestCancelled(Exception):
+    """`file_digests` stopped early because its *cancel* event was set."""
+
+
+def file_digests(path: Path, cancel: threading.Event | None = None) -> tuple[str, str]:
     """Return ``(sha256_hex, crc64nvme_base64)`` for *path* in one read.
 
     Streams in :data:`HASH_CHUNK_SIZE`-byte chunks so a multi-gigabyte
     instrument file is not loaded into memory. The CRC is the value S3
-    checks when a multipart upload is finished.
+    checks when a multipart upload is finished. Raises `DigestCancelled`
+    once *cancel* is set, which it checks for each chunk it reads.
     """
     sha = hashlib.sha256()
     crc = 0
     with open(path, "rb") as handle:
         for chunk in iter(lambda: handle.read(HASH_CHUNK_SIZE), b""):
+            if cancel is not None and cancel.is_set():
+                raise DigestCancelled(str(path))
             sha.update(chunk)
             crc = checksums.crc64nvme(chunk, crc)
     crc_b64 = base64.b64encode(crc.to_bytes(8, byteorder="big")).decode("ascii")

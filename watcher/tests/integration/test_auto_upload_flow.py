@@ -11,6 +11,7 @@ instrument:
 from __future__ import annotations
 import random
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 from urllib.parse import parse_qs, urlparse
@@ -21,6 +22,7 @@ from data_hub_shared.testing import IntegrationEnv, db_query
 from data_hub_watcher.api_client import DataHubClient
 from data_hub_watcher.events import EventReporter
 from data_hub_watcher.heartbeat import WatcherCounters
+from data_hub_watcher.models import PresignedUploadResponse
 from data_hub_watcher.state import StateDB
 from data_hub_watcher.uploader import Uploader
 
@@ -402,6 +404,99 @@ class TestFullAutoModeLifecycle:
         assert rows[0][0] == "stopped"
 
 
+class TestWholeFileUpload:
+    def test_small_file_is_uploaded_with_one_put(
+        self,
+        client: DataHubClient,
+        instrument_id: str,
+        integration_env: IntegrationEnv,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        watcher_id, _run_id = _register_and_report(client, instrument_id, run_id="WHOLE-001")
+        # The test server uploads in parts from 1024 bytes, so this is one PUT.
+        # The bytes differ from one position to the next, so a truncated or
+        # shifted upload changes what the stand-in stores.
+        payload = random.Random(1).randbytes(700)
+        path = tmp_path / "small.bin"
+        path.write_bytes(payload)
+        # A one-part multipart upload would also leave `multipart_upload_id` empty and
+        # report one part, so the checks below can't tell it from a whole-file upload.
+        # Record what the server offered and which multipart calls are made, and let them
+        # go through, so a regression fails on the checks that name it.
+        offers: list[PresignedUploadResponse] = []
+        multipart_calls: list[str] = []
+        real_request_upload_url = client.request_upload_url
+
+        def request_upload_url(*args: Any, **kwargs: Any) -> PresignedUploadResponse:
+            offer = real_request_upload_url(*args, **kwargs)
+            offers.append(offer)
+            return offer
+
+        def record_multipart_call(name: str) -> Callable[..., Any]:
+            real = getattr(client, name)
+
+            def call(*args: Any, **kwargs: Any) -> Any:
+                multipart_calls.append(name)
+                return real(*args, **kwargs)
+
+            return call
+
+        monkeypatch.setattr(client, "request_upload_url", request_upload_url)
+        for name in ("get_part_urls", "complete_multipart_upload", "abort_multipart_upload"):
+            monkeypatch.setattr(client, name, record_multipart_call(name))
+        state = StateDB(tmp_path / "state.db")
+        try:
+            reporter = EventReporter(client, watcher_id)
+            uploader = Uploader(
+                client=client,
+                state_db=state,
+                event_reporter=reporter,
+                counters=WatcherCounters(),
+                instrument_id=instrument_id,
+                watcher_id=watcher_id,
+                watch_directory=tmp_path,
+            )
+            assert uploader._upload_single(path, "WHOLE-001") is True
+            reporter.flush()
+        finally:
+            state.close()
+
+        assert len(offers) == 1
+        assert offers[0].upload_type != "multipart"
+        assert offers[0].upload_id is None
+        assert offers[0].part_count is None
+        assert offers[0].upload_url
+        assert multipart_calls == []
+
+        rows = db_query(
+            integration_env.db_dsn,
+            """SELECT f.status, f.multipart_upload_id FROM files f
+               JOIN instrument_runs r ON f.instrument_run_id = r.id
+               WHERE r.run_id = %s AND f.filename = %s""",
+            ("WHOLE-001", "small.bin"),
+        )
+        assert rows[0] == ("uploaded", None)
+        stored = (
+            integration_env.s3_mirror_root
+            / integration_env.raw_bucket
+            / instrument_id
+            / "WHOLE-001"
+            / "small.bin"
+        )
+        assert stored.read_bytes() == payload
+
+        events = db_query(
+            integration_env.db_dsn,
+            "SELECT details FROM watcher_events WHERE watcher_id = %s AND event_type = %s",
+            (watcher_id, "file_uploaded"),
+        )
+        assert len(events) == 1
+        details = cast(dict[str, Any], events[0][0])
+        assert details["part_count"] == 1
+        assert details["size_bytes"] == len(payload)
+
+
 class TestMultipartUpload:
     def test_large_file_is_uploaded_in_parts(
         self,
@@ -439,8 +534,12 @@ class TestMultipartUpload:
             ("PARTS-001", "stack.bin"),
         )
         assert rows[0] == ("uploaded", None)
-        stored = Path(
-            f"/tmp/data-hub-integration-s3/data-hub-test-raw/{instrument_id}/PARTS-001/stack.bin"
+        stored = (
+            integration_env.s3_mirror_root
+            / integration_env.raw_bucket
+            / instrument_id
+            / "PARTS-001"
+            / "stack.bin"
         )
         assert stored.read_bytes() == payload
 
@@ -514,8 +613,12 @@ class TestMultipartUpload:
             ("PARTS-001", "stack.bin"),
         )
         assert rows[0] == ("uploaded", None)
-        stored = Path(
-            f"/tmp/data-hub-integration-s3/data-hub-test-raw/{instrument_id}/PARTS-001/stack.bin"
+        stored = (
+            integration_env.s3_mirror_root
+            / integration_env.raw_bucket
+            / instrument_id
+            / "PARTS-001"
+            / "stack.bin"
         )
         assert stored.read_bytes() == payload
 
