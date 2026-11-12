@@ -4,7 +4,6 @@ import re
 import shutil
 import warnings
 from dataclasses import dataclass
-from pprint import pformat
 from typing import Any
 from urllib.parse import unquote_plus
 
@@ -67,6 +66,39 @@ def parse_s3_event(event: S3Event) -> S3EventInfo:
         s3_key=s3_key,
         filename=match.group(3),
     )
+
+
+# ------------------------------------------------------------------
+# Event logging
+# ------------------------------------------------------------------
+
+
+def _string_at(value: object, *path: str) -> str | None:
+    """Follow ``path`` through nested dicts and return the string found there."""
+    for part in path:
+        if not isinstance(value, dict):
+            return None
+        value = value.get(part)
+    return value if isinstance(value, str) else None
+
+
+def _describe_s3_records(event: object) -> str:
+    """List each record's object as ``s3://bucket/key`` for the log.
+
+    Reads only the bucket name and object key. Never log the event itself: a
+    Function URL event carries the caller's SigV4 headers, including the STS
+    session token, and its IAM identity under ``requestContext``.
+    """
+    records = event.get("Records") if isinstance(event, dict) else None
+    if not isinstance(records, list) or not records:
+        return "no S3 records"
+
+    locations: list[str] = []
+    for record in records:
+        bucket = _string_at(record, "s3", "bucket", "name") or "?"
+        key = _string_at(record, "s3", "object", "key")
+        locations.append(f"s3://{bucket}/{unquote_plus(key) if key else '?'}")
+    return ", ".join(locations)
 
 
 # ------------------------------------------------------------------
@@ -317,14 +349,14 @@ def lambda_handler(event: dict[str, Any], context: Context) -> dict[str, Any] | 
     a silent return would strand it.
     """
     record_invocation_deadline(context)
-    logger.info("Received event: %s", pformat(event))
 
     # Capture before unwrapping: the payload loses the Function URL envelope.
     is_function_url = _is_function_url_event(event)
 
     # Function URL invocations carry a requestContext with an http key.
     # AWS_IAM auth is enforced by Lambda before the handler runs, so we
-    # only need to unwrap the inner JSON payload here.
+    # only need to unwrap the inner JSON payload here. The envelope holds
+    # the caller's credentials, so only the payload's summary is logged.
     if is_function_url:
         payload = _parse_function_url_body(event)
         if payload is None:
@@ -335,9 +367,20 @@ def lambda_handler(event: dict[str, Any], context: Context) -> dict[str, Any] | 
         # S3 event (used by the file-reprocess flow on the web app).
         payload_type = payload.get("type") if isinstance(payload, dict) else None
         if payload_type == "build_archive":
+            logger.info(
+                "Received Function URL request to build an archive of run %s/%s",
+                payload.get("instrument_id"),
+                payload.get("run_id"),
+            )
             return _handle_build_archive(payload)
 
         event = payload
+
+    logger.info(
+        "Received %s for %s",
+        "Function URL request" if is_function_url else "S3 notification",
+        _describe_s3_records(event),
+    )
 
     try:
         event_info = parse_s3_event(event)  # type: ignore[arg-type]
