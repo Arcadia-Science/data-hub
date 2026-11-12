@@ -336,7 +336,7 @@ The watcher maintains one SQLite database per environment at `~/.data-hub/watche
 
 Logs are written to `C:\ProgramData\DataHubWatcher\watcher.log` on Windows and `~/.data-hub/watcher.log` on macOS/Linux (10 MB rotating, 5 backups). Both the CLI `watch` command and the Windows service write to the same file so a single `Get-Content -Wait` (or `tail -F`) covers all entry points.
 
-The Windows service also writes to the Application event log, but only every warning and error and its own lifecycle lines (starting, running, stopped). The INFO lines the other modules write for each file stay in `watcher.log`, so a run of thousands of files can't fill the Application log and push out older warnings and errors.
+The Windows service also writes to the Application event log, but only warnings, errors and its own lifecycle lines (starting, running, stopped). The INFO lines the other modules write for each file stay in `watcher.log`, so a run of thousands of files can't fill the Application log and push out older warnings and errors.
 
 ### Initial scan identity
 
