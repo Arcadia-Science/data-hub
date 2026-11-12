@@ -24,7 +24,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from data_hub_watcher.constants import HEARTBEAT_INTERVAL_SECONDS
+from data_hub_watcher.constants import (
+    DEFAULT_CHECK_INTERVAL_TICKS,
+    DEFAULT_IDLE_TICKS_REQUIRED,
+    HEARTBEAT_INTERVAL_SECONDS,
+    UPLOAD_POLL_INTERVAL_SECONDS,
+)
 from data_hub_watcher.events import EventType
 from data_hub_watcher.heartbeat import HeartbeatLoop, WatcherCounters
 from data_hub_watcher.models import InstrumentConfig, RunDetectionConfig, WatcherConfig
@@ -313,6 +318,105 @@ class TestBuildRuntimeSharedDependencies:
             assert rt.heartbeat._instrument_id == cfg.instrument.id
         finally:
             rt.state_db.close()
+
+
+class TestBuildRuntimeTestOnlyOverrides:
+    """`build_runtime` reads the test-only timer overrides when it is called.
+
+    The end-to-end suite sets these so the real watcher ticks in seconds. They
+    are read here, not at import, so the Windows service sees the values in its
+    registered env file.
+    """
+
+    def test_unset_leaves_the_production_timers(self, tmp_path: Path, db_path: Path) -> None:
+        cfg = _make_config(tmp_path, upload_mode="auto")
+        rt = build_runtime(client=MagicMock(), cfg=cfg, db_path=db_path)
+
+        try:
+            assert rt.heartbeat._interval == HEARTBEAT_INTERVAL_SECONDS == 60
+            assert rt.upload_worker is not None
+            assert rt.upload_worker._interval == UPLOAD_POLL_INTERVAL_SECONDS == 60
+            assert rt.updater._check_interval_ticks == DEFAULT_CHECK_INTERVAL_TICKS == 60
+            assert rt.updater._idle_ticks_required == DEFAULT_IDLE_TICKS_REQUIRED == 5
+        finally:
+            rt.state_db.close()
+
+    @pytest.mark.parametrize("upload_mode", ["auto", "manual"])
+    def test_overrides_reach_the_heartbeat_upload_worker_and_updater(
+        self,
+        tmp_path: Path,
+        db_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        upload_mode: Literal["auto", "manual"],
+    ) -> None:
+        # Set after this module (and `runtime`) was imported.
+        monkeypatch.setenv("DATA_HUB_WATCHER_HEARTBEAT_INTERVAL_SECONDS", "7")
+        monkeypatch.setenv("DATA_HUB_WATCHER_UPLOAD_POLL_INTERVAL_SECONDS", "11")
+        monkeypatch.setenv("DATA_HUB_WATCHER_UPDATE_CHECK_INTERVAL_TICKS", "3")
+        monkeypatch.setenv("DATA_HUB_WATCHER_UPDATE_IDLE_TICKS", "2")
+        cfg = _make_config(tmp_path, upload_mode=upload_mode)
+        rt = build_runtime(client=MagicMock(), cfg=cfg, db_path=db_path)
+
+        try:
+            assert rt.heartbeat._interval == 7
+            assert rt.upload_worker is not None
+            assert rt.upload_worker._interval == 11
+            assert rt.updater._check_interval_ticks == 3
+            assert rt.updater._idle_ticks_required == 2
+        finally:
+            rt.state_db.close()
+
+    def test_each_override_changes_only_its_own_timer(
+        self, tmp_path: Path, db_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("DATA_HUB_WATCHER_UPLOAD_POLL_INTERVAL_SECONDS", "11")
+        cfg = _make_config(tmp_path, upload_mode="auto")
+        rt = build_runtime(client=MagicMock(), cfg=cfg, db_path=db_path)
+
+        try:
+            assert rt.upload_worker is not None
+            assert rt.upload_worker._interval == 11
+            assert rt.heartbeat._interval == HEARTBEAT_INTERVAL_SECONDS
+            assert rt.updater._check_interval_ticks == DEFAULT_CHECK_INTERVAL_TICKS
+            assert rt.updater._idle_ticks_required == DEFAULT_IDLE_TICKS_REQUIRED
+        finally:
+            rt.state_db.close()
+
+    def test_bad_values_fall_back_to_the_defaults_instead_of_failing_the_build(
+        self, tmp_path: Path, db_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("DATA_HUB_WATCHER_HEARTBEAT_INTERVAL_SECONDS", "0")
+        monkeypatch.setenv("DATA_HUB_WATCHER_UPLOAD_POLL_INTERVAL_SECONDS", "soon")
+        monkeypatch.setenv("DATA_HUB_WATCHER_UPDATE_CHECK_INTERVAL_TICKS", "-4")
+        monkeypatch.setenv("DATA_HUB_WATCHER_UPDATE_IDLE_TICKS", "1.5")
+        cfg = _make_config(tmp_path, upload_mode="auto")
+        rt = build_runtime(client=MagicMock(), cfg=cfg, db_path=db_path)
+
+        try:
+            assert rt.heartbeat._interval == HEARTBEAT_INTERVAL_SECONDS
+            assert rt.upload_worker is not None
+            assert rt.upload_worker._interval == UPLOAD_POLL_INTERVAL_SECONDS
+            assert rt.updater._check_interval_ticks == DEFAULT_CHECK_INTERVAL_TICKS
+            assert rt.updater._idle_ticks_required == DEFAULT_IDLE_TICKS_REQUIRED
+        finally:
+            rt.state_db.close()
+
+    def test_a_rebuild_picks_up_a_changed_value(
+        self, tmp_path: Path, db_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Each build reads the environment again; nothing is cached.
+        monkeypatch.setenv("DATA_HUB_WATCHER_HEARTBEAT_INTERVAL_SECONDS", "2")
+        cfg = _make_config(tmp_path, upload_mode="auto")
+        first = build_runtime(client=MagicMock(), cfg=cfg, db_path=db_path)
+        first.state_db.close()
+        monkeypatch.setenv("DATA_HUB_WATCHER_HEARTBEAT_INTERVAL_SECONDS", "5")
+        second = build_runtime(client=MagicMock(), cfg=cfg, db_path=db_path)
+
+        try:
+            assert first.heartbeat._interval == 2
+            assert second.heartbeat._interval == 5
+        finally:
+            second.state_db.close()
 
 
 class TestBuildRuntimeErrors:

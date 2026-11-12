@@ -52,10 +52,18 @@ export {
   uploadUrlResponse,
 } from "./schemas/runs";
 export {
+  createWatcherConfigRevisionBody,
   heartbeatBody,
   registerWatcherBody,
   watcherChecksumResponse,
   watcherConfigBody,
+  watcherConfigPreviewBody,
+  watcherConfigPreviewResponse,
+  watcherConfigPushResponse,
+  watcherConfigRevision,
+  watcherConfigRevisionResultBody,
+  watcherConfigRevisionsListResponse,
+  watcherConfigSettings,
   watcherDeleted,
   watcherDetail,
   watcherEventBody,

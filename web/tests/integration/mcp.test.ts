@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 // biome-ignore lint/performance/noNamespaceImport: integration tests need the full schema module for Db typing
 import * as schema from "@/lib/db/schema";
@@ -13,7 +13,7 @@ import {
 } from "@/tests/integration/helpers";
 
 /** Bump when adding/removing an MCP tool so the change shows up in review. */
-const EXPECTED_MCP_TOOL_COUNT = 40;
+const EXPECTED_MCP_TOOL_COUNT = 41;
 
 function jsonRpc(method: string, params: unknown = {}, id = 1) {
   return {
@@ -867,6 +867,124 @@ describe("MCP Server (HTTP)", () => {
     });
     expect(edit.isError).toBe(true);
     expect(edit.content[0].text).toMatch(/only edit your own/i);
+  });
+
+  // ---- Watcher config ------------------------------------------------------
+
+  it("update_watcher_config is for admins and merges over the latest settings", async () => {
+    const db = getTestDb();
+    const configInstrument = "mcp-config-instrument";
+    await db.insert(schema.instruments).values({
+      id: configInstrument,
+      displayName: "MCP Config Instrument",
+      status: "active",
+    });
+    const [watcher] = await db
+      .insert(schema.watchers)
+      .values({
+        instrumentId: configInstrument,
+        watcherVersion: "1.4.0",
+        status: "watching",
+        lastHeartbeatAt: new Date(),
+        configYaml: [
+          "instrument:",
+          "  id: mcp-config-instrument",
+          "  watch_directory: /data/plate",
+          "  file_patterns: ['*.csv']",
+          "  run_detection:",
+          "    pattern: '^([^_]+)'",
+          "    recursive: false",
+        ].join("\n"),
+      })
+      .returning({ id: schema.watchers.id });
+
+    const args = {
+      watcherId: watcher.id,
+      baseRevision: null,
+      settings: { file_patterns: ["*.csv", "*.AZE"] },
+    };
+
+    const refused = await callTool("update_watcher_config", args, token);
+    expect(refused.isError).toBe(true);
+    expect(refused.content[0].text).toMatch(/Admin role required/);
+
+    const saved = await callTool("update_watcher_config", args, adminAToken);
+    expect(saved.isError).toBeFalsy();
+    const body = JSON.parse(saved.content[0].text);
+    expect(body.revision).toMatchObject({
+      revision: 1,
+      source: "web",
+      status: "pending",
+      createdByUser: { userId: adminAId },
+    });
+    expect(body.revision.settings).toMatchObject({
+      watch_directory: "/data/plate",
+      file_patterns: ["*.csv", "*.AZE"],
+      run_detection: { pattern: "^([^_]+)", recursive: false },
+      upload_mode: "auto",
+    });
+
+    const detail = await callTool("get_watcher", { watcherId: watcher.id });
+    const detailBody = JSON.parse(detail.content[0].text);
+    expect(detailBody.configRevision).toBe(1);
+    expect(detailBody.pendingConfigRevision).toMatchObject({ revision: 1 });
+
+    const stale = await callTool("update_watcher_config", args, adminAToken);
+    expect(stale.isError).toBe(true);
+    expect(stale.content[0].text).toMatch(/stale_revision/);
+
+    // A rejected change isn't carried into the next partial update: the
+    // merge starts from the settings the watcher kept.
+    await db
+      .update(schema.watcherConfigRevisions)
+      .set({ status: "rejected", resolvedAt: new Date() })
+      .where(eq(schema.watcherConfigRevisions.watcherId, watcher.id));
+    const next = await callTool(
+      "update_watcher_config",
+      {
+        watcherId: watcher.id,
+        baseRevision: 1,
+        settings: { upload_mode: "manual" },
+      },
+      adminAToken
+    );
+    expect(next.isError).toBeFalsy();
+    expect(JSON.parse(next.content[0].text).revision).toMatchObject({
+      revision: 2,
+      settings: { file_patterns: ["*.csv"], upload_mode: "manual" },
+    });
+
+    // A PC edit the running watcher hasn't loaded is flagged as waiting for
+    // a restart, while appliedConfigRevision says what it runs.
+    await db
+      .update(schema.watcherConfigRevisions)
+      .set({ status: "applied", resolvedAt: new Date() })
+      .where(
+        and(
+          eq(schema.watcherConfigRevisions.watcherId, watcher.id),
+          eq(schema.watcherConfigRevisions.revision, 2)
+        )
+      );
+    await db.insert(schema.watcherConfigRevisions).values({
+      watcherId: watcher.id,
+      revision: 3,
+      source: "pc",
+      status: "applied",
+      settings: JSON.parse(next.content[0].text).revision.settings,
+      resolvedAt: new Date(),
+    });
+    await db
+      .update(schema.watchers)
+      .set({ configRevision: 3, appliedConfigRevision: 2 })
+      .where(eq(schema.watchers.id, watcher.id));
+    const edited = JSON.parse(
+      (await callTool("get_watcher", { watcherId: watcher.id })).content[0].text
+    );
+    expect(edited).toMatchObject({
+      appliedConfigRevision: 2,
+      configRevision: 3,
+      pcEditAwaitingRestart: true,
+    });
   });
 
   // ---- OAuth scope enforcement (coarse read / write) ----------------------

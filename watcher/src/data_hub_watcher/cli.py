@@ -8,11 +8,14 @@ import signal
 import subprocess
 import sys
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import click
+from pydantic import ValidationError
 
+from data_hub_watcher import testing_overrides
 from data_hub_watcher.api_client import ApiError, DataHubClient
 from data_hub_watcher.config_io import config_checksum, load_config, save_config
 from data_hub_watcher.constants import (
@@ -33,19 +36,16 @@ from data_hub_watcher.constants import (
 from data_hub_watcher.events import EventReporter, EventType, WatcherEvent
 from data_hub_watcher.heartbeat import WatcherCounters
 from data_hub_watcher.models import (
+    FILE_PATTERN_MAX_LENGTH,
+    FILE_PATTERNS_MAX,
     InstrumentConfig,
     RunDetectionConfig,
     WatcherConfig,
+    watch_directory_problem,
 )
-from data_hub_watcher.runtime import (
-    build_runtime,
-    classify_shutdown,
-    start_runtime,
-    stop_runtime,
-    sync_config_to_api,
-)
+from data_hub_watcher.remote_config import editable_settings_problem
+from data_hub_watcher.runtime import WatcherSupervisor, run_supervisor
 from data_hub_watcher.self_update import (
-    DEFAULT_INDEX_URL,
     InstallMethod,
     UvExecutableNotFoundError,
     _resolve_uv_executable,
@@ -181,6 +181,42 @@ def _setup_file_logging() -> None:
     setup_file_logging()
 
 
+def _prompted_watch_directory(value: str) -> Path:
+    """Resolve a typed watch folder, failing clearly if it can't be watched.
+
+    The config itself loads with a missing folder (the watcher then waits for
+    it), but an operator typing a path at the PC should hear about a typo now.
+    """
+    watch_dir = Path(value).expanduser().resolve()
+    problem = watch_directory_problem(watch_dir)
+    if problem is not None:
+        raise click.ClickException(problem)
+    return watch_dir
+
+
+def _prompted_file_patterns(value: str) -> list[str]:
+    """Split typed file patterns, within the limits Data Hub can read.
+
+    The watcher would run with more or longer patterns, but the server
+    couldn't parse the pushed config, so it couldn't be edited from the web
+    app and PC edits wouldn't show in its history.
+    """
+    patterns = [p.strip() for p in value.split(",") if p.strip()]
+    if not patterns:
+        raise click.ClickException("At least one file pattern is required.")
+    if len(patterns) > FILE_PATTERNS_MAX:
+        raise click.ClickException(
+            f"Use at most {FILE_PATTERNS_MAX} file patterns (got {len(patterns)})."
+        )
+    for pattern in patterns:
+        if len(pattern) > FILE_PATTERN_MAX_LENGTH:
+            raise click.ClickException(
+                f"File patterns can be at most {FILE_PATTERN_MAX_LENGTH} characters: "
+                f"{pattern[:40]}…"
+            )
+    return patterns
+
+
 # ---------------------------------------------------------------------------
 # init command
 # ---------------------------------------------------------------------------
@@ -275,16 +311,12 @@ def init(ctx: click.Context, show_key: bool) -> None:
 
     # 4. Watch directory
     watch_dir_str = click.prompt("Watch directory (absolute path)")
-    watch_dir = Path(watch_dir_str).expanduser().resolve()
-    if not watch_dir.is_dir():
-        raise click.ClickException(f"Not a directory: {watch_dir}")
+    watch_dir = _prompted_watch_directory(watch_dir_str)
 
     # 5. File patterns
     default_patterns = ",".join(selected.file_patterns) if selected.file_patterns else "*.*"
     patterns_raw = click.prompt("File patterns (comma-separated)", default=default_patterns)
-    file_patterns = [p.strip() for p in patterns_raw.split(",") if p.strip()]
-    if not file_patterns:
-        raise click.ClickException("At least one file pattern is required.")
+    file_patterns = _prompted_file_patterns(patterns_raw)
 
     run_pattern, run_recursive = _prompt_run_detection(watch_dir)
 
@@ -414,6 +446,16 @@ def _prompt_run_detection(
                     )
                 )
                 continue
+            if "(?P<" in pattern or "(?P=" in pattern:
+                # Valid in Python, but Data Hub's JavaScript can't read it.
+                click.echo(
+                    click.style(
+                        "  Use a plain capture group, such as (…), not a named one "
+                        "such as (?P<name>…)",
+                        fg="red",
+                    )
+                )
+                continue
             break
         default_rec = current_recursive if current_recursive is not None else True
     else:
@@ -475,7 +517,10 @@ def _push_config_to_api(
     try:
         yaml_content = path.read_text(encoding="utf-8")
         checksum = config_checksum(path)
-        client.push_config(watcher_id, yaml_content, checksum)
+        # `modified_at` lets the server tell that this PC edit is newer than
+        # a change from the web app that the running watcher hasn't applied.
+        modified_at = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+        client.push_config(watcher_id, yaml_content, checksum, modified_at=modified_at)
         click.echo("Config synced to Data Hub.")
         if reporter is not None:
             reporter.queue_event(
@@ -707,6 +752,10 @@ def _switch_environment(
 def _dry_run_scan(cfg: WatcherConfig) -> None:
     """Scan the watch directory and log what `watch` would do, without side effects."""
     inst = cfg.instrument
+    problem = watch_directory_problem(inst.watch_directory)
+    if problem is not None:
+        click.echo(click.style(f"\n{problem}. `watch` would wait for the folder.", fg="yellow"))
+        return
     is_auto = inst.upload_mode == "auto"
     is_recursive = inst.run_detection.recursive
     watch_dir = inst.watch_directory
@@ -916,8 +965,27 @@ def config_show(ctx: click.Context) -> None:
 def config_validate(ctx: click.Context) -> None:
     """Validate the config file (offline, no network calls)."""
     path = _resolve_path(ctx)
-    load_config(path)  # raises on validation error
+    cfg = load_config(path)  # raises on validation error
+    # A missing folder no longer stops the config from loading (the watcher
+    # waits for it instead), so check it here where an operator will see it.
+    problem = watch_directory_problem(cfg.instrument.watch_directory)
+    if problem is not None:
+        raise click.ClickException(
+            f"{problem}\nThe watcher will start but wait until the folder exists "
+            "or its config is fixed."
+        )
     click.echo(click.style(f"✓ Config is valid: {path}", fg="green"))
+    unreadable = editable_settings_problem(cfg.instrument)
+    if unreadable is not None:
+        # The watcher runs this config, so it isn't an error.
+        click.echo(
+            click.style(
+                f"Warning: Data Hub can't read these settings ({unreadable}). The config "
+                "can't be edited from the web app, and edits made here won't appear in "
+                "its history.",
+                fg="yellow",
+            )
+        )
 
 
 @config.command("set-environment")
@@ -992,15 +1060,13 @@ def config_edit(ctx: click.Context) -> None:
     inst = cfg.instrument
 
     watch_dir_str = click.prompt("Watch directory", default=str(inst.watch_directory))
-    watch_dir = Path(watch_dir_str).expanduser().resolve()
-    if not watch_dir.is_dir():
-        raise click.ClickException(f"Not a directory: {watch_dir}")
+    watch_dir = _prompted_watch_directory(watch_dir_str)
 
     patterns_raw = click.prompt(
         "File patterns (comma-separated)",
         default=",".join(inst.file_patterns),
     )
-    file_patterns = [p.strip() for p in patterns_raw.split(",") if p.strip()]
+    file_patterns = _prompted_file_patterns(patterns_raw)
 
     run_pattern, run_recursive = _prompt_run_detection(
         watch_dir,
@@ -1022,22 +1088,31 @@ def config_edit(ctx: click.Context) -> None:
 
     enabled = click.confirm("Enabled?", default=inst.enabled)
 
-    new_config = WatcherConfig(
-        version=cfg.version,
-        environment=cfg.environment,
-        api_base_urls=cfg.api_base_urls,
-        watcher_ids=cfg.watcher_ids,
-        initial_scan=cfg.initial_scan,
-        instrument=InstrumentConfig(
-            id=inst.id,
-            watch_directory=watch_dir,
-            file_patterns=file_patterns,
-            enabled=enabled,
-            upload_mode=upload_mode,
-            stability_period_seconds=stability,
-            run_detection=RunDetectionConfig(pattern=run_pattern, recursive=run_recursive),
-        ),
-    )
+    try:
+        new_config = WatcherConfig(
+            version=cfg.version,
+            environment=cfg.environment,
+            api_base_urls=cfg.api_base_urls,
+            watcher_ids=cfg.watcher_ids,
+            initial_scan=cfg.initial_scan,
+            instrument=InstrumentConfig(
+                id=inst.id,
+                watch_directory=watch_dir,
+                file_patterns=file_patterns,
+                enabled=enabled,
+                upload_mode=upload_mode,
+                stability_period_seconds=stability,
+                # Not prompted, so keep the current values. Leaving them out
+                # reset them to their defaults, which silently undid changes
+                # made in the config file or from the web app.
+                max_stability_wait_seconds=inst.max_stability_wait_seconds,
+                upload_parallelism=inst.upload_parallelism,
+                run_detection=RunDetectionConfig(pattern=run_pattern, recursive=run_recursive),
+            ),
+        )
+    except ValidationError as exc:
+        messages = "; ".join(err["msg"] for err in exc.errors())
+        raise click.ClickException(f"Invalid config: {messages}") from exc
 
     save_config(new_config, path)
     click.echo(f"Config saved to {path}")
@@ -1134,45 +1209,62 @@ def watch(ctx: click.Context, dry_run: bool) -> None:
     # Step 3: File logging
     _setup_file_logging()
 
-    # Step 4: Build the shared runtime (state DB, uploader, detector,
-    # monitor, heartbeat — all wired identically to the Windows-service
-    # path via data_hub_watcher.runtime).
+    # Step 4: Start the supervisor. It syncs the config (failures surface in
+    # the dashboard as kind=config_sync_failed), applies a config revision
+    # saved in Data Hub while the watcher was stopped, then builds and starts
+    # the runtime (state DB, uploader, detector, monitor, heartbeat), wired
+    # identically to the Windows-service path. A missing watch folder starts
+    # the waiting state instead.
     db_path = resolve_state_db_path(state_db_dir(path, service=False), cfg.environment)
-    rt = build_runtime(client=client, cfg=cfg, db_path=db_path)
+    supervisor = WatcherSupervisor(
+        client=client,
+        cfg=cfg,
+        config_path=path,
+        db_path=db_path,
+        role="Watcher",
+        host=platform.node(),
+    )
+    click.echo("Syncing config to Data Hub and scanning for existing files…")
+    supervisor.start()
 
-    # Step 5: sync config (now that we have a reporter, failures are
-    # surfaced to the dashboard as kind=config_sync_failed instead of
-    # only being printed to the local console).
-    click.echo("Syncing config to Data Hub…")
-    sync_config_to_api(client, cfg.watcher_id, path, rt.reporter, trigger="startup")
-
-    click.echo(f"Scanning {inst.watch_directory} for existing files…")
-    start_runtime(rt, started_message=f"Watcher started on {platform.node()}")
-
-    click.echo(f"Watcher is running (instrument={inst.id}, dir={inst.watch_directory})…")
+    if supervisor.waiting_reason is not None:
+        click.echo(
+            click.style(
+                f"Waiting: {supervisor.waiting_reason}. Heartbeats continue, and watching "
+                "starts once the folder exists or a config change from Data Hub fixes it.",
+                fg="yellow",
+            )
+        )
+    else:
+        running = supervisor.cfg.instrument
+        click.echo(f"Watcher is running (instrument={running.id}, dir={running.watch_directory})…")
     click.echo("Press Ctrl+C to stop.")
+
+    stop_requested = threading.Event()
 
     def _shutdown(signum: int, frame: Any) -> None:
         click.echo("\nShutting down…")
-        stop_runtime(rt, stopped_message="Watcher stopped by user")
-        raise SystemExit(0)
+        stop_requested.set()
+        supervisor.wake()
 
     signal.signal(signal.SIGINT, _shutdown)
     signal.signal(signal.SIGTERM, _shutdown)
 
-    # Block on the runtime's shutdown event so the in-process auto-updater
-    # can request a restart from the heartbeat thread without needing a
-    # signal. Ctrl+C still works because the SIGINT handler raises
-    # SystemExit(0) directly out of `Event.wait` (Python interrupts the
-    # blocking call to deliver the signal).
-    while not rt.shutdown_event.wait(timeout=1.0):
-        pass
+    # Poll until Ctrl+C or until the runtime asks to shut down (the in-process
+    # auto-updater requests a restart from the heartbeat thread). Each poll
+    # also applies config revisions from Data Hub by rebuilding the runtime
+    # in this process, so a config change never exits `watch`.
+    run_supervisor(supervisor, stop_requested)
+
+    if stop_requested.is_set():
+        supervisor.stop(stopped_message="Watcher stopped by user")
+        raise SystemExit(0)
 
     # Distinguish an upgrade-driven shutdown from a generic one by
     # delegating to `classify_shutdown` — the same helper used by the
     # Windows service path in `service._run_service_loop`, so the two
     # entrypoints can't drift on the WATCHER_STOPPED message text.
-    decision = classify_shutdown(rt, role="Watcher")
+    decision = supervisor.classify_shutdown()
     if decision.is_upgrade_restart:
         # Foreground `data-hub-watcher watch` doesn't have an SCM to
         # auto-restart it, so the message has to cover both audiences:
@@ -1185,7 +1277,7 @@ def watch(ctx: click.Context, dry_run: bool) -> None:
             "\nUpgrade installed. Re-run data-hub-watcher watch to load the new "
             "version (or install the service for automatic restart)."
         )
-    stop_runtime(rt, stopped_message=decision.stopped_message)
+    supervisor.stop(stopped_message=decision.stopped_message)
     # Exit non-zero on upgrade restart so any supervisor (or the
     # operator's wrapper script) restarts us. The `data-hub-watcher
     # service` Windows path uses the SCM's failure-actions config to
@@ -1476,7 +1568,7 @@ def _dispatch_self_update_via_worker(
         target_version=target_version,
         pkg_spec=pkg_spec,
         uv_executable=uv_path,
-        index_url=DEFAULT_INDEX_URL,
+        index_url=testing_overrides.index_url(),
         previous_version=current_version,
         install_method=InstallMethod.UV_TOOL.value,
     )

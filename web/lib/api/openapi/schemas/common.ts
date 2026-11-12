@@ -19,6 +19,7 @@ export const watcherStatusSchema = z.enum([
   "registered",
   "watching",
   "stopped",
+  "waiting",
   "stale",
 ]);
 export const watcherEventTypeSchema = z.enum(watcherEventTypeEnum.enumValues);

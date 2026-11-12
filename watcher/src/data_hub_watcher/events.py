@@ -58,6 +58,12 @@ a database migration. Known ``kind`` values, with their per-kind
 * ``pending_upload_missing`` -- an auto-mode upload waiting for a retry
   was no longer on disk at startup, so the retry was dropped.
   ``details = {"kind", "relative_path", "run_id"}``.
+* ``watch_directory_unavailable`` -- the watch folder was missing or
+  unreadable, so the watcher entered its waiting state (heartbeats only).
+  ``details = {"kind", "watch_directory", "reason"}``.
+
+Results of config revisions from the web app are not reported here: the
+server writes those events itself when the watcher posts the result.
 """
 
 from __future__ import annotations

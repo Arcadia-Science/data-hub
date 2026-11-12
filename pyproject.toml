@@ -11,7 +11,8 @@ dev = [
 ]
 
 [tool.ruff]
-src = ["lambda/src", "watcher/src", "packages/shared/src"]
+# `watcher/e2e` holds `e2e_support`, the package the end-to-end tests import from.
+src = ["lambda/src", "watcher/src", "packages/shared/src", "watcher/e2e"]
 exclude = ["legacy"]
 line-length = 100
 indent-width = 4
@@ -50,11 +51,36 @@ order-by-type = true
 no-lines-before = ["future", "standard-library"]
 
 [tool.pytest.ini_options]
+# `watcher/e2e` is deliberately not listed: `make py-test`, `py-test-unit` and
+# `py-test-integration` never collect the end-to-end suite. `make py-test-e2e` names it.
 testpaths = ["lambda/tests", "watcher/tests", "packages/shared/tests"]
 addopts = "--import-mode=importlib"
-markers = ["integration: Tests requiring Postgres + Next.js server"]
+# Under `--import-mode=importlib` a test module can't import its siblings, so the shared
+# code of the end-to-end suite is a package (`e2e_support`) found through `pythonpath`.
+# `watcher/tests/test_e2e_catalog.py` imports its catalog the same way.
+pythonpath = ["watcher/e2e"]
+markers = [
+    "integration: Tests requiring Postgres + Next.js server",
+    "e2e: End-to-end tests that run the real watcher against the test server (watcher/e2e, make py-test-e2e)",
+    "covers(*transition_ids): The watcher state-machine transitions an end-to-end test covers, by catalog ID (watcher/e2e/e2e_support/catalog)",
+    "platforms(*kinds): The kinds of watcher driver an end-to-end test is for, 'cli' and/or 'service' (default: both). conftest.py skips it under the other kind, and the catalog check reads it",
+]
 filterwarnings = ["ignore::DeprecationWarning:matplotlib"]
 
 [tool.pyright]
 include = ["lambda", "watcher", "packages/shared"]
-exclude = ["legacy", ".venv"]
+# The end-to-end tests import `e2e_support` from `watcher/e2e`, which pytest puts on the
+# path through its `pythonpath` setting.
+extraPaths = ["watcher/e2e"]
+# `build` folders hold the stale copy of a package's source that an old in-place wheel
+# build (`pip wheel`, `uv build`, or an older version of the wheel tests in
+# packages/shared) leaves in the package folder, such as `watcher/build/lib`. Nothing in
+# this repo writes them any more. These entries keep one a developer still has locally
+# out of the type check, without hiding a folder named `build` anywhere else.
+exclude = [
+    "legacy",
+    ".venv",
+    "lambda/build",
+    "packages/shared/build",
+    "watcher/build",
+]

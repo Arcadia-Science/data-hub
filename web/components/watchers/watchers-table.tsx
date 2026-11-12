@@ -12,6 +12,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  ConfigChangeBadge,
+  RestartPendingBadge,
+} from "@/components/watchers/watcher-config-status";
 import { WatcherStatusBadge } from "@/components/watchers/watcher-status-badge";
 import type { WatcherListItem } from "@/lib/api/watchers";
 import { cn } from "@/lib/utils";
@@ -130,10 +134,22 @@ export function WatchersTable({
               </TableCell>
               <TableCell>
                 <RowControl>
-                  <WatcherStatusBadge
-                    className="text-xs"
-                    status={row.effectiveStatus}
-                  />
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <WatcherStatusBadge
+                      className="text-xs"
+                      reason={row.statusReason}
+                      status={row.effectiveStatus}
+                    />
+                    {row.deletedAt ? null : (
+                      <ConfigChangeBadge
+                        className="text-xs"
+                        status={row.configRevisionStatus}
+                      />
+                    )}
+                    {!row.deletedAt && row.pcEditAwaitingRestart ? (
+                      <RestartPendingBadge className="text-xs" />
+                    ) : null}
+                  </div>
                 </RowControl>
               </TableCell>
               <TableCell>

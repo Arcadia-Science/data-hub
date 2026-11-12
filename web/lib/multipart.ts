@@ -1,3 +1,5 @@
+import { mirrorRootForUploads } from "@/lib/s3-local-mirror";
+
 // Files at or above the threshold upload as parts. The server decides, so
 // this can change without a watcher release. Tests set the env vars so they
 // can exercise the path with a small file; production leaves them unset.
@@ -37,22 +39,13 @@ export function multipartPartSizeBytes(): number {
   );
   const size = Math.max(configured, 1);
   // Tests set a tiny part size. S3 rejects a part under 5 MiB, so that
-  // override is only honored while the local stand-in is actually in use.
-  // The conditions match `mirrorRootForMultipart`.
-  if (standInServesParts()) {
+  // override is only honored while a local stand-in is actually taking the
+  // parts. `mirrorRootForUploads` is the check `s3.ts` makes before it routes
+  // a part to the stand-in.
+  if (mirrorRootForUploads()) {
     return size;
   }
   return Math.max(size, MULTIPART_MIN_PART_BYTES);
-}
-
-function standInServesParts(): boolean {
-  if (process.env.NODE_ENV !== "production" && process.env.LOCAL_S3_MIRROR) {
-    return true;
-  }
-  if (process.env.VERCEL) {
-    return false;
-  }
-  return Boolean(process.env.INTEGRATION_TEST_S3_MIRROR);
 }
 
 export function planMultipartUpload(sizeBytes: number): {

@@ -35,7 +35,8 @@ Everything the watcher persists lives under `~/.data-hub/`:
 ```yaml
 version: 1
 environment: production          # "staging", "production", or "preview"
-api_base_url: null               # required when environment is "preview"
+api_base_urls:                   # one API base URL per environment
+  production: https://datahub.example.org/api/v1
 watcher_ids:                     # one registration id per environment
   production: <assigned-by-api>
 initial_scan: null               # null (default), "full", or "new-only"
@@ -57,28 +58,30 @@ instrument:
 
 ### Field reference [#field-reference]
 
-| Field | Type | Description |
-| --- | --- | --- |
-| `version` | int | Config schema version. Currently `1`. |
-| `environment` | enum | `staging`, `production`, or `preview`. |
-| `api_base_url` | string \| null | Required only for `preview` (the deployment’s `/api/v1` URL). |
-| `watcher_ids` | map | One watcher registration id per environment, assigned by the API. |
-| `initial_scan` | enum \| null | `null` (env default), `full`, or `new-only`. See [Initial scan](#initial-scan). |
-| `instrument.id` | string | Kebab-case instrument ID. Permanent; the storage key prefix. |
-| `instrument.watch_directory` | string | Absolute path the instrument writes to. |
-| `instrument.file_patterns` | string[] | Glob patterns; only matching files are uploaded. |
-| `instrument.enabled` | bool | Whether the watcher processes this instrument. |
-| `instrument.upload_mode` | enum | `auto` or `manual`. See [Upload modes](#upload-modes). |
-| `instrument.stability_period_seconds` | int (1–300) | Seconds a file must stay unchanged before it’s considered written. Default `5`. |
-| `instrument.max_stability_wait_seconds` | int (1–86400) | Seconds a still-changing file may stay pending before the watcher abandons it with a `stability_timeout` event. Must be ≥ `stability_period_seconds`. Default `300` (5 minutes). |
-| `instrument.upload_parallelism` | int (1–32) | The most uploads the watcher runs at the same time. From watcher 1.3.0, each part of a large file counts as one upload, so a single file can use several connections. Default `4`. Raise it on PCs with a fast network link; lower it on a slow or shared one. |
-| `instrument.run_detection.pattern` | regex | One-capture-group regex applied to each file’s path relative to `watch_directory`. |
-| `instrument.run_detection.recursive` | bool | `true` watches subdirectories; `false` only the top level. |
+Fields marked **Web** in the table can also be changed by an admin from the web app, with watcher 1.4.0 and later. The watcher saves those changes to this file. See [Change a watcher’s config](/docs/manage-watchers#change-a-watchers-config).
+
+| Field | Type | Web | Description |
+| --- | --- | --- | --- |
+| `version` | int | | Config schema version. Currently `1`. |
+| `environment` | enum | | `staging`, `production`, or `preview`. |
+| `api_base_urls` | map | | One API base URL per environment, keyed by environment name. Set at `init`, or by `config set-environment --api-base-url`. A config with a single top-level `api_base_url` is moved into this map on load. |
+| `watcher_ids` | map | | One watcher registration id per environment, assigned by the API. |
+| `initial_scan` | enum \| null | | `null` (env default), `full`, or `new-only`. See [Initial scan](#initial-scan). |
+| `instrument.id` | string | | Kebab-case instrument ID. Permanent; the storage key prefix. |
+| `instrument.watch_directory` | string | Web | Absolute path the instrument writes to. |
+| `instrument.file_patterns` | string[] | Web | Glob patterns matched against each file’s name, case-sensitive; only matching files are uploaded. 1–50 patterns. |
+| `instrument.enabled` | bool | | Whether the watcher processes this instrument. |
+| `instrument.upload_mode` | enum | Web | `auto` or `manual`. See [Upload modes](#upload-modes). |
+| `instrument.stability_period_seconds` | int (1–300) | Web | Seconds a file must stay unchanged before it’s considered written. Default `5`. |
+| `instrument.max_stability_wait_seconds` | int (1–86400) | Web | Seconds a still-changing file may stay pending before the watcher abandons it with a `stability_timeout` event. Must be ≥ `stability_period_seconds`. Default `300` (5 minutes). |
+| `instrument.upload_parallelism` | int (1–32) | Web | The most uploads the watcher runs at the same time. From watcher 1.3.0, each part of a large file counts as one upload, so a single file can use several connections. Default `4`. Raise it on PCs with a fast network link; lower it on a slow or shared one. |
+| `instrument.run_detection.pattern` | regex | Web | One-capture-group regex applied to each file’s path relative to `watch_directory`. |
+| `instrument.run_detection.recursive` | bool | Web | `true` watches subdirectories; `false` only the top level. Default `true`. |
 
 <Callout type="info">
-A config written by an older watcher used a single top-level `watcher_id`. It’s
-migrated transparently on load: lifted into `watcher_ids` under the active
-environment and dropped on the next save.
+A config written by an older watcher used a single top-level `watcher_id` and
+`api_base_url`. They’re migrated transparently on load: lifted into `watcher_ids`
+and `api_base_urls` under the active environment and dropped on the next save.
 </Callout>
 
 ## Run detection
@@ -87,6 +90,9 @@ The `pattern` regex is applied with `re.search` to each file’s path relative t
 `watch_directory`, with backslashes normalized to `/`. Capture group 1 is the run
 ID, and the pattern must have exactly one capture group. In YAML, single-quote
 patterns so backslash sequences like `\d` don’t need escaping.
+
+The web app checks patterns in JavaScript as well, so it refuses Python-only
+syntax such as named groups (`(?P<name>…)`). Use a plain capture group instead.
 
 The `init` wizard offers these presets (or supply a custom regex):
 
