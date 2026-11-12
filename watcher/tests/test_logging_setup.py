@@ -177,7 +177,7 @@ class TestServiceManagerHandler:
         # plugin currently defaults the root to.
         monkeypatch.setenv("DATA_HUB_WATCHER_LOG_LEVEL", "DEBUG")
         sm = MagicMock(name="servicemanager")
-        logging_setup.attach_servicemanager_handler(sm)
+        logging_setup.attach_servicemanager_handler(sm, info_from="data_hub_watcher.test")
 
         logger = logging.getLogger("data_hub_watcher.test")
         logger.info("hello")
@@ -190,6 +190,43 @@ class TestServiceManagerHandler:
         sm.LogErrorMsg.assert_not_called()
         sm.LogWarningMsg.assert_not_called()
 
+    def test_info_from_other_loggers_stays_out_of_the_event_log(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A run of thousands of files logs several INFO lines per file;
+        # ``watcher.log`` keeps them, the Application log must not.
+        monkeypatch.setenv("DATA_HUB_WATCHER_LOG_LEVEL", "DEBUG")
+        sm = MagicMock(name="servicemanager")
+        logging_setup.attach_servicemanager_handler(sm, info_from="data_hub_watcher.service")
+
+        other = logging.getLogger("data_hub_watcher.monitor")
+        other.info("File stable: a.csv")
+        other.debug("Checking a.csv")
+        other.warning("Upload is slow")
+        other.error("Upload failed")
+        logging.getLogger("data_hub_watcher.service").info("Data Hub Watcher is running")
+
+        sm.LogInfoMsg.assert_called_once()
+        assert "is running" in sm.LogInfoMsg.call_args.args[0]
+        sm.LogWarningMsg.assert_called_once()
+        assert "Upload is slow" in sm.LogWarningMsg.call_args.args[0]
+        sm.LogErrorMsg.assert_called_once()
+        assert "Upload failed" in sm.LogErrorMsg.call_args.args[0]
+
+    def test_without_info_from_only_warnings_and_errors_reach_the_event_log(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("DATA_HUB_WATCHER_LOG_LEVEL", "DEBUG")
+        sm = MagicMock(name="servicemanager")
+        logging_setup.attach_servicemanager_handler(sm)
+
+        logger = logging.getLogger("data_hub_watcher.service")
+        logger.info("Data Hub Watcher is running")
+        logger.warning("careful")
+
+        sm.LogInfoMsg.assert_not_called()
+        sm.LogWarningMsg.assert_called_once()
+
     def test_idempotent_for_same_sm(self) -> None:
         sm = MagicMock(name="servicemanager")
         first = logging_setup.attach_servicemanager_handler(sm)
@@ -199,6 +236,20 @@ class TestServiceManagerHandler:
         root = logging.getLogger()
         handlers = [h for h in root.handlers if isinstance(h, logging_setup._ServiceManagerHandler)]
         assert len(handlers) == 1
+
+    def test_attaching_again_keeps_the_first_info_from(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("DATA_HUB_WATCHER_LOG_LEVEL", "DEBUG")
+        sm = MagicMock(name="servicemanager")
+        logging_setup.attach_servicemanager_handler(sm, info_from="data_hub_watcher.first")
+        logging_setup.attach_servicemanager_handler(sm, info_from="data_hub_watcher.second")
+
+        logging.getLogger("data_hub_watcher.second").info("not from the first")
+        logging.getLogger("data_hub_watcher.first").info("from the first")
+
+        sm.LogInfoMsg.assert_called_once()
+        assert "from the first" in sm.LogInfoMsg.call_args.args[0]
 
     def test_separate_handler_per_sm_object(self) -> None:
         sm1 = MagicMock(name="sm1")

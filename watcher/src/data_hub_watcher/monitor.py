@@ -531,15 +531,19 @@ class FileMonitor:
                     # Written to after the scan, so it holds data from after
                     # the config change: it follows `upload_mode` again.
                     self._report_only_paths.discard(path)
-                    continue
-
-                elapsed_since_change = now - pf.last_changed
-                if elapsed_since_change >= self._stability_period:
+                elif now - pf.last_changed >= self._stability_period:
                     is_report_only = path in self._report_only_paths
                     self._report_only_paths.discard(path)
                     stable.append((path, is_report_only))
                     del self._pending[path]
-                elif (now - pf.first_seen) >= max_wait:
+                    continue
+
+                # Checked whether or not the file changed since the last check:
+                # a file written to more often than this loop runs changes at
+                # every check, and would otherwise never time out. (Watchdog's
+                # modify events often refresh `pf` between checks, which hid
+                # this.)
+                if now - pf.first_seen >= max_wait:
                     timed_out.append(path)
                     self._report_only_paths.discard(path)
                     del self._pending[path]

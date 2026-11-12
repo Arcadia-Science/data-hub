@@ -2,7 +2,7 @@
 
 Four independent test suites across two frameworks — one per package, plus a
 split between fast/isolated tests and tests that exercise a real Postgres +
-Next.js server. This page is the map; see [Conventions](conventions.md) for the
+Next.js server, and a separate end-to-end suite that runs the real watcher. This page is the map; see [Conventions](conventions.md) for the
 one-line summary and [CI and deployment](ci-and-deployment.md) for how these
 run in GitHub Actions.
 
@@ -13,6 +13,7 @@ run in GitHub Actions.
 | `make py-test-unit` | `lambda/`, `watcher/`, `packages/shared/` | pytest, excluding `@pytest.mark.integration` — no Postgres or server. The wheel-build tests in `packages/shared/` need `uv` on the PATH, and network access when the `uv` cache is cold |
 | `make py-test-integration` | `lambda/`, `watcher/` | pytest, only `@pytest.mark.integration` — builds/starts Next.js against Postgres |
 | `make py-test` | `lambda/`, `watcher/`, `packages/shared/` | All pytest tests (unit + integration) |
+| `make py-test-e2e` | `watcher/e2e/` | The [end-to-end suite](#end-to-end-tests-of-the-watcher): the real watcher against the test server. Not part of `py-test`, and not run in pull requests |
 | `make fe-test-unit` | `web/` | Vitest `tests/unit/` + `tests/mcp/` — no Postgres, no server |
 | `make fe-test-integration` | `web/` | Vitest `tests/integration/` — builds/starts Next.js against Postgres |
 | `make fe-test` | `web/` | `fe-test-unit` then `fe-test-integration` |
@@ -31,15 +32,20 @@ network. Tests that need `uv` skip themselves when it isn't on the PATH.
 
 Integration tests (Python and TypeScript alike) need Postgres reachable at
 `127.0.0.1:5432` and create/reuse a `data_hub_test` database. The Python
-harness can use a different server: set `DATA_HUB_TEST_PGHOST`,
-`DATA_HUB_TEST_PGPORT`, `DATA_HUB_TEST_PGUSER` and `DATA_HUB_TEST_PGPASSWORD`
-(the defaults are `127.0.0.1`, `5432`, `postgres` and `postgres`).
-`DATA_HUB_TEST_PGHOST` must be a host name or address, not a socket directory.
-The harness deliberately ignores the standard `PGHOST`, `PGPORT`, `PGUSER` and
-`PGPASSWORD`. Your shell may point `psql` at another server, and the harness
-creates a database, runs `drizzle-kit push --force` and truncates tables. The
-TypeScript suite doesn't read any of these variables. The tests also build
-and start a real Next.js **production** server (`next build && next start`)
+harness can use a different server or database: set `DATA_HUB_TEST_PGHOST`,
+`DATA_HUB_TEST_PGPORT`, `DATA_HUB_TEST_PGUSER`, `DATA_HUB_TEST_PGPASSWORD` and
+`DATA_HUB_TEST_PGDATABASE` (the defaults are `127.0.0.1`, `5432`, `postgres`,
+`postgres` and `data_hub_test`). The harness creates the database if it is
+missing, so two runs that must not share tables, such as the integration suite
+and the [end-to-end suite](#end-to-end-tests-of-the-watcher), can each use their
+own by setting `DATA_HUB_TEST_PGDATABASE`. Its value must be a plain name:
+letters, digits and underscores, not starting with a digit, at most 63
+characters. `DATA_HUB_TEST_PGHOST` must be a host name or address, not a socket
+directory. The harness deliberately ignores the standard `PGHOST`, `PGPORT`,
+`PGUSER`, `PGPASSWORD` and `PGDATABASE`. Your shell may point `psql` at another
+server, and the harness creates a database, runs `drizzle-kit push --force` and
+truncates tables. The TypeScript suite doesn't read any of these variables. The
+tests also build and start a real Next.js **production** server (`next build && next start`)
 rather than `next dev` — dev mode recompiles on every request, which makes a
 large suite 5–10x slower, and a production build matches actual deployment
 behavior. That build writes to `web/.next`, which **contends with a running
@@ -68,7 +74,8 @@ def integration_env() -> Generator[IntegrationEnv, None, None]:
         yield env
 ```
 
-`start_test_server()` creates the `data_hub_test` database if missing, pushes
+`start_test_server()` creates the test database (`data_hub_test` unless
+`DATA_HUB_TEST_PGDATABASE` says otherwise) if missing, pushes
 the Drizzle schema via `npx drizzle-kit push --force`, seeds a deterministic
 `watcher_release_config` row, builds and starts `next start` on a free port,
 waits for it to respond, seeds a test user + personal access token, and yields
@@ -84,7 +91,7 @@ installed in `web/node_modules` (run `npm ci` in `web/`).
 | --- | --- |
 | `base_url` | The server's origin, for example `http://127.0.0.1:54321`. |
 | `api_token` | A personal access token with the `*` scope. |
-| `db_dsn` | A DSN for the `data_hub_test` database. |
+| `db_dsn` | A DSN for the test database. |
 | `server_log` | The file that receives the server's stdout and stderr. |
 | `s3_mirror_root` | The directory the server uses as its S3 stand-in. An object lands at `<s3_mirror_root>/<bucket>/<key>`. |
 | `cron_secret` | The bearer token the cron routes accept. |
@@ -276,9 +283,341 @@ test files need (`base_url`, `databaseUrl`, capture-server URLs) are passed
 back via `process.env`, since Vitest's global setup runs in a separate worker
 from the tests themselves.
 
+## End-to-end tests of the watcher
+
+The integration tests call the watcher's API client against a real server, but nothing in
+them runs the watcher program. The end-to-end suite in `watcher/e2e/` does. It installs a
+wheel of the watcher with `uv tool install --python 3.12`, starts `data-hub-watcher watch` as
+a real process with its own `HOME` (or, on Windows, installs and starts the real Windows service),
+and drives it from outside: files in the watch folder, signals, admin actions on the server, and
+network faults. Then it checks what the server and
+the S3 stand-in hold. A file is done when its row says `uploaded` and its bytes in the stand-in
+match the original. Lambda, Slack and the web UI are outside the suite.
+
+### Running it
+
+```sh
+make py-test-e2e
+```
+
+It needs what the integration tests need (Postgres on `127.0.0.1:5432`, Node.js, `npm ci`
+in `web/`) and `uv` on the PATH. The first run downloads Python 3.12 and the watcher's
+dependencies if `uv` doesn't have them. Like the integration tests it builds into `web/.next`,
+so stop `make dev` first. `make py-test`, `make py-test-unit` and `make py-test-integration`
+never collect it, and the only thing that keeps it out is that `watcher/e2e` is not in pytest's
+`testpaths`. (The `e2e` marker that every test module there sets is what `make py-test-e2e`
+selects with and what the catalog check requires. It doesn't exclude anything from the other
+targets.) Run part of it with the usual pytest selection:
+
+```sh
+uv run pytest watcher/e2e/test_smoke.py -m e2e -v -k graceful
+```
+
+These variables change a run:
+
+| Variable | Effect |
+| --- | --- |
+| `DATA_HUB_TEST_PGHOST`, `_PGPORT`, `_PGUSER`, `_PGPASSWORD`, `_PGDATABASE` | Which Postgres and which database the test server uses (see [above](#running-tests)). Set `DATA_HUB_TEST_PGDATABASE` to give a run its own database next to the integration tests or another checkout's e2e run. Two runs in one checkout still share `web/.next` |
+| `DATA_HUB_E2E_ARTIFACTS` | Where the files of a failed test go. Default: a folder named `data-hub-e2e-artifacts-<pid>` in your system temp directory. The path is printed in the pytest header and when a test fails |
+| `DATA_HUB_E2E_WHEEL` | A prebuilt watcher wheel, or a folder holding exactly one, to install instead of building one from the checkout. The release workflow sets it to the wheel it is about to publish |
+| `DATA_HUB_E2E_DRIVER` | The kind of [driver](#drivers) the run uses: `cli` (the default, a `data-hub-watcher watch` process) or `service` (the Windows service: [Running the service suite](#running-the-service-suite)). `service` stops the run with a clear message anywhere but an elevated Windows shell |
+
+The suite starts the watcher without anything from your shell that would change what it does:
+every `DATA_HUB_*` variable, the interpreter and index variables of `uv` and `pip`
+(`UV_PYTHON`, `UV_INDEX*`, `UV_EXTRA_INDEX_URL`, `UV_DEFAULT_INDEX`, `PIP_*`) and the proxy
+variables in any case. It sets `NO_PROXY=127.0.0.1,localhost`. A machine that can reach PyPI only
+through a proxy can't run the suite.
+
+### Running the service suite
+
+```powershell
+$env:DATA_HUB_E2E_DRIVER = "service"
+uv run pytest watcher/e2e -m e2e
+```
+
+The same scenario files run against the real Windows service, plus `test_windows_service.py`, which
+covers what only a service has: how it is registered, what the Service Control Manager does when it
+fails, the scheduled-task worker that upgrades it, and uninstalling it. It needs:
+
+- **Windows, in an elevated shell** (Run as Administrator), because the suite installs, starts and
+  removes the `DataHubWatcher` service, and the upgrade worker's scheduled task. The service is
+  one per machine, so nothing else may use it while the suite runs, and a service left by an
+  earlier run is removed when the next test installs its own. Each test removes its service when
+  it ends.
+- What the CLI suite needs: Postgres (on `127.0.0.1:5432` unless the `DATA_HUB_TEST_PG*` variables
+  say otherwise, see [above](#running-tests)), Node.js with `npm ci` in `web/`, and `uv` on the
+  PATH.
+- Nothing installed for the real user: the driver installs the wheel (with the `windows-service`
+  extra, for pywin32) into a `uv tool` folder of the suite's own, so a `data-hub-watcher` you use
+  is left alone. Each test gets a profile folder that stands in for the operator's home
+  (`USERPROFILE`), so `~/.data-hub` (the config, the env file, the state database, the upgrade
+  worker's files) is that test's. The one shared thing is
+  `C:\ProgramData\DataHubWatcher\watcher.log`: the driver reads it from the byte offset where it
+  ended when the test began, and never truncates it.
+
+Some of it takes real time. The SCM restarts a service that failed 60 seconds after the first
+failure and 120 seconds after the second, so the tests of recovery wait for those, and every upgrade
+runs the worker's `uv tool install` as `LocalSystem`, which has its own uv cache. Only three tests
+wait for the SCM's real restarts: a killed service, a refused start (the API is unreachable), and
+the third failure that leaves the service stopped (a kill, then two refused starts, to show that a
+crash and a `SystemExit(1)` count as one service's failures). The other start-up refusals end in the
+same `SystemExit(1)`, so they are shown by their log line and a failure exit code. The suite sets
+the SCM's recovery actions to none right after `service install`, so a test that kills or refuses
+the service sees it stay down as a `watch` process does. Where a test only has to see that the SCM
+does not restart a service, it gives it a 2-second restart instead of waiting for 60. A test of
+recovery asks for what the product configures with `install_service(failure_actions="product")`.
+
+CI splits the service run over three runners that run at the same time, because one would need
+longer than its step allows (see [CI and deployment](ci-and-deployment.md#watcher-end-to-end-tests-watcher-e2eyml)).
+To run one shard, pass its files: `uv run pytest watcher/e2e/test_windows_service.py -m e2e`, or
+the rest of the suite with `--ignore` for the files of the other two.
+
+### How a test is built
+
+Test modules can't import their siblings (pytest runs with `--import-mode=importlib`), so the
+shared code is the package `watcher/e2e/e2e_support/`, which pytest finds through the
+`pythonpath` setting in the root `pyproject.toml`. Pyright and Ruff know about it too.
+
+| Module | What it is for |
+| --- | --- |
+| `drivers` | `WatcherDriver`, the only way a test starts, stops, kills or inspects the watcher. `CliDriver` runs the process on POSIX. See [Drivers](#drivers) |
+| `service_driver`, `windows_scm` | `WindowsServiceDriver`, which installs and drives the real Windows service, and the commands it runs (`sc.exe`, `reg.exe`, `schtasks.exe`, PowerShell for the Event Log) with the parsing of what they print. They import on any platform, and `watcher/tests/test_e2e_service_driver.py` tests them with a fake machine |
+| `server` | `ServerView`: the watcher row, the status the web app shows (`stale` included) and the watcher list route's rows (`list_watchers`), events, heartbeats, files, runs and their derived status, helpers that make a timestamp old, and the S3 stand-in's objects. It has `wait_for_*` methods that fail with a dump of the server's state |
+| `admin` | `Admin`: the actions of a person in the web app, through the real routes. Request upload, delete and restore a run, dismiss a file, change an instrument's status, deregister a watcher, save a config revision, set the release, revoke a token, run the cron sweep |
+| `waiting` | `wait_until`, the deadline poll behind every wait, and `stays_true` for "this must not happen". Tests never sleep for a fixed time. A timeout shows the last value seen. `known_bug()` and `KnownBugStillPresent` are for [tests of known bugs](#the-transition-catalog) |
+| `proxy_helpers` | What several scenario files do with the fault proxy. `silence_heartbeats` keeps a watcher's heartbeats from reaching the server, so a killed watcher's last heartbeat can be aged without one still on its way refreshing it |
+| `platforms` | Which kind of driver a `@pytest.mark.platforms(...)` test is for, and when a run skips it |
+| `files` | Write run folders, files of an exact size on each side of the 1 KB multipart threshold, and a file that keeps growing |
+| `factory`, `artifacts` | The `watcher` fixture's factory and the failure artifacts |
+| `catalog` | The transition catalog and its check (below) |
+
+`watcher/e2e/conftest.py` provides:
+
+| Fixture | What a test gets |
+| --- | --- |
+| `integration_env` (session) | The real Next.js server on Postgres, from `start_test_server()` |
+| `admin` (session) | An `Admin`. Before each test the release's latest version is set to the current watcher version, so nothing is offered an update unless the test asks |
+| `current_wheel`, `current_version` (session) | The wheel under test, built from the checkout or `DATA_HUB_E2E_WHEEL`, and its version |
+| `bumped_wheel`, `bumped_version` (session) | The same code under a higher version (the patch number plus 1000), built when first requested. It is what a self-update installs |
+| `driver_class` (session) | The class of driver for this run, from `DATA_HUB_E2E_DRIVER` |
+| `tool_install` (session) | The shared `uv tool install` of the current wheel, with the extras the driver needs (`windows-service` for the service). Its path contains `/uv/tools/data-hub-watcher`, which is how the watcher knows it is a uv-tool install. A test never asks for it: the `watcher` fixture hands it to the driver |
+| `private_install` | What `watcher(own_install=True)` uses to install the watcher for one PC alone. A watcher that updates itself reinstalls into the folder it runs from, so a test that updates asks the factory for its own install. A test doesn't use this fixture, because that would tie it to one kind of driver |
+| `package_index` | A local package index that serves the wheels in the suite's wheel folder (the current wheel, and the bumped one once a test has asked for `bumped_wheel`). Pass `package_index.url` to `watcher(index_url=...)`. Each test starts with an empty request log and no failure switches |
+| `unreadable_folder` | A folder this user can't list, for the one scenario about an unreadable watch folder. Where the user can list it anyway (root) it skips the test on your machine and fails it on CI, so the scenario can't go untested without anybody noticing |
+| `instrument_id` | A fresh instrument, the only one in the database. The watcher tables and instruments are emptied before every test |
+| `proxy` | A fresh `FaultProxy` between the watcher and the server, with no faults. The watcher's `api_base_url` points at it, and so do the upload URLs |
+| `server` | A `ServerView` |
+| `watch_dir` | An empty watch folder |
+| `watcher` | A factory for configured drivers. `watcher()` returns a `WatcherDriver` and writes `config.yaml` with the watcher's own `save_config`, writes the env file with the API key and the test timers, and registers the watcher with the server, so `driver.watcher_id` is set. It doesn't start it. Everything about the config and the environment variables can be overridden per test. `watcher(own_install=True)` gives the PC an install of its own (with `wheel=` to install another wheel, such as `bumped_wheel`) for a test that updates the watcher, and `watcher(configure=False)` returns a bare PC for a test that runs `init` |
+
+### Drivers
+
+A test asks the driver and never sends a signal itself. `watcher()` returns a `WatcherDriver`,
+the same interface for every kind of driver, and a type checker refuses anything only one kind
+has. There are two kinds, named `"cli"` and `"service"` (`driver.kind`), and a run uses one of
+them (`DATA_HUB_E2E_DRIVER`). `CliDriver` runs `data-hub-watcher watch` as a process, on Linux
+and on macOS. `WindowsServiceDriver` runs the same scenario files with the watcher as the real
+Windows service, and `drivers.py` and `service_driver.py` explain how each method maps to Windows.
+
+What a driver offers:
+
+- **The process:** `start`, `stop` (graceful, returns the exit code), `request_stop`,
+  `interrupt`, `kill`, `wait_exit`, `restart`, `is_running`, `pid` (`None` when it isn't
+  running; compare two readings to see that it is the same process), `exit_code`, and
+  `close`. `start()` waits until the watcher is ready to be stopped, because its signal handlers
+  are installed only after the start-up scan. `start()` and `run_cli()` take `global_args=` for
+  the options that go before the command (`--verbose`, `--config <path>`).
+- **After an update:** `await_upgrade_restart(timeout)` carries an update from "the new version
+  is being installed" to "the watcher is running again", and `installed_version()` reads the
+  version that is installed. Under the CLI the process exits with code 1 once the install is
+  done and the driver starts it again. Under the service, the in-process updater doesn't install:
+  it hands the upgrade to a scheduled-task worker that runs `Stop-Service`, `uv tool install` and
+  `Start-Service`, so the service stops cleanly (exit code 0, a `Service stopped` event, never exit
+  code 1 and never "restarting for auto-update") and a new process starts. A scenario that checks
+  the exit code or the "restarting for auto-update" event is marked `platforms("cli")`. A scenario
+  that waits for an install reads how long from `driver.install_timeout_seconds` (180 s, 300 s under
+  the service, whose worker runs `uv` as `LocalSystem` with a cold cache) and keeps no constant of
+  its own. Under the service the updater can dispatch the same upgrade to the worker twice, so a
+  scenario about the upgrade compares its events with a repeat counted once.
+  `install_wheel(wheel)` puts another version in place of the installed one while the watcher is
+  stopped (the PC must have an install of its own), for the scenario of an update that did not
+  take effect: the new version was installed, and the old one is back at the next start.
+- **What the watcher says:** it names itself by role, so a test uses `started_prefix`
+  (`Watcher started on ` or `Service started on `), `resumed_prefix`, `restarted_prefix`,
+  `operator_stop_message` (`Watcher stopped by user`, or `Service stopped`) and
+  `update_stop_message` (`Watcher restarting for auto-update`, or `Service stopped`), and never
+  the literal text.
+- **One-shot commands and setup:** `run_cli` for a command that runs to its end,
+  `init_interactive` for the real `init --show-key` with piped answers, `write_config` and
+  `write_env`, `hide_uv()` (the watcher can't find `uv`, so an update fails before it starts).
+- **The log:** `log_text(since=None)` is what the watcher logged, each line once and the runs in
+  order. `mark_logs()` gives a `LogMark` that `log_text(since=mark)` and `wait_for_log(regex,
+  timeout, since=mark)` read from. Never count lines in `log_files()`, which are the files for
+  the failure artifacts and repeat each other (the CLI logs to the console and to `watcher.log`).
+- **The state database:** `state_query` for a SELECT, `state_execute` for a write, and two
+  switches for the watcher's own database: `stall_writes(table)` makes its next insert into the
+  table take minutes (a watcher stuck inside it is killed when the block ends, and the trigger is
+  always dropped) and `fail_writes(table, message)` makes inserts fail and roll back their
+  transaction. `wait_for_state_db_busy(hold_seconds)` waits until another process has held the
+  database's write lock for that long without a break, which is how a scenario knows the watcher
+  is stuck inside a stalled write without depending on which of its writes share a transaction.
+  A test never opens the database itself.
+
+Nothing supervises a watcher that runs as a CLI process. After an update it exits with code 1 and
+stays down, and `await_upgrade_restart` is the driver standing in for a supervisor and starting
+it again.
+
+**The service driver.** `WindowsServiceDriver` does what an operator does, from an elevated shell:
+`uv tool install "data-hub-watcher[windows-service]"`, `init` (through `run_cli`, in the PC's
+profile folder), `data-hub-watcher service install --env-path <the PC's env file>` and `service
+start`. The service is installed the first time the driver starts it, because `service install`
+reads the config and a scenario may write it after the PC is built. Under the hood:
+
+- `start()` waits for the line the service logs when it has finished starting (`Data Hub Watcher is
+  running`, or `is waiting`), because the SCM reports `RUNNING` as soon as the process is up.
+  `wait_exit()` and `kill()` (`taskkill /F /T /PID`) read the SCM's state with `sc queryex`, and
+  `exit_code` is its win32 exit code: 0 after a clean stop, 1067 after a kill, and 536870913
+  (0x20000001) for anything raised out of the service, a `SystemExit(1)` and an uncaught error alike
+  (pywin32 catches what leaves `SvcRun`). It is never the 1 of the `SystemExit`.
+- There is one service per machine. A driver that installs takes it over from whichever driver had
+  it, and `close()` removes it only if the driver is still the owner. A driver that no longer owns
+  the service reports it as not running, and `request_stop()`, `kill()` and `wait_exit()` raise, so
+  a test can't stop another PC's service. A test with several PCs starts them one after the other.
+- `close()` (and the next install) removes the service in this order: the recovery actions off, so
+  that nothing killed comes back; the upgrade task ended and deleted, and any worker still running
+  killed, because a worker's last step is `Start-Service`; the stop, a kill if the service won't
+  stop (`sc stop` answers 1061 while it is stopping and 1052 while it is starting, and does nothing,
+  so the driver waits for those); `service uninstall`; and a wait until the SCM has forgotten the
+  service.
+- `service install` configures restarts after 60 s and 120 s. The driver turns them off right after
+  (`sc failure DataHubWatcher reset= 0 actions= ""`), so that a scenario which kills the watcher or
+  refuses its start sees it stay down. `install_service(failure_actions="product")` keeps them.
+- The env file gets a `PATH` that leads to `uv` (a service has no user PATH, and the updater needs
+  it). `hide_uv()` replaces it with `System32`.
+- The log text is `watcher.log` (machine-wide, read from an offset), `service-bootstrap.log`, the
+  worker's `upgrade-worker.log` and, after a failed run, the one Event Log entry pywin32 writes when
+  the service fails (`The instance's SvcRun() method failed`, with the traceback). The service's own
+  log lines reach the Event Log as well, but `watcher.log` has them, so they aren't copied again.
+  `log_files()` adds the worker's script and the upgrade sentinels and an export of the service's
+  Event Log entries for the failure artifacts.
+- `interrupt()` raises `NotImplementedError`, and `start()` refuses `args` and `global_args`: a
+  service has no Ctrl+C and takes no options.
+
+### Marking a test for one kind of driver
+
+A test in a shared file runs under both kinds of driver. One that only makes sense for one is
+marked, and `conftest.py` skips it under the other kind before any fixture is set up:
+
+```python
+@pytest.mark.platforms("cli")  # Ctrl+C: the service has none
+@pytest.mark.covers("process.interrupt->clean_exit")
+def test_an_interrupt_stops_the_watcher(...): ...
+```
+
+The catalog check reads the marker, so it knows which transitions each kind covers, and it
+refuses the other ways of skipping a test, which would hide it from the check (see
+[the catalog](#the-transition-catalog)). A skip that depends on the machine is a fixture in
+`conftest.py` (`unreadable_folder`).
+
+### The overrides it sets
+
+The watcher's timers are minutes long, so the suite shrinks them with the [test-only
+overrides](watcher.md#test-only-overrides), written to the env file the watcher loads
+(`~/.data-hub/.env.<environment>` under the test's `HOME`): a heartbeat and a queue poll every
+2 seconds, an update check every 5th heartbeat, and 2 quiet heartbeats before an idle-gated
+update. A self-update scenario adds `DATA_HUB_WATCHER_INDEX_URL`, pointing at the local index.
+Server timers are not waited for: `ServerView.age_heartbeat` moves `last_heartbeat_at` into
+the past to cross the 5-minute stale mark and the 15-minute sweep grace.
+
+### The transition catalog
+
+The watcher and the server routes it calls are small state machines. `e2e_support/catalog/`
+lists every transition once, with an ID such as `file.pending->stable`, in one module per
+machine (`setup_startup`, `detection`, `upload_auto`, `upload_queue`, `heartbeat_status`,
+`events`, `registration_tokens`, `config_sync`, `shutdown`, `self_update`,
+`windows_service`). Each transition has a status:
+
+- `covered`: a test shows it.
+- `xfail_bug`: a known gap. The test asserts the intended behavior, so it fails today and fails
+  loudly when the bug is fixed, which is when the mark comes off and the status becomes
+  `covered`.
+- `excluded`: not tested here, with the reason and where it is tested instead.
+
+A test claims transitions with `@pytest.mark.covers("file.pending->stable", ...)`, on a function or
+a class. `watcher/tests/test_e2e_catalog.py` reads `watcher/e2e/test_*.py` with `ast` (nothing is
+imported or run), so it is fast and runs in `make py-test-unit` and in pull requests. It fails
+when a test names an ID that isn't in the catalog, when a transition that isn't excluded has no
+test, when an `xfail_bug` transition has no strict xfail test or a `covered` one is covered
+only by xfail tests, and when an excluded transition has a test.
+
+**Kinds of driver.** A transition exists for the kinds of driver in its `platforms` (`cli`,
+`service`). A test in a shared file runs under both unless `@pytest.mark.platforms("cli")` (or
+`"service"`) narrows it, and tests in `test_windows_service.py` run only under the service. The
+check fails when a test runs under a kind where a transition it covers doesn't exist, and a
+transition that exists for both kinds needs a test that runs under both. Transitions that exist
+only under the service (the `windows_service` machine) are covered by `test_windows_service.py`, and
+the check asks for a test for each.
+
+**Tests of known bugs.** They all look the same, so a broken precondition can't hide as the
+bug:
+
+```python
+@pytest.mark.xfail(
+    strict=True,
+    raises=KnownBugStillPresent,
+    reason="ENG-2116: the final heartbeat arrives first",
+)
+@pytest.mark.covers("process.stop->event_before_stopped_heartbeat")
+def test_the_stop_event_reaches_the_server_first(...):
+    ...  # The precondition: the watcher runs, it was stopped, the rows exist.
+    with known_bug():
+        assert event.created_at <= final.created_at
+```
+
+`known_bug()` turns an `AssertionError` raised inside it (a `WaitTimeout` too) into
+`KnownBugStillPresent`, which the `xfail` lists in `raises=`. Anything that fails outside the
+block is a different failure, so the test fails and doesn't count as the bug. Put only the
+assertion that shows the intended behavior inside. The check enforces the pattern: the xfail is
+strict and has `raises=KnownBugStillPresent`, the test has a `with known_bug():` block and names
+only `xfail_bug` transitions, its reason starts with the bug of one of them (its Linear issue, such
+as `ENG-2116:`, or a short slug until the issue is filed), and
+no other test names an `xfail_bug` transition. To see that a test fails inside the block, run it
+with `--runxfail`.
+
+**Nothing hides a test from the check.** A test file may not contain `pytest.skip(...)`,
+`pytest.xfail(...)`, `pytest.importorskip(...)`, the `skip` and `skipif` marks,
+`pytest.param(..., marks=...)`, an `xfail` with a condition, or a mark the check can't read (a
+decorator that isn't `pytest.mark.<name>`, or a mark kept in a variable). Marks that appear at
+several levels follow pytest: for `xfail` and `platforms` the closest wins (function, then class,
+then module), and `covers` adds up.
+
+To see what is missing while you write scenarios, run
+`cd watcher/e2e && uv run python -m e2e_support.catalog.check --summary`.
+
+### When a test fails
+
+The files that explain it are copied to `$DATA_HUB_E2E_ARTIFACTS/<test id>/`: the part of the
+server log written during the test, each watcher's logs with its stdout and stderr, its state
+database, `config.yaml`, the server's view of the watcher when the test failed, the fault
+proxy's request log, and a listing of the S3 stand-in. Under the service a watcher's files are
+`watcher.log` (the whole machine's), `service-bootstrap.log`, `upgrade-worker.log` and
+`event-log.txt`, an export of the Windows Event Log entries about the service. A run that is interrupted (Ctrl+C, or CI
+cancelling the job) keeps the files of the test that was running. In CI the folder is uploaded as
+the `watcher-e2e-linux-artifacts` artifact, for a failed or a cancelled run.
+
+### Why it isn't in pull-request CI
+
+Every test starts a real watcher and some wait for a restart or an update, so the suite is
+much slower than the rest. It runs where a regression would otherwise reach lab PCs: on
+every push to `production`, by hand with `workflow_dispatch` on any branch, and as a
+required job of the release workflow before a wheel is published. Pull requests get the
+catalog check, which is fast. See [CI and deployment](ci-and-deployment.md#watcher-end-to-end-tests-watcher-e2eyml).
+
 ## In CI
 
 `python-test.yml` runs `make py-test` (unit + integration together, one
 Postgres 17 service container). `typescript-test.yml` runs `make fe-test-unit`
-then `make fe-test-integration` as separate steps. See
-[CI and deployment](ci-and-deployment.md) for the full workflow list.
+then `make fe-test-integration` as separate steps. `watcher-e2e.yml` runs
+`make py-test-e2e`, on pushes to `production`, on demand, and before a watcher
+release is published. See [CI and deployment](ci-and-deployment.md) for the full
+workflow list.

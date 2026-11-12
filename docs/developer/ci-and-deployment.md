@@ -2,9 +2,11 @@
 
 ## GitHub Actions
 
-Six workflows run on pushes to `staging`/`production` and on pull requests targeting those branches. `apply-migrations.yml` runs on merges to `staging`/`production` that touch migration files, `deploy-lambda.yml` runs on merges that touch the Lambda or its infrastructure (see [Lambda (AWS)](#lambda-aws)), and `publish-watcher.yml` runs only on `watcher-v*` tag pushes and manual dispatch. `docs-screenshots.yml` runs monthly and on demand (see [Docs screenshots](local-development.md#docs-screenshots)).
+Six workflows run on pushes to `staging`/`production` and on pull requests targeting those branches. `apply-migrations.yml` runs on merges to `staging`/`production` that touch migration files, `deploy-lambda.yml` runs on merges that touch the Lambda or its infrastructure (see [Lambda (AWS)](#lambda-aws)), and `publish-watcher.yml` runs only on `watcher-v*` tag pushes and manual dispatch. `watcher-e2e.yml` is never part of a pull request: it runs on pushes to `production`, on manual dispatch, and as a job of `publish-watcher.yml`. `docs-screenshots.yml` runs monthly and on demand (see [Docs screenshots](local-development.md#docs-screenshots)).
 
 ### Python lint and typecheck (`python-lint.yml`)
+
+Runs when a change touches `lambda/`, `packages/`, `watcher/` (which includes the end-to-end suite in `watcher/e2e/`), the root `pyproject.toml`, `uv.lock`, the `Makefile` or the workflow itself.
 
 1. Install dependencies with `uv sync --all-packages`.
 2. `make py-lint` — Ruff linter and format check.
@@ -15,6 +17,7 @@ Six workflows run on pushes to `staging`/`production` and on pull requests targe
 - Starts a Postgres 17 service container.
 - Installs both Node.js 24 and Python packages.
 - `make py-test` — runs all pytest tests (unit and integration). Integration tests build and start a real Next.js production server, seed a test database, and exercise the Lambda and watcher against the live API.
+  It includes `watcher/tests/test_e2e_catalog.py`, which checks that the watcher end-to-end tests and their transition catalog agree (see [Testing](testing.md#the-transition-catalog)). The end-to-end tests themselves are not run here.
 - `make py-watcher-cli-catalog`, then fails if `docs/site/src/lib/cli-catalog.snapshot.json` changed. The docs site renders its watcher CLI reference from that committed file, so a change to the CLI or a watcher version bump has to commit the regenerated snapshot. The MCP docs bundle embeds the same page, so run `make docs-catalogs` and commit both files, or `docs-lint.yml` fails next.
 
 ### TypeScript lint and typecheck (`typescript-lint.yml`)
@@ -53,13 +56,53 @@ Triggered on pushes to `staging`/`production` (i.e. PR merges) that change files
 
 Production is gated by a required-reviewer protection rule on the `production` GitHub environment, so production migrations pause for manual approval before applying. Each environment needs a `DATABASE_URL` secret pointing at its PostgreSQL connection string, and that database must accept connections from GitHub-hosted runners.
 
+### Watcher end-to-end tests (`watcher-e2e.yml`)
+
+Runs the end-to-end suite described in [Testing](testing.md#end-to-end-tests-of-the-watcher): the real watcher against the real Next.js server and Postgres. It is not part of pull-request CI. It runs:
+
+- on every push to `production`, with no path filter,
+- on `workflow_dispatch`, from the Actions tab on any branch, to try a change before it is promoted, and
+- through `workflow_call`, as the `e2e` job of `publish-watcher.yml`. That call passes the name of the artifact that holds the wheel the release built (`wheel-artifact: dist`), which the job downloads and hands to the suite in `DATA_HUB_E2E_WHEEL`, so the release is tested as built.
+
+The `linux` job (`ubuntu-latest`, 45-minute limit):
+
+1. Starts a Postgres 17 service container and installs Node.js 24, `uv`, the web packages (`npm ci`) and the Python packages.
+2. Downloads the wheel artifact, when one is named.
+3. `make py-test-e2e`, with `DATA_HUB_E2E_ARTIFACTS` set to a folder under the runner's temp directory. The step has a 35-minute limit of its own, under the job's, so a hung test fails the step and the steps after it still run (a job that hits its own limit is cancelled with no chance to upload). `pytest` prints the stack of every thread when one test takes longer than 5 minutes (`-o faulthandler_timeout=300` in the Makefile target), which shows where a hang is.
+4. If the tests fail or the job is cancelled, uploads that folder as the `watcher-e2e-linux-artifacts` artifact (kept 14 days): per failed test, or for the test that was running when the run was cancelled, the watcher logs and state database, the server log, the fault proxy's request log, and a listing of the S3 stand-in.
+
+A release commit runs the suite twice: once when it is pushed to `production`, and again when the `watcher-v*` tag on it starts `publish-watcher.yml`, whose `e2e` job is a release gate. That is intended, because the tag run tests the wheel it is about to publish. Don't tag before the push run has finished unless you want the suite to run twice at once.
+
+The `windows` job (`windows-latest`, 90-minute limit) runs the same suite against the real Windows service, with `DATA_HUB_E2E_DRIVER=service`. The suite installs the watcher with `uv tool install`, sets it up with `init` and `service install`, and drives the service from outside. It has the same triggers and inputs as the `linux` job.
+
+The job is a matrix of three shards that run at the same time, each on its own runner (and so with its own Service Control Manager). A single runner would need longer than the step's limit: the service tests wait for the SCM's 60 and 120 second restarts, and every upgrade runs `uv` as `LocalSystem`. `fail-fast` is off, so a failure in one shard doesn't cancel the others. Every test file runs in exactly one shard:
+
+| Shard | Runs |
+| --- | --- |
+| `service` | `test_windows_service.py`, what only a Windows service has |
+| `updates-uploads` | `test_self_update.py`, `test_upload_auto.py` and `test_upload_queue.py`, the slow shared files |
+| `rest` | everything else in `watcher/e2e`: it ignores the files the other two name, so a new test file is picked up here and can't be left out. A file that is renamed makes the shard that names it fail with "file or directory not found" |
+
+Each shard's steps are:
+
+1. Starts PostgreSQL. Windows runners cannot run service containers, so the job uses the PostgreSQL that the runner image ships. The readme for the Windows 2025 image, which `windows-latest` points to, lists it as version 17.11, a Windows service named `postgresql-x64-17` with start type Disabled, and a `PGBIN` folder with the client tools (see [the image readme](https://github.com/actions/runner-images/blob/main/images/windows/Windows2025-Readme.md)). The readme gives no command to start it. The `Start PostgreSQL` step (PowerShell) finds the service by the `postgresql-x64-*` name, sets its start type to Manual, starts it, and waits up to 90 seconds for `pg_isready` to succeed on port 5432. The readme gives the `postgres` password as `root`. The step uses that password once to set a random one for this run, masks it in the log, and passes it to later steps through `GITHUB_ENV`. If the image has no such service, the step fails with a message that says so.
+2. Installs Node.js 24, `uv`, the web packages (`npm ci`) and the Python packages with `uv sync --all-packages --extra windows-service`. The extra adds pywin32, which installs only on Windows.
+3. Downloads the wheel artifact, when one is named.
+4. Runs `uv run pytest <the shard's files> -m e2e -v --durations=50 -o faulthandler_timeout=300`, the same command as `make py-test-e2e` with the shard's files. The job calls pytest directly because the image is not guaranteed to have `make`. `--durations=50` lists the 50 slowest tests at the end of the log, which shows where a shard's time goes. The step has a 75-minute limit of its own, so a hung test fails the step and the steps after it still run.
+5. If the tests fail or the job is cancelled, exports the Event Log entries of the last three hours that are about the service to `event-log.txt`: the Application log's `DataHubWatcher` and `Python Service` entries, and the Service Control Manager's entries that name the service. The providers are in the query, so a busy log can't push the entries out before they are filtered. Then it uploads the folder as the `watcher-e2e-windows-<shard>-artifacts` artifact (kept 14 days). The suite writes its failure files to that folder, as it does for the `linux` job.
+
+The harness reads its database settings from `DATA_HUB_TEST_PGHOST`, `DATA_HUB_TEST_PGPORT`, `DATA_HUB_TEST_PGUSER`, `DATA_HUB_TEST_PGPASSWORD` and `DATA_HUB_TEST_PGDATABASE`, and ignores the standard `PG*` variables. The job sets the first, second, third and fifth in its `env:` block, and step 1 sets the password.
+
+The steps run in Git Bash, and the runner runs as an administrator, which `service install` needs. The target for each shard is under an hour.
+
 ### Publish watcher (`publish-watcher.yml`)
 
-Triggered on `watcher-v*` tag pushes and manual `workflow_dispatch` from `production`. The `build` job's `if:` guard refuses dispatches from any other branch so a feature branch can't accidentally publish whatever version is in its `pyproject.toml`. Builds the `data-hub-watcher` package, publishes it to PyPI via OIDC trusted publishing, and verifies the upload by installing the freshly published wheel into a clean venv. Three sequential jobs:
+Triggered on `watcher-v*` tag pushes and manual `workflow_dispatch` from `production`. The `build` job's `if:` guard refuses dispatches from any other branch so a feature branch can't accidentally publish whatever version is in its `pyproject.toml`. Builds the `data-hub-watcher` package, tests it end to end, publishes it to PyPI via OIDC trusted publishing, and verifies the upload by installing the freshly published wheel into a clean venv. Four sequential jobs (a manual dispatch runs all of them again, the end-to-end tests included. To retry after a PyPI outage, use "Re-run failed jobs" on the failed run, which runs only the jobs that didn't pass):
 
 1. **build** — Verifies the git tag matches `watcher/pyproject.toml` (`make py-check-watcher-version`), builds the wheel and sdist with `uv build --package data-hub-watcher`, and uploads them as a workflow artifact.
-2. **publish** — Downloads the artifact and uploads it to PyPI with [`pypa/gh-action-pypi-publish`](https://github.com/pypa/gh-action-pypi-publish) using OIDC trusted publishing. Gated on the `pypi` GitHub deployment environment so reviewer-required releases can be enforced from the GitHub UI without editing the workflow file.
-3. **verify** — In a fresh `uv venv`, installs `data-hub-watcher==<tag-version>` from PyPI and runs `data-hub-watcher --version` plus `python -c "import data_hub_watcher"` as a smoke test. Catches stale-mirror shadows and module-level import side-effect crashes.
+2. **e2e** — Calls [`watcher-e2e.yml`](#watcher-end-to-end-tests-watcher-e2eyml) with the `dist` artifact, so the end-to-end suite installs the wheel that is about to be published. It is a release gate: `publish` needs it, and the `linux` job and all three `windows` shards of `watcher-e2e.yml` must pass, so a failing test stops the release before the `pypi` environment asks for approval.
+3. **publish** — Downloads the artifact and uploads it to PyPI with [`pypa/gh-action-pypi-publish`](https://github.com/pypa/gh-action-pypi-publish) using OIDC trusted publishing. Gated on the `pypi` GitHub deployment environment so reviewer-required releases can be enforced from the GitHub UI without editing the workflow file.
+4. **verify** — In a fresh `uv venv`, installs `data-hub-watcher==<tag-version>` from PyPI and runs `data-hub-watcher --version` plus `python -c "import data_hub_watcher"` as a smoke test. Catches stale-mirror shadows and module-level import side-effect crashes.
 
 See the [Watcher (PyPI)](#watcher-pypi) deployment section for the operator-facing release flow.
 
