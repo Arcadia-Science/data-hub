@@ -177,7 +177,7 @@ TRANSITIONS: tuple[Transition, ...] = (
     # transaction and the pending record is written in another, so any interruption between them
     # (a kill, or a write that fails) leaves a reported file that nothing will upload. One fix
     # (write both together, or the pending record first) makes both scenarios pass, which is why
-    # they share the slug.
+    # they share one issue.
     xfail_bug(
         MACHINE,
         "upload.pending_record_failed->retried_after_restart",

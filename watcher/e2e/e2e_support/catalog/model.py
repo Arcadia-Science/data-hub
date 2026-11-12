@@ -78,7 +78,10 @@ class Transition:
         if not self.platforms or not self.platforms <= BOTH:
             raise ValueError(f"{self.id}: platforms must be a non-empty subset of {sorted(BOTH)}")
         if self.status == "xfail_bug" and not self.bug:
-            raise ValueError(f"{self.id}: an xfail_bug transition needs a bug slug")
+            raise ValueError(
+                f"{self.id}: an xfail_bug transition needs a bug: its Linear issue "
+                "(such as ENG-2116) or a short slug"
+            )
         if self.status != "xfail_bug" and self.bug:
             raise ValueError(f"{self.id}: only an xfail_bug transition has a bug")
         if self.status == "excluded" and not self.reason:

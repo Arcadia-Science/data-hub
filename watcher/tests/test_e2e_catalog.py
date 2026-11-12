@@ -139,7 +139,7 @@ def missing_ids(report: CatalogReport) -> set[str]:
 
 
 # The way a known-bug test is written: strict, raises the exception `known_bug()` makes, a
-# reason that starts with the bug's slug, and only the intended-behavior assertion in the block.
+# reason that starts with the bug's name, and only the intended-behavior assertion in the block.
 BUG_MARKS = """
     @pytest.mark.covers("thing.c->d")
     @pytest.mark.xfail(
@@ -711,20 +711,20 @@ def test_a_known_bug_test_names_only_known_bug_transitions(tmp_path: Path) -> No
     assert "names only xfail_bug transitions, not thing.a->b" in problems[0]
 
 
-def test_the_xfail_reason_starts_with_the_slug_of_a_transition_the_test_names(
+def test_the_xfail_reason_starts_with_the_bug_of_a_transition_the_test_names(
     tmp_path: Path,
 ) -> None:
-    wrong_slug = bug_problems(
+    wrong_bug = bug_problems(
         tmp_path, GOOD_BUG_TEST.replace('"bug-99-example: stuck"', '"bug-98-other: stuck"')
     )
     no_colon = bug_problems(
         tmp_path, GOOD_BUG_TEST.replace('"bug-99-example: stuck"', '"bug-99-example-ish: stuck"')
     )
-    no_slug = bug_problems(tmp_path, GOOD_BUG_TEST.replace("bug-99-example: ", ""))
+    no_bug = bug_problems(tmp_path, GOOD_BUG_TEST.replace("bug-99-example: ", ""))
 
-    assert len(wrong_slug) == len(no_colon) == len(no_slug) == 1
-    assert "must start with 'bug-99-example: ...'" in wrong_slug[0]
-    assert "bug-98-other" in wrong_slug[0]
+    assert len(wrong_bug) == len(no_colon) == len(no_bug) == 1
+    assert "must start with 'bug-99-example: ...'" in wrong_bug[0]
+    assert "bug-98-other" in wrong_bug[0]
 
 
 def test_a_test_that_is_not_an_xfail_cannot_name_a_known_bug_transition(tmp_path: Path) -> None:
