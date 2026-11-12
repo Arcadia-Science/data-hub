@@ -1371,6 +1371,28 @@ class TestRunServiceLoopUpgradeRestart:
         log_messages = [c.args[0] for c in harness.sm.LogInfoMsg.call_args_list]
         assert any("upgraded" in m.lower() for m in log_messages)
 
+    def test_a_system_shutdown_wins_over_a_pending_upgrade_restart(
+        self, harness: _LoopHarness
+    ) -> None:
+        # The PC is going down, so nothing restarts the process: the stop must not claim a
+        # restart, and the service must not exit with the failure code that asks the SCM
+        # for one. The next boot loads the upgraded watcher anyway.
+        harness.runtime.shutdown_event.set()
+        harness.runtime.upgrade_restart_event.set()
+        stop_event = threading.Event()
+        stop_event.set()
+        system_shutdown = threading.Event()
+        system_shutdown.set()
+
+        harness.svc._run_service_loop(stop_event, harness.sm, system_shutdown)
+
+        assert [message for _rt, message in harness.stop_calls] == [
+            "Service stopped: Windows is shutting down"
+        ]
+        assert harness.stop_system_shutdown == [True]
+        log_messages = [c.args[0] for c in harness.sm.LogInfoMsg.call_args_list]
+        assert not any("upgraded" in m.lower() for m in log_messages)
+
 
 class TestRunServiceLoopChecksumSync:
     def test_checksum_api_error_is_a_warning_not_a_fatal(self, harness: _LoopHarness) -> None:

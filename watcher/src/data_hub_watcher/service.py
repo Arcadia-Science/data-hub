@@ -611,7 +611,7 @@ def _run_service_loop(
         attach_servicemanager_handler,
         setup_file_logging,
     )
-    from data_hub_watcher.runtime import WatcherSupervisor
+    from data_hub_watcher.runtime import ShutdownReason, WatcherSupervisor
 
     # Wire up file logging + Windows Event Log routing BEFORE any
     # other work, so a registry-read or env-load failure on the very
@@ -750,12 +750,18 @@ def _run_service_loop(
     # event message reflects whether this is an upgrade-driven restart
     # or a normal stop. Shared with the CLI ``watch`` path via
     # ``classify_shutdown`` so the two entrypoints can't drift.
-    decision = supervisor.classify_shutdown(
-        system_shutdown=system_shutdown is not None and system_shutdown.is_set()
-    )
-    supervisor.stop(
-        stopped_message=decision.stopped_message, system_shutdown=decision.system_shutdown
-    )
+    is_system_shutdown = system_shutdown is not None and system_shutdown.is_set()
+    if is_system_shutdown:
+        # The PC is going down, so nothing restarts the process: this wins over an
+        # auto-update restart that was pending at the same time, and the next boot
+        # loads the new version anyway.
+        decision = ShutdownReason(
+            is_upgrade_restart=False,
+            stopped_message=f"{supervisor.role} stopped: Windows is shutting down",
+        )
+    else:
+        decision = supervisor.classify_shutdown()
+    supervisor.stop(stopped_message=decision.stopped_message, system_shutdown=is_system_shutdown)
 
     if decision.is_upgrade_restart:
         logger.info("%s restarting to load upgraded watcher", SERVICE_DISPLAY_NAME)

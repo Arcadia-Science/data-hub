@@ -637,38 +637,6 @@ class TestClassifyShutdown:
         finally:
             rt.state_db.close()
 
-    def test_system_shutdown_has_its_own_message_and_mark(
-        self, tmp_path: Path, db_path: Path
-    ) -> None:
-        cfg = _make_config(tmp_path, upload_mode="auto")
-        rt = build_runtime(client=MagicMock(), cfg=cfg, db_path=db_path)
-        try:
-            decision = classify_shutdown(rt, role="Service", system_shutdown=True)
-            # Data Hub tells a restart of the PC from a `service stop` by this text.
-            assert decision == ShutdownReason(
-                is_upgrade_restart=False,
-                stopped_message="Service stopped: Windows is shutting down",
-                system_shutdown=True,
-            )
-            assert classify_shutdown(rt, role="Service").system_shutdown is False
-        finally:
-            rt.state_db.close()
-
-    def test_system_shutdown_wins_over_a_pending_upgrade_restart(
-        self, tmp_path: Path, db_path: Path
-    ) -> None:
-        # The PC is going down, so nothing restarts the process: it must not claim a
-        # restart, and the service must not exit with the failure code that asks for one.
-        cfg = _make_config(tmp_path, upload_mode="auto")
-        rt = build_runtime(client=MagicMock(), cfg=cfg, db_path=db_path)
-        try:
-            rt.upgrade_restart_event.set()
-            decision = classify_shutdown(rt, role="Service", system_shutdown=True)
-            assert decision.is_upgrade_restart is False
-            assert decision.system_shutdown is True
-        finally:
-            rt.state_db.close()
-
     def test_role_is_substituted_into_both_messages(self, tmp_path: Path, db_path: Path) -> None:
         cfg = _make_config(tmp_path, upload_mode="auto")
         rt = build_runtime(client=MagicMock(), cfg=cfg, db_path=db_path)

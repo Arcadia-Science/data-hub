@@ -124,10 +124,6 @@ class ShutdownReason:
 
     is_upgrade_restart: bool
     stopped_message: str
-    # True when Windows is shutting down or restarting. The final `stopped`
-    # heartbeat then carries `SYSTEM_SHUTDOWN_STATUS_REASON`, so the server keeps
-    # the instrument's requested uploads queued across the restart.
-    system_shutdown: bool = False
 
 
 # uv's diagnostic lines start with ``error:`` (or ``Error:`` on a few
@@ -200,23 +196,7 @@ def _expecting_worker_result(outcome: object) -> bool:
     return sys.platform == "win32"
 
 
-def _system_shutdown_reason(role: str) -> ShutdownReason:
-    """The stop that Windows shutting down or restarting causes.
-
-    It wins over an auto-update restart that was pending at the same time: the
-    PC is going down, so nothing restarts the process, and the next boot loads
-    the new version anyway.
-    """
-    return ShutdownReason(
-        is_upgrade_restart=False,
-        stopped_message=f"{role} stopped: Windows is shutting down",
-        system_shutdown=True,
-    )
-
-
-def classify_shutdown(
-    rt: WatcherRuntime, *, role: str, system_shutdown: bool = False
-) -> ShutdownReason:
+def classify_shutdown(rt: WatcherRuntime, *, role: str) -> ShutdownReason:
     """Pick the right ``stopped_message`` for the WATCHER_STOPPED event.
 
     *role* is the human-readable noun for this entrypoint
@@ -224,16 +204,10 @@ def classify_shutdown(
     so the message reads naturally in the events stream regardless of
     which path triggered the shutdown.
 
-    *system_shutdown* says the Windows service was told that Windows is shutting
-    down or restarting, which gets its own message so the events stream can tell
-    a restart of the PC from a ``service stop``.
-
     Note: the CLI's signal-initiated stop has its own "stopped by user"
     message and does not go through this helper — at that point we
     already know the cause is an operator signal, not the auto-updater.
     """
-    if system_shutdown:
-        return _system_shutdown_reason(role)
     if rt.upgrade_restart_event.is_set():
         return ShutdownReason(
             is_upgrade_restart=True,
@@ -954,11 +928,9 @@ class WatcherSupervisor:
         """Make a blocked :meth:`poll` return early (used by signal handlers)."""
         self._wake.set()
 
-    def classify_shutdown(self, *, system_shutdown: bool = False) -> ShutdownReason:
+    def classify_shutdown(self) -> ShutdownReason:
         if self.rt is not None:
-            return classify_shutdown(self.rt, role=self.role, system_shutdown=system_shutdown)
-        if system_shutdown:
-            return _system_shutdown_reason(self.role)
+            return classify_shutdown(self.rt, role=self.role)
         if self.upgrade_restart_event.is_set():
             return ShutdownReason(
                 is_upgrade_restart=True,
