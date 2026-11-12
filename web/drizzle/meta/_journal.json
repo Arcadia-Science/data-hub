@@ -432,8 +432,15 @@
     {
       "idx": 61,
       "version": "7",
-      "when": 1794440772120,
-      "tag": "0061_same_sasquatch",
+      "when": 1794338672646,
+      "tag": "0061_watcher_config_revisions",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1794447861481,
+      "tag": "0062_ordinary_blur",
       "breakpoints": true
     }
   ]

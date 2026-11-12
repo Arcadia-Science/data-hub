@@ -1,5 +1,16 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import { actorToken, actorUser } from "@/lib/api/actor";
+import { readSettingsFromYaml } from "@/lib/api/watcher-config/from-yaml";
+import {
+  type ConfigRevision,
+  createWebConfigRevision,
+  getIntendedConfigRevision,
+  getPendingConfigRevision,
+} from "@/lib/api/watcher-config/revisions";
+import {
+  type WatcherConfigSettings,
+  watcherConfigSettingsSchema,
+} from "@/lib/api/watcher-config/settings";
 import {
   type EffectiveStatus,
   getWatcherById,
@@ -8,13 +19,59 @@ import {
   getWatcherList,
 } from "@/lib/api/watchers";
 import { toolRegistrationConfig } from "@/lib/mcp/catalog/register";
-import { errorResult, structuredResult } from "@/lib/mcp/tools/helpers";
+import {
+  errorResult,
+  getMcpUserId,
+  requireMcpAdmin,
+  requireMcpWrite,
+  structuredResult,
+} from "@/lib/mcp/tools/helpers";
 import {
   getWatcherHeartbeatsTool,
   getWatcherTool,
   listWatcherEventsTool,
   listWatchersTool,
+  updateWatcherConfigTool,
 } from "./watchers.defs";
+
+function toMcpRevision(rev: ConfigRevision) {
+  return {
+    revision: rev.revision,
+    source: rev.source,
+    status: rev.status,
+    statusReason: rev.statusReason,
+    settings: rev.settings,
+    createdAt: rev.createdAt,
+    resolvedAt: rev.resolvedAt,
+    createdByUser: actorUser(rev.createdBy),
+    createdByToken: actorToken(rev.createdBy),
+  };
+}
+
+type SettingsPatch = Partial<
+  Omit<WatcherConfigSettings, "run_detection"> & {
+    run_detection: Partial<WatcherConfigSettings["run_detection"]>;
+  }
+>;
+
+// Settings the caller left out keep their current values. `run_detection`
+// merges field by field; `file_patterns` replaces the whole list.
+function mergeSettings(
+  base: WatcherConfigSettings,
+  patch: SettingsPatch
+): unknown {
+  const { run_detection: runDetection, ...rest } = patch;
+  return {
+    ...base,
+    ...Object.fromEntries(
+      Object.entries(rest).filter(([, value]) => value !== undefined)
+    ),
+    run_detection: {
+      pattern: runDetection?.pattern ?? base.run_detection.pattern,
+      recursive: runDetection?.recursive ?? base.run_detection.recursive,
+    },
+  };
+}
 
 export function registerWatcherTools(server: McpServer) {
   server.registerTool(
@@ -45,10 +102,15 @@ export function registerWatcherTools(server: McpServer) {
         return errorResult(`Watcher '${watcherId}' not found.`);
       }
       const { deregisteredBy, ...fields } = watcher;
+      const pending =
+        watcher.configRevisionStatus === "pending"
+          ? await getPendingConfigRevision(watcherId)
+          : null;
       return structuredResult({
         ...fields,
         deregisteredByUser: actorUser(deregisteredBy),
         deregisteredByToken: actorToken(deregisteredBy),
+        pendingConfigRevision: pending ? toMcpRevision(pending) : null,
       });
     }
   );
@@ -92,6 +154,73 @@ export function registerWatcherTools(server: McpServer) {
         lookbackHours,
         total,
         heartbeats: rows,
+      });
+    }
+  );
+
+  server.registerTool(
+    updateWatcherConfigTool.name,
+    toolRegistrationConfig(updateWatcherConfigTool),
+    async ({ watcherId, baseRevision, settings }, ctx) => {
+      const authInfo = ctx.http?.authInfo;
+      const writeError = requireMcpWrite(authInfo);
+      if (writeError) {
+        return writeError;
+      }
+      const adminError = await requireMcpAdmin(authInfo);
+      if (adminError) {
+        return adminError;
+      }
+      // `requireMcpAdmin` already refused a missing user id.
+      const userId = getMcpUserId(authInfo) as string;
+
+      const watcher = await getWatcherById(watcherId);
+      if (!watcher || watcher.deletedAt) {
+        return errorResult(`Watcher '${watcherId}' not found.`);
+      }
+
+      // Merge over what the watcher runs or is about to run. A rejected
+      // change isn't carried along: the caller confirmed only the settings
+      // it names.
+      const intended = await getIntendedConfigRevision(watcherId);
+      const reported = watcher.configYaml
+        ? readSettingsFromYaml(watcher.configYaml)
+        : null;
+      const base =
+        intended?.settings ?? (reported?.ok ? reported.settings : null);
+      if (!base) {
+        return errorResult(
+          reported && !reported.ok
+            ? `Data Hub can't read this watcher's config file, so there are no settings to change. Fix config.yaml on the instrument PC. ${reported.reason}`
+            : "This watcher hasn't reported its config yet, so there are no settings to change."
+        );
+      }
+
+      const parsed = watcherConfigSettingsSchema.safeParse(
+        mergeSettings(base, settings)
+      );
+      if (!parsed.success) {
+        const problems = parsed.error.issues
+          .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
+          .join("; ");
+        return errorResult(`Invalid settings: ${problems}`);
+      }
+
+      const result = await createWebConfigRevision({
+        watcherId,
+        baseRevision,
+        settings: parsed.data,
+        actor: { kind: "user", userId },
+      });
+      if (!result.ok) {
+        const detail = result.details
+          ? ` (${JSON.stringify(result.details)})`
+          : "";
+        return errorResult(`${result.message}${detail}`);
+      }
+      return structuredResult({
+        watcherId,
+        revision: toMcpRevision(result.revision),
       });
     }
   );

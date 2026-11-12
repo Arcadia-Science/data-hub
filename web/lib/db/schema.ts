@@ -27,7 +27,26 @@ export const watcherStatusEnum = pgEnum("watcher_status", [
   "registered",
   "watching",
   "stopped",
+  // Running but not watching: the watch folder is missing at startup. The
+  // watcher keeps heartbeating and checking for config changes so a fix
+  // made in the web app can reach it. `watchers.status_reason` says why.
+  "waiting",
 ]);
+
+// Where a watcher config revision came from: an admin in the web app (or the
+// REST API / MCP), or the watcher's own config file on the instrument PC.
+export const watcherConfigRevisionSourceEnum = pgEnum(
+  "watcher_config_revision_source",
+  ["web", "pc"]
+);
+
+// `pending` until the watcher reports a result. `superseded` means a newer
+// revision replaced it before it was applied (or, for a PC edit that lost an
+// offline conflict, that it was kept only as history).
+export const watcherConfigRevisionStatusEnum = pgEnum(
+  "watcher_config_revision_status",
+  ["pending", "applied", "rejected", "superseded"]
+);
 
 export const watcherEventTypeEnum = pgEnum("watcher_event_type", [
   "watcher_started",
@@ -431,6 +450,15 @@ export const watchers = pgTable(
     // `stale` is computed at query time when
     // last_heartbeat_at < now() - interval '5 minutes'.
     status: watcherStatusEnum("status").notNull().default("registered"),
+    // Why the watcher is `waiting` (for example the missing folder). NULL
+    // for every other status.
+    statusReason: text("status_reason"),
+    // Highest revision number in `watcher_config_revisions` for this
+    // watcher. NULL until the first revision exists.
+    configRevision: integer("config_revision"),
+    // Highest revision the watcher reports it has applied, from the
+    // heartbeat or the revision result call.
+    appliedConfigRevision: integer("applied_config_revision"),
     createdAt: timestamp("created_at", {
       withTimezone: true,
       mode: "date",
@@ -483,6 +511,60 @@ export const watchers = pgTable(
     uniqueIndex("uq_watchers_active_instrument_id")
       .on(watcher.instrumentId)
       .where(sql`${watcher.deletedAt} is null`),
+  ]
+);
+
+// Every change to a watcher's editable settings, from the web app or from
+// the config file on the instrument PC. `watchers.config_yaml` still holds
+// the watcher's own latest report; this table is the history and the queue
+// of changes waiting for the watcher to pick up.
+export const watcherConfigRevisions = pgTable(
+  "watcher_config_revisions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    watcherId: uuid("watcher_id")
+      .notNull()
+      .references(() => watchers.id),
+    // Starts at 1 per watcher and goes up by 1 for each change.
+    revision: integer("revision").notNull(),
+    source: watcherConfigRevisionSourceEnum("source").notNull(),
+    // Only the web-editable fields (`WatcherConfigSettings` in
+    // `web/lib/api/watcher-config/settings.ts`), with YAML key names.
+    settings: jsonb("settings").notNull(),
+    status: watcherConfigRevisionStatusEnum("status").notNull(),
+    // Why the watcher rejected the change, or why it was superseded.
+    statusReason: text("status_reason"),
+    // Who made the change. A `pc` revision records the watcher's token. At
+    // most one of the two is set.
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdByToken: uuid("created_by_token").references(
+      () => personalAccessTokens.id,
+      { onDelete: "restrict" }
+    ),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "date",
+    })
+      .notNull()
+      .defaultNow(),
+    // When the status left `pending`.
+    resolvedAt: timestamp("resolved_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
+  },
+  (revision) => [
+    check(
+      "watcher_config_revisions_one_creator",
+      sql`num_nonnulls(${revision.createdBy}, ${revision.createdByToken}) <= 1`
+    ),
+    // Doubles as the lookup index for "latest revision" and the history list.
+    unique("uq_watcher_config_revisions_watcher_revision").on(
+      revision.watcherId,
+      revision.revision
+    ),
   ]
 );
 

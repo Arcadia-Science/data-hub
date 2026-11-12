@@ -7,10 +7,15 @@ import {
   watcherIdParam,
 } from "../registry";
 import {
+  createWatcherConfigRevisionBody,
   heartbeatBody,
   registerWatcherBody,
   watcherChecksumResponse,
   watcherConfigBody,
+  watcherConfigPushResponse,
+  watcherConfigRevision,
+  watcherConfigRevisionResultBody,
+  watcherConfigRevisionsListResponse,
   watcherDeleted,
   watcherDetail,
   watcherEventBody,
@@ -66,7 +71,9 @@ operation(
   {
     query: z.object({
       instrument_id: z.string().optional(),
-      status: z.enum(["registered", "watching", "stopped", "stale"]).optional(),
+      status: z
+        .enum(["registered", "watching", "stopped", "waiting", "stale"])
+        .optional(),
       include_deleted: z.coerce.boolean().optional(),
     }),
   }
@@ -110,7 +117,7 @@ operation(
   "updateWatcherConfig",
   "Update watcher configuration",
   "watchers:report",
-  watcherChecksumResponse,
+  watcherConfigPushResponse,
   { params: watcherParams, body: body(watcherConfigBody) },
   true
 );
@@ -185,5 +192,68 @@ operation(
   "watchers:read",
   watcherUpdateCheckResponse,
   { params: watcherParams },
+  true
+);
+
+const revisionParams = z.object({
+  watcherId: watcherIdParam,
+  revision: z.number().int().positive(),
+});
+
+operation(
+  "get",
+  "/watchers/{watcherId}/config-revisions",
+  "listWatcherConfigRevisions",
+  "List watcher config revisions",
+  "watchers:read",
+  watcherConfigRevisionsListResponse,
+  {
+    params: watcherParams,
+    query: z.object({
+      limit: z.number().int().min(1).max(200).optional(),
+    }),
+  }
+);
+registry.registerPath({
+  method: "post",
+  path: "/watchers/{watcherId}/config-revisions",
+  operationId: "createWatcherConfigRevision",
+  summary: "Change a watcher's config",
+  description:
+    "Requires a token that lists `watchers:admin` explicitly; legacy tokens with `*` or `watchers:write` get 403. Browser sessions must belong to an admin. Stores a pending revision that the watcher applies after its next heartbeat. Returns 409 when `base_revision` isn't the latest revision (`details.reason: stale_revision`) or the watcher runs a version older than 1.4.0 (`details.reason: watcher_update_required`).",
+  tags: ["Watchers"],
+  security: bearerSecurity,
+  request: {
+    params: watcherParams,
+    body: body(createWatcherConfigRevisionBody),
+  },
+  responses: {
+    201: jsonResponse("Created revision.", watcherConfigRevision),
+    ...errorResponses(),
+  },
+});
+registry.registerPath({
+  method: "get",
+  path: "/watchers/{watcherId}/config-revisions/latest",
+  operationId: "getLatestWatcherConfigRevision",
+  summary: "Get the config revision a watcher should apply",
+  description:
+    "Requires scope `watchers:read`. PAT only; browser sessions are rejected. Returns the newest `pending` revision if there is one, otherwise the highest-numbered revision. A pending revision can sit below a higher `superseded` one when a change from Data Hub wins over an older offline edit on the PC. Returns 404 when the watcher has no revisions.",
+  tags: ["Watchers"],
+  security: bearerSecurity,
+  request: { params: watcherParams },
+  responses: {
+    200: jsonResponse("The revision to apply.", watcherConfigRevision),
+    ...errorResponses(),
+  },
+});
+operation(
+  "post",
+  "/watchers/{watcherId}/config-revisions/{revision}/result",
+  "reportWatcherConfigRevisionResult",
+  "Report whether a config revision was applied",
+  "watchers:report",
+  watcherConfigRevision,
+  { params: revisionParams, body: body(watcherConfigRevisionResultBody) },
   true
 );

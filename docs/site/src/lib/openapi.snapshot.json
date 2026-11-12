@@ -1080,6 +1080,7 @@
               "registered",
               "watching",
               "stopped",
+              "waiting",
               "stale"
             ]
           },
@@ -1090,6 +1091,24 @@
             ]
           },
           "config_checksum": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "config_revision": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "applied_config_revision": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "status_reason": {
             "type": [
               "string",
               "null"
@@ -1127,6 +1146,164 @@
           "last_heartbeat_at",
           "created_at",
           "updated_at"
+        ]
+      },
+      "WatcherConfigRevision": {
+        "type": "object",
+        "properties": {
+          "revision": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "web",
+              "pc"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "applied",
+              "rejected",
+              "superseded"
+            ]
+          },
+          "status_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "settings": {
+            "type": "object",
+            "properties": {
+              "watch_directory": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024
+              },
+              "file_patterns": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "maxLength": 200
+                },
+                "minItems": 1,
+                "maxItems": 50
+              },
+              "run_detection": {
+                "type": "object",
+                "properties": {
+                  "pattern": {
+                    "type": "string"
+                  },
+                  "recursive": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "pattern",
+                  "recursive"
+                ]
+              },
+              "upload_mode": {
+                "type": "string",
+                "enum": [
+                  "auto",
+                  "manual"
+                ]
+              },
+              "stability_period_seconds": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 300
+              },
+              "max_stability_wait_seconds": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 86400
+              },
+              "upload_parallelism": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 32
+              }
+            },
+            "required": [
+              "watch_directory",
+              "file_patterns",
+              "run_detection",
+              "upload_mode",
+              "stability_period_seconds",
+              "max_stability_wait_seconds",
+              "upload_parallelism"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "resolved_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "created_by": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "email": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "email"
+            ]
+          },
+          "created_by_token": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "name"
+            ]
+          }
+        },
+        "required": [
+          "revision",
+          "source",
+          "status",
+          "status_reason",
+          "settings",
+          "created_at",
+          "resolved_at",
+          "created_by",
+          "created_by_token"
         ]
       },
       "ArchiveJobDetail": {
@@ -5303,6 +5480,7 @@
                 "registered",
                 "watching",
                 "stopped",
+                "waiting",
                 "stale"
               ]
             },
@@ -5732,6 +5910,17 @@
                   "config_yaml": {
                     "type": "string",
                     "minLength": 1
+                  },
+                  "based_on_revision": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 0
+                  },
+                  "modified_at": {
+                    "type": "string",
+                    "format": "date-time"
                   }
                 },
                 "required": [
@@ -5752,10 +5941,17 @@
                   "properties": {
                     "config_checksum": {
                       "type": "string"
+                    },
+                    "config_revision": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
                     }
                   },
                   "required": [
-                    "config_checksum"
+                    "config_checksum",
+                    "config_revision"
                   ]
                 }
               }
@@ -6240,8 +6436,20 @@
                     "enum": [
                       "registered",
                       "watching",
-                      "stopped"
+                      "stopped",
+                      "waiting"
                     ]
+                  },
+                  "status_reason": {
+                    "type": "string",
+                    "maxLength": 500
+                  },
+                  "config_revision": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 0
                   },
                   "timestamp": {
                     "type": "string"
@@ -6293,10 +6501,17 @@
                       "enum": [
                         true
                       ]
+                    },
+                    "config_revision": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
                     }
                   },
                   "required": [
-                    "ok"
+                    "ok",
+                    "config_revision"
                   ]
                 }
               }
@@ -6699,6 +6914,498 @@
                     "mandatory",
                     "min_supported_version"
                   ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token does not have the required scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested resource was not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with resource state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/watchers/{watcherId}/config-revisions": {
+      "get": {
+        "operationId": "listWatcherConfigRevisions",
+        "summary": "List watcher config revisions",
+        "description": "Requires scope `watchers:read`.",
+        "tags": [
+          "Watchers"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "watcherId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List watcher config revisions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/WatcherConfigRevision"
+                      }
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token does not have the required scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested resource was not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with resource state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createWatcherConfigRevision",
+        "summary": "Change a watcher's config",
+        "description": "Requires a token that lists `watchers:admin` explicitly; legacy tokens with `*` or `watchers:write` get 403. Browser sessions must belong to an admin. Stores a pending revision that the watcher applies after its next heartbeat. Returns 409 when `base_revision` isn't the latest revision (`details.reason: stale_revision`) or the watcher runs a version older than 1.4.0 (`details.reason: watcher_update_required`).",
+        "tags": [
+          "Watchers"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "watcherId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "base_revision": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "exclusiveMinimum": 0
+                  },
+                  "settings": {
+                    "type": "object",
+                    "properties": {
+                      "watch_directory": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 1024
+                      },
+                      "file_patterns": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "maxLength": 200
+                        },
+                        "minItems": 1,
+                        "maxItems": 50
+                      },
+                      "run_detection": {
+                        "type": "object",
+                        "properties": {
+                          "pattern": {
+                            "type": "string"
+                          },
+                          "recursive": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "pattern",
+                          "recursive"
+                        ]
+                      },
+                      "upload_mode": {
+                        "type": "string",
+                        "enum": [
+                          "auto",
+                          "manual"
+                        ]
+                      },
+                      "stability_period_seconds": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 300
+                      },
+                      "max_stability_wait_seconds": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 86400
+                      },
+                      "upload_parallelism": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 32
+                      }
+                    },
+                    "required": [
+                      "watch_directory",
+                      "file_patterns",
+                      "run_detection",
+                      "upload_mode",
+                      "stability_period_seconds",
+                      "max_stability_wait_seconds",
+                      "upload_parallelism"
+                    ]
+                  }
+                },
+                "required": [
+                  "base_revision",
+                  "settings"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created revision.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatcherConfigRevision"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token does not have the required scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested resource was not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with resource state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/watchers/{watcherId}/config-revisions/latest": {
+      "get": {
+        "operationId": "getLatestWatcherConfigRevision",
+        "summary": "Get the config revision a watcher should apply",
+        "description": "Requires scope `watchers:read`. PAT only; browser sessions are rejected. Returns the newest `pending` revision if there is one, otherwise the highest-numbered revision. A pending revision can sit below a higher `superseded` one when a change from Data Hub wins over an older offline edit on the PC. Returns 404 when the watcher has no revisions.",
+        "tags": [
+          "Watchers"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "watcherId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The revision to apply.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatcherConfigRevision"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token does not have the required scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested resource was not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with resource state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/watchers/{watcherId}/config-revisions/{revision}/result": {
+      "post": {
+        "operationId": "reportWatcherConfigRevisionResult",
+        "summary": "Report whether a config revision was applied",
+        "description": "Requires scope `watchers:report`. PAT only; browser sessions are rejected.",
+        "tags": [
+          "Watchers"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "watcherId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "exclusiveMinimum": 0
+            },
+            "required": true,
+            "name": "revision",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "applied",
+                      "rejected"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string",
+                    "maxLength": 1000
+                  }
+                },
+                "required": [
+                  "status"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Report whether a config revision was applied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatcherConfigRevision"
                 }
               }
             }

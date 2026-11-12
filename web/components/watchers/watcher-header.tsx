@@ -92,6 +92,7 @@ export function WatcherHeader({
             </h1>
             <WatcherStatusBadge
               lastOnlineAt={watcher.lastHeartbeatAt}
+              reason={watcher.statusReason}
               status={watcher.effectiveStatus}
             />
             {watcher.watcherVersion && (

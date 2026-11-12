@@ -1,5 +1,5 @@
 {
-  "id": "4739ffa0-b7a9-4dd1-b3fa-ff0355c6a592",
+  "id": "8a969508-5d09-4471-9d4e-ffaddea4ba87",
   "prevId": "08e142e4-7b2d-4c6b-b275-8da4dfac1f27",
   "version": "7",
   "dialect": "postgresql",
@@ -430,12 +430,6 @@
         },
         "processing_started_at": {
           "name": "processing_started_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "queued_at": {
-          "name": "queued_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
@@ -3714,6 +3708,143 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.watcher_config_revisions": {
+      "name": "watcher_config_revisions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "watcher_id": {
+          "name": "watcher_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source": {
+          "name": "source",
+          "type": "watcher_config_revision_source",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "settings": {
+          "name": "settings",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "watcher_config_revision_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status_reason": {
+          "name": "status_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_by_token": {
+          "name": "created_by_token",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "resolved_at": {
+          "name": "resolved_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "watcher_config_revisions_watcher_id_watchers_id_fk": {
+          "name": "watcher_config_revisions_watcher_id_watchers_id_fk",
+          "tableFrom": "watcher_config_revisions",
+          "tableTo": "watchers",
+          "columnsFrom": [
+            "watcher_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "watcher_config_revisions_created_by_user_id_fk": {
+          "name": "watcher_config_revisions_created_by_user_id_fk",
+          "tableFrom": "watcher_config_revisions",
+          "tableTo": "user",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "watcher_config_revisions_created_by_token_personal_access_tokens_id_fk": {
+          "name": "watcher_config_revisions_created_by_token_personal_access_tokens_id_fk",
+          "tableFrom": "watcher_config_revisions",
+          "tableTo": "personal_access_tokens",
+          "columnsFrom": [
+            "created_by_token"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "uq_watcher_config_revisions_watcher_revision": {
+          "name": "uq_watcher_config_revisions_watcher_revision",
+          "nullsNotDistinct": false,
+          "columns": [
+            "watcher_id",
+            "revision"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "watcher_config_revisions_one_creator": {
+          "name": "watcher_config_revisions_one_creator",
+          "value": "num_nonnulls(\"watcher_config_revisions\".\"created_by\", \"watcher_config_revisions\".\"created_by_token\") <= 1"
+        }
+      },
+      "isRLSEnabled": false
+    },
     "public.watcher_events": {
       "name": "watcher_events",
       "schema": "",
@@ -4074,6 +4205,24 @@
           "notNull": true,
           "default": "'registered'"
         },
+        "status_reason": {
+          "name": "status_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "config_revision": {
+          "name": "config_revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "applied_config_revision": {
+          "name": "applied_config_revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -4223,7 +4372,6 @@
         "detected",
         "upload_requested",
         "uploaded",
-        "queued",
         "processing",
         "completed",
         "failed"
@@ -4283,6 +4431,24 @@
         "manual"
       ]
     },
+    "public.watcher_config_revision_source": {
+      "name": "watcher_config_revision_source",
+      "schema": "public",
+      "values": [
+        "web",
+        "pc"
+      ]
+    },
+    "public.watcher_config_revision_status": {
+      "name": "watcher_config_revision_status",
+      "schema": "public",
+      "values": [
+        "pending",
+        "applied",
+        "rejected",
+        "superseded"
+      ]
+    },
     "public.watcher_event_type": {
       "name": "watcher_event_type",
       "schema": "public",
@@ -4305,7 +4471,8 @@
       "values": [
         "registered",
         "watching",
-        "stopped"
+        "stopped",
+        "waiting"
       ]
     }
   },

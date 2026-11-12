@@ -34,6 +34,34 @@ The wizard rejects values that do not start with `dhub_`, and strips zero-width 
 - Confirm the instrument is `active`, not `pending`
 - On Windows, if the **service** will not start, see [Windows service](#windows-service)
 
+## The watcher shows “Waiting: folder not found” [#waiting-folder-not-found]
+
+Watcher 1.4.0 and later start even when the watch folder is missing, for example when a network drive isn’t connected yet or the folder was renamed. The watcher keeps sending heartbeats but watches nothing, and the **Watchers** page shows **Waiting: folder not found**. Hover over the badge to see which folder it’s looking for.
+
+The watcher checks for the folder again once a minute and starts watching as soon as it appears. To fix it:
+
+- Create or reconnect the folder on the PC, or
+- Point the watcher at the right folder from the web app; see [Change a watcher’s config](/docs/manage-watchers#change-a-watchers-config)
+
+Older watchers exit at startup instead, with an error that the watch directory doesn’t exist.
+
+## A config change shows “Change rejected” [#change-rejected]
+
+The watcher checked a change made in the web app and refused it, so it kept its previous settings. The reason shows on the watcher’s **Configuration** tab and as an `error` event with `details.kind` set to `config_revision_rejected`. The most common reason is a folder that doesn’t exist or can’t be read on the PC. Fix the cause, then save the change again or **Restore** an earlier version from the history.
+
+## “Data Hub can’t read the watcher’s config file” [#config-file-unreadable]
+
+The watcher’s **Configuration** tab shows this when the `config.yaml` the watcher sent breaks the rules the web app checks, for example a relative watch folder, more than 50 file patterns, or a run detection pattern with Python-only syntax such as `(?P<name>…)`. The notice names each field that needs fixing, by its key in the file.
+
+Until it’s fixed, edits made on the PC aren’t recorded in the history, and if Data Hub has no earlier revision of the settings, there are none to edit there. Fix the file on the instrument PC, for example with `data-hub-watcher config edit`.
+
+## A config change stays on “Change pending” [#change-pending]
+
+The watcher picks up a change after its next heartbeat, within about a minute. If it stays pending:
+
+- Check that the watcher is **Online**. An offline watcher applies the change when it next starts.
+- Check that the watcher runs 1.4.0 or later. The web app won’t save changes for older watchers.
+
 ## The watcher shows Offline right after a restart
 
 The watcher checks in once a minute, so a watcher that was just restarted can take up to a minute to show as **Online**. Refresh the page after a minute. If it still shows **Offline** or **Unresponsive**, check that the process is running and see [“Connection error” or “Request timed out”](#connection-error-or-request-timed-out).
@@ -62,9 +90,9 @@ Older watchers try again only when another file in the run finishes or the watch
 
 ## Files are not being detected
 
-- Confirm the watch directory and file patterns. The instrument’s page in the web app shows both, or run `data-hub-watcher config show` on the PC
+- Confirm the watch directory and file patterns. The instrument’s page in the web app shows both, or run `data-hub-watcher config show` on the PC. Admins can change them from the web app; see [Change a watcher’s config](/docs/manage-watchers#change-a-watchers-config)
 - Check that the instrument saves its files into that folder, not a shared network drive or another folder
-- Check file patterns. Globs are case-sensitive on some systems (`*.csv` does not match `data.CSV`)
+- Check file patterns. Globs are case-sensitive (`*.csv` does not match `data.CSV`)
 - If files live in subfolders, set run detection to recursive; see [Configure run detection and uploads](/docs/configure-run-detection)
 - Run `data-hub-watcher watch --dry-run` to preview matches
 - Look for `pattern_mismatch` events on the dashboard

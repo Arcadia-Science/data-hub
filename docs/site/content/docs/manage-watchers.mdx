@@ -1,18 +1,20 @@
 ---
 title: Manage the watcher fleet
-description: Monitor watcher health, deregister watchers, and approve or request uploads from the admin dashboard.
+description: Monitor watcher health, change a watcher’s config, deregister watchers, and approve or request uploads from the admin dashboard.
 contentType: How-to
 ---
 
 <Audience>Administrators</Audience>
 
-The **Watchers** area is the fleet view: every registered watcher, its health, deregistration, and the upload queue. Cutting releases and advertising versions is separate: [Roll out watcher releases](/docs/watcher-releases).
+The **Watchers** area is the fleet view: every registered watcher, its health, its config, deregistration, and the upload queue. Cutting releases and advertising versions is separate: [Roll out watcher releases](/docs/watcher-releases).
 
 ## Monitor watcher health [#monitor-watcher-health]
 
 Each watcher sends a [heartbeat](/docs/concepts#heartbeat) every 60 seconds with version, instrument, watch directory, upload mode, activity counters, and uptime. The fleet list surfaces:
 
-- **Status**: **Online**, **Unresponsive** (no heartbeat for more than 5 minutes), **Stopped** (shut down cleanly), or **Registered** (no first heartbeat yet). See [Watcher status](/docs/concepts#watcher-status).
+- **Status**: **Online**, **Waiting: folder not found** (running, but its watch folder is missing), **Unresponsive** (no heartbeat for more than 5 minutes), **Stopped** (shut down cleanly), or **Registered** (no first heartbeat yet). See [Watcher status](/docs/concepts#watcher-status).
+- **Change pending** or **Change rejected**: the latest config change from the web app hasn’t reached the watcher yet, or the watcher refused it. See [Change a watcher’s config](#change-a-watchers-config).
+- **Edited on PC, restart pending**: someone changed `config.yaml` on the PC while the watcher was running, and the watcher hasn’t loaded it yet. See [Edits made on the PC](#edits-on-the-pc).
 - **Last heartbeat**: a stale value is the first sign of a stopped, disconnected, or crashed watcher
 - **Hostname and instrument assignment**
 - **Events**: per-watcher log (`watcher_started`, `run_reported`, `file_uploaded`, `update_*`, and `error` with a `details.kind` discriminator). Expand an event to read its details. From watcher 1.3.0, a `file_uploaded` event reports `size_bytes`, `part_count`, `prep_seconds` (hashing the file and requesting its upload link), and `upload_seconds` (sending the file to storage). Divide `size_bytes` by `upload_seconds` to get the upload speed.
@@ -24,6 +26,47 @@ Events are the primary remote-diagnosis tool. For operator-side symptoms, see [T
 Open a watcher to see its event log, a status chart with a connectivity strip of recent heartbeats, and its configuration.
 
 ![Watcher page on the Status tab, with an Online badge, the version, a chart of files, runs, and errors, and a connectivity strip](/images/watcher-detail.webp)
+
+## Change a watcher’s config [#change-a-watchers-config]
+
+Admins can change a watcher’s settings from the web app, without visiting the instrument PC. This needs watcher 1.4.0 or later. For older watchers the form is turned off with a note to update the watcher.
+
+Open the watcher and choose the **Configuration** tab, or choose **Edit watcher config** from the three-dot menu on the instrument page. You can change:
+
+- **Watch folder**: any folder on the instrument PC
+- **File patterns**
+- **Run detection**: a preset or your own pattern, and whether to include subfolders
+- **Upload mode**, **Parallel uploads**, **Stability period**, and **Max stability wait**
+
+The form checks each value as you type. **Preview with recent files** shows which of the instrument’s recent files the new patterns match and the run ID each would get. It only covers files Data Hub already knows about, so files on the PC that never matched a pattern don’t appear.
+
+After you save:
+
+1. The change shows as **Change pending**.
+2. Within about a minute, the watcher’s next heartbeat tells it a change is waiting. The watcher fetches it.
+3. The watcher checks the change, including that the new folder exists and can be read. If a check fails, it keeps its current settings and the change shows as **Change rejected** with the reason, both on the **Configuration** tab and as an `error` event.
+4. Otherwise it saves the new settings to `config.yaml`, waits up to two minutes for the uploads it’s sending, and restarts its watching with the new settings. The change shows as **Applied**. A file that hadn’t finished uploading, such as a large file partway through, uploads again from the start after the change, unless the change moved the watch folder or switched to manual uploads.
+
+If the new settings match more files, the watcher reports files that are already on the PC as detected, but doesn’t upload them. To upload them, use **Upload** on the run page; see [Request uploads](#request-uploads). New files after the change follow the upload mode.
+
+If the watcher is offline, the change waits and is applied when the watcher next starts. If someone also edited `config.yaml` on the PC while it was offline, the newer of the two edits wins and the other stays in the history.
+
+### Edits made on the PC [#edits-on-the-pc]
+
+An edit made on the PC while the watcher is running, such as with `data-hub-watcher config edit`, is saved to `config.yaml` and recorded in the history at once, as **Applied**. The watcher reads `config.yaml` only when it starts, though, so it keeps running its previous settings until it restarts. Until then the **Configuration** tab shows **Edited on the PC** with what will change, and the watcher list shows **Edited on PC, restart pending**. With watcher 1.4.0 and later, **Current settings** shows what the watcher is running, from the revision it reports in its heartbeat.
+
+### History and restore [#config-history]
+
+The **History** list on the **Configuration** tab records every change, whether it came from Data Hub or from the config file on the PC (such as `data-hub-watcher config edit`), with who made it and when. To go back to an earlier version, click **Restore** on it. That saves its settings as a new change.
+
+When two admins edit the same watcher at once, the second save is refused with a message to reload, so neither overwrites the other unseen.
+
+Members can see the current settings, any pending change, and the history, but only admins can change them.
+
+### Change a config with the API or an AI assistant
+
+- **API**: `POST /api/v1/watchers/:watcherId/config-revisions` with `base_revision` and the full `settings`. Signed-in callers must be admins; tokens must list `watchers:admin` explicitly (legacy `*` and `watchers:write` tokens are refused). `GET /api/v1/watchers/:watcherId/config-revisions` lists the history. See the [generated API docs](/docs/api).
+- **MCP**: the `update_watcher_config` tool, for admins. It changes only the settings you name. The assistant shows you the change and asks you to confirm before it saves.
 
 ## Deregister a watcher [#deregister-a-watcher]
 
@@ -53,5 +96,5 @@ For instruments in [manual upload mode](/docs/concepts#upload-mode), the watcher
 
 Safeguards that keep the queue healthy:
 
-- Changing an instrument’s `watch_directory` reverts pending upload requests to `detected` so stale paths drain instead of erroring
+- Changing an instrument’s watch folder, from the web app or on the PC, reverts pending upload requests to `detected` so stale paths drain instead of erroring
 - A queued file that keeps failing (missing on disk or failing to upload) is retried on at most three polls, then cancelled server-side
