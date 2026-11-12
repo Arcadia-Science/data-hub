@@ -146,17 +146,14 @@ TRANSITIONS: tuple[Transition, ...] = (
         "ENG-2128",
         platforms=SERVICE,
     ),
-    xfail_bug(
+    covered(
         MACHINE,
         "service.system_shutdown->clean_stop",
-        "PROPOSED — confirm intent: the service accepts a system shutdown "
-        "(`SERVICE_ACCEPT_SHUTDOWN`, which pywin32 sets when the class has a "
-        "`SvcShutdown`), so a reboot stops it as `service stop` does, with a `stopped` "
-        "heartbeat and a `watcher_stopped` event. Today the class has none, `sc queryex` "
-        "lists IGNORES_SHUTDOWN, and every reboot kills the service with no `stopped` "
-        "heartbeat. The test reads the controls `sc queryex` lists: a test can't send a "
-        "shutdown to a service.",
-        "ENG-2129",
+        "The service accepts a system shutdown (`SERVICE_ACCEPT_SHUTDOWN`, which pywin32 "
+        "sets when the class has a `SvcShutdown`), so a reboot stops it as `service stop` "
+        "does, with a `stopped` heartbeat and a `watcher_stopped` event. `sc queryex` "
+        "lists ACCEPTS_SHUTDOWN. The test reads the controls `sc queryex` lists: a test "
+        "can't send a shutdown to a service.",
         platforms=SERVICE,
     ),
     # --- start-up failures and the SCM's recovery -------------------------------------------

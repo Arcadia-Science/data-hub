@@ -48,6 +48,18 @@ _ERROR_SERVICE_MARKED_FOR_DELETE = 1072
 # fails its API health check, and stays stopped" failure mode.
 _SERVICE_DEPENDENCIES: list[str] = ["Tcpip", "Dnscache"]
 
+# The wait hint the service reports while it stops, from a ``service stop`` or
+# from a system shutdown. A stop with the API answering is the service loop's
+# one-second poll, a final heartbeat and an event flush, which is a few
+# seconds. The hint is not raised to cover a stop against an API that doesn't
+# answer (up to about 95 s, known bug ENG-2127): at a shutdown the SCM waits
+# no longer than its shutdown limit, whatever the hint says ("about 20
+# seconds" in Microsoft's documentation, and for a reboot the
+# ``WaitToKillServiceTimeout`` value, which Microsoft doesn't give for
+# Windows 10 and 11 and which is commonly reported as 5 s), so a larger hint
+# would promise time Windows doesn't give.
+_STOP_WAIT_HINT_MS = 5_000
+
 
 def install_service(config_path: Path, env_path: Path) -> None:
     """Install the watcher as a Windows service with automatic start and recovery.
@@ -783,9 +795,23 @@ def _create_service_class() -> type | None:
 
             _run_service_loop(self._stop_event, servicemanager)
 
-        def SvcStop(self) -> None:
-            self.ReportServiceStatus(ws.SERVICE_STOP_PENDING)
+        def _begin_stop(self) -> None:
+            """Tell the SCM the stop has begun and let the service loop run it."""
+            self.ReportServiceStatus(ws.SERVICE_STOP_PENDING, waitHint=_STOP_WAIT_HINT_MS)
             self._stop_event.set()
+
+        def SvcStop(self) -> None:
+            self._begin_stop()
+
+        # pywin32 reports SERVICE_ACCEPT_SHUTDOWN only for a class that has a
+        # ``SvcShutdown`` (``ServiceFramework.GetAcceptedControls``). Without
+        # it a reboot or a shutdown kills the process with no stop at all.
+        # The accepted controls are reported by the running service, not
+        # stored at install, so a PC upgraded in place has this from the
+        # restart that loads the new wheel, with no reinstall.
+        def SvcShutdown(self) -> None:
+            logger.info("%s stopping: Windows is shutting down", SERVICE_DISPLAY_NAME)
+            self._begin_stop()
 
     return DataHubWatcherService
 

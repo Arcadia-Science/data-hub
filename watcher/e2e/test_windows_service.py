@@ -1232,15 +1232,6 @@ def test_a_file_that_stays_locked_after_its_last_write_is_uploaded_once_it_is_re
         )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=KnownBugStillPresent,
-    reason=(
-        "ENG-2129: the service class has no `SvcShutdown`, so `sc "
-        "queryex` lists IGNORES_SHUTDOWN and every reboot kills the service with no `stopped` "
-        "heartbeat"
-    ),
-)
 @pytest.mark.covers("service.system_shutdown->clean_stop")
 def test_the_service_asks_to_be_told_about_a_shutdown_of_the_system(
     watcher: WatcherFactory, server: ServerView
@@ -1254,6 +1245,6 @@ def test_the_service_asks_to_be_told_about_a_shutdown_of_the_system(
     # `sc queryex` lists what the service accepts, and the listing was read.
     assert "STOPPABLE" in status.controls, status.controls
 
-    # PROPOSED: it accepts a shutdown, so that a reboot stops it as `service stop` does.
-    with known_bug():
-        assert status.accepts_shutdown is True, f"sc queryex lists {', '.join(status.controls)}"
+    # It accepts a shutdown, so that a reboot stops it as `service stop` does. A test can't
+    # send a shutdown (only the system can), so this reads the controls the service reports.
+    assert status.accepts_shutdown is True, f"sc queryex lists {', '.join(status.controls)}"

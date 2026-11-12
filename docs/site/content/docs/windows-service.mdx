@@ -48,6 +48,14 @@ The Windows auto-update path requires that `service install` (or `service reinst
 
 `service install` and `service reinstall` accept `--env-path PATH` to override which `.env` file the service loads (defaults to `~/.data-hub/.env.<environment>`).
 
+## When the PC restarts or shuts down
+
+With watcher 1.4.1 and later, restarting or shutting down the PC stops the service the way `service stop` does. The watcher sends a final heartbeat, so it shows as **Stopped** on the **Watchers** page, and it records a `watcher_stopped` event. The service starts again at boot, as before.
+
+Windows gives a service only a few seconds to stop at shutdown. If Data Hub can’t be reached, or a file is still uploading, the stop can be cut off before the final heartbeat. The watcher then shows as **Unresponsive** after five minutes, until the service starts again, and a file that was still uploading is retried after the start. See [An upload was cut off by a restart or an update](/docs/troubleshoot-a-watcher#an-upload-was-cut-off-by-a-restart-or-an-update).
+
+Watchers older than 1.4.1 don’t tell Windows they handle a shutdown, so a restart ends them with no final heartbeat and no `watcher_stopped` event. Updating to 1.4.1 is enough: the service tells Windows what it handles each time it runs, so no `service reinstall` is needed.
+
 ## Do not run `watch` alongside the service
 
 Running `data-hub-watcher watch` interactively while the service is also running is not supported: both processes would race on the same log file and watch directory. Stop the service first if you need the CLI for debugging:
