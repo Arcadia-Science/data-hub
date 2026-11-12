@@ -762,13 +762,6 @@ def test_reporting_a_deleted_run_again_is_refused_and_attaches_no_files(
         assert server.file(instrument_id, "RUN001", "RUN001/second.csv") is None
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=KnownBugStillPresent,
-    reason="ENG-2121: the watcher puts the run ID into the URL path of its "
-    "calls as it is, so a hash or percent sign in it sends an update (manual mode) or an upload "
-    "(auto mode) to another run, or nowhere",
-)
 @pytest.mark.covers("run.url_characters_in_id->update_reaches_run")
 @pytest.mark.parametrize("upload_mode", ["manual", "auto"])
 def test_a_run_with_url_characters_in_its_id_gets_its_files(
@@ -793,23 +786,22 @@ def test_a_run_with_url_characters_in_its_id_gets_its_files(
         server, instrument_id, "PLAIN", "second.csv", upload_mode, contents["PLAIN"]["second.csv"]
     )
 
-    with known_bug():
-        for run_id in ("Plate#3", "Q%41"):
-            for name, data in contents[run_id].items():
-                if upload_mode == "auto":
-                    # Done means the row says so and the stand-in holds the bytes under the
-                    # run's own folder, `<instrument>/<run>/<name>`.
-                    server.wait_for_uploaded(
-                        instrument_id, run_id, f"{run_id}/{name}", content=data, timeout=10
-                    )
-                else:
-                    server.wait_for_file(
-                        instrument_id, run_id, f"{run_id}/{name}", status="detected", timeout=5
-                    )
-        # Nothing of these runs landed in the run that the encoded ID reads as.
-        assert relative_paths(server, instrument_id, "QA") == ["QA/own.csv"]
-        assert not server.object_exists(instrument_id, "QA", "first.csv")
-        assert not server.object_exists(instrument_id, "QA", "second.csv")
+    for run_id in ("Plate#3", "Q%41"):
+        for name, data in contents[run_id].items():
+            if upload_mode == "auto":
+                # Done means the row says so and the stand-in holds the bytes under the
+                # run's own folder, `<instrument>/<run>/<name>`.
+                server.wait_for_uploaded(
+                    instrument_id, run_id, f"{run_id}/{name}", content=data, timeout=10
+                )
+            else:
+                server.wait_for_file(
+                    instrument_id, run_id, f"{run_id}/{name}", status="detected", timeout=5
+                )
+    # Nothing of these runs landed in `QA`, the run that `Q%41` reads as without the encoding.
+    assert relative_paths(server, instrument_id, "QA") == ["QA/own.csv"]
+    assert not server.object_exists(instrument_id, "QA", "first.csv")
+    assert not server.object_exists(instrument_id, "QA", "second.csv")
 
 
 @pytest.mark.xfail(
