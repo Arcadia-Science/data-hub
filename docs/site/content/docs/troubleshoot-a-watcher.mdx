@@ -120,6 +120,27 @@ Watcher 1.2.1 and later retry an automatic upload that didn’t finish the next 
 
 Older watchers don’t retry; use **Upload** on the run page instead.
 
+### A file stays Pending after the watcher restarted [#a-file-stays-pending-after-the-watcher-restarted]
+
+Watchers before 1.4.1 could lose track of a file in an automatic upload when the watcher stopped without shutting down cleanly, such as after a reboot, a power cut, or a crash, just after it reported the run. The run is in Data Hub, but the file shows **Pending** and nothing uploads it, because after the restart the watcher treats the file as already handled. Watcher 1.4.1 and later record a run and its files on the PC together, so a restart like that doesn’t leave a file behind.
+
+Updating doesn’t pick up files that an older watcher already lost this way. Ask for them from the run page:
+
+<Steps>
+
+<Step>
+If the watcher is older than 1.2.1, update it first. Older watchers in auto mode ignore upload requests; see [A requested upload stays on Uploading](#a-requested-upload-stays-on-uploading).
+</Step>
+
+<Step>
+Open the run, select the files that show **Pending**, and choose **Upload**. To ask for the files of several runs at once, select the runs in the run list and choose **Upload**. See [Request an upload](/docs/browse-runs#request-upload).
+</Step>
+
+<Step>
+The watcher picks up the request within a minute and uploads the files that are still on the instrument PC.
+</Step>
+</Steps>
+
 ### Files with the same name were skipped [#files-with-the-same-name-were-skipped]
 
 When a run gathers files from several folders, watchers older than 1.1.0 uploaded only the first file with a given name and skipped the rest. Watcher 1.1.0 and later keep every copy, adding a short tag to later names. To upload files an older watcher skipped:
