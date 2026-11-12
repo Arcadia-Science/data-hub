@@ -373,6 +373,25 @@ class TestAWriteThatFails:
         )
         assert w.uploads == [("RUN1", names)]
 
+    def test_a_report_only_file_still_gets_no_pending_row_when_the_write_comes_later(
+        self, processes: Callable[..., Watcher], watch_dir: Path
+    ) -> None:
+        w = processes()
+        _refuse_pending_rows(w.state_db)
+        w.detector.on_stable_file(_write(watch_dir, "RUN1/a.csv"))
+        w.detector.on_stable_file(_write(watch_dir, "RUN1/old.csv"), upload=False)
+        _allow_pending_rows(w.state_db)
+
+        w.detector.on_stable_file(_write(watch_dir, "RUN1/new.csv"))
+
+        # The backlog (a) and the new file are pending, and the report-only file is not.
+        assert _state(w.state_db, "RUN1") == (
+            True,
+            ["RUN1/a.csv", "RUN1/new.csv", "RUN1/old.csv"],
+            ["RUN1/a.csv", "RUN1/new.csv"],
+        )
+        assert w.uploads == [("RUN1", ["a.csv", "new.csv"])]
+
     def test_a_patch_that_is_not_recorded_is_not_sent_again_with_the_next_file(
         self, processes: Callable[..., Watcher], watch_dir: Path
     ) -> None:
