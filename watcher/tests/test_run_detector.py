@@ -28,7 +28,7 @@ from data_hub_watcher.constants import (
     RUN_REPORT_RETRY_MAX_DELAY_SECONDS,
 )
 from data_hub_watcher.heartbeat import WatcherCounters
-from data_hub_watcher.run_detector import RunDetector
+from data_hub_watcher.run_detector import RunDetector, relative_key
 
 
 def _make_detector(
@@ -1127,3 +1127,41 @@ class TestRunReportRetries:
         for expected_calls in (4, 5, 6, 6):
             detector.retry_failed_reports()
             assert client.report_run.call_count == expected_calls
+
+
+class TestRelativeKey:
+    """The state DB key of a file: the one definition the detector, uploader and monitor share."""
+
+    def test_a_file_in_the_watch_directory_is_its_name(self, tmp_path: Path) -> None:
+        assert relative_key(tmp_path / "a.csv", tmp_path) == "a.csv"
+
+    def test_a_nested_file_is_its_path_with_forward_slashes(self, tmp_path: Path) -> None:
+        assert relative_key(tmp_path / "RUN1" / "sub" / "a.csv", tmp_path) == "RUN1/sub/a.csv"
+
+    def test_a_path_outside_the_watch_directory_falls_back_to_its_basename(
+        self, tmp_path: Path
+    ) -> None:
+        watch_dir = tmp_path / "watch"
+        watch_dir.mkdir()
+
+        assert relative_key(tmp_path / "elsewhere" / "a.csv", watch_dir) == "a.csv"
+        # A sibling whose name starts with the watch directory's is outside it too.
+        assert relative_key(tmp_path / "watch-old" / "a.csv", watch_dir) == "a.csv"
+
+    def test_windows_paths_use_forward_slashes(self) -> None:
+        watch_dir = PureWindowsPath("C:\\Instrument\\Data")
+
+        assert relative_key(PureWindowsPath("C:\\Instrument\\Data\\a.csv"), watch_dir) == "a.csv"
+        assert (
+            relative_key(PureWindowsPath("C:\\Instrument\\Data\\RUN1\\sub\\a.csv"), watch_dir)
+            == "RUN1/sub/a.csv"
+        )
+        # Windows paths compare without regard to case.
+        assert relative_key(PureWindowsPath("c:\\instrument\\data\\RUN1\\a.csv"), watch_dir) == (
+            "RUN1/a.csv"
+        )
+
+    def test_a_windows_path_outside_the_watch_directory_falls_back_to_its_basename(self) -> None:
+        watch_dir = PureWindowsPath("C:\\Instrument\\Data")
+
+        assert relative_key(PureWindowsPath("D:\\Other\\a.csv"), watch_dir) == "a.csv"

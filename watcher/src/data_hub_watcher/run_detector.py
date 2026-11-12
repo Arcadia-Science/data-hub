@@ -23,7 +23,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import Literal
 
 from data_hub_watcher.api_client import ApiError, DataHubClient
@@ -51,14 +51,15 @@ def file_created_at(st: os.stat_result) -> float:
     return getattr(st, "st_birthtime", None) or st.st_mtime
 
 
-def relative_key(path: Path, watch_dir: Path) -> str:
+def relative_key(path: PurePath, watch_dir: PurePath) -> str:
     """Return *path* as a forward-slash path relative to *watch_dir*.
 
     This is the key of a file in the state DB (`pending_uploads`,
-    `detected_files`, `uploaded_files`). The run detector writes a file's
-    `pending_uploads` row and the uploader clears it, so both compute the key
-    here. Falls back to the basename for a path outside the watch directory
-    (e.g. one-shot `upload --file /abs/path`) so recording never raises.
+    `detected_files`, `uploaded_files`, `baseline_files`). The run detector
+    writes a file's `pending_uploads` row, the uploader clears it, and the
+    monitor's scans look files up by it, so all three compute the key here.
+    Falls back to the basename for a path outside the watch directory (e.g.
+    one-shot `upload --file /abs/path`) so recording never raises.
     """
     try:
         return path.relative_to(watch_dir).as_posix()
