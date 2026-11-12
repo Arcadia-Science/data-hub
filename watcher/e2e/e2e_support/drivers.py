@@ -2,8 +2,9 @@
 
 A scenario never starts a process or sends a signal itself. It asks a ``WatcherDriver``, so
 the same scenario file runs against a ``data-hub-watcher watch`` process (on Linux, and on
-macOS for a developer) and, in the next pull request, against the real Windows service. This
-module holds the interface, the shared parts, and ``CliDriver``, the POSIX implementation.
+macOS for a developer) and against the real Windows service. This module holds the interface,
+the shared parts, and ``CliDriver``, the POSIX implementation. ``WindowsServiceDriver`` is in
+``e2e_support.service_driver``.
 
 Kinds of driver
 ---------------
@@ -20,42 +21,59 @@ The wording of the watcher differs by role (``"Watcher started on ..."``, ``"Ser
 on ..."``), so a scenario asks the driver for it: ``started_prefix``, ``resumed_prefix``,
 ``operator_stop_message`` and ``update_stop_message``.
 
-The seam for the Windows service
---------------------------------
+The Windows service driver
+--------------------------
 
-A ``WindowsServiceDriver`` subclasses :class:`WatcherDriver` and fills in the abstract
-methods. The mapping, for whoever writes it:
+``WindowsServiceDriver`` (``e2e_support.service_driver``) subclasses :class:`WatcherDriver` and
+fills in the abstract methods. How each maps to Windows:
 
 ==========================  ===========================================================
 Driver method               Windows service
 ==========================  ===========================================================
-``run_cli``                 the same ``data-hub-watcher`` executable, run elevated, in
-                            the test's own user profile (see "per-test isolation" below)
-``start``                   ``service start``, then wait for the SCM to say ``running``
+``run_cli``                 the same ``data-hub-watcher`` executable, run elevated, with
+                            ``USERPROFILE``, ``HOME`` and ``APPDATA`` in the test's own
+                            profile folder (see "per-test isolation" below)
+``start``                   ``service start`` (installing the service first if this driver
+                            has not), then waits for the service's own "is running" or "is
+                            waiting" line, which comes after the start-up scan (the SCM says
+                            ``RUNNING`` as soon as the process is up), or for the service to
+                            have ended (a refused start)
 ``request_stop``            ``service stop`` (``SvcStop``), without waiting
-``interrupt``               not supported: raise ``NotImplementedError``. A scenario that
+``interrupt``               not supported: raises ``NotImplementedError``. A scenario that
                             needs it is marked ``platforms("cli")``
-``kill``                    ``taskkill /F /PID`` of the pid ``service status`` reports
-``wait_exit``               wait for the SCM state ``stopped``; the exit code is the
-                            service's win32 exit code (0 after a stop)
-``await_upgrade_restart``   wait until the SCM shows ``running`` with a pid other than the
-                            one of the last start (see below)
-``is_running``              the SCM state is ``running`` or a ``*_pending`` one
-``pid``                     the pid ``service status`` reports, ``None`` unless running
-``exit_code``               the win32 exit code of the last run, ``None`` while it runs
-``installed_version``       ``data-hub-watcher --version`` of the machine's uv-tool install
-``install_wheel``           ``uv tool install --reinstall <wheel>`` into the machine's
-                            uv-tool install, with the service stopped (see "install_wheel"
-                            below)
+``kill``                    ``taskkill /F /T /PID`` of the pid ``sc queryex`` reports (``/T``
+                            because a venv's ``python.exe`` is a launcher that starts the real
+                            interpreter), then waits for the SCM state ``STOPPED``
+``wait_exit``               wait for the SCM state ``STOPPED``; the exit code is the service's
+                            win32 exit code (0 after a stop, 1067 after a kill). Anything
+                            raised out of ``SvcRun`` (a refused start's ``SystemExit(1)``, an
+                            uncaught error) ends with 0x20000001, never 1
+``await_upgrade_restart``   wait until the SCM shows ``RUNNING`` with a pid other than the
+                            one of the last start, and the new process says it is ready
+``is_running``              the SCM state is not ``STOPPED``
+``pid``                     the pid ``sc queryex`` reports, ``None`` when stopped
+``exit_code``               the win32 exit code of the last run (the service's own code,
+                            0x20000001, when the win32 code says
+                            ``ERROR_SERVICE_SPECIFIC_ERROR``), ``None`` while it runs
+``installed_version``       ``data-hub-watcher --version`` of the PC's uv-tool install
+``install_wheel``           ``uv tool install --reinstall <wheel>[windows-service]`` into
+                            the PC's own uv-tool install, with the service stopped
 ``hide_uv``                 see "hide_uv" below
 ``log_files``               ``C:\\ProgramData\\DataHubWatcher\\watcher.log``,
-                            ``service-bootstrap.log`` and ``upgrade-worker.log``
-``state_db_path``           beside the config file in the registry (``ConfigPath``)
+                            ``service-bootstrap.log``, the profile's ``upgrade-worker.log``,
+                            ``upgrade-worker.ps1`` and the upgrade sentinels, and an
+                            Event Log export (``Get-WinEvent``)
+``state_db_path``           beside the config file (the registry's ``ConfigPath``), which
+                            is in the test's profile
 ``config_dir``              the directory of that config file
-``close``                   ``service uninstall``, then wait for the service to be removed
+``close``                   recovery off, the upgrade task and any worker ended, ``service
+                            stop`` (a kill if it won't), ``service uninstall``, and a wait
+                            for the service to be removed
 ==========================  ===========================================================
 
-The fault proxy, the server and every assertion are the same under both drivers.
+The fault proxy, the server and every assertion are the same under both drivers. The
+commands the driver runs and the parsing of what ``sc``, ``reg`` and ``schtasks`` print are in
+``e2e_support.windows_scm``, which is unit-tested with a fake runner on any platform.
 
 How a Windows upgrade works, because the CLI is different
 ---------------------------------------------------------
@@ -71,76 +89,82 @@ code or the event of the in-process path (``selfupdate.installed->exit_for_resta
 CLI-only. The rest asks for ``await_upgrade_restart(timeout)``, which is "the upgrade has
 been installed and the watcher is running again" under both.
 
-Service driver notes for PR 3
------------------------------
+Notes on the service driver
+---------------------------
 
-Facts the notes rest on: one machine has one service and one registry ``ConfigPath``;
+Facts the driver rests on: one machine has one service and one registry ``ConfigPath``;
 ``C:\\ProgramData\\DataHubWatcher\\watcher.log`` is one file shared by everything on the
 machine; the service loads its registered env file with ``override=True``; the SCM restarts a
 failed or killed service after 60 s and then 120 s.
 
-* **Per-test isolation for** ``run_cli``. Each test gets a folder with its own
-  ``USERPROFILE`` (so ``~/.data-hub`` of a one-shot command such as ``init``, ``state
-  forget`` or ``self-update`` is the test's), and ``service install`` registers
-  ``ConfigPath`` and ``EnvPath`` inside that folder. ``config_dir()``, the env file and the
-  state database (``state_db_path()`` is beside ``ConfigPath``) are then the test's own, and
-  tests don't see each other's files. The first install per session registers the service
-  and every later test points the registry at its own folder (``service install`` again, or
-  ``service reinstall``), then ``close()`` uninstalls.
-* **The shared log.** The driver records the byte offset of ``watcher.log`` when it is
-  created and builds :meth:`log_text` and :meth:`mark_logs` from that offset, plus
-  ``service-bootstrap.log`` and ``upgrade-worker.log`` (set ``self._log_baseline``). Nothing
-  may truncate or delete ``watcher.log``. ``log_files()`` can return the whole file for the
-  artifacts. Log rotation (``RotatingFileHandler``) can move the file under the offset: when
-  the file is shorter than the recorded offset, read it from the start.
+* **Per-test isolation for** ``run_cli``. Each driver has a profile folder, and every command
+  runs with ``USERPROFILE`` (and ``HOME`` and ``APPDATA``) pointing at it, so ``~/.data-hub`` of
+  a one-shot command such as ``init``, ``state forget`` or ``self-update`` is the test's. The
+  service is installed with ``--config <profile>\\.data-hub\\config.yaml`` and ``--env-path
+  <profile>\\.data-hub\\.env.<environment>``, so ``config_dir()``, the env file and the state
+  database (``state_db_path()`` is beside ``ConfigPath``) are the test's own, and tests don't
+  see each other's files. The service is installed lazily, at the driver's first ``start()``
+  (``service install`` reads the config, and a scenario may write it after the PC is built),
+  and ``close()`` uninstalls it. A driver that installs takes over from whichever driver had the
+  service, and ``close()`` removes it only if the driver is still the owner.
+* **The shared log.** The driver records the byte offset of ``watcher.log`` (and of the
+  bootstrap log) when it is created and builds :meth:`log_text` and :meth:`mark_logs` from that
+  offset, plus ``upgrade-worker.log`` (the profile's own). Nothing may truncate or delete
+  ``watcher.log``. Log rotation (``RotatingFileHandler``) can move the file under the offset:
+  when the file is shorter than the recorded offset, it is read from the start.
+  ``log_files()`` returns the whole file for the artifacts. An exception that nothing catches
+  in the service (a config that doesn't load) is reported by pywin32 to the Event Log, not to
+  ``watcher.log``: after a run that ended badly the driver copies those entries into a file that
+  :meth:`log_text` reads.
 * **SCM failure actions off for the shared scenarios.** ``service install`` sets restart
   actions after 60 s and 120 s. A scenario that kills the watcher, or one whose start is
   refused, expects it to stay down until the scenario starts it, as a CLI process does. So
   right after ``service install`` the driver turns the actions off (``sc failure
   DataHubWatcher reset= 0 actions= ""``), and the real recovery is tested only in
-  ``test_windows_service.py``, which switches them on itself.
-* **A second PC for the test that runs** ``init`` **for another one**
-  (``test_a_second_registration_for_an_instrument_with_a_live_watcher_is_refused``). There
-  is one service per machine, so a second PC can't be a second service. It is a
-  config-only driver: a folder with its own profile whose ``run_cli`` passes the group
-  option ``--config <path>`` (``global_args=("--config", str(path))``), so ``init``
-  writes there and the registered
-  service is left alone. It never starts.
+  ``test_windows_service.py``, which asks for it with ``install_service(
+  failure_actions="product")``.
+* **A second PC.** There is one service per machine, so a second PC can't be a second service.
+  Every driver has its own profile, so a PC that only runs ``init`` (the test that registers a
+  second PC for an instrument with a live watcher) needs nothing special: it never starts, so it
+  never installs. A test that starts several PCs does it one after the other: the next
+  ``start()`` takes the service over.
 * **await_upgrade_restart** waits for the service to be ``running`` with a pid other than the
-  one the driver saw at its last ``start()`` (or its last ``await_upgrade_restart``). Take
-  the old pid from the last start, not from the moment of the call: the worker may have
-  restarted the service before the scenario gets there.
-* **hide_uv.** Put a minimal ``PATH`` in the env file (the service reads it with
-  ``override=True``), such as ``C:\\Windows\\System32``, and make sure the candidate
-  ``<home>\\.local\\bin\\uv.exe`` that ``self_update._sys_prefix_uv_candidates`` derives from
-  the install prefix and from ``USERPROFILE`` does not exist (a per-test profile has none; if
-  the standalone installer put one in the profile the tool was installed from, move it away
-  for the test and put it back in a ``finally``).
+  one the driver saw at its last ``start()`` (or its last ``await_upgrade_restart``), and for
+  the new process to log that it is ready. The old pid is taken from the last start, not from
+  the moment of the call: the worker may have restarted the service before the scenario gets
+  there.
+* **hide_uv.** The env file gets ``PATH=C:\\Windows\\System32`` (the service reads it with
+  ``override=True``. Without this the driver gives the service a ``PATH`` that leads to ``uv``,
+  which a service, with no user PATH, would not find), and the driver checks that the
+  candidates ``self_update._sys_prefix_uv_candidates`` derives for the service account
+  (``<systemprofile>\\.local\\bin\\uv.exe``) do not exist. The install is in a folder of the
+  suite's, not in the default uv layout, so no candidate comes from the install prefix.
 * **install_wheel.** The shared scenarios call it, on a PC with an install of its own, to put
   another version in place of the one that runs, as an operator reinstalling by hand would, so
   that the next start runs that version (the scenario of an update that did not take effect).
-  Under the service it is ``uv tool install --reinstall <wheel>`` against the machine's
-  uv-tool install, run while the service is stopped, which the scenario guarantees (it calls it
-  between a stop and the next start). The upgrade worker does the install itself, so a scenario
-  can't slip a reinstall in between the worker's install and its restart: the scenario that
-  needs that moment is ``platforms("cli")``.
+  Under the service it is ``uv tool install --reinstall <wheel>[windows-service]`` against the
+  PC's uv-tool install, run while the service is stopped, which the scenario guarantees. The
+  upgrade worker does the install itself, so a scenario can't slip a reinstall in between the
+  worker's install and its restart: the scenario that needs that moment is ``platforms("cli")``.
 * **wait_for_state_db_busy** and the state database. The method is shared and needs no
-  override: it uses :meth:`state_db_path` and opens the database the way ``state_query`` does.
+  override: it uses :meth:`state_db_path` and opens the database the way ``state_query`` does,
+  from an elevated shell, against the file the service (``LocalSystem``) has open.
 * **kill() and the recovery actions.** ``taskkill /F`` is a crash for the SCM, so with the
   failure actions on the service comes back by itself after 60 s. With them off (note above)
-  it stays down, ``wait_exit`` returns the win32 exit code of the killed process, and
+  it stays down, ``wait_exit`` returns the win32 exit code of the killed process (1067), and
   ``restart()`` is the only supervisor. ``stall_writes`` and ``fail_writes`` below may call
   ``kill()`` when a watcher is stuck inside a trigger.
 * **The service's** ``config_invalid`` **path.** ``_run_service_loop`` calls ``load_config``
   outside of any ``try``, so a missing or malformed config raises an unhandled
-  ``ClickException`` (it lands in ``service-bootstrap.log``) where every other refusal logs an
-  error and exits through ``SystemExit(1)``. ``startup.config_invalid->refused`` reads the
-  message from the log, and under the service it will find it in the bootstrap log instead.
-  PR 3 should decide whether that is the behavior to test or a bug to fix, and say so in the
-  catalog.
+  ``ClickException`` where every other refusal logs an error and exits through
+  ``SystemExit(1)``. The message is not in ``watcher.log``: it reaches the Event Log (the
+  traceback the service host reports, which the driver copies into the log text), and
+  ``service-bootstrap.log`` if the exception reaches the dispatcher. The shared test reads it
+  from the log text, so it holds either way. Whether the unhandled exception should be a
+  logged ``SystemExit(1)`` like the others is a product question the catalog doesn't decide.
 * **start() arguments.** ``args`` and ``global_args`` are command-line arguments of ``watch``
   (``args=("--dry-run",)``) and of the group before it (``global_args=("--verbose",)``). A
-  service takes neither: ignore them, or refuse with ``NotImplementedError``.
+  service takes neither: ``start`` raises ``NotImplementedError``.
 """
 
 from __future__ import annotations
@@ -547,6 +571,17 @@ class WatcherDriver(ABC):
     # What the watcher calls itself in its events: "Watcher" for `watch`, "Service" for the
     # Windows service.
     role: ClassVar[str]
+    # The extras of the package the install this kind of driver runs from needs (`uv tool
+    # install "data-hub-watcher[<extra>]"`): the service needs pywin32, which ships in the
+    # `windows-service` extra. The suite's fixtures install the wheel with these.
+    install_extras: ClassVar[tuple[str, ...]] = ()
+    # How long a scenario waits for an update to be installed and the watcher to run again
+    # (`await_upgrade_restart`, the wait for the index to be asked for the wheel). A
+    # `uv tool install --reinstall` re-reads the metadata of every dependency from PyPI, which
+    # takes seconds on a good connection and longer on a bad one. The service's worker runs it as
+    # `LocalSystem`, which has a uv cache of its own, empty on a new runner, so it overrides this
+    # with a longer time. Scenarios read it from the driver and keep no constant of their own.
+    install_timeout_seconds: ClassVar[float] = 180.0
 
     def __init__(
         self,
@@ -1373,14 +1408,30 @@ class CliDriver(WatcherDriver):
         process.wait()
 
 
+def _on_windows() -> bool:
+    return sys.platform == "win32"
+
+
 def driver_class_for(kind: DriverKind) -> type[WatcherDriver]:
-    """The driver class for a kind of driver."""
+    """The driver class for a kind of driver. The service driver runs only on Windows, in an
+    elevated shell, and says so on any other system."""
     if kind == "cli":
         return CliDriver
-    raise NotImplementedError(
-        "The service driver (WindowsServiceDriver) arrives in the third pull request of the "
-        "watcher end-to-end stack (PR 3). Until then only DATA_HUB_E2E_DRIVER=cli runs."
-    )
+    if not _on_windows():
+        raise RuntimeError(
+            f"{DRIVER_VARIABLE}=service runs the watcher as a Windows service, so it needs "
+            f"Windows (this is {sys.platform}) and an elevated shell. Use "
+            f"{DRIVER_VARIABLE}=cli here."
+        )
+    # Imported here: the service driver's module imports this one.
+    from e2e_support.service_driver import WindowsServiceDriver, is_elevated
+
+    if not is_elevated():
+        raise RuntimeError(
+            f"{DRIVER_VARIABLE}=service installs and removes a Windows service, which needs an "
+            "elevated shell (run as Administrator)."
+        )
+    return WindowsServiceDriver
 
 
 def active_driver_kind(env: Mapping[str, str] | None = None) -> DriverKind:

@@ -37,7 +37,7 @@ module                 test file                 covers
 ``config_sync``        ``test_config_sync``      config push, revisions, rebuilds
 ``shutdown``           ``test_shutdown``         graceful stops, kill, ordering
 ``self_update``        ``test_self_update``      updating from a package index
-``windows_service``    ``test_windows_service``  the Windows service (PR 3)
+``windows_service``    ``test_windows_service``  the Windows service
 =====================  ========================  ====================================
 
 A test may name transitions from any module: the scenario that makes an event happen also
@@ -94,10 +94,9 @@ __all__ = [
     "xfail_bug",
 ]
 
-# Until the service suite lands (PR 3), the transitions that exist only under the Windows
-# service can't have a test, so the catalog check does not ask for one. PR 3 flips this to
-# True, and from then on `test_windows_service.py` must cover every one of them.
-SERVICE_SUITE_READY = False
+# The transitions that exist only under the Windows service are covered by
+# `test_windows_service.py`, and the catalog check asks for a test for each of them.
+SERVICE_SUITE_READY = True
 
 # The one test file whose tests run only under the service driver. Every other test file runs
 # under both drivers, except the tests that say otherwise with `@pytest.mark.platforms(...)`.

@@ -336,6 +336,8 @@ The watcher maintains one SQLite database per environment at `~/.data-hub/watche
 
 Logs are written to `C:\ProgramData\DataHubWatcher\watcher.log` on Windows and `~/.data-hub/watcher.log` on macOS/Linux (10 MB rotating, 5 backups). Both the CLI `watch` command and the Windows service write to the same file so a single `Get-Content -Wait` (or `tail -F`) covers all entry points.
 
+The Windows service also writes to the Application event log, but only warnings, errors and its own lifecycle lines (starting, running, stopped). The INFO lines the other modules write for each file stay in `watcher.log`, so a run of thousands of files can't fill the Application log and push out older warnings and errors.
+
 ### Initial scan identity
 
 When the watcher starts it walks the watch directory to catch files that arrived while it was stopped. Identity for "have I already uploaded this?" is `(relative_path, size, mtime)` rather than a full-content hash — this keeps startup fast even on directories holding hundreds of GB of instrument output. Content integrity is still verified at upload time: the uploader computes a SHA-256 on every file it PUTs to S3 and records it alongside the upload.

@@ -9,6 +9,10 @@ finds through the ``pythonpath`` setting in the root ``pyproject.toml``.
 * :mod:`e2e_support.drivers`: ``WatcherDriver``, the only way a scenario starts, stops,
   kills or inspects the watcher, so the same scenario runs against a CLI process (kind
   ``cli``) and a Windows service (kind ``service``).
+* :mod:`e2e_support.service_driver`, :mod:`e2e_support.windows_scm`: ``WindowsServiceDriver``,
+  which installs and drives the real Windows service (it needs Windows and an elevated shell to
+  run, and imports anywhere), and the commands it runs (``sc.exe``, ``reg.exe``,
+  ``schtasks.exe``, PowerShell) with the parsing of what they print.
 * :mod:`e2e_support.server`: ``ServerView``, what the server says about the watcher, its
   files and its runs, plus helpers that age timestamps and read the S3 stand-in.
 * :mod:`e2e_support.admin`: ``Admin``, the actions an operator takes in the web app,

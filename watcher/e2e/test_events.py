@@ -141,7 +141,7 @@ def test_a_batch_that_cannot_be_sent_is_dropped_and_the_next_flush_reports_the_g
     strict=True,
     raises=KnownBugStillPresent,
     reason=(
-        "bug-11-events-lost-on-kill: the queue lives in memory only, so events queued but "
+        "ENG-2120: the queue lives in memory only, so events queued but "
         "not yet sent when the watcher is killed are never delivered"
     ),
 )

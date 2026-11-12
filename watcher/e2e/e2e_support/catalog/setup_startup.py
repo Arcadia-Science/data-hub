@@ -157,7 +157,7 @@ TRANSITIONS: tuple[Transition, ...] = (
         "waiting.folder_vanished->waiting_then_resumed",
         "When the watch folder disappears while the watcher runs, it moves to `waiting` "
         "with a reason, and starts watching again when the folder returns.",
-        "bug-01-folder-vanishes",
+        "ENG-2110",
     ),
     # --- left to unit tests -----------------------------------------------------------------
     excluded(

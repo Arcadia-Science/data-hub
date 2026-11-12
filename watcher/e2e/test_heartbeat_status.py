@@ -165,7 +165,7 @@ def test_graceful_stop_shows_stopped_and_starting_again_shows_watching(
     strict=True,
     raises=KnownBugStillPresent,
     reason=(
-        "bug-new-stopped-reads-stale: a cleanly stopped watcher reads `stale` five minutes "
+        "ENG-2124: a cleanly stopped watcher reads `stale` five minutes "
         "after its last heartbeat, although the docs list Stopped as a status of its own"
     ),
 )
@@ -193,7 +193,7 @@ def test_a_cleanly_stopped_watcher_keeps_reading_stopped(
     strict=True,
     raises=KnownBugStillPresent,
     reason=(
-        "bug-new-stopped-reads-stale: the watcher list shows a cleanly stopped watcher as "
+        "ENG-2124: the watcher list shows a cleanly stopped watcher as "
         "`stale` and lists it under the stale filter, five minutes after its last heartbeat"
     ),
 )
@@ -246,17 +246,24 @@ def test_the_watcher_list_filters_stale_watchers_by_the_age_of_their_heartbeat(
         another("stopped"),
         another("never"),
     )
-    for pc in (online, silent, stopped):
-        pc.start()
-        server.wait_for_watcher_status(pc.watcher_id, "watching")
-    assert stopped.stop() == 0
-    server.wait_for_watcher_status(stopped.watcher_id, "stopped")
+    # One PC at a time, with the one that stays online last: under the Windows service there is
+    # one service per machine, and starting the next PC takes it over from the one before.
 
     # One watcher goes quiet without a word. Its heartbeats are refused until a refusal has been
     # seen, so none is on its way when it is killed and its timestamp aged.
+    silent.start()
+    server.wait_for_watcher_status(silent.watcher_id, "watching")
     silence_heartbeats(proxy, silent.watcher_id)
     silent.kill()
     server.age_past_stale(silent.watcher_id)
+
+    stopped.start()
+    server.wait_for_watcher_status(stopped.watcher_id, "watching")
+    assert stopped.stop() == 0
+    server.wait_for_watcher_status(stopped.watcher_id, "stopped")
+
+    online.start()
+    server.wait_for_watcher_status(online.watcher_id, "watching")
 
     def shown(status: str | None) -> dict[str, str]:
         return {r["id"]: r["status"] for r in server.list_watchers(status=status)}
@@ -412,7 +419,7 @@ def test_heartbeats_report_what_happened_since_the_last_one_and_start_again_from
     strict=True,
     raises=KnownBugStillPresent,
     reason=(
-        "bug-03-failed-heartbeat-counts-lost: the counters are reset after a heartbeat that "
+        "ENG-2112: the counters are reset after a heartbeat that "
         "failed to send, so the next successful one reports zero for that interval"
     ),
 )
@@ -450,7 +457,7 @@ def test_counts_from_a_heartbeat_that_failed_are_carried_into_the_next_one(
     strict=True,
     raises=KnownBugStillPresent,
     reason=(
-        "bug-new-counts-lost-during-heartbeat: the counters are reset after the heartbeat "
+        "ENG-2125: the counters are reset after the heartbeat "
         "request returns, so a count added while it is in flight is never reported"
     ),
 )
@@ -508,20 +515,25 @@ def test_watcher_survives_a_server_outage_and_reports_the_gap_when_it_ends(
 ) -> None:
     # No queue polling, so no event is queued during the outage. A flush that fails waits
     # between its attempts, which would stretch each tick and leave fewer failed heartbeats in
-    # the seven seconds below.
+    # the time the outage lasts.
     pc = watcher(overrides={testing_overrides.UPLOAD_POLL_INTERVAL_ENV_VAR: "600"})
     pc.start()
     server.wait_for_watcher_status(pc.watcher_id, "watching")
     last_before = server.last_heartbeat_id(pc.watcher_id)
 
+    mark = pc.mark_logs()
     proxy.go_down()
-    # Seven seconds are three ticks. The watcher keeps running and nothing is stored.
-    stays_true(
-        lambda: pc.is_running() and server.last_heartbeat_id(pc.watcher_id) == last_before,
-        7,
+    # The outage lasts until two heartbeats have been refused, however long a refused connection
+    # takes (about two seconds on Windows, and no time on Linux). A fixed time would leave fewer
+    # failures on Windows. The watcher keeps running and nothing is stored.
+    wait_until(
+        lambda: pc.log_text(mark).count("Heartbeat failed") >= 2,
+        60,
         lambda: server.dump(pc.watcher_id) + "\n" + pc.log_tail(),
-        what="a running watcher and no new heartbeats during the outage",
+        what="two refused heartbeats during the outage",
     )
+    assert pc.is_running()
+    assert server.last_heartbeat_id(pc.watcher_id) == last_before
     proxy.come_up()
 
     fresh = server.wait_for_heartbeats(pc.watcher_id, count=2, after_id=last_before)
@@ -531,8 +543,10 @@ def test_watcher_survives_a_server_outage_and_reports_the_gap_when_it_ends(
 
     recovered = server.wait_for_event(pc.watcher_id, event_type="error", kind="heartbeat_recovered")
     assert recovered.details["consecutive_failures"] >= 2
-    # The gap runs from the first failed heartbeat to the first one that got through.
-    assert recovered.details["gap_seconds"] >= 4
+    # The gap runs from the first failed heartbeat to the first one that got through: two waits
+    # of 2 s at least, in whole seconds (the watcher truncates), so 3 allows for a timer that
+    # fires a few milliseconds early.
+    assert recovered.details["gap_seconds"] >= 3
     assert "consecutive failure" in recovered.message
     # One event for the whole outage, not one per failed heartbeat.
     assert len(server.events(pc.watcher_id, kind="heartbeat_recovered")) == 1

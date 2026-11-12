@@ -1436,11 +1436,25 @@ def test_which_driver_a_run_uses_comes_from_the_environment() -> None:
         active_driver_kind({drivers.DRIVER_VARIABLE: "windows"})
 
 
-def test_the_cli_driver_is_the_class_of_the_cli_kind_and_the_service_waits_for_pr_3() -> None:
+def test_each_kind_of_driver_has_its_class_and_the_service_needs_windows_and_elevation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from e2e_support import service_driver
+
     assert driver_class_for("cli") is CliDriver
     assert CliDriver.kind == "cli"
-    with pytest.raises(NotImplementedError, match="PR 3"):
+    # Anywhere but Windows the service kind stops the run with a message that says what to do.
+    monkeypatch.setattr(drivers, "_on_windows", lambda: False)
+    with pytest.raises(RuntimeError, match="needs Windows.*DATA_HUB_E2E_DRIVER=cli"):
         driver_class_for("service")
+    # On Windows it needs an elevated shell, because it installs a service.
+    monkeypatch.setattr(drivers, "_on_windows", lambda: True)
+    monkeypatch.setattr(service_driver, "is_elevated", lambda: False)
+    with pytest.raises(RuntimeError, match="elevated shell"):
+        driver_class_for("service")
+    monkeypatch.setattr(service_driver, "is_elevated", lambda: True)
+    assert driver_class_for("service") is service_driver.WindowsServiceDriver
+    assert service_driver.WindowsServiceDriver.kind == "service"
 
 
 def test_a_platforms_marker_decides_which_kind_of_driver_runs_a_test() -> None:

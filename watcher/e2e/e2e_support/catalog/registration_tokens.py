@@ -87,9 +87,9 @@ TRANSITIONS: tuple[Transition, ...] = (
         "outcome is that it stops and stays stopped: a deregistered watcher can never "
         "recover, so the SCM's recovery actions, which restart a service that exits with a "
         "failure, must not keep bringing it back. The shared test checks the stop and the "
-        "uploads, a CLI test the exit code, and the SCM side belongs to "
-        "`test_windows_service.py` in PR 3.",
-        "bug-08-deregistered-watcher-keeps-running",
+        "uploads, a CLI test the exit code, and the SCM side is "
+        "`service.deregistered->stays_stopped` in `test_windows_service.py`.",
+        "ENG-2117",
     ),
     xfail_bug(
         MACHINE,
@@ -97,6 +97,6 @@ TRANSITIONS: tuple[Transition, ...] = (
         "Starting a watcher whose registration was deleted exits with a clear message that "
         "says to run `init` again. (A service start that is refused exits with a failure, and "
         "the SCM's recovery restarts it twice before it stays down.)",
-        "bug-08-deregistered-watcher-keeps-running",
+        "ENG-2117",
     ),
 )

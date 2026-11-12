@@ -47,7 +47,7 @@ def known_bug() -> Iterator[None]:
     the server holds what it should, the file was written. If any of that fails the test
     fails, and not as an expected failure. Only the intended-behavior assertion goes inside::
 
-        @pytest.mark.xfail(strict=True, raises=KnownBugStillPresent, reason="bug-07-...: ...")
+        @pytest.mark.xfail(strict=True, raises=KnownBugStillPresent, reason="ENG-2116: ...")
         @pytest.mark.covers("process.stop->event_before_stopped_heartbeat")
         def test_the_stop_event_reaches_the_server_first(...):
             ...  # precondition

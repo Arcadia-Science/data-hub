@@ -19,10 +19,10 @@ The rules (``check_catalog``):
   service. A transition that exists only under the service is covered from
   ``test_windows_service.py``, and is not asked for until ``SERVICE_SUITE_READY`` is true;
 * a known-bug test follows the pattern: ``xfail(strict=True, raises=KnownBugStillPresent,
-  reason="<bug slug>: ...")``, a ``with known_bug():`` block around the intended-behavior
-  assertion, and only ``xfail_bug`` transitions in ``covers``. The reason starts with the slug
-  of one of those transitions. A test that isn't an xfail never names an ``xfail_bug``
-  transition.
+  reason="<bug>: ...")``, a ``with known_bug():`` block around the intended-behavior
+  assertion, and only ``xfail_bug`` transitions in ``covers``. The reason starts with the bug
+  of one of those transitions (its Linear issue, such as ``ENG-2116``, or a short slug until
+  the issue is filed). A test that isn't an xfail never names an ``xfail_bug`` transition.
 
 What counts as a marker: ``@pytest.mark.covers("id", ...)``, ``@pytest.mark.platforms("cli")``
 and ``@pytest.mark.xfail(...)`` on a test function, on a test class (which applies to all its
@@ -529,10 +529,10 @@ def _known_bug_problems(tests: Sequence[TestInfo], by_id: dict[str, Transition])
                 f"{test.label}: an xfail test names only xfail_bug transitions, not "
                 f"{', '.join(not_bugs)}"
             )
-        slugs = [t.bug for t in bugs if t.bug]
+        bug_names = [t.bug for t in bugs if t.bug]
         reason = test.xfail_reason or ""
-        if not any(reason.startswith(f"{slug}:") for slug in slugs):
-            wanted = " or ".join(f"'{slug}: ...'" for slug in slugs) or "the slug of a transition"
+        if not any(reason.startswith(f"{name}:") for name in bug_names):
+            wanted = " or ".join(f"'{name}: ...'" for name in bug_names) or "its bug"
             problems.append(
                 f"{test.label}: the xfail reason must start with {wanted}, not {reason[:60]!r}"
             )

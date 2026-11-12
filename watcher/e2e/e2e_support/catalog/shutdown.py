@@ -60,7 +60,7 @@ TRANSITIONS: tuple[Transition, ...] = (
         "process.stop->event_before_stopped_heartbeat",
         "On a graceful stop the server receives the `watcher_stopped` event before the "
         "final `stopped` heartbeat.",
-        "bug-07-stopped-heartbeat-before-event",
+        "ENG-2116",
     ),
     xfail_bug(
         MACHINE,
@@ -72,7 +72,23 @@ TRANSITIONS: tuple[Transition, ...] = (
         "and a following file, for about 5 seconds after the stop. (The in-process rebuild "
         "for a config revision stops the worker first.) The test makes a stop arrive during "
         "the first of two short files and asserts that no request for a part follows it.",
-        "bug-new-uploads-continue-after-stop",
+        "ENG-2126",
+    ),
+    xfail_bug(
+        MACHINE,
+        "process.stop->bounded_when_server_hangs",
+        "PROPOSED — confirm intent: a graceful stop completes within about 30 seconds even "
+        "when the server has stopped answering. Today a stop waits for the heartbeat thread "
+        "(whose request is stuck for the client's 30 s read timeout), sends the final "
+        "`stopped` heartbeat and flushes the events, each of which can wait for the same "
+        "timeout again, and the join of the thread allows 65 s, so a stop against a hung "
+        "server took up to about 95 s. For the Windows service that is worse than slow: "
+        "pywin32 reports a wait hint of 5 s that nothing updates, the SCM doesn't kill a "
+        "manual stop that is slow, and `service reinstall` gives up waiting for the "
+        "service after 30 s. The test holds every heartbeat and event request for longer "
+        "than the client waits, asks for a stop and expects the process to be gone within "
+        "30 s.",
+        "ENG-2127",
     ),
     xfail_bug(
         MACHINE,
@@ -83,11 +99,9 @@ TRANSITIONS: tuple[Transition, ...] = (
         "`watcher_stopped` event. The test holds up the first heartbeat to keep the process "
         "in that window, because the scan itself is too quick to hit from outside. The "
         "Windows service has no such window: `SvcStop` sets an event that its loop reads "
-        "when the start has finished, so the stop is not lost. A service counterpart "
-        "belongs to `test_windows_service.py` in PR 3, together with a stop during a long "
-        "scan, which only takes effect when the scan ends and so has to fit the SCM's "
-        "stop wait hint.",
-        "bug-09-sigterm-during-scan",
+        "when the start has finished, so the stop is not lost. The service counterpart is "
+        "`service.stop->clean_stop_during_start` in `test_windows_service.py`.",
+        "ENG-2118",
         platforms=CLI,
     ),
 )

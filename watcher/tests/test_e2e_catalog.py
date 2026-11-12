@@ -15,6 +15,7 @@ check by hand, with the missing count per machine::
 """
 
 from __future__ import annotations
+import re
 import textwrap
 from pathlib import Path
 
@@ -60,19 +61,22 @@ def test_the_catalog_is_well_formed() -> None:
         catalog.transitions_for("no_such_machine")
 
 
-def test_known_bugs_have_a_slug_and_exclusions_a_reason() -> None:
+# A known bug is named by its Linear issue, or by a short slug until the issue is filed.
+KNOWN_BUG_NAME = re.compile(r"ENG-[0-9]+|bug-[a-z0-9-]+")
+
+
+def test_known_bugs_have_a_name_and_exclusions_a_reason() -> None:
     for t in catalog.ALL_TRANSITIONS:
         if t.status == "xfail_bug":
-            assert t.bug is not None and t.bug.startswith("bug-"), t.id
+            assert t.bug is not None and KNOWN_BUG_NAME.fullmatch(t.bug), t.id
         if t.status == "excluded":
             assert t.reason, t.id
 
 
 def test_a_service_only_transition_is_in_the_service_machine() -> None:
-    # The service suite (PR 3) covers these from test_windows_service.py. Until then the check
-    # skips them behind SERVICE_SUITE_READY, so make sure that switch is the only thing standing
-    # between a service-only transition and a missing-test failure, and that none of them hides
-    # in the catalog of a machine whose tests run under both drivers.
+    # The service suite covers these from test_windows_service.py, and the check asks for each
+    # of them (SERVICE_SUITE_READY), so make sure that none of them hides in the catalog of a
+    # machine whose tests run under both drivers.
     service_only = [t for t in catalog.ALL_TRANSITIONS if t.platforms == SERVICE]
     assert service_only
     assert {t.machine for t in service_only} == {"windows_service"}
@@ -135,7 +139,7 @@ def missing_ids(report: CatalogReport) -> set[str]:
 
 
 # The way a known-bug test is written: strict, raises the exception `known_bug()` makes, a
-# reason that starts with the bug's slug, and only the intended-behavior assertion in the block.
+# reason that starts with the bug's name, and only the intended-behavior assertion in the block.
 BUG_MARKS = """
     @pytest.mark.covers("thing.c->d")
     @pytest.mark.xfail(
@@ -707,20 +711,20 @@ def test_a_known_bug_test_names_only_known_bug_transitions(tmp_path: Path) -> No
     assert "names only xfail_bug transitions, not thing.a->b" in problems[0]
 
 
-def test_the_xfail_reason_starts_with_the_slug_of_a_transition_the_test_names(
+def test_the_xfail_reason_starts_with_the_bug_of_a_transition_the_test_names(
     tmp_path: Path,
 ) -> None:
-    wrong_slug = bug_problems(
+    wrong_bug = bug_problems(
         tmp_path, GOOD_BUG_TEST.replace('"bug-99-example: stuck"', '"bug-98-other: stuck"')
     )
     no_colon = bug_problems(
         tmp_path, GOOD_BUG_TEST.replace('"bug-99-example: stuck"', '"bug-99-example-ish: stuck"')
     )
-    no_slug = bug_problems(tmp_path, GOOD_BUG_TEST.replace("bug-99-example: ", ""))
+    no_bug = bug_problems(tmp_path, GOOD_BUG_TEST.replace("bug-99-example: ", ""))
 
-    assert len(wrong_slug) == len(no_colon) == len(no_slug) == 1
-    assert "must start with 'bug-99-example: ...'" in wrong_slug[0]
-    assert "bug-98-other" in wrong_slug[0]
+    assert len(wrong_bug) == len(no_colon) == len(no_bug) == 1
+    assert "must start with 'bug-99-example: ...'" in wrong_bug[0]
+    assert "bug-98-other" in wrong_bug[0]
 
 
 def test_a_test_that_is_not_an_xfail_cannot_name_a_known_bug_transition(tmp_path: Path) -> None:
@@ -921,7 +925,8 @@ def test_the_real_known_bug_tests_follow_the_pattern() -> None:
         assert test.strict_xfail, test.label
         assert test.xfail_raises_known_bug, test.label
         assert test.wraps_known_bug, test.label
-        assert test.xfail_reason is not None and test.xfail_reason.startswith("bug-"), test.label
+        assert test.xfail_reason is not None, test.label
+        assert KNOWN_BUG_NAME.fullmatch(test.xfail_reason.split(":")[0]), test.label
     # And no other test names a known bug.
     for test in tests:
         if not test.xfail:

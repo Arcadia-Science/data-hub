@@ -189,7 +189,9 @@ def test_files_that_match_no_pattern_are_ignored(
 def test_a_growing_file_is_not_reported_until_it_stops_growing(
     watcher: WatcherFactory, server: ServerView, instrument_id: str, watch_dir: Path
 ) -> None:
-    pc = watcher(upload_mode="manual", stability_period_seconds=2)
+    # A write every second (the default of `GrowingFile`) never leaves the file quiet for the
+    # 3-second stability period: 2 s of margin.
+    pc = watcher(upload_mode="manual", stability_period_seconds=3)
     pc.start()
 
     live = watch_dir / "RUN001" / "live.csv"
@@ -213,21 +215,22 @@ def test_a_growing_file_is_not_reported_until_it_stops_growing(
 def test_a_file_that_never_settles_is_abandoned_with_an_error_event(
     watcher: WatcherFactory, server: ServerView, instrument_id: str, watch_dir: Path
 ) -> None:
-    pc = watcher(upload_mode="manual", stability_period_seconds=2, max_stability_wait_seconds=4)
+    pc = watcher(upload_mode="manual", stability_period_seconds=3, max_stability_wait_seconds=6)
     pc.start()
 
     live = watch_dir / "RUN001" / "live.csv"
-    # A write every quarter of a second: well inside the stability period, so the file is never
-    # quiet long enough to be stable, and only the timeout ends its wait.
-    with GrowingFile(live, interval=0.25):
+    # A write every second (the default of `GrowingFile`, which says why not faster): inside the
+    # 3-second stability period, so the file is never quiet long enough to be stable, and only
+    # the 6-second timeout ends its wait.
+    with GrowingFile(live):
         event = server.wait_for_event(
             pc.watcher_id, event_type="error", kind="stability_timeout", timeout=40
         )
         # It is still changing, and nothing was reported for it.
         assert not server.runs(instrument_id)
     assert Path(event.details["path"]) == live
-    assert event.details["max_wait_seconds"] == 4
-    assert event.message == "File live.csv did not stabilise within 4s"
+    assert event.details["max_wait_seconds"] == 6
+    assert event.message == "File live.csv did not stabilise within 6s"
 
     # Being abandoned is not forever: the last write put the file back on the list, and once
     # the file stops changing it is reported at its final size.
@@ -711,7 +714,7 @@ def test_a_deleted_run_refuses_updates_and_catches_up_after_it_is_restored(
 @pytest.mark.xfail(
     strict=True,
     raises=KnownBugStillPresent,
-    reason="bug-05-rereport-deleted-run-attaches-files: the POST of a deleted run returns 200 "
+    reason="ENG-2114: the POST of a deleted run returns 200 "
     "and attaches the files instead of a 409",
 )
 @pytest.mark.covers("run.deleted->rereport_conflict")
@@ -762,7 +765,7 @@ def test_reporting_a_deleted_run_again_is_refused_and_attaches_no_files(
 @pytest.mark.xfail(
     strict=True,
     raises=KnownBugStillPresent,
-    reason="bug-new-run-id-not-url-encoded: the watcher puts the run ID into the URL path of its "
+    reason="ENG-2121: the watcher puts the run ID into the URL path of its "
     "calls as it is, so a hash or percent sign in it sends an update (manual mode) or an upload "
     "(auto mode) to another run, or nowhere",
 )
@@ -812,7 +815,7 @@ def test_a_run_with_url_characters_in_its_id_gets_its_files(
 @pytest.mark.xfail(
     strict=True,
     raises=KnownBugStillPresent,
-    reason="bug-06-dismissed-path-blocks-new-file: the dismissed file's path stays unique in "
+    reason="ENG-2115: the dismissed file's path stays unique in "
     "its run, so the report of a new file at that path is dropped without a trace",
 )
 @pytest.mark.covers("file.dismissed_path->redetected")

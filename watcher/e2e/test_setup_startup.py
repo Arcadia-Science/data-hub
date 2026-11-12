@@ -681,7 +681,7 @@ def test_a_start_that_keeps_failing_backs_off_and_then_succeeds(
     strict=True,
     raises=KnownBugStillPresent,
     reason=(
-        "bug-01-folder-vanishes: a watch folder that disappears while the watcher runs "
+        "ENG-2110: a watch folder that disappears while the watcher runs "
         "leaves it reporting `watching` instead of `waiting`"
     ),
 )

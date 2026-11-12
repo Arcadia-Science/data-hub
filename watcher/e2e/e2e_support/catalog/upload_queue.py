@@ -114,7 +114,7 @@ TRANSITIONS: tuple[Transition, ...] = (
         "has gone by without it, also gets a fresh set of three attempts: the watcher tries to "
         "upload it. Today it still remembers the three failures, and cancels the new request "
         "at once with no attempt and no `queued_file_missing` event.",
-        "bug-new-cancel-memo-not-cleared",
+        "ENG-2123",
     ),
     covered(
         MACHINE,
@@ -157,7 +157,7 @@ TRANSITIONS: tuple[Transition, ...] = (
         MACHINE,
         "queue.deleted_run_file->not_listed",
         "A queued file whose run was soft-deleted is not listed in the watcher's upload queue.",
-        "bug-04-queue-lists-deleted-run-files",
+        "ENG-2113",
     ),
     excluded(
         MACHINE,

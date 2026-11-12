@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from data_hub_shared.testing_proxy import FaultProxy
+from data_hub_watcher import testing_overrides
 from e2e_support.drivers import WatcherDriver
 from e2e_support.factory import WatcherFactory
 from e2e_support.files import SMALL, write_file, write_run
@@ -350,7 +351,7 @@ def test_a_watcher_started_again_after_a_kill_resumes_without_reporting_twice(
     strict=True,
     raises=KnownBugStillPresent,
     reason=(
-        "bug-new-uploads-continue-after-stop: `stop_runtime` joins the file monitor for up to "
+        "ENG-2126: `stop_runtime` joins the file monitor for up to "
         "5 s before it stops the upload worker, so an auto upload on the monitor's thread "
         "keeps starting parts, and the next file, after a stop"
     ),
@@ -381,8 +382,10 @@ def test_a_stop_starts_no_new_part_or_file_of_an_auto_upload(
         what="the first part to be on its way",
     )
 
-    stopped_at = time.time()
     pc.request_stop()
+    # Taken after the request returns: under the service `request_stop` spends a second or two in
+    # a command first, and a part that arrives meanwhile is not one the stop failed to prevent.
+    stopped_at = time.time()
     assert pc.wait_exit(25) == 0
 
     # The proxy logs a part when it arrives, so a part logged after the stop (with some room for
@@ -401,7 +404,7 @@ def test_a_stop_starts_no_new_part_or_file_of_an_auto_upload(
     strict=True,
     raises=KnownBugStillPresent,
     reason=(
-        "bug-07-stopped-heartbeat-before-event: the final `stopped` heartbeat reaches the "
+        "ENG-2116: the final `stopped` heartbeat reaches the "
         "server before the `watcher_stopped` event"
     ),
 )
@@ -409,7 +412,11 @@ def test_a_stop_starts_no_new_part_or_file_of_an_auto_upload(
 def test_the_stop_event_reaches_the_server_before_the_stopped_heartbeat(
     watcher: WatcherFactory, server: ServerView
 ) -> None:
-    pc = watcher()
+    # One heartbeat at start, then none for a minute. A tick that is under way when the stop comes
+    # sends the queued stop event with its own flush, ahead of the final heartbeat, and hides the
+    # order the stop itself uses. Stopping the service takes about as long as the usual 2-second
+    # interval, so with that interval a tick usually is under way.
+    pc = watcher(overrides={testing_overrides.HEARTBEAT_INTERVAL_ENV_VAR: "60"})
     start_watching(pc, server)
 
     assert pc.stop() == 0
@@ -428,7 +435,41 @@ def test_the_stop_event_reaches_the_server_before_the_stopped_heartbeat(
     strict=True,
     raises=KnownBugStillPresent,
     reason=(
-        "bug-09-sigterm-during-scan: a stop that arrives while the watcher is still starting "
+        "ENG-2127: a stop against a server that has stopped "
+        "answering waits for the stuck heartbeat, the final heartbeat and the event flush, "
+        "each up to the client's read timeout, and takes up to about 95 s"
+    ),
+)
+@pytest.mark.covers("process.stop->bounded_when_server_hangs")
+def test_a_stop_completes_within_thirty_seconds_even_if_the_server_stops_answering(
+    watcher: WatcherFactory, server: ServerView, proxy: FaultProxy
+) -> None:
+    pc = watcher()
+    start_watching(pc, server)
+    # Every heartbeat and event request is held for longer than the client waits for an answer
+    # (30 s), so each one the watcher sends is stuck until it gives up on it.
+    proxy.add_fault("delay", path=r"/(heartbeat|events)$", method="POST", delay_seconds=45)
+    wait_until(
+        lambda: any(r.fault_mode == "delay" for r in proxy.requests),
+        30,
+        pc.log_tail,
+        what="a heartbeat to be held up",
+    )
+    assert pc.is_running()
+
+    pc.request_stop()
+
+    # PROPOSED bound: the process is gone within about 30 s. A test that outlasts it leaves the
+    # watcher to the driver, which stops it for good when the test ends.
+    with known_bug():
+        pc.wait_exit(30)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    raises=KnownBugStillPresent,
+    reason=(
+        "ENG-2118: a stop that arrives while the watcher is still starting "
         "(before its start-up scan ends) kills it with no stopped heartbeat and no stop event"
     ),
 )

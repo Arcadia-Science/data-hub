@@ -149,7 +149,7 @@ TRANSITIONS: tuple[Transition, ...] = (
         "Reporting a run that an admin soft-deleted (a watcher that starts without that run in "
         "its state database, for example after `state forget`) is refused with a 409, as "
         "updating it is, and attaches no files to it.",
-        "bug-05-rereport-deleted-run-attaches-files",
+        "ENG-2114",
     ),
     xfail_bug(
         MACHINE,
@@ -157,7 +157,7 @@ TRANSITIONS: tuple[Transition, ...] = (
         "A new file at a path whose earlier file was dismissed (a different size or "
         "modification time), reported by a watcher that forgot the old one with "
         "`state forget`, appears on the server as `detected`.",
-        "bug-06-dismissed-path-blocks-new-file",
+        "ENG-2115",
     ),
     xfail_bug(
         MACHINE,
@@ -171,7 +171,7 @@ TRANSITIONS: tuple[Transition, ...] = (
         "runs in both upload modes and asserts that each file lands in its own run and, in "
         "auto mode, under `<instrument>/<run id>/`, and that the run the ID reads as gets "
         "nothing.",
-        "bug-new-run-id-not-url-encoded",
+        "ENG-2121",
     ),
     # --- the initial scan and restarts ------------------------------------------------------
     covered(
