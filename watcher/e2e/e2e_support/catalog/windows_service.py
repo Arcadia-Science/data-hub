@@ -154,11 +154,11 @@ TRANSITIONS: tuple[Transition, ...] = (
         "lists ACCEPTS_PRESHUTDOWN), and its handler stops the service as `service stop` "
         "does, with a `stopped` heartbeat and a `watcher_stopped` event that say Windows is "
         "shutting down. The test reads only the controls `sc queryex` lists, because a "
-        "test can't send a preshutdown to a service. The unit tests cover the handler. So "
-        "the test doesn't show that a stop finishes in time: Windows waits 10 s by default, "
-        "and a stop with an upload in flight can take longer and is then cut off with no "
-        "final heartbeat. With Fast Startup on, a shutdown from the Start menu doesn't stop "
-        "the service.",
+        "test can't send a preshutdown to a service. The unit tests cover the handler and "
+        "the limits the stop sets itself (about 8 s in all). So the test doesn't show that "
+        "a stop finishes in the time Windows waits, 10 s by default from Windows 10 "
+        "version 1703: only a real restart does. With Fast Startup on, a shutdown from the "
+        "Start menu doesn't stop the service.",
         platforms=SERVICE,
     ),
     # --- start-up failures and the SCM's recovery -------------------------------------------

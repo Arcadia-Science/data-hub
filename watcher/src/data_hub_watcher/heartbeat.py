@@ -7,9 +7,10 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from data_hub_watcher.api_client import ApiError, DataHubClient
+from data_hub_watcher.api_client import ApiError, DataHubClient, timeout_until
 from data_hub_watcher.constants import (
     HEARTBEAT_INTERVAL_SECONDS,
+    SYSTEM_SHUTDOWN_JOIN_SECONDS,
     SYSTEM_SHUTDOWN_STATUS_REASON,
     WATCHER_VERSION,
 )
@@ -123,30 +124,54 @@ class HeartbeatLoop:
         """Change the ``status_reason`` sent from the next heartbeat on."""
         self._status_reason = reason
 
-    def stop(self, *, send_stopped: bool = True, system_shutdown: bool = False) -> None:
+    def stop(
+        self,
+        *,
+        send_stopped: bool = True,
+        system_shutdown: bool = False,
+        deadline: float | None = None,
+    ) -> None:
         """Stop the loop and, unless *send_stopped* is false, send the final heartbeat.
 
         *system_shutdown* marks that heartbeat as caused by Windows shutting down or
         restarting: the server then keeps the instrument's requested uploads queued
         for the watcher to upload once the PC starts again, instead of cancelling
         them as it does for any other stop.
+
+        *deadline* (a `time.monotonic()` value) is for a stop that has little time, as
+        when Windows is shutting down. The wait for a heartbeat in progress is at most
+        `SYSTEM_SHUTDOWN_JOIN_SECONDS`, and the final heartbeat uses an HTTP timeout
+        that fits before the deadline.
         """
         self._stop_event.set()
         if self._thread and self._thread.is_alive():
-            # A tick in progress when stop is requested can take far longer than
-            # a short interval: the heartbeat request alone can run for tens of
-            # seconds, and the event flush and the update check follow it. The
-            # final "stopped" heartbeat below must not overtake that tick's
-            # "watching" one, or the server ends on "watching". So the wait
-            # never drops below the production interval, which a short test
-            # override of the interval would otherwise shrink.
-            self._thread.join(timeout=max(self._interval, HEARTBEAT_INTERVAL_SECONDS) + 5)
+            if deadline is None:
+                # A tick in progress when stop is requested can take far longer than
+                # a short interval: the heartbeat request alone can run for tens of
+                # seconds, and the event flush and the update check follow it. The
+                # final "stopped" heartbeat below must not overtake that tick's
+                # "watching" one, or the server ends on "watching". So the wait
+                # never drops below the production interval, which a short test
+                # override of the interval would otherwise shrink.
+                join_timeout = max(self._interval, HEARTBEAT_INTERVAL_SECONDS) + 5
+            else:
+                # With little time, a tick that is still running after a short wait is
+                # left behind: it is a daemon thread, and it ends with the process. If
+                # its request is slow, its "watching" heartbeat can reach the server
+                # after the "stopped" one, which is no worse than a watcher that was
+                # killed: the server marks the PC offline when no heartbeat follows.
+                join_timeout = SYSTEM_SHUTDOWN_JOIN_SECONDS
+            self._thread.join(timeout=join_timeout)
         # Send a final "stopped" heartbeat so the server knows the watcher
         # shut down gracefully rather than silently disappearing. Skipped when
         # the runtime is being rebuilt for a new config, because a new loop
         # starts straight away and the watcher never actually stops.
         if send_stopped:
-            self._send_heartbeat(status="stopped", system_shutdown=system_shutdown)
+            self._send_heartbeat(
+                status="stopped",
+                system_shutdown=system_shutdown,
+                timeout=None if deadline is None else timeout_until(deadline),
+            )
 
     def _run(self) -> None:
         # Event.wait() returns True when set (stop requested) and False on timeout,
@@ -162,10 +187,16 @@ class HeartbeatLoop:
         if self._on_tick is not None:
             self._on_tick()
 
-    def _send_heartbeat(self, status: str = "watching", *, system_shutdown: bool = False) -> None:
+    def _send_heartbeat(
+        self,
+        status: str = "watching",
+        *,
+        system_shutdown: bool = False,
+        timeout: tuple[float, float] | None = None,
+    ) -> None:
         payload = self._build_payload(status, system_shutdown=system_shutdown)
         try:
-            response = self._client.send_heartbeat(self._watcher_id, payload)
+            response = self._client.send_heartbeat(self._watcher_id, payload, timeout=timeout)
         except (ApiError, Exception) as exc:
             logger.warning("Heartbeat failed: %s", exc)
             if self._consecutive_heartbeat_failures == 0:

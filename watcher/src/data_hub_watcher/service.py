@@ -576,8 +576,10 @@ def _run_service_loop(
 
     *system_shutdown* is set, before *stop_event*, when the stop is Windows
     shutting down or restarting. The final ``stopped`` heartbeat then says so
-    (the server keeps requested uploads queued across the restart), and the
-    ``watcher_stopped`` event reads "Service stopped: Windows is shutting down".
+    (the server keeps requested uploads queued across the restart), the
+    ``watcher_stopped`` event reads "Service stopped: Windows is shutting down",
+    and the stop is limited to about 7 s (see ``stop_runtime``), because Windows
+    ends the service when its preshutdown timeout passes.
 
     This is the testable body of ``DataHubWatcherService.SvcDoRun``.
     Extracted as a top-level function so unit tests can exercise the
@@ -823,23 +825,23 @@ def _create_service_class() -> type | None:
         # service that accepts preshutdown and stops is not sent the shutdown control,
         # so the class has no ``SvcShutdown``.
         #
-        # pywin32 311's ``ServiceFramework`` accepts stop, pause and continue, and
-        # shutdown when the class has a ``SvcShutdown``. It sends a control it has no
-        # method for to ``SvcOtherEx``, so this takes the ``GetAcceptedControls``
-        # override below and the check in ``SvcOtherEx``. The service reports what it
-        # accepts each time it runs, so a PC upgraded in place has this from the
-        # restart into the new wheel, with no ``service reinstall``.
+        # pywin32 311's ``GetAcceptedControls`` reports stop for a class that has a
+        # ``SvcStop``, pause and continue for one that has both ``SvcPause`` and
+        # ``SvcContinue``, and shutdown for one that has a ``SvcShutdown``. It sends a
+        # control it has no method for to ``SvcOtherEx``, so this takes the
+        # ``GetAcceptedControls`` override below and the check in ``SvcOtherEx``. The
+        # service reports what it accepts each time it runs, so a PC upgraded in place
+        # has this from the restart into the new wheel, with no ``service reinstall``.
         #
-        # Windows waits for the service to stop for the preshutdown timeout, 10 s by
-        # default from Windows 10 build 15063, and a wait hint can't raise it. The
-        # stop first waits for the file monitor (up to 5 s for the observer and 5 s
-        # for the stability checker), then for the upload worker (up to 30 s), then
-        # for a heartbeat in progress (up to 65 s), and only then sends the final
-        # heartbeat. With nothing uploading and the API answering, that is a few
-        # seconds. With an upload in flight it can be longer than Windows waits, and
-        # in auto mode an upload that runs on the monitor's own thread isn't told to
-        # stop for the first 5 s or so (known bug ENG-2126). A stop that Windows cuts
-        # off sends no final heartbeat, as before 1.4.1.
+        # Windows waits for the service to stop for the preshutdown timeout, and a wait
+        # hint can't raise it: 10 s by default from Windows 10 build 15063, and 180 s
+        # before that. So a stop for a system shutdown limits itself to about 8 s on
+        # any build: the service loop notices the stop within a second unless it is
+        # busy with config work, then ``stop_runtime`` has a budget of 7 s. It
+        # cuts uploads off first, joins for at most 1 s each, and sends the final
+        # heartbeat and the events with a short HTTP timeout (constants
+        # ``SYSTEM_SHUTDOWN_*``). An upload cut off is retried at the next start.
+        # ``service stop`` has no such limit.
         def GetAcceptedControls(self) -> int:
             return super().GetAcceptedControls() | ws.SERVICE_ACCEPT_PRESHUTDOWN
 

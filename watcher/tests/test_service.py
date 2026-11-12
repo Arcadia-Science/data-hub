@@ -1583,12 +1583,12 @@ class _FakeServiceFramework:
     ``ServiceCtrlHandlerEx``, ``SvcOtherEx`` and ``SvcOther``.
 
     The real class only imports on Windows, and what the service class gets right or wrong
-    is what pywin32 does with its methods: it accepts stop, and shutdown only for a class
-    that has a ``SvcShutdown``, never preshutdown, which reaches the class as an unknown
-    control through ``SvcOtherEx``. This copy keeps those rules and drops what the service
-    doesn't use: pause and continue, interrogate, and ``SvcOther``'s ``print``. It has no
-    ``SvcStop`` or ``SvcShutdown`` of its own, as in pywin32, and it records what the service
-    reports to the SCM instead of sending it.
+    is what pywin32 does with its methods: it accepts stop for a class that has a
+    ``SvcStop`` and shutdown for one that has a ``SvcShutdown``, never preshutdown, which
+    reaches the class as an unknown control through ``SvcOtherEx``. This copy keeps those
+    rules and drops what the service doesn't use: pause and continue, interrogate, and
+    ``SvcOther``'s ``print``. It has no ``SvcStop`` or ``SvcShutdown`` of its own, as in
+    pywin32, and it records what the service reports to the SCM instead of sending it.
     """
 
     def __init__(self, args: list[str]) -> None:

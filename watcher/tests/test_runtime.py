@@ -18,6 +18,7 @@ wiring contract per `upload_mode` so any future drift fails loudly:
 
 from __future__ import annotations
 import json
+import time
 from pathlib import Path
 from typing import Any, Literal
 from unittest.mock import MagicMock
@@ -28,7 +29,10 @@ from data_hub_watcher.constants import (
     DEFAULT_CHECK_INTERVAL_TICKS,
     DEFAULT_IDLE_TICKS_REQUIRED,
     HEARTBEAT_INTERVAL_SECONDS,
+    SYSTEM_SHUTDOWN_JOIN_SECONDS,
+    SYSTEM_SHUTDOWN_STOP_BUDGET_SECONDS,
     UPLOAD_POLL_INTERVAL_SECONDS,
+    UPLOAD_WORKER_STOP_TIMEOUT_SECONDS,
 )
 from data_hub_watcher.events import EventType
 from data_hub_watcher.heartbeat import HeartbeatLoop, WatcherCounters
@@ -266,17 +270,135 @@ class TestStopRuntimeUploadWorkerOrdering:
 
         state_db.close.assert_called_once_with()
 
-    @pytest.mark.parametrize("system_shutdown", [True, False])
-    def test_final_heartbeat_is_marked_only_for_a_system_shutdown(
-        self, system_shutdown: bool
+
+class TestStopRuntimeForASystemShutdown:
+    """A stop for Windows shutting down is limited to about 7 s, and any other stop is not.
+
+    Windows ends the service when its preshutdown timeout passes, 10 s on current builds.
+    The stop used to wait up to 30 s for the upload worker and 65 s for a heartbeat in
+    progress, so a restart with an upload in flight could outlast it. The tests record every
+    call on the runtime's parts in one mock, so they can tell the order of the steps.
+    """
+
+    @staticmethod
+    def _runtime(
+        *, monitor_stopped: bool = True, worker_stopped: bool = True
+    ) -> tuple[WatcherRuntime, MagicMock]:
+        parts = MagicMock()
+        parts.monitor.stop.return_value = monitor_stopped
+        parts.upload_worker.stop.return_value = worker_stopped
+        rt = WatcherRuntime(
+            state_db=parts.state_db,
+            counters=MagicMock(),
+            reporter=parts.reporter,
+            uploader=parts.uploader,
+            detector=MagicMock(),
+            monitor=parts.monitor,
+            heartbeat=parts.heartbeat,
+            updater=MagicMock(),
+            config_dir=Path("/tmp"),
+            upload_worker=parts.upload_worker,
+        )
+        return rt, parts
+
+    @staticmethod
+    def _steps(parts: MagicMock) -> list[str]:
+        return [name for name, _args, _kwargs in parts.method_calls]
+
+    def test_a_shutdown_cuts_uploads_off_first_and_keeps_every_wait_short(self) -> None:
+        rt, parts = self._runtime()
+
+        before = time.monotonic()
+        stop_runtime(rt, stopped_message="Service stopped", system_shutdown=True)
+        after = time.monotonic()
+
+        # The uploads are told to stop before anything waits for them.
+        assert self._steps(parts) == [
+            "uploader.abort",
+            "monitor.stop",
+            "upload_worker.stop",
+            "reporter.queue_event",
+            "heartbeat.stop",
+            "reporter.flush",
+            "state_db.close",
+        ]
+        parts.monitor.stop.assert_called_once_with(
+            timeout=SYSTEM_SHUTDOWN_JOIN_SECONDS, observer_timeout=SYSTEM_SHUTDOWN_JOIN_SECONDS
+        )
+        parts.upload_worker.stop.assert_called_once_with(timeout=SYSTEM_SHUTDOWN_JOIN_SECONDS)
+        # The final heartbeat is marked, and it and the flush share one deadline that is the
+        # budget from when the stop began.
+        heartbeat_kwargs = parts.heartbeat.stop.call_args.kwargs
+        assert heartbeat_kwargs["system_shutdown"] is True
+        deadline = heartbeat_kwargs["deadline"]
+        assert before + SYSTEM_SHUTDOWN_STOP_BUDGET_SECONDS <= deadline
+        assert deadline <= after + SYSTEM_SHUTDOWN_STOP_BUDGET_SECONDS
+        parts.reporter.flush.assert_called_once_with(deadline=deadline)
+
+    def test_any_other_stop_waits_as_it_always_did(self) -> None:
+        rt, parts = self._runtime()
+
+        stop_runtime(rt, stopped_message="Service stopped")
+
+        # No uploader abort: the upload worker's stop is what tells the uploads to stop,
+        # after the monitor has had its turn.
+        assert self._steps(parts) == [
+            "monitor.stop",
+            "upload_worker.stop",
+            "reporter.queue_event",
+            "heartbeat.stop",
+            "reporter.flush",
+            "state_db.close",
+        ]
+        parts.monitor.stop.assert_called_once_with()
+        parts.upload_worker.stop.assert_called_once_with(timeout=UPLOAD_WORKER_STOP_TIMEOUT_SECONDS)
+        parts.heartbeat.stop.assert_called_once_with(system_shutdown=False, deadline=None)
+        parts.reporter.flush.assert_called_once_with(deadline=None)
+
+    @pytest.mark.parametrize(
+        ("monitor_stopped", "worker_stopped", "closed"),
+        [(True, True, True), (False, True, False), (True, False, False)],
+        ids=["both-stopped", "monitor-still-running", "worker-still-running"],
+    )
+    def test_a_shutdown_leaves_the_state_db_open_while_an_upload_thread_runs(
+        self, monitor_stopped: bool, worker_stopped: bool, closed: bool
     ) -> None:
-        heartbeat = MagicMock()
-        rt = self._runtime_with_mocks(MagicMock(), None)
-        rt.heartbeat = heartbeat
+        # With joins this short, a thread can still be running at the end. It is told to
+        # stop and the process ends with it, so the state DB is left open rather than closed
+        # under it. The final heartbeat is sent either way.
+        rt, parts = self._runtime(monitor_stopped=monitor_stopped, worker_stopped=worker_stopped)
 
-        stop_runtime(rt, stopped_message="Service stopped", system_shutdown=system_shutdown)
+        stop_runtime(rt, stopped_message="Service stopped", system_shutdown=True)
 
-        heartbeat.stop.assert_called_once_with(system_shutdown=system_shutdown)
+        assert parts.state_db.close.called is closed
+        parts.heartbeat.stop.assert_called_once()
+
+    def test_any_other_stop_closes_the_state_db_whatever_the_monitor_reports(self) -> None:
+        # As before: only the upload worker decides.
+        rt, parts = self._runtime(monitor_stopped=False)
+
+        stop_runtime(rt, stopped_message="Service stopped")
+
+        parts.state_db.close.assert_called_once_with()
+
+    def test_the_final_heartbeat_is_marked_only_for_a_system_shutdown(self) -> None:
+        shutdown_rt, shutdown_parts = self._runtime()
+        other_rt, other_parts = self._runtime()
+
+        stop_runtime(shutdown_rt, stopped_message="Service stopped", system_shutdown=True)
+        stop_runtime(other_rt, stopped_message="Service stopped")
+
+        assert shutdown_parts.heartbeat.stop.call_args.kwargs["system_shutdown"] is True
+        assert other_parts.heartbeat.stop.call_args.kwargs["system_shutdown"] is False
+
+    def test_a_shutdown_without_an_upload_worker_is_still_limited(self) -> None:
+        rt, parts = self._runtime()
+        rt.upload_worker = None
+
+        stop_runtime(rt, stopped_message="Service stopped", system_shutdown=True)
+
+        assert self._steps(parts)[:2] == ["uploader.abort", "monitor.stop"]
+        assert parts.heartbeat.stop.call_args.kwargs["deadline"] is not None
 
 
 class TestBuildRuntimeSharedDependencies:

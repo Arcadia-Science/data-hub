@@ -8,6 +8,8 @@ uploading:
 """
 
 from __future__ import annotations
+import time
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -179,7 +181,7 @@ class TestStopWithRequestedUploads:
     """
 
     @staticmethod
-    def _stop_the_watcher(client: DataHubClient, watcher_id: str, **stop_kwargs: bool) -> None:
+    def _stop_the_watcher(client: DataHubClient, watcher_id: str, **stop_kwargs: Any) -> None:
         loop = HeartbeatLoop(
             client=client,
             watcher_id=watcher_id,
@@ -217,7 +219,11 @@ class TestStopWithRequestedUploads:
     ) -> None:
         watcher_id, file_id = self._request_the_upload(client, integration_env)
 
-        self._stop_the_watcher(client, watcher_id, system_shutdown=True)
+        # With the deadline a stop for a system shutdown has, the heartbeat goes out with the
+        # short HTTP timeout it gets there. This sends it through the real client.
+        self._stop_the_watcher(
+            client, watcher_id, system_shutdown=True, deadline=time.monotonic() + 7
+        )
 
         watchers = db_query(
             integration_env.db_dsn, "SELECT status FROM watchers WHERE id = %s", (watcher_id,)

@@ -213,18 +213,19 @@ class FileMonitor:
             self._recursive,
         )
 
-    def stop(self, timeout: float = 5.0) -> bool:
+    def stop(self, timeout: float = 5.0, *, observer_timeout: float = 5.0) -> bool:
         """Stop the observer and stability-checker thread.
 
         *timeout* bounds the wait for the stability checker, which may be in
-        the middle of an auto-mode upload. Returns whether it exited in time.
+        the middle of an auto-mode upload, and *observer_timeout* the wait for
+        the observer. Returns whether the stability checker exited in time.
         """
         self._checker_stop.set()
         self._observer.stop()
         # Not started when `start()` failed partway, e.g. in a rebuild that is
         # being rolled back, and joining an unstarted thread raises.
         if self._observer.is_alive():
-            self._observer.join(timeout=5)
+            self._observer.join(timeout=observer_timeout)
         stopped = self.join(timeout)
         logger.info("FileMonitor stopped")
         return stopped

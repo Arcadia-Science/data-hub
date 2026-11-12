@@ -1249,5 +1249,5 @@ def test_the_service_asks_to_be_told_about_a_shutdown_of_the_system(
     # restart or a full shutdown. A test can't send one (only the system can), so this reads
     # the controls the service reports. It doesn't show that a stop at a restart finishes in
     # the time Windows allows (10 s by default), or that it sends the final heartbeat: the unit
-    # tests cover what the service does with the control.
+    # tests cover what the service does with the control, and the limits the stop sets itself.
     assert status.accepts_preshutdown is True, f"sc queryex lists {', '.join(status.controls)}"
