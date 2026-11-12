@@ -189,7 +189,9 @@ def test_files_that_match_no_pattern_are_ignored(
 def test_a_growing_file_is_not_reported_until_it_stops_growing(
     watcher: WatcherFactory, server: ServerView, instrument_id: str, watch_dir: Path
 ) -> None:
-    pc = watcher(upload_mode="manual", stability_period_seconds=2)
+    # A write every second (the default of `GrowingFile`) never leaves the file quiet for the
+    # 3-second stability period: 2 s of margin.
+    pc = watcher(upload_mode="manual", stability_period_seconds=3)
     pc.start()
 
     live = watch_dir / "RUN001" / "live.csv"
@@ -213,23 +215,22 @@ def test_a_growing_file_is_not_reported_until_it_stops_growing(
 def test_a_file_that_never_settles_is_abandoned_with_an_error_event(
     watcher: WatcherFactory, server: ServerView, instrument_id: str, watch_dir: Path
 ) -> None:
-    pc = watcher(upload_mode="manual", stability_period_seconds=2, max_stability_wait_seconds=4)
+    pc = watcher(upload_mode="manual", stability_period_seconds=3, max_stability_wait_seconds=6)
     pc.start()
 
     live = watch_dir / "RUN001" / "live.csv"
-    # A write every second: inside the 2-second stability period, so the file is never quiet long
-    # enough to be stable, and only the timeout ends its wait. Not faster: on Windows the watcher
-    # gets no file events for the folder while a file in it is written twice a second or more,
-    # only once the writes pause, so it would never see the file.
-    with GrowingFile(live, interval=1.0):
+    # A write every second (the default of `GrowingFile`, which says why not faster): inside the
+    # 3-second stability period, so the file is never quiet long enough to be stable, and only
+    # the 6-second timeout ends its wait.
+    with GrowingFile(live):
         event = server.wait_for_event(
             pc.watcher_id, event_type="error", kind="stability_timeout", timeout=40
         )
         # It is still changing, and nothing was reported for it.
         assert not server.runs(instrument_id)
     assert Path(event.details["path"]) == live
-    assert event.details["max_wait_seconds"] == 4
-    assert event.message == "File live.csv did not stabilise within 4s"
+    assert event.details["max_wait_seconds"] == 6
+    assert event.message == "File live.csv did not stabilise within 6s"
 
     # Being abandoned is not forever: the last write put the file back on the list, and once
     # the file stops changing it is reported at its final size.

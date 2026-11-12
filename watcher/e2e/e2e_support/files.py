@@ -93,9 +93,14 @@ class GrowingFile:
         with GrowingFile(watch_dir / "RUN1" / "live.csv"):
             ...  # the watcher sees it growing
         # now it stops growing, and the watcher can call it stable
+
+    The default is one write a second, and a test should not go faster. On Windows the watcher
+    gets no file events for a folder while a file in it is written twice a second or more
+    (ENG-2132), so it would never track the file, and a test about a growing file would pass
+    without testing anything.
     """
 
-    def __init__(self, path: Path, *, chunk: bytes = b"0123456789\n", interval: float = 0.25):
+    def __init__(self, path: Path, *, chunk: bytes = b"0123456789\n", interval: float = 1.0):
         self.path = path
         self._chunk = chunk
         self._interval = interval
