@@ -40,6 +40,7 @@ from data_hub_watcher.uploader import (
     _UploadStopped,
     s3_error_details,
 )
+from data_hub_watcher.util import DigestCancelled, file_digests
 
 
 @pytest.fixture()
@@ -692,6 +693,43 @@ class TestPollUploadQueueAttemptCap:
         mock_client.cancel_upload_request.assert_called_once_with(2)
         assert reporter_mock.report_error.call_args.kwargs["reason"] == "upload_failed"
 
+    def test_upload_cut_off_by_a_stop_is_not_an_attempt(
+        self,
+        mock_client: MagicMock,
+        state_db: StateDB,
+        tmp_path: Path,
+    ) -> None:
+        (tmp_path / "data.csv").write_text("x")
+        stop = threading.Event()
+        up = _make_uploader(mock_client, state_db, tmp_path, parallelism=1, stop_event=stop)
+        mock_client.get_upload_queue.return_value = UploadQueueResponse(
+            files=[
+                UploadQueueFile(
+                    id=2,
+                    instrument_id="test-instrument",
+                    run_id="RUN-Y",
+                    filename="data.csv",
+                    relative_path="data.csv",
+                )
+            ]
+        )
+        with patch.object(up, "_upload_single", return_value=False):
+            for _ in range(MAX_QUEUE_FILE_ATTEMPTS - 1):
+                up.poll_upload_queue()
+
+        def cut_off(path: Path, run_id: str) -> bool:
+            # A config rebuild stops the uploader while this file uploads.
+            stop.set()
+            return False
+
+        with patch.object(up, "_upload_single", side_effect=cut_off):
+            up.poll_upload_queue()
+
+        # The last attempt isn't used up, so the request isn't cancelled and
+        # the file stays in the server's queue for the next runtime.
+        mock_client.cancel_upload_request.assert_not_called()
+        assert up._queue_attempts[2].count == MAX_QUEUE_FILE_ATTEMPTS - 1
+
     def test_successful_upload_prunes_without_cancel(
         self,
         uploader: Uploader,
@@ -1003,6 +1041,77 @@ class TestStopDuringPrep:
         assert [p.relative_path for p in state_db.pending_uploads()] == ["big.bin"]
         run = state_db.get_run("RUN-001")
         assert run is None or run.uploaded_at is None
+
+
+class TestAbort:
+    """`abort` cuts off PUTs and hashing in progress, and defers the file."""
+
+    @pytest.mark.parametrize("multipart", [False, True])
+    def test_a_put_in_flight_is_cut_off_and_the_file_stays_pending(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path, multipart: bool
+    ) -> None:
+        path = tmp_path / "big.bin"
+        path.write_bytes(bytes(range(16)))
+        up = _make_uploader(
+            mock_client, state_db, tmp_path, parallelism=2, stop_event=threading.Event()
+        )
+        mock_client.request_upload_url.return_value = (
+            _multipart_presigned(part_size=4, part_count=4)
+            if multipart
+            else _single_presigned("big.bin")
+        )
+        mock_client.get_part_urls.side_effect = _part_urls
+        bytes_sent: list[int] = []
+
+        def put(url: str, *, data: _FileSlice, **kwargs: object) -> MagicMock:
+            # The owner gives up while this body is being sent.
+            bytes_sent.append(len(data.read(1)))
+            up.abort()
+            data.read(1)
+            return _etag_response(1)
+
+        with patch.object(up._s3_session, "put", side_effect=put):
+            assert up.upload_files("RUN-001", [_file_info(path)]) == 0
+
+        assert bytes_sent and all(sent == 1 for sent in bytes_sent)
+        # Deferred, not failed: nothing finished, aborted, reported or counted.
+        mock_client.complete_multipart_upload.assert_not_called()
+        mock_client.abort_multipart_upload.assert_not_called()
+        mock_client.mark_file_uploaded.assert_not_called()
+        assert up._counters.errors == 0
+        cast(MagicMock, up._reporter).queue_event.assert_not_called()
+        assert [p.relative_path for p in state_db.pending_uploads()] == ["big.bin"]
+
+    def test_hashing_is_cut_off_without_a_failure(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "big.bin"
+        path.write_bytes(bytes(range(16)))
+        up = _make_uploader(mock_client, state_db, tmp_path, parallelism=1)
+        mock_client.request_upload_url.return_value = _single_presigned("big.bin")
+
+        def digests(file_path: Path, cancel: threading.Event) -> tuple[str, str]:
+            up.abort()
+            return file_digests(file_path, cancel)
+
+        with (
+            patch("data_hub_watcher.uploader.file_digests", side_effect=digests),
+            patch.object(Uploader, "_put_to_presigned_url") as put_file,
+        ):
+            assert up._upload_single(path, "RUN-001") is False
+
+        put_file.assert_not_called()
+        assert up._counters.errors == 0
+        cast(MagicMock, up._reporter).queue_event.assert_not_called()
+
+    def test_file_digests_stops_once_cancelled(self, tmp_path: Path) -> None:
+        path = tmp_path / "big.bin"
+        path.write_bytes(bytes(range(16)))
+        cancel = threading.Event()
+        cancel.set()
+
+        with pytest.raises(DigestCancelled):
+            file_digests(path, cancel)
 
 
 class TestUploadQueueWorker:

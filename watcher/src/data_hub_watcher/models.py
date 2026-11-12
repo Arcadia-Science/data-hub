@@ -1,6 +1,7 @@
 from __future__ import annotations
 import fnmatch
 import logging
+import os
 import re
 from datetime import datetime
 from pathlib import Path
@@ -11,6 +12,42 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from data_hub_watcher.constants import MAX_STABILITY_WAIT_SECONDS
 
 logger = logging.getLogger(__name__)
+
+
+def check_run_pattern(v: str) -> str:
+    """Raise `ValueError` unless *v* compiles with exactly one capture group."""
+    try:
+        compiled = re.compile(v)
+    except re.error as exc:
+        raise ValueError(f"Invalid run_detection.pattern regex: {exc}") from exc
+    if compiled.groups != 1:
+        raise ValueError(
+            f"run_detection.pattern must have exactly 1 capture group, got {compiled.groups}"
+        )
+    return v
+
+
+def watch_directory_problem(path: Path) -> str | None:
+    """Return why *path* can't be watched, or `None` if it can.
+
+    Used at startup (a problem puts the watcher in its waiting state), when
+    applying a config revision from the web app (a problem rejects it), and by
+    `config validate`, `init` and `config edit` so operators at the PC are told.
+    The messages start with ``watch_directory`` so they read well as the
+    heartbeat's ``status_reason`` and a rejected revision's reason.
+    """
+    try:
+        if not path.exists():
+            return f"watch_directory not found: {path}"
+        if not path.is_dir():
+            return f"watch_directory is not a folder: {path}"
+        # `os.access` can report a folder as readable when an ACL denies
+        # listing it, so try to list it.
+        with os.scandir(path) as it:
+            next(it, None)
+    except OSError as exc:
+        return f"watch_directory is not readable: {path} ({exc.strerror or exc})"
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -25,15 +62,7 @@ class RunDetectionConfig(BaseModel):
     @field_validator("pattern")
     @classmethod
     def _one_capture_group(cls, v: str) -> str:
-        try:
-            compiled = re.compile(v)
-        except re.error as exc:
-            raise ValueError(f"Invalid run_detection.pattern regex: {exc}") from exc
-        if compiled.groups != 1:
-            raise ValueError(
-                f"run_detection.pattern must have exactly 1 capture group, got {compiled.groups}"
-            )
-        return v
+        return check_run_pattern(v)
 
 
 class InstrumentConfig(BaseModel):
@@ -69,12 +98,11 @@ class InstrumentConfig(BaseModel):
     @field_validator("watch_directory")
     @classmethod
     def _validate_directory(cls, v: Path) -> Path:
-        expanded = Path(str(v)).expanduser().resolve()
-        if not expanded.exists():
-            raise ValueError(f"Watch directory does not exist: {expanded}")
-        if not expanded.is_dir():
-            raise ValueError(f"Watch directory is not a directory: {expanded}")
-        return expanded
+        # Existence is checked at runtime (see `watch_directory_problem`), not
+        # here: a missing folder must not stop the config from loading, so the
+        # watcher can start in its waiting state and pick up a fix from the
+        # web app.
+        return Path(str(v)).expanduser().resolve()
 
     @model_validator(mode="after")
     def _max_wait_covers_stability_period(self) -> InstrumentConfig:
@@ -163,8 +191,12 @@ class WatcherConfig(BaseModel):
         if not self.instrument.enabled:
             logger.warning("Instrument %r is disabled in config", self.instrument.id)
         watch_dir = self.instrument.watch_directory
-        if watch_dir.exists():
-            patterns = self.instrument.file_patterns
+        problem = watch_directory_problem(watch_dir)
+        if problem is not None:
+            logger.warning("%s", problem)
+            return self
+        patterns = self.instrument.file_patterns
+        try:
             if self.instrument.run_detection.recursive:
                 file_iter = (e for e in watch_dir.rglob("*") if e.is_file())
             else:
@@ -172,12 +204,15 @@ class WatcherConfig(BaseModel):
             has_match = any(
                 fnmatch.fnmatch(entry.name, pat) for entry in file_iter for pat in patterns
             )
-            if not has_match:
-                logger.warning(
-                    "Watch directory %s contains no files matching patterns %s",
-                    watch_dir,
-                    patterns,
-                )
+        except OSError as exc:
+            logger.warning("Could not list watch directory %s: %s", watch_dir, exc)
+            return self
+        if not has_match:
+            logger.warning(
+                "Watch directory %s contains no files matching patterns %s",
+                watch_dir,
+                patterns,
+            )
         return self
 
 
@@ -217,12 +252,112 @@ class ConfigChecksumResponse(BaseModel):
     model_config = _API_MODEL_CONFIG
 
     config_checksum: str
+    # Highest config revision for this watcher. Only `PUT /config` returns it,
+    # and only on servers that store config revisions.
+    config_revision: int | None = None
 
 
 class HeartbeatResponse(BaseModel):
     model_config = _API_MODEL_CONFIG
 
     ok: bool
+    # Latest config revision stored on the server for this watcher, or `None`
+    # when there is none or the server predates remote config.
+    config_revision: int | None = None
+
+
+# ---------------------------------------------------------------------------
+# Remote config revisions
+# ---------------------------------------------------------------------------
+
+# The server's limits on the editable settings (`WatcherConfigSettings`).
+FILE_PATTERNS_MAX = 50
+FILE_PATTERN_MAX_LENGTH = 200
+WATCH_DIRECTORY_MAX_LENGTH = 1024
+
+# Matches the server's rule for an absolute `watch_directory`: a Windows drive
+# path (`D:\...` or `D:/...`), a UNC path (`\\server\share`) or a POSIX path.
+_ABSOLUTE_PATH_RE = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\|/)")
+
+
+class RunDetectionSettings(BaseModel):
+    model_config = _API_MODEL_CONFIG
+
+    pattern: str
+    recursive: bool
+
+    @field_validator("pattern")
+    @classmethod
+    def _one_capture_group(cls, v: str) -> str:
+        return check_run_pattern(v)
+
+
+class WatcherConfigSettings(BaseModel):
+    """The settings an admin can edit from the web app.
+
+    Mirrors the server's `WatcherConfigSettings` (the wire contract) so both
+    sides accept and reject the same values. Names match the YAML keys under
+    `instrument:`.
+    """
+
+    model_config = _API_MODEL_CONFIG
+
+    watch_directory: str = Field(min_length=1, max_length=WATCH_DIRECTORY_MAX_LENGTH)
+    file_patterns: list[str] = Field(min_length=1, max_length=FILE_PATTERNS_MAX)
+    run_detection: RunDetectionSettings
+    upload_mode: Literal["auto", "manual"]
+    stability_period_seconds: int = Field(ge=1, le=300)
+    max_stability_wait_seconds: int = Field(ge=1, le=86400)
+    upload_parallelism: int = Field(ge=1, le=32)
+
+    @field_validator("watch_directory")
+    @classmethod
+    def _absolute_path(cls, v: str) -> str:
+        if not _ABSOLUTE_PATH_RE.match(v):
+            raise ValueError(f"watch_directory must be an absolute path: {v!r}")
+        return v
+
+    @field_validator("file_patterns")
+    @classmethod
+    def _non_blank_patterns(cls, v: list[str]) -> list[str]:
+        for pattern in v:
+            if not pattern.strip():
+                raise ValueError("file_patterns must not contain blank entries")
+            if len(pattern) > FILE_PATTERN_MAX_LENGTH:
+                raise ValueError(
+                    f"file pattern is longer than {FILE_PATTERN_MAX_LENGTH} characters: "
+                    f"{pattern[:40]}…"
+                )
+        return v
+
+    @model_validator(mode="after")
+    def _max_wait_covers_stability_period(self) -> WatcherConfigSettings:
+        if self.max_stability_wait_seconds < self.stability_period_seconds:
+            raise ValueError(
+                "max_stability_wait_seconds "
+                f"({self.max_stability_wait_seconds}) must be >= "
+                f"stability_period_seconds ({self.stability_period_seconds})"
+            )
+        return self
+
+
+class ConfigRevisionResponse(BaseModel):
+    """One stored config revision (`GET /watchers/{id}/config-revisions/latest`).
+
+    `settings` stays a plain dict here so a revision with settings this watcher
+    can't accept still parses, and the watcher can reject it with a reason
+    instead of failing to read it.
+    """
+
+    model_config = _API_MODEL_CONFIG
+
+    revision: int
+    source: str
+    status: str
+    status_reason: str | None = None
+    settings: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime | None = None
+    resolved_at: datetime | None = None
 
 
 class EventsResponse(BaseModel):

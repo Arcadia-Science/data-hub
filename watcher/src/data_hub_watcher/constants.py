@@ -76,6 +76,20 @@ UPLOAD_POLL_INTERVAL_SECONDS = 60
 # Bounded so a service stop doesn't hang on a large in-flight PUT; past this,
 # shutdown stops waiting for the worker and leaves the state DB open.
 UPLOAD_WORKER_STOP_TIMEOUT_SECONDS = 30
+# How long applying a config revision from the web app waits for uploads in
+# progress before rebuilding the runtime. The stop starts no new file or part
+# and lets the PUTs already sending finish: up to `upload_parallelism` whole
+# files or 64 MB parts. A file that didn't finish, such as a large file that
+# still had parts to send, keeps its `pending_uploads` row or stays in the
+# server's queue, as after a restart. Past the limit the uploader cuts off
+# the PUTs and hashing still running, and the rebuild waits for their
+# threads to exit before it starts the new runtime.
+CONFIG_APPLY_DRAIN_TIMEOUT_SECONDS = 120
+# While waiting with the watch folder present, a start that keeps failing is
+# retried after 1, 2, 4 and 8 heartbeat intervals, then every 15 minutes, so a
+# persistent failure doesn't rebuild the runtime and log a traceback every
+# minute. A missing folder is still checked on every heartbeat.
+WAITING_START_RETRY_MAX_SECONDS = 15 * 60
 DEFAULT_STABILITY_PERIOD_SECONDS = 5
 
 # Built-in presets for the ``init`` / ``config edit`` wizard.

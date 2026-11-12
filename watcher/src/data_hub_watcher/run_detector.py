@@ -58,6 +58,11 @@ class FileInfo:
     # restarts and reflects the original creation time even after the
     # file has been re-stat'd or partially modified.
     file_created_at: float = 0.0
+    # False for a file the report-only rescan found after a config change
+    # widened what the watcher sees: it is reported as detected but never
+    # handed to the upload callback. Not persisted; a reported file is never
+    # uploaded automatically after a restart either.
+    upload: bool = True
 
 
 @dataclass
@@ -161,11 +166,15 @@ class RunDetector:
     # public entry point (called by FileMonitor)
     # ------------------------------------------------------------------
 
-    def on_stable_file(self, path: Path) -> None:
+    def on_stable_file(self, path: Path, *, upload: bool = True) -> None:
         """Process a file that has been determined to be stable.
 
         First file for a given run ID triggers a POST to create the run;
         subsequent files for the same run ID trigger a PATCH to update it.
+
+        With ``upload=False`` the file is reported but never passed to the
+        upload callback, even in auto mode (see `FileMonitor`'s
+        ``report_only``).
         """
         run_id = self._extract_run_id(path)
         if run_id is None:
@@ -183,6 +192,7 @@ class RunDetector:
             size_bytes=st.st_size,
             mtime=st.st_mtime,
             file_created_at=file_created_at(st),
+            upload=upload,
         )
 
         run = self._runs.get(run_id)
@@ -387,9 +397,11 @@ class RunDetector:
         )
         logger.info("Reported new run %s (%d files)", run.run_id, len(run.files))
 
-        if self._upload_cb:
-            succeeded = self._upload_cb(run.run_id, list(run.files))
-            run.uploaded_file_count = succeeded
+        uploadable = [f for f in run.files if f.upload]
+        if self._upload_cb and uploadable:
+            succeeded = self._upload_cb(run.run_id, uploadable)
+            # Report-only files count as handled so the cursor moves past them.
+            run.uploaded_file_count = succeeded + (len(run.files) - len(uploadable))
         else:
             run.uploaded_file_count = len(run.files)
 
@@ -448,10 +460,12 @@ class RunDetector:
             len(run.files),
         )
 
-        upload_new = run.files[run.uploaded_file_count :]
+        not_uploaded = run.files[run.uploaded_file_count :]
+        upload_new = [f for f in not_uploaded if f.upload]
         if self._upload_cb and upload_new:
             succeeded = self._upload_cb(run.run_id, upload_new)
-            run.uploaded_file_count += succeeded
+            # Report-only files count as handled so the cursor moves past them.
+            run.uploaded_file_count += succeeded + (len(not_uploaded) - len(upload_new))
         else:
             run.uploaded_file_count = len(run.files)
 

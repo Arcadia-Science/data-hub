@@ -602,13 +602,7 @@ def _run_service_loop(stop_event: threading.Event, sm: Any) -> None:
         attach_servicemanager_handler,
         setup_file_logging,
     )
-    from data_hub_watcher.runtime import (
-        build_runtime,
-        classify_shutdown,
-        start_runtime,
-        stop_runtime,
-        sync_config_to_api,
-    )
+    from data_hub_watcher.runtime import WatcherSupervisor
 
     # Wire up file logging + Windows Event Log routing BEFORE any
     # other work, so a registry-read or env-load failure on the very
@@ -698,33 +692,43 @@ def _run_service_loop(stop_event: threading.Event, sm: Any) -> None:
     # upgrade worker (whose paths were baked in at install time
     # against the same directory) actually reads from. See
     # ``WatcherRuntime.config_dir`` for the gory details.
-    rt = build_runtime(client=client, cfg=cfg, db_path=db_path, config_dir=path.parent)
+    supervisor = WatcherSupervisor(
+        client=client,
+        cfg=cfg,
+        config_path=path,
+        db_path=db_path,
+        config_dir=path.parent,
+        role="Service",
+        host=platform.node(),
+    )
 
-    # Step 2: sync config checksum (now that we have a reporter, any
-    # failure surfaces as kind=config_sync_failed in the dashboard
-    # instead of only as a Windows-event-log warning that operators
-    # rarely read).
-    if sync_config_to_api(client, cfg.watcher_id, path, rt.reporter, trigger="startup"):
-        logger.info("Config synced to Data Hub")
+    # Syncs the config (failures surface as kind=config_sync_failed in the
+    # dashboard), applies a config revision saved in Data Hub while the
+    # service was down, then starts watching. If the watch folder is missing
+    # it starts in the waiting state instead of exiting, so the SCM doesn't
+    # restart-loop and a fix from the web app can still reach this PC.
+    supervisor.start()
 
-    start_runtime(rt, started_message=f"Service started on {platform.node()}")
+    if supervisor.waiting_reason is not None:
+        logger.warning("%s is waiting: %s", SERVICE_DISPLAY_NAME, supervisor.waiting_reason)
+    else:
+        logger.info("%s is running", SERVICE_DISPLAY_NAME)
 
-    logger.info("%s is running", SERVICE_DISPLAY_NAME)
-
-    # Wait for either the SCM's stop_event (operator-initiated stop, or
-    # OS shutdown) or the runtime's shutdown_event (in-process updater
-    # finished installing a new wheel and wants the SCM to restart us).
-    # Polling on a 1-second tick keeps wakeup latency low for both paths.
+    # Poll until the SCM's stop_event is set (operator-initiated stop, or OS
+    # shutdown) or the runtime asks to shut down (the in-process updater
+    # finished installing a new wheel and wants the SCM to restart us). Each
+    # poll also applies config revisions from Data Hub by rebuilding the
+    # runtime in this process, so a config change never exits the service.
     while not stop_event.is_set():
-        if rt.shutdown_event.wait(timeout=1.0):
+        if supervisor.poll(timeout=1.0):
             break
 
     # Classify before tearing the runtime down so the WATCHER_STOPPED
     # event message reflects whether this is an upgrade-driven restart
     # or a normal stop. Shared with the CLI ``watch`` path via
     # ``classify_shutdown`` so the two entrypoints can't drift.
-    decision = classify_shutdown(rt, role="Service")
-    stop_runtime(rt, stopped_message=decision.stopped_message)
+    decision = supervisor.classify_shutdown()
+    supervisor.stop(stopped_message=decision.stopped_message)
 
     if decision.is_upgrade_restart:
         logger.info("%s restarting to load upgraded watcher", SERVICE_DISPLAY_NAME)

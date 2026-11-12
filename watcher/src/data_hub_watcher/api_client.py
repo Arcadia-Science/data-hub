@@ -11,6 +11,7 @@ from data_hub_watcher.constants import WATCHER_VERSION, WATCHER_VERSION_HEADER
 from data_hub_watcher.models import (
     ApiErrorDetail,
     ConfigChecksumResponse,
+    ConfigRevisionResponse,
     EventsResponse,
     FileResponse,
     HeartbeatResponse,
@@ -80,6 +81,9 @@ class DataHubClient:
         # id, so this header is the only way the server can tell a 1.1.0
         # watcher from one that still uploads by bare filename.
         self._session.headers[WATCHER_VERSION_HEADER] = WATCHER_VERSION
+        # Set after the first 404 from a config-revision endpoint so an older
+        # server doesn't fill the log with the same line every heartbeat.
+        self._remote_config_missing_logged = False
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -166,14 +170,73 @@ class DataHubClient:
         return RegisterWatcherResponse.model_validate(resp.json())
 
     def push_config(
-        self, watcher_id: str, config_yaml: str, checksum: str
+        self,
+        watcher_id: str,
+        config_yaml: str,
+        checksum: str,
+        *,
+        based_on_revision: int | None = None,
+        modified_at: datetime | None = None,
     ) -> ConfigChecksumResponse:
-        resp = self._request(
-            "PUT",
-            f"/watchers/{watcher_id}/config",
-            json={"config_yaml": config_yaml, "config_checksum": checksum},
-        )
+        """Push the local config YAML.
+
+        *based_on_revision* is the highest config revision this watcher had
+        applied when the file was written, and *modified_at* is the file's
+        modification time. The server uses both to decide whether an edit made
+        on the PC while offline wins over a pending change from the web app.
+        Older servers ignore both fields.
+        """
+        payload: dict[str, Any] = {"config_yaml": config_yaml, "config_checksum": checksum}
+        if based_on_revision is not None:
+            payload["based_on_revision"] = based_on_revision
+        if modified_at is not None:
+            payload["modified_at"] = modified_at.astimezone(timezone.utc).isoformat()
+        resp = self._request("PUT", f"/watchers/{watcher_id}/config", json=payload)
         return ConfigChecksumResponse.model_validate(resp.json())
+
+    def get_latest_config_revision(self, watcher_id: str) -> ConfigRevisionResponse | None:
+        """Return the watcher's latest config revision, or `None` if there is none.
+
+        A 404 means either that no revision exists yet or that the server
+        predates remote config. Both mean "nothing to apply", so neither is an
+        error. The first one is logged once per client, not on every call.
+        """
+        try:
+            resp = self._request("GET", f"/watchers/{watcher_id}/config-revisions/latest")
+        except ApiError as exc:
+            if exc.status_code == 404:
+                self._note_remote_config_missing()
+                return None
+            raise
+        return ConfigRevisionResponse.model_validate(resp.json())
+
+    def report_config_revision_result(
+        self,
+        watcher_id: str,
+        revision: int,
+        status: str,
+        reason: str | None = None,
+    ) -> ConfigRevisionResponse:
+        """Tell the server whether *revision* was `applied` or `rejected`."""
+        payload: dict[str, Any] = {"status": status}
+        if reason:
+            # The server caps the reason at 1000 characters.
+            payload["reason"] = reason[:1000]
+        resp = self._request(
+            "POST",
+            f"/watchers/{watcher_id}/config-revisions/{revision}/result",
+            json=payload,
+        )
+        return ConfigRevisionResponse.model_validate(resp.json())
+
+    def _note_remote_config_missing(self) -> None:
+        if self._remote_config_missing_logged:
+            return
+        self._remote_config_missing_logged = True
+        logger.info(
+            "The server has no config revisions for this watcher, or doesn't "
+            "support editing watcher config from the web app yet"
+        )
 
     def get_config_checksum(self, watcher_id: str) -> ConfigChecksumResponse | None:
         """Return the remote checksum, or `None` if no config has been pushed.
