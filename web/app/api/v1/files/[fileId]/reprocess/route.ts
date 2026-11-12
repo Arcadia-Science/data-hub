@@ -15,11 +15,12 @@ interface RouteContext {
 // ---------------------------------------------------------------------------
 // POST /api/v1/files/:fileId/reprocess
 //
-// Transitions an uploaded, failed, completed, or stalled-processing raw
-// file back to "processing" and invokes the Lambda Function URL to re-run
-// the instrument's process_file workflow. Processed artifacts are rejected.
-// The core logic lives in lib/api/file-reprocessing.ts so the MCP server
-// can reuse it.
+// Queues an uploaded, failed, completed, or stalled-processing raw file for
+// reprocessing. The file starts right away ("processing") when a processing
+// slot is free, and otherwise waits ("queued") and starts as soon as a slot is
+// free. Starting a file invokes the Lambda Function URL to re-run the instrument's
+// process_file workflow. Processed artifacts are rejected. The core logic
+// lives in lib/api/file-reprocessing.ts so the MCP server can reuse it.
 // ---------------------------------------------------------------------------
 
 export async function POST(request: NextRequest, { params }: RouteContext) {
@@ -43,5 +44,5 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     ...surfaceEvent(authResult),
   });
 
-  return Response.json({ status: "processing", file_id: result.fileId });
+  return Response.json({ status: result.fileStatus, file_id: result.fileId });
 }

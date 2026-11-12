@@ -44,6 +44,7 @@ export {
   runDeleted,
   runDetail,
   runListResponse,
+  runQueuedCancelled,
   runReprocessed,
   runRestored,
   runUpdated,

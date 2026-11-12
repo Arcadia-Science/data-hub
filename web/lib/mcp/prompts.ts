@@ -221,7 +221,7 @@ export function registerPrompts(server: McpServer) {
               "Steps:",
               `1. Call get_run with instrumentId="${instrumentId}", runId="${runId}", include=["failure_summary","files"].`,
               "2. Call get_run_report for the same run for processed-data context.",
-              "3. Identify failed or stalled files (pending/uploaded/processing that never finished) and quote error messages.",
+              "3. Identify failed or stalled files (pending/uploaded/processing that never finished) and quote error messages. Queued files are waiting for a free processing slot and start on their own.",
               "4. Recommend next actions: reprocess_run / reprocess_file (stalled processing files are eligible), request_run_upload(_all) if pending and a watcher is online, or escalate watcher issues via list_watchers.",
               "5. Do not call destructive tools without confirming with the user first.",
             ].join("\n"),

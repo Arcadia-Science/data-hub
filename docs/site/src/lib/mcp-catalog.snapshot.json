@@ -592,7 +592,7 @@
             "type": "string"
           },
           "status": {
-            "description": "Filter by derived run status (OR'd together). Status is derived from a run's raw file states, priority-exclusive: failed (any file failed), stalled (a file has been in processing past the stall window and can be reprocessed), pending (files awaiting upload), uploaded, processing (in flight), completed (all done), empty (no files).",
+            "description": "Filter by derived run status (OR'd together). Status is derived from a run's raw file states, priority-exclusive: failed (any file failed), stalled (a file has been in processing past the stall window and can be reprocessed), pending (files awaiting upload), uploaded, queued (reprocessing files waiting for a free processing slot), processing (in flight), completed (all done), empty (no files).",
             "type": "array",
             "items": {
               "type": "string",
@@ -601,6 +601,7 @@
                 "stalled",
                 "pending",
                 "uploaded",
+                "queued",
                 "processing",
                 "completed",
                 "empty"
@@ -732,6 +733,11 @@
                   "minimum": -9007199254740991,
                   "maximum": 9007199254740991
                 },
+                "files_queued": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
                 "files_processing": {
                   "type": "integer",
                   "minimum": -9007199254740991,
@@ -807,6 +813,7 @@
                 "files_failed",
                 "files_pending_upload",
                 "files_uploaded",
+                "files_queued",
                 "files_processing",
                 "files_stalled",
                 "total_size_bytes",
@@ -1117,6 +1124,7 @@
                     "detected",
                     "upload_requested",
                     "uploaded",
+                    "queued",
                     "processing",
                     "completed",
                     "failed"
@@ -1532,6 +1540,7 @@
                     "detected",
                     "upload_requested",
                     "uploaded",
+                    "queued",
                     "processing",
                     "completed",
                     "failed"
@@ -1587,6 +1596,7 @@
                     "detected",
                     "upload_requested",
                     "uploaded",
+                    "queued",
                     "processing",
                     "completed",
                     "failed"
@@ -1702,7 +1712,7 @@
             "description": "Run identifier within the instrument"
           },
           "status": {
-            "description": "Filter to one or more file statuses (OR'd). Omit to return all statuses.",
+            "description": "Filter to one or more file statuses (OR'd). 'queued' files are waiting for a free processing slot after a reprocess request. Omit to return all statuses.",
             "type": "array",
             "items": {
               "type": "string",
@@ -1710,6 +1720,7 @@
                 "detected",
                 "upload_requested",
                 "uploaded",
+                "queued",
                 "processing",
                 "completed",
                 "failed"
@@ -1771,6 +1782,7 @@
                     "detected",
                     "upload_requested",
                     "uploaded",
+                    "queued",
                     "processing",
                     "completed",
                     "failed"
@@ -2633,7 +2645,7 @@
     {
       "name": "reprocess_run",
       "title": "Reprocess Run",
-      "description": "Re-run Lambda processing for every uploaded, completed, failed, or stalled raw file on a run. Processed artifacts are skipped. The instrument must have a Lambda processor. Prefer this over looping reprocess_file for bulk retries after a parser fix, to kick stuck uploads, or to recover files that never reported back from processing.",
+      "description": "Re-run Lambda processing for every uploaded, completed, failed, or stalled raw file on a run. Processed artifacts are skipped. The instrument must have a Lambda processor. Each file starts as soon as a processing slot is free (at most 10 raw files process at once across Data Hub by default), and a file that does not start right away waits with status 'queued'. filesQueued counts every file accepted, whether it started or is waiting. Prefer this over looping reprocess_file for bulk retries after a parser fix, to kick stuck uploads, or to recover files that never reported back from processing.",
       "group": "runs",
       "scope": "runs:reprocess",
       "annotations": {
@@ -2685,6 +2697,60 @@
           "runId",
           "filesQueued",
           "filesFailed"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "cancel_queued_files",
+      "title": "Cancel Queued Files",
+      "description": "Take every queued file of a run out of the reprocessing queue. Each one becomes 'failed' with a message that says the reprocess was cancelled, and can be reprocessed again. Files that have already started processing are not affected. Use it when queued files are not going to start, or after a reprocess_run that was a mistake. filesCancelled is 0 when the run has no queued files. Works on a soft-deleted run too.",
+      "group": "runs",
+      "scope": "runs:reprocess",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true
+      },
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "instrumentId": {
+            "type": "string",
+            "description": "Instrument identifier"
+          },
+          "runId": {
+            "type": "string",
+            "description": "Run identifier within the instrument"
+          }
+        },
+        "required": [
+          "instrumentId",
+          "runId"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "instrumentId": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "filesCancelled": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "instrumentId",
+          "runId",
+          "filesCancelled"
         ],
         "additionalProperties": false
       }
@@ -3300,6 +3366,7 @@
               "detected",
               "upload_requested",
               "uploaded",
+              "queued",
               "processing",
               "completed",
               "failed"
@@ -3378,6 +3445,18 @@
               }
             ]
           },
+          "queuedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "fileCreatedAt": {
             "anyOf": [
               {
@@ -3429,6 +3508,7 @@
           "uploadedAt",
           "processedAt",
           "processingStartedAt",
+          "queuedAt",
           "fileCreatedAt",
           "createdAt",
           "deletedAt",
@@ -3612,7 +3692,7 @@
     {
       "name": "reprocess_file",
       "title": "Reprocess File",
-      "description": "Re-run the Lambda processing workflow for an uploaded, failed, completed, or stalled raw file on an instrument that has a Lambda processor. A file is stalled when it has been in 'processing' longer than the configured stall window (20 minutes by default, past the Lambda's 15-minute limit) or has no processing-started timestamp. Processed artifacts are rejected. Transitions the file back to 'processing'. Use this to retry after a parser fix, transient Lambda failure, a stuck upload that never entered processing, or a file that never reported back from processing.",
+      "description": "Re-run the Lambda processing workflow for an uploaded, failed, completed, or stalled raw file on an instrument that has a Lambda processor. A file is stalled when it has been in 'processing' longer than the configured stall window (20 minutes by default, past the Lambda's 15-minute limit) or has no processing-started timestamp. Processed artifacts are rejected. The file is queued first and starts as soon as a processing slot is free. The result is status 'processing' when the file started right away and 'queued' when it did not, for example because 10 raw files are already processing (the default limit across Data Hub). A file that is already 'queued' is rejected. Use this to retry after a parser fix, transient Lambda failure, a stuck upload that never entered processing, or a file that never reported back from processing.",
       "group": "files",
       "scope": "files:reprocess",
       "annotations": {
@@ -3641,7 +3721,10 @@
         "properties": {
           "status": {
             "type": "string",
-            "const": "processing"
+            "enum": [
+              "processing",
+              "queued"
+            ]
           },
           "fileId": {
             "type": "integer",

@@ -489,8 +489,46 @@ describe("Files API", () => {
     });
   });
 
-  // "completed" and "failed" are terminal states — the state machine
-  // forbids any further transitions to prevent data corruption.
+  // The Lambda sends a final status again after a transient error, and the
+  // first attempt may have been saved with only its response lost.
+  it("PATCH accepts a repeat of completed and keeps the first processed_at", async () => {
+    const db = getTestDb();
+    const [before] = await db
+      .select({ processedAt: schemaFiles.processedAt })
+      .from(schemaFiles)
+      .where(eq(schemaFiles.id, fileId));
+
+    const res = await api(`/api/v1/files/${fileId}`, {
+      method: "PATCH",
+      token,
+      body: {
+        status: "completed",
+        metadata: { plate_type: "96-well", read_mode: "absorbance" },
+      },
+    });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.status).toBe("completed");
+    expect(data.metadata).toEqual({
+      plate_type: "96-well",
+      read_mode: "absorbance",
+    });
+    expect(new Date(data.processed_at).getTime()).toBe(
+      before.processedAt?.getTime()
+    );
+  });
+
+  it("PATCH still rejects a change between the two final statuses", async () => {
+    const res = await api(`/api/v1/files/${fileId}`, {
+      method: "PATCH",
+      token,
+      body: { status: "failed", error_message: "too late" },
+    });
+    expect(res.status).toBe(409);
+  });
+
+  // "completed" and "failed" only repeat or restart: the state machine
+  // forbids any other transition to prevent data corruption.
   it("PATCH rejects invalid status transition (completed → uploaded)", async () => {
     const res = await api(`/api/v1/files/${fileId}`, {
       method: "PATCH",
@@ -521,6 +559,37 @@ describe("Files API", () => {
     const data = await res.json();
     expect(data.status).toBe("failed");
     expect(data.error_message).toBe("Parser could not recognize file format");
+  });
+
+  it("PATCH accepts a repeat of failed and keeps the first processed_at", async () => {
+    const db = getTestDb();
+    const [before] = await db
+      .select({ processedAt: schemaFiles.processedAt })
+      .from(schemaFiles)
+      .where(eq(schemaFiles.id, lambdaFileId));
+
+    const res = await api(`/api/v1/files/${lambdaFileId}`, {
+      method: "PATCH",
+      token,
+      body: {
+        status: "failed",
+        error_message: "Parser could not recognize file format",
+      },
+    });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.status).toBe("failed");
+    expect(data.error_message).toBe("Parser could not recognize file format");
+    expect(new Date(data.processed_at).getTime()).toBe(
+      before.processedAt?.getTime()
+    );
+
+    const rejected = await api(`/api/v1/files/${lambdaFileId}`, {
+      method: "PATCH",
+      token,
+      body: { status: "completed" },
+    });
+    expect(rejected.status).toBe(409);
   });
 
   it("PATCH returns 404 for nonexistent file", async () => {

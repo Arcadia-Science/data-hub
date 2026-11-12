@@ -13,7 +13,7 @@ import {
 } from "@/tests/integration/helpers";
 
 /** Bump when adding/removing an MCP tool so the change shows up in review. */
-const EXPECTED_MCP_TOOL_COUNT = 41;
+const EXPECTED_MCP_TOOL_COUNT = 42;
 
 function jsonRpc(method: string, params: unknown = {}, id = 1) {
   return {
@@ -190,6 +190,7 @@ describe("MCP Server (HTTP)", () => {
     expect(toolNames).toContain("get_me");
     expect(toolNames).toContain("list_run_comments");
     expect(toolNames).toContain("reprocess_run");
+    expect(toolNames).toContain("cancel_queued_files");
     expect(toolNames).toContain("delete_run");
     expect(toolNames).toContain("dismiss_file");
     expect(toolNames).toContain("get_run_report");
@@ -716,6 +717,88 @@ describe("MCP Server (HTTP)", () => {
     });
     expect(badId.isError).toBe(true);
     expect(badId.content[0].text).toMatch(/not found/i);
+  });
+
+  // ---- Cancel queued files (end-to-end) -------------------------------------
+
+  it("cancel_queued_files fails a run's queued files and leaves the others alone", async () => {
+    const db = getTestDb();
+    const cancelInstrument = "mcp-cancel-instrument";
+    const cancelRun = "mcp-cancel-run";
+
+    await db.insert(schema.instruments).values({
+      id: cancelInstrument,
+      displayName: "MCP Cancel Instrument",
+      status: "active",
+      instrumentType: "plate_reader",
+    });
+    const [run] = await db
+      .insert(schema.instrumentRuns)
+      .values({
+        instrumentId: cancelInstrument,
+        runId: cancelRun,
+        source: "lambda",
+      })
+      .returning({ id: schema.instrumentRuns.id });
+    const seeded = await db
+      .insert(schema.files)
+      .values(
+        [
+          { name: "queued-a.csv", status: "queued" as const },
+          { name: "queued-b.csv", status: "queued" as const },
+          { name: "running.csv", status: "processing" as const },
+          { name: "done.csv", status: "completed" as const },
+        ].map(({ name, status }) => ({
+          instrumentRunId: run.id,
+          filename: name,
+          relativePath: name,
+          category: "raw" as const,
+          status,
+          queuedAt: status === "queued" ? new Date() : null,
+        }))
+      )
+      .returning({ id: schema.files.id, filename: schema.files.filename });
+    const idOf = (name: string) =>
+      seeded.find((f) => f.filename === name)?.id ?? -1;
+
+    const result = await callTool("cancel_queued_files", {
+      instrumentId: cancelInstrument,
+      runId: cancelRun,
+    });
+    expect(result.isError).toBeFalsy();
+    expect(JSON.parse(result.content[0].text)).toEqual({
+      instrumentId: cancelInstrument,
+      runId: cancelRun,
+      filesCancelled: 2,
+    });
+
+    const rows = await db
+      .select()
+      .from(schema.files)
+      .where(eq(schema.files.instrumentRunId, run.id));
+    const byName = new Map(rows.map((r) => [r.filename, r]));
+    for (const name of ["queued-a.csv", "queued-b.csv"]) {
+      expect(byName.get(name)?.id).toBe(idOf(name));
+      expect(byName.get(name)?.status).toBe("failed");
+      expect(byName.get(name)?.queuedAt).toBeNull();
+      expect(byName.get(name)?.errorMessage).toMatch(/cancelled/);
+    }
+    expect(byName.get("running.csv")?.status).toBe("processing");
+    expect(byName.get("done.csv")?.status).toBe("completed");
+
+    // Nothing is queued any more.
+    const again = await callTool("cancel_queued_files", {
+      instrumentId: cancelInstrument,
+      runId: cancelRun,
+    });
+    expect(JSON.parse(again.content[0].text).filesCancelled).toBe(0);
+
+    const unknown = await callTool("cancel_queued_files", {
+      instrumentId: cancelInstrument,
+      runId: "no-such-run",
+    });
+    expect(unknown.isError).toBe(true);
+    expect(unknown.content[0].text).toMatch(/not found/i);
   });
 
   // ---- Delete / restore round-trip (end-to-end) ----------------------------

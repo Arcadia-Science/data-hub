@@ -6,6 +6,7 @@ import { runReportToolUiMeta } from "@/lib/mcp/ui-apps";
 import { RUN_STATUS_VALUES } from "@/lib/runs/run-status";
 import {
   addRunCommentOutputSchema,
+  cancelQueuedFilesOutputSchema,
   claimRunOutputSchema,
   claimRunsOutputSchema,
   deleteRunCommentOutputSchema,
@@ -95,7 +96,7 @@ export const searchRunsTool = {
       .array(z.enum(RUN_STATUS_VALUES))
       .optional()
       .describe(
-        "Filter by derived run status (OR'd together). Status is derived from a run's raw file states, priority-exclusive: failed (any file failed), stalled (a file has been in processing past the stall window and can be reprocessed), pending (files awaiting upload), uploaded, processing (in flight), completed (all done), empty (no files)."
+        "Filter by derived run status (OR'd together). Status is derived from a run's raw file states, priority-exclusive: failed (any file failed), stalled (a file has been in processing past the stall window and can be reprocessed), pending (files awaiting upload), uploaded, queued (reprocessing files waiting for a free processing slot), processing (in flight), completed (all done), empty (no files)."
       ),
   },
   annotations: { readOnlyHint: true },
@@ -153,7 +154,7 @@ export const listRunFilesTool = {
       .array(z.enum(fileStatusEnum.enumValues))
       .optional()
       .describe(
-        "Filter to one or more file statuses (OR'd). Omit to return all statuses."
+        "Filter to one or more file statuses (OR'd). 'queued' files are waiting for a free processing slot after a reprocess request. Omit to return all statuses."
       ),
     page: z
       .number()
@@ -316,7 +317,7 @@ export const reprocessRunTool = {
   scope: "runs:reprocess",
   title: "Reprocess Run",
   description:
-    "Re-run Lambda processing for every uploaded, completed, failed, or stalled raw file on a run. Processed artifacts are skipped. The instrument must have a Lambda processor. Prefer this over looping reprocess_file for bulk retries after a parser fix, to kick stuck uploads, or to recover files that never reported back from processing.",
+    "Re-run Lambda processing for every uploaded, completed, failed, or stalled raw file on a run. Processed artifacts are skipped. The instrument must have a Lambda processor. Each file starts as soon as a processing slot is free (at most 10 raw files process at once across Data Hub by default), and a file that does not start right away waits with status 'queued'. filesQueued counts every file accepted, whether it started or is waiting. Prefer this over looping reprocess_file for bulk retries after a parser fix, to kick stuck uploads, or to recover files that never reported back from processing.",
   inputSchema: {
     instrumentId: z.string().describe("Instrument identifier"),
     runId: z.string().describe("Run identifier within the instrument"),
@@ -326,6 +327,28 @@ export const reprocessRunTool = {
   // artifacts and resets per-file status in bulk, so clients should
   // confirm even though no data is deleted.
   annotations: { readOnlyHint: false, destructiveHint: true },
+} as const satisfies McpToolDef;
+
+export const cancelQueuedFilesTool = {
+  name: "cancel_queued_files",
+  group: "runs",
+  scope: "runs:reprocess",
+  title: "Cancel Queued Files",
+  description:
+    "Take every queued file of a run out of the reprocessing queue. Each one becomes 'failed' with a message that says the reprocess was cancelled, and can be reprocessed again. Files that have already started processing are not affected. Use it when queued files are not going to start, or after a reprocess_run that was a mistake. filesCancelled is 0 when the run has no queued files. Works on a soft-deleted run too.",
+  inputSchema: {
+    instrumentId: z.string().describe("Instrument identifier"),
+    runId: z.string().describe("Run identifier within the instrument"),
+  },
+  outputSchema: cancelQueuedFilesOutputSchema,
+  // Nothing is deleted or overwritten: the files keep their data and a later
+  // reprocess starts them again. Calling it twice cancels nothing the second
+  // time.
+  annotations: {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: true,
+  },
 } as const satisfies McpToolDef;
 
 export const deleteRunTool = {
@@ -423,6 +446,7 @@ export const RUN_TOOL_DEFS = [
   editRunCommentTool,
   deleteRunCommentTool,
   reprocessRunTool,
+  cancelQueuedFilesTool,
   deleteRunTool,
   restoreRunTool,
   requestRunUploadTool,

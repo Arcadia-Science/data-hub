@@ -136,7 +136,7 @@ registry.registerPath({
   operationId: "reprocessFile",
   summary: "Reprocess a file",
   description:
-    "Requires scope `files:reprocess`. Raw files only. Eligible statuses: `uploaded`, `failed`, `completed`, or stalled `processing` (file must have an S3 location). The file's instrument must have a Lambda processor.",
+    "Requires scope `files:reprocess`. Raw files only. Eligible statuses: `uploaded`, `failed`, `completed`, or stalled `processing` (file must have an S3 location). The file's instrument must have a Lambda processor. The file is queued first and starts as soon as a processing slot is free. Returns `processing` when the file started right away. Returns `queued` when it did not, for example because 10 raw files are already processing (the default limit across Data Hub). A file that is already `queued` returns `409`.",
   tags: ["Files"],
   security: bearerSecurity,
   request: { params: fileParams },

@@ -59,6 +59,7 @@ export interface AnalyticsEvents {
   };
   run_claimed: SurfaceEvent;
   run_deleted: SurfaceEvent;
+  run_queue_cancelled: SurfaceEvent;
   run_reprocessed: SurfaceEvent;
   run_restored: SurfaceEvent;
   run_unclaimed: SurfaceEvent;

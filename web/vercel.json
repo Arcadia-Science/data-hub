@@ -5,6 +5,10 @@
     {
       "path": "/api/cron/upload-queue-sweep",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/reprocess-queue",
+      "schedule": "* * * * *"
     }
   ]
 }

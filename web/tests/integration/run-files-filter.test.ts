@@ -93,6 +93,14 @@ describe("Run files status filter", () => {
         category: "raw",
         status: "failed",
       },
+      // Waiting for a free processing slot after a reprocess request.
+      {
+        instrumentRunId: run.id,
+        filename: "h-queued.csv",
+        category: "raw",
+        status: "queued",
+        queuedAt: new Date(),
+      },
     ]);
   });
 
@@ -102,6 +110,10 @@ describe("Run files status filter", () => {
 
   it("'processing' returns only files still inside the stall window", async () => {
     expect(await filenamesFor(["processing"])).toEqual(["a-in-flight.csv"]);
+  });
+
+  it("'queued' returns only queued files", async () => {
+    expect(await filenamesFor(["queued"])).toEqual(["h-queued.csv"]);
   });
 
   it("'stalled' returns files past the window and those with no start time", async () => {
@@ -138,17 +150,22 @@ describe("Run files status filter", () => {
   });
 
   // Sort-by-status ranks rows by the label the status column shows, so
-  // Processing must come before Stalled and both after Pending.
-  it("sorts Stalled directly after Processing", async () => {
-    expect(await filenamesFor(undefined, "status")).toEqual([
+  // Processing comes before Queued, Queued before Stalled, and all of them
+  // after Pending.
+  it("sorts Queued between Processing and Stalled", async () => {
+    const names = await filenamesFor(undefined, "status");
+    expect(names.slice(0, 5)).toEqual([
       "d-completed.csv",
       "g-failed.csv",
       "e-detected.csv",
       "a-in-flight.csv",
-      "b-stalled.csv",
-      "c-stalled-null-start.csv",
-      "f-uploaded.csv",
+      "h-queued.csv",
     ]);
+    // The two stalled files share a rank, and the sort has no tiebreaker.
+    expect(new Set(names.slice(5, 7))).toEqual(
+      new Set(["b-stalled.csv", "c-stalled-null-start.csv"])
+    );
+    expect(names[7]).toBe("f-uploaded.csv");
   });
 
   it("counts in-flight and stalled files separately in the run stats", async () => {
@@ -156,5 +173,14 @@ describe("Run files status filter", () => {
     expect(stats.processing).toBe(3);
     expect(stats.processingInFlight).toBe(1);
     expect(stats.stalled).toBe(2);
+  });
+
+  // The page keeps refreshing while files are queued, and the footer's
+  // "uploaded" count and the Download all count include them (they are in S3).
+  it("counts queued files in the run stats", async () => {
+    const stats = await getRunFileStats(runInternalId);
+    expect(stats.queued).toBe(1);
+    // completed, failed, uploaded, and queued: everything in S3 not processing.
+    expect(stats.uploaded).toBe(4);
   });
 });

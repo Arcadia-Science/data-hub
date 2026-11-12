@@ -10,6 +10,7 @@ import {
   pgEnum,
   pgTable,
   primaryKey,
+  smallint,
   text,
   timestamp,
   unique,
@@ -93,6 +94,7 @@ export const fileStatusEnum = pgEnum("file_status", [
   "detected",
   "upload_requested",
   "uploaded",
+  "queued",
   "processing",
   "completed",
   "failed",
@@ -775,6 +777,9 @@ export const files = pgTable(
     // Distinguishes raw uploads from Lambda-generated artifacts.
     category: fileCategoryEnum("category").notNull().default("raw"),
     // detected → upload_requested → uploaded → processing → completed | failed
+    // Reprocessing goes through `queued`: a reprocess request marks the file
+    // `queued`, and the dispatcher in `lib/api/file-reprocessing.ts` moves it
+    // to `processing` once fewer than the concurrency limit are in flight.
     status: fileStatusEnum("status").notNull().default("detected"),
     // Instrument-specific key-value metadata extracted by the Lambda function
     // from this file. Stored as a flat object; multi-valued properties use
@@ -813,6 +818,25 @@ export const files = pgTable(
       withTimezone: true,
       mode: "date",
     }),
+    // When a reprocess request put the file in the queue. The dispatcher
+    // starts the oldest `queued_at` first. Set while status = 'queued', NULL
+    // otherwise.
+    queuedAt: timestamp("queued_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
+    // Names the start that the reprocess dispatcher made. The dispatcher sets
+    // a fresh ID when it moves a file from `queued` to `processing`, and its
+    // own later writes to the file match on that ID. The Lambda's own
+    // processing -> processing update keeps it. Every other change of the
+    // file's start clears it: a start from an S3 upload, a final status, a new
+    // reprocess request, a cancel, and a requeue. NULL means the dispatcher
+    // did not start the file's current run of processing.
+    dispatchId: uuid("dispatch_id"),
+    // How many times the dispatcher has put this file back in the queue after
+    // its start stalled. The reprocess-queue cron does that once. A manual
+    // reprocess resets the count.
+    stallRequeues: smallint("stall_requeues").notNull().default(0),
     // On-disk creation time of the file, reported by the watcher
     // (st_birthtime where available, else st_mtime). NULL for
     // Lambda-created files and rows predating this column.

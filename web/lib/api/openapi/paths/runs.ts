@@ -24,6 +24,7 @@ import {
   runDetail,
   runListQuery,
   runListResponse,
+  runQueuedCancelled,
   runReprocessed,
   runRestored,
   runUpdated,
@@ -142,11 +143,22 @@ registry.registerPath({
   path: "/instruments/{instrumentId}/runs/{runId}/reprocess",
   operationId: "reprocessInstrumentRun",
   summary: "Reprocess a run",
-  description: `${scoped("runs:reprocess")} Reprocesses every \`uploaded\`, \`failed\`, \`completed\`, or stalled \`processing\` raw file on the run. Processed artifacts are skipped. The instrument must have a Lambda processor.`,
+  description: `${scoped("runs:reprocess")} Queues every \`uploaded\`, \`failed\`, \`completed\`, or stalled \`processing\` raw file on the run for reprocessing. Each file starts as soon as a processing slot is free (at most 10 raw files process at once by default), and a file that does not start right away waits as \`queued\`. \`files_queued\` counts every file accepted, whether it started or is waiting. Processed artifacts are skipped. The instrument must have a Lambda processor.`,
   tags: tag,
   security: bearerSecurity,
   request: { params: runParams },
   responses: ok("Reprocessing result.", runReprocessed),
+});
+registry.registerPath({
+  method: "post",
+  path: "/instruments/{instrumentId}/runs/{runId}/cancel-queued",
+  operationId: "cancelQueuedInstrumentRunFiles",
+  summary: "Cancel a run's queued files",
+  description: `${scoped("runs:reprocess")} Takes every \`queued\` file of the run out of the reprocessing queue. Each one becomes \`failed\` with a message that says the reprocess was cancelled, and can be reprocessed again. Files that have already started are not affected. Works on a soft-deleted run too. \`files_cancelled\` is 0 when no file was queued.`,
+  tags: tag,
+  security: bearerSecurity,
+  request: { params: runParams },
+  responses: ok("Cancellation result.", runQueuedCancelled),
 });
 registry.registerPath({
   method: "get",

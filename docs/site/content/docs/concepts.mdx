@@ -80,6 +80,7 @@ How far a run’s files have got from the instrument to the dashboard. These are
 | Stalled        | At least one file has been processing for more than 20 minutes without finishing. Reprocess it to try again. |
 | Pending upload | The watcher found the files but hasn’t sent them yet.                                     |
 | Uploaded       | The files are in storage. Processing hasn’t started, or this instrument type has no preprocessor. |
+| Queued         | You chose **Reprocess**, and the files are waiting for a free processing slot. They start as other files finish. See [How reprocessing is queued](/docs/browse-runs#reprocess-queue). |
 | Processing     | The preprocessor is reading the files, extracting metadata, and building reports.          |
 | Completed      | Processing finished.                                                                      |
 | Empty          | The run has no files.                                                                     |
@@ -97,7 +98,7 @@ Both categories download the same way, and file filters on the run page work on 
 
 ### Preprocessor [#preprocessor]
 
-The server-side code that reads a raw file, extracts metadata, and writes processed files. It runs in an AWS Lambda when a file arrives in raw storage, or when you choose **Reprocess**. Which preprocessor runs depends on the [instrument type](#instrument-type), and not every type has one. Per-type inputs and outputs are in [Instrument data preprocessing](/docs/instrument-preprocessing).
+The server-side code that reads a raw file, extracts metadata, and writes processed files. It runs in an AWS Lambda when a file arrives in raw storage, or when you choose **Reprocess**. Reprocessing starts at most 10 files at a time and queues the rest; see [How reprocessing is queued](/docs/browse-runs#reprocess-queue). Which preprocessor runs depends on the [instrument type](#instrument-type), and not every type has one. Per-type inputs and outputs are in [Instrument data preprocessing](/docs/instrument-preprocessing).
 
 ### Run archive [#run-archive]
 

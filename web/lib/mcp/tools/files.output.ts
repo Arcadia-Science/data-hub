@@ -24,6 +24,7 @@ export const getFileOutputSchema = z.object({
   uploadedAt: isoDateTime.nullable(),
   processedAt: isoDateTime.nullable(),
   processingStartedAt: isoDateTime.nullable(),
+  queuedAt: isoDateTime.nullable(),
   fileCreatedAt: isoDateTime.nullable(),
   createdAt: isoDateTime,
   deletedAt: isoDateTime.nullable(),
@@ -59,7 +60,9 @@ export const getRunArchiveOutputSchema = z.discriminatedUnion("status", [
 ]);
 
 export const reprocessFileOutputSchema = z.object({
-  status: z.literal("processing"),
+  // `processing` when the file started right away, `queued` when it is
+  // waiting for a free processing slot.
+  status: z.enum(["processing", "queued"]),
   fileId: z.number().int(),
 });
 

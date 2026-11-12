@@ -30,6 +30,7 @@ const BASE: RunRow = {
   files_failed: 0,
   files_pending_upload: 0,
   files_uploaded: 0,
+  files_queued: 0,
   files_processing: 0,
   files_stalled: 0,
   total_size_bytes: 0,
@@ -61,6 +62,14 @@ describe("canReprocessRun", () => {
 
   it("rejects a run whose files are all still inside the stall window", () => {
     expect(canReprocessRun(row({ file_count: 1, files_processing: 1 }))).toBe(
+      false
+    );
+  });
+
+  // Queued files are already in line for reprocessing, and the endpoint skips
+  // them, so offering Reprocess for them would do nothing.
+  it("rejects a run whose files are all already queued", () => {
+    expect(canReprocessRun(row({ file_count: 1, files_queued: 1 }))).toBe(
       false
     );
   });
@@ -102,6 +111,7 @@ describe("reprocessableFileCount", () => {
           files_stalled: 4,
           files_pending_upload: 5,
           files_processing: 6,
+          files_queued: 7,
         })
       )
     ).toBe(10);

@@ -132,6 +132,20 @@ cd web
 vercel env pull
 ```
 
+`web/vercel.json` also schedules two Vercel Cron jobs. Each calls a route under `web/app/api/cron/` with `Authorization: Bearer $CRON_SECRET`, and the route returns 401 when `CRON_SECRET` is unset or does not match:
+
+| Cron | Schedule | What it does |
+| --- | --- | --- |
+| `/api/cron/upload-queue-sweep` | Every 5 minutes | Reverts files stuck in `upload_requested` when their instrument has had no online watcher for longer than the grace window. |
+| `/api/cron/reprocess-queue` | Every minute | First puts files that the dispatcher started and that then stalled back in the queue, once per file. Then starts queued reprocessing files while fewer than the processing limit are in flight. It starts files that the other triggers miss: a slot freed by a stalled file, a request that gave up waiting for the dispatch lock, a dispatch that failed, and a file that went back to the queue after the Lambda answered 429. When `LAMBDA_FUNCTION_URL` or the AWS credentials are missing it does neither, and logs one warning per run while a startable file is queued. See [The reprocess queue](lambda.md#the-reprocess-queue). |
+
+**Which deployments run the crons.** Vercel's cron documentation says cron jobs run only on production deployments, so a preview deployment never runs these two. `staging` is a Vercel custom environment (the branch `staging` deploys to it), not the project's production environment. Vercel's Schedules documentation says static schedules in a custom environment start inactive. They run only after someone enables each one with `vercel schedules enable <name> --environment staging`, or turns on **Create New Schedules as Active** in the environment's settings. Check the project's **Schedules** page filtered to **Staging** to see whether they are active. Where they are not, nothing calls the two routes:
+
+- `upload-queue-sweep` does not revert files stuck in `upload_requested`.
+- `reprocess-queue` does not start a queued file after a stalled file frees its slot, after a dispatch gave up waiting for the lock, or after a 429 put a file back in the queue. It also does not put a stalled start back in the queue. A queued file still starts when another file completes or fails, and when a later reprocess request finds a free slot.
+
+To start the queue by hand on any deployment, send `GET /api/cron/reprocess-queue` with `Authorization: Bearer $CRON_SECRET`. A preview deployment behind Vercel's deployment protection also needs a bypass token.
+
 When a push changes only files under `docs/`, the web project skips its build. `web/vercel.json` sets `ignoreCommand` to `web/scripts/vercel-ignore-build.sh`, which compares the pushed commit with the last successful deployment and builds whenever any file outside `docs/` changed.
 
 ### Docs site

@@ -54,6 +54,7 @@ import { WatcherGatedUploadButton } from "./watcher-gated-upload-button";
 
 const DOWNLOADABLE_STATUSES = new Set([
   "uploaded",
+  "queued",
   "processing",
   "completed",
   "failed",
@@ -292,14 +293,14 @@ function ReprocessAction({
               <>
                 Processing never finished for{" "}
                 <strong className="font-mono">{file.filename}</strong>.
-                Reprocessing will try again. Any existing report data for this
-                file will be cleared.
+                Reprocessing will queue it to try again. Any existing report
+                data for this file will be cleared.
               </>
             ) : (
               <>
                 <strong className="font-mono">{file.filename}</strong> will be
-                sent to the Lambda function for reprocessing. Any existing
-                report data for this file will be cleared.
+                queued for reprocessing and will start when a processing slot is
+                free. Any existing report data for this file will be cleared.
               </>
             )}
           </AlertDialogDescription>

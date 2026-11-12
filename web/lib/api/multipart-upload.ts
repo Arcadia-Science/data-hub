@@ -31,6 +31,7 @@ const CALLER_FIXABLE_S3_ERRORS = new Set([
 ]);
 const UPLOADED_OR_LATER = new Set([
   "uploaded",
+  "queued",
   "processing",
   "completed",
   "failed",
