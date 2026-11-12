@@ -48,18 +48,6 @@ _ERROR_SERVICE_MARKED_FOR_DELETE = 1072
 # fails its API health check, and stays stopped" failure mode.
 _SERVICE_DEPENDENCIES: list[str] = ["Tcpip", "Dnscache"]
 
-# The wait hint the service reports while it stops, from a ``service stop`` or
-# from a system shutdown. A stop with the API answering is the service loop's
-# one-second poll, a final heartbeat and an event flush, which is a few
-# seconds. The hint is not raised to cover a stop against an API that doesn't
-# answer (up to about 95 s, known bug ENG-2127): at a shutdown the SCM waits
-# no longer than its shutdown limit, whatever the hint says ("about 20
-# seconds" in Microsoft's documentation, and for a reboot the
-# ``WaitToKillServiceTimeout`` value, which Microsoft doesn't give for
-# Windows 10 and 11 and which is commonly reported as 5 s), so a larger hint
-# would promise time Windows doesn't give.
-_STOP_WAIT_HINT_MS = 5_000
-
 
 def install_service(config_path: Path, env_path: Path) -> None:
     """Install the watcher as a Windows service with automatic start and recovery.
@@ -579,8 +567,17 @@ def _repair_upgrade_worker_if_missing(config_dir: Path) -> None:
         )
 
 
-def _run_service_loop(stop_event: threading.Event, sm: Any) -> None:
+def _run_service_loop(
+    stop_event: threading.Event,
+    sm: Any,
+    system_shutdown: threading.Event | None = None,
+) -> None:
     """Run the watcher service loop until *stop_event* is set.
+
+    *system_shutdown* is set, before *stop_event*, when the stop is Windows
+    shutting down or restarting. The final ``stopped`` heartbeat then says so
+    (the server keeps requested uploads queued across the restart), and the
+    ``watcher_stopped`` event reads "Service stopped: Windows is shutting down".
 
     This is the testable body of ``DataHubWatcherService.SvcDoRun``.
     Extracted as a top-level function so unit tests can exercise the
@@ -753,8 +750,12 @@ def _run_service_loop(stop_event: threading.Event, sm: Any) -> None:
     # event message reflects whether this is an upgrade-driven restart
     # or a normal stop. Shared with the CLI ``watch`` path via
     # ``classify_shutdown`` so the two entrypoints can't drift.
-    decision = supervisor.classify_shutdown()
-    supervisor.stop(stopped_message=decision.stopped_message)
+    decision = supervisor.classify_shutdown(
+        system_shutdown=system_shutdown is not None and system_shutdown.is_set()
+    )
+    supervisor.stop(
+        stopped_message=decision.stopped_message, system_shutdown=decision.system_shutdown
+    )
 
     if decision.is_upgrade_restart:
         logger.info("%s restarting to load upgraded watcher", SERVICE_DISPLAY_NAME)
@@ -789,29 +790,60 @@ def _create_service_class() -> type | None:
         def __init__(self, args: list[str]) -> None:
             super().__init__(args)
             self._stop_event = threading.Event()
+            # Set before ``_stop_event`` when Windows is shutting down or restarting.
+            self._system_shutdown = threading.Event()
 
         def SvcDoRun(self) -> None:
             import servicemanager  # type: ignore[import-untyped]
 
-            _run_service_loop(self._stop_event, servicemanager)
+            _run_service_loop(self._stop_event, servicemanager, self._system_shutdown)
 
-        def _begin_stop(self) -> None:
+        def _begin_stop(self, *, system_shutdown: bool = False) -> None:
             """Tell the SCM the stop has begun and let the service loop run it."""
-            self.ReportServiceStatus(ws.SERVICE_STOP_PENDING, waitHint=_STOP_WAIT_HINT_MS)
+            if system_shutdown:
+                # Before the stop event, so the loop reads it once it sees the stop.
+                self._system_shutdown.set()
+            self.ReportServiceStatus(ws.SERVICE_STOP_PENDING)
             self._stop_event.set()
 
         def SvcStop(self) -> None:
             self._begin_stop()
 
-        # pywin32 reports SERVICE_ACCEPT_SHUTDOWN only for a class that has a
-        # ``SvcShutdown`` (``ServiceFramework.GetAcceptedControls``). Without
-        # it a reboot or a shutdown kills the process with no stop at all.
-        # The accepted controls are reported by the running service, not
-        # stored at install, so a PC upgraded in place has this from the
-        # restart that loads the new wheel, with no reinstall.
-        def SvcShutdown(self) -> None:
-            logger.info("%s stopping: Windows is shutting down", SERVICE_DISPLAY_NAME)
-            self._begin_stop()
+        # A restart or a full shutdown of the PC reaches the service as
+        # SERVICE_CONTROL_PRESHUTDOWN. Windows sends that before it sends
+        # SERVICE_CONTROL_SHUTDOWN to the other services, and by default the SCM sends
+        # the shutdown control with no regard to service dependencies, so the network
+        # can already be stopping while the watcher sends its final heartbeat. A
+        # service that accepts preshutdown and stops is not sent the shutdown control,
+        # so the class has no ``SvcShutdown``.
+        #
+        # pywin32 311's ``ServiceFramework`` accepts stop, pause and continue, and
+        # shutdown when the class has a ``SvcShutdown``. It sends a control it has no
+        # method for to ``SvcOtherEx``, so this takes the ``GetAcceptedControls``
+        # override below and the check in ``SvcOtherEx``. The service reports what it
+        # accepts each time it runs, so a PC upgraded in place has this from the
+        # restart into the new wheel, with no ``service reinstall``.
+        #
+        # Windows waits for the service to stop for the preshutdown timeout, 10 s by
+        # default from Windows 10 build 15063, and a wait hint can't raise it. The
+        # stop first waits for the file monitor (up to 5 s for the observer and 5 s
+        # for the stability checker), then for the upload worker (up to 30 s), then
+        # for a heartbeat in progress (up to 65 s), and only then sends the final
+        # heartbeat. With nothing uploading and the API answering, that is a few
+        # seconds. With an upload in flight it can be longer than Windows waits, and
+        # in auto mode an upload that runs on the monitor's own thread isn't told to
+        # stop for the first 5 s or so (known bug ENG-2126). A stop that Windows cuts
+        # off sends no final heartbeat, as before 1.4.1.
+        def GetAcceptedControls(self) -> int:
+            return super().GetAcceptedControls() | ws.SERVICE_ACCEPT_PRESHUTDOWN
+
+        def SvcOtherEx(self, control: int, event_type: int, data: Any) -> None:
+            if control == ws.SERVICE_CONTROL_PRESHUTDOWN:
+                # Control handlers should return quickly: start the stop, then log.
+                self._begin_stop(system_shutdown=True)
+                logger.info("%s stopping: Windows is shutting down", SERVICE_DISPLAY_NAME)
+                return None
+            return super().SvcOtherEx(control, event_type, data)
 
     return DataHubWatcherService
 

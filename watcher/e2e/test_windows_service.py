@@ -1245,6 +1245,9 @@ def test_the_service_asks_to_be_told_about_a_shutdown_of_the_system(
     # `sc queryex` lists what the service accepts, and the listing was read.
     assert "STOPPABLE" in status.controls, status.controls
 
-    # It accepts a shutdown, so that a reboot stops it as `service stop` does. A test can't
-    # send a shutdown (only the system can), so this reads the controls the service reports.
-    assert status.accepts_shutdown is True, f"sc queryex lists {', '.join(status.controls)}"
+    # It tells the SCM it takes the preshutdown notification, which Windows sends before a
+    # restart or a full shutdown. A test can't send one (only the system can), so this reads
+    # the controls the service reports. It doesn't show that a stop at a restart finishes in
+    # the time Windows allows (10 s by default), or that it sends the final heartbeat: the unit
+    # tests cover what the service does with the control.
+    assert status.accepts_preshutdown is True, f"sc queryex lists {', '.join(status.controls)}"

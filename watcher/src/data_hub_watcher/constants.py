@@ -70,6 +70,11 @@ WATCHER_LOG_DIR = _resolve_watcher_log_dir()
 SUPPORTED_ENVIRONMENTS: tuple[str, ...] = ("staging", "production", "preview")
 
 HEARTBEAT_INTERVAL_SECONDS = 60
+# The `status_reason` on the final `stopped` heartbeat when the stop was caused by
+# Windows shutting down or restarting. A server that knows the value keeps the
+# instrument's requested uploads queued, for the watcher to upload after the PC
+# starts again. The server's `SYSTEM_SHUTDOWN_STATUS_REASON` must say the same.
+SYSTEM_SHUTDOWN_STATUS_REASON = "system_shutdown"
 # Kept separate from ``HEARTBEAT_INTERVAL_SECONDS`` so the poll cadence can
 # diverge now that uploads no longer ride the heartbeat tick.
 UPLOAD_POLL_INTERVAL_SECONDS = 60

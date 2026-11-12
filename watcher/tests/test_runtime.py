@@ -266,6 +266,18 @@ class TestStopRuntimeUploadWorkerOrdering:
 
         state_db.close.assert_called_once_with()
 
+    @pytest.mark.parametrize("system_shutdown", [True, False])
+    def test_final_heartbeat_is_marked_only_for_a_system_shutdown(
+        self, system_shutdown: bool
+    ) -> None:
+        heartbeat = MagicMock()
+        rt = self._runtime_with_mocks(MagicMock(), None)
+        rt.heartbeat = heartbeat
+
+        stop_runtime(rt, stopped_message="Service stopped", system_shutdown=system_shutdown)
+
+        heartbeat.stop.assert_called_once_with(system_shutdown=system_shutdown)
+
 
 class TestBuildRuntimeSharedDependencies:
     """Cross-object wiring invariants that apply to both upload modes."""
@@ -622,6 +634,38 @@ class TestClassifyShutdown:
             # would look weird on Windows where the dashboard already
             # shows the watcher's host as a service.
             assert decision.stopped_message == "Service restarting for auto-update"
+        finally:
+            rt.state_db.close()
+
+    def test_system_shutdown_has_its_own_message_and_mark(
+        self, tmp_path: Path, db_path: Path
+    ) -> None:
+        cfg = _make_config(tmp_path, upload_mode="auto")
+        rt = build_runtime(client=MagicMock(), cfg=cfg, db_path=db_path)
+        try:
+            decision = classify_shutdown(rt, role="Service", system_shutdown=True)
+            # Data Hub tells a restart of the PC from a `service stop` by this text.
+            assert decision == ShutdownReason(
+                is_upgrade_restart=False,
+                stopped_message="Service stopped: Windows is shutting down",
+                system_shutdown=True,
+            )
+            assert classify_shutdown(rt, role="Service").system_shutdown is False
+        finally:
+            rt.state_db.close()
+
+    def test_system_shutdown_wins_over_a_pending_upgrade_restart(
+        self, tmp_path: Path, db_path: Path
+    ) -> None:
+        # The PC is going down, so nothing restarts the process: it must not claim a
+        # restart, and the service must not exit with the failure code that asks for one.
+        cfg = _make_config(tmp_path, upload_mode="auto")
+        rt = build_runtime(client=MagicMock(), cfg=cfg, db_path=db_path)
+        try:
+            rt.upgrade_restart_event.set()
+            decision = classify_shutdown(rt, role="Service", system_shutdown=True)
+            assert decision.is_upgrade_restart is False
+            assert decision.system_shutdown is True
         finally:
             rt.state_db.close()
 

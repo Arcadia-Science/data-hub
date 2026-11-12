@@ -124,6 +124,10 @@ class ShutdownReason:
 
     is_upgrade_restart: bool
     stopped_message: str
+    # True when Windows is shutting down or restarting. The final `stopped`
+    # heartbeat then carries `SYSTEM_SHUTDOWN_STATUS_REASON`, so the server keeps
+    # the instrument's requested uploads queued across the restart.
+    system_shutdown: bool = False
 
 
 # uv's diagnostic lines start with ``error:`` (or ``Error:`` on a few
@@ -196,7 +200,23 @@ def _expecting_worker_result(outcome: object) -> bool:
     return sys.platform == "win32"
 
 
-def classify_shutdown(rt: WatcherRuntime, *, role: str) -> ShutdownReason:
+def _system_shutdown_reason(role: str) -> ShutdownReason:
+    """The stop that Windows shutting down or restarting causes.
+
+    It wins over an auto-update restart that was pending at the same time: the
+    PC is going down, so nothing restarts the process, and the next boot loads
+    the new version anyway.
+    """
+    return ShutdownReason(
+        is_upgrade_restart=False,
+        stopped_message=f"{role} stopped: Windows is shutting down",
+        system_shutdown=True,
+    )
+
+
+def classify_shutdown(
+    rt: WatcherRuntime, *, role: str, system_shutdown: bool = False
+) -> ShutdownReason:
     """Pick the right ``stopped_message`` for the WATCHER_STOPPED event.
 
     *role* is the human-readable noun for this entrypoint
@@ -204,10 +224,16 @@ def classify_shutdown(rt: WatcherRuntime, *, role: str) -> ShutdownReason:
     so the message reads naturally in the events stream regardless of
     which path triggered the shutdown.
 
+    *system_shutdown* says the Windows service was told that Windows is shutting
+    down or restarting, which gets its own message so the events stream can tell
+    a restart of the PC from a ``service stop``.
+
     Note: the CLI's signal-initiated stop has its own "stopped by user"
     message and does not go through this helper — at that point we
     already know the cause is an operator signal, not the auto-updater.
     """
+    if system_shutdown:
+        return _system_shutdown_reason(role)
     if rt.upgrade_restart_event.is_set():
         return ShutdownReason(
             is_upgrade_restart=True,
@@ -671,8 +697,14 @@ def sync_config_to_api(
     )
 
 
-def stop_runtime(rt: WatcherRuntime, *, stopped_message: str) -> None:
-    """Shut everything down in reverse order and flush pending events."""
+def stop_runtime(
+    rt: WatcherRuntime, *, stopped_message: str, system_shutdown: bool = False
+) -> None:
+    """Shut everything down in reverse order and flush pending events.
+
+    *system_shutdown* marks the final `stopped` heartbeat as caused by Windows
+    shutting down (see `HeartbeatLoop.stop`).
+    """
     rt.monitor.stop()
     # ``StateDB.close`` assumes writer threads have joined; a large upload
     # outliving the join once wrote post-close. Stop the worker first, and if
@@ -694,7 +726,7 @@ def stop_runtime(rt: WatcherRuntime, *, stopped_message: str) -> None:
             message=stopped_message,
         )
     )
-    rt.heartbeat.stop()
+    rt.heartbeat.stop(system_shutdown=system_shutdown)
     rt.reporter.flush()
     if upload_worker_stopped:
         rt.state_db.close()
@@ -922,9 +954,11 @@ class WatcherSupervisor:
         """Make a blocked :meth:`poll` return early (used by signal handlers)."""
         self._wake.set()
 
-    def classify_shutdown(self) -> ShutdownReason:
+    def classify_shutdown(self, *, system_shutdown: bool = False) -> ShutdownReason:
         if self.rt is not None:
-            return classify_shutdown(self.rt, role=self.role)
+            return classify_shutdown(self.rt, role=self.role, system_shutdown=system_shutdown)
+        if system_shutdown:
+            return _system_shutdown_reason(self.role)
         if self.upgrade_restart_event.is_set():
             return ShutdownReason(
                 is_upgrade_restart=True,
@@ -932,16 +966,20 @@ class WatcherSupervisor:
             )
         return ShutdownReason(is_upgrade_restart=False, stopped_message=f"{self.role} stopped")
 
-    def stop(self, *, stopped_message: str) -> None:
-        """Stop whatever is running and flush events."""
+    def stop(self, *, stopped_message: str, system_shutdown: bool = False) -> None:
+        """Stop whatever is running and flush events.
+
+        *system_shutdown* marks the final `stopped` heartbeat as caused by Windows
+        shutting down (see `HeartbeatLoop.stop`).
+        """
         if self.rt is not None:
-            stop_runtime(self.rt, stopped_message=stopped_message)
+            stop_runtime(self.rt, stopped_message=stopped_message, system_shutdown=system_shutdown)
             self.rt = None
         elif self._waiting is not None:
             self.reporter.queue_event(
                 WatcherEvent(event_type=EventType.WATCHER_STOPPED, message=stopped_message)
             )
-            self._waiting.heartbeat.stop()
+            self._waiting.heartbeat.stop(system_shutdown=system_shutdown)
             self._waiting = None
             self.reporter.flush()
         if self._state is not None:

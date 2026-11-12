@@ -262,3 +262,43 @@ class TestHeartbeatStop:
         loop.stop()
 
         thread.join.assert_called_once_with(timeout=expected_wait)
+
+
+class TestFinalHeartbeatReason:
+    """The final ``stopped`` heartbeat says when Windows shutting down caused the stop.
+
+    The server keeps the instrument's requested uploads queued for a ``stopped``
+    heartbeat with ``status_reason: system_shutdown``, and cancels them for any
+    other ``stopped`` heartbeat. The value is the contract with the server, so the
+    tests spell it out.
+    """
+
+    @staticmethod
+    def _final_payload(**stop_kwargs: bool) -> dict[str, object]:
+        client = MagicMock()
+        loop = _make_loop(client, MagicMock(spec=EventReporter))
+
+        loop.stop(**stop_kwargs)
+
+        client.send_heartbeat.assert_called_once()
+        return client.send_heartbeat.call_args.args[1]
+
+    def test_a_stop_caused_by_a_system_shutdown_carries_the_reason(self) -> None:
+        payload = self._final_payload(system_shutdown=True)
+
+        assert payload["status"] == "stopped"
+        assert payload["status_reason"] == "system_shutdown"
+
+    def test_any_other_stop_carries_no_reason(self) -> None:
+        payload = self._final_payload()
+
+        assert payload["status"] == "stopped"
+        assert "status_reason" not in payload
+
+    def test_a_heartbeat_that_is_not_the_final_one_never_carries_it(self) -> None:
+        client = MagicMock()
+        loop = _make_loop(client, MagicMock(spec=EventReporter))
+
+        loop._send_heartbeat(status="watching", system_shutdown=True)
+
+        assert "status_reason" not in client.send_heartbeat.call_args.args[1]

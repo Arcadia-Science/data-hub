@@ -8,7 +8,11 @@ from datetime import datetime, timezone
 from typing import Any
 
 from data_hub_watcher.api_client import ApiError, DataHubClient
-from data_hub_watcher.constants import HEARTBEAT_INTERVAL_SECONDS, WATCHER_VERSION
+from data_hub_watcher.constants import (
+    HEARTBEAT_INTERVAL_SECONDS,
+    SYSTEM_SHUTDOWN_STATUS_REASON,
+    WATCHER_VERSION,
+)
 from data_hub_watcher.events import EventReporter
 
 logger = logging.getLogger(__name__)
@@ -119,7 +123,14 @@ class HeartbeatLoop:
         """Change the ``status_reason`` sent from the next heartbeat on."""
         self._status_reason = reason
 
-    def stop(self, *, send_stopped: bool = True) -> None:
+    def stop(self, *, send_stopped: bool = True, system_shutdown: bool = False) -> None:
+        """Stop the loop and, unless *send_stopped* is false, send the final heartbeat.
+
+        *system_shutdown* marks that heartbeat as caused by Windows shutting down or
+        restarting: the server then keeps the instrument's requested uploads queued
+        for the watcher to upload once the PC starts again, instead of cancelling
+        them as it does for any other stop.
+        """
         self._stop_event.set()
         if self._thread and self._thread.is_alive():
             # A tick in progress when stop is requested can take far longer than
@@ -135,7 +146,7 @@ class HeartbeatLoop:
         # the runtime is being rebuilt for a new config, because a new loop
         # starts straight away and the watcher never actually stops.
         if send_stopped:
-            self._send_heartbeat(status="stopped")
+            self._send_heartbeat(status="stopped", system_shutdown=system_shutdown)
 
     def _run(self) -> None:
         # Event.wait() returns True when set (stop requested) and False on timeout,
@@ -151,8 +162,8 @@ class HeartbeatLoop:
         if self._on_tick is not None:
             self._on_tick()
 
-    def _send_heartbeat(self, status: str = "watching") -> None:
-        payload = self._build_payload(status)
+    def _send_heartbeat(self, status: str = "watching", *, system_shutdown: bool = False) -> None:
+        payload = self._build_payload(status, system_shutdown=system_shutdown)
         try:
             response = self._client.send_heartbeat(self._watcher_id, payload)
         except (ApiError, Exception) as exc:
@@ -201,7 +212,7 @@ class HeartbeatLoop:
         self.counters.runs_reported = 0
         self.counters.errors = 0
 
-    def _build_payload(self, status: str) -> dict[str, Any]:
+    def _build_payload(self, status: str, *, system_shutdown: bool = False) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "status": status,
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -217,6 +228,8 @@ class HeartbeatLoop:
         if status == "waiting" and self._status_reason:
             # The server caps `status_reason` at 500 characters.
             payload["status_reason"] = self._status_reason[:500]
+        elif status == "stopped" and system_shutdown:
+            payload["status_reason"] = SYSTEM_SHUTDOWN_STATUS_REASON
         if self._config_revision is not None:
             payload["config_revision"] = self._config_revision()
         return payload

@@ -74,11 +74,12 @@ def queryex_active(
     *,
     state: int = 4,
     state_name: str = "RUNNING",
-    shutdown: str = "ACCEPTS_SHUTDOWN",
+    shutdown: str = "ACCEPTS_PRESHUTDOWN",
     pid: int = 4132,
 ) -> str:
-    """What `sc queryex` prints for a service that is not stopped. The real service lists
-    ACCEPTS_SHUTDOWN: it has a `SvcShutdown`."""
+    """What `sc queryex` prints for a service that is not stopped. The real service accepts
+    the preshutdown notification, which Microsoft says `sc` lists as ACCEPTS_PRESHUTDOWN on
+    Windows 7 and later. This text was not read from a Windows PC."""
     return _QUERYEX_ACTIVE.format(state=state, state_name=state_name, shutdown=shutdown, pid=pid)
 
 
@@ -158,7 +159,7 @@ class TestReadingWhatWindowsPrints:
 
         assert status is not None
         assert (status.state, status.pid, status.exit_code) == (ServiceState.RUNNING, 4132, 0)
-        assert status.accepts_shutdown is True
+        assert status.accepts_preshutdown is True
 
     def test_a_stopped_service_has_no_pid_and_says_how_it_ended(self) -> None:
         text = QUERYEX_STOPPED.format(win32=1067, specific=0)
@@ -183,17 +184,20 @@ class TestReadingWhatWindowsPrints:
         assert status.exit_code == 536870913
         assert status.exit_code != 1
 
-    def test_the_controls_say_whether_the_service_accepts_a_shutdown(self) -> None:
+    def test_the_controls_say_whether_the_service_accepts_the_preshutdown(self) -> None:
         ignoring = parse_sc_queryex(CommandResult(0, queryex_active(shutdown="IGNORES_SHUTDOWN")))
         accepting = parse_sc_queryex(CommandResult(0, queryex_active()))
         stopped = parse_sc_queryex(CommandResult(0, QUERYEX_STOPPED.format(win32=0, specific=0)))
 
         assert ignoring is not None and accepting is not None and stopped is not None
         assert ignoring.controls == ("STOPPABLE", "NOT_PAUSABLE", "IGNORES_SHUTDOWN")
-        assert ignoring.accepts_shutdown is False
-        assert accepting.accepts_shutdown is True
+        assert accepting.controls == ("STOPPABLE", "NOT_PAUSABLE", "ACCEPTS_PRESHUTDOWN")
+        # A service that lists controls without ACCEPTS_PRESHUTDOWN doesn't accept it, which is
+        # not the same as `sc` listing none.
+        assert ignoring.accepts_preshutdown is False
+        assert accepting.accepts_preshutdown is True
         # A stopped service lists no controls.
-        assert (stopped.controls, stopped.accepts_shutdown) == ((), None)
+        assert (stopped.controls, stopped.accepts_preshutdown) == ((), None)
 
     def test_a_service_that_never_ran_has_no_exit_code(self) -> None:
         status = parse_sc_queryex(CommandResult(0, QUERYEX_STOPPED.format(win32=1077, specific=0)))

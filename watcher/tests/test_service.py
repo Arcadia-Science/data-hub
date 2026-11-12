@@ -83,8 +83,8 @@ def _make_win32_fakes() -> dict[str, ModuleType]:
     # The real values of the controls and of the bits that say which a service accepts
     # (winsvc.h). The service class's tests read them through the framework fake below.
     ws.SERVICE_CONTROL_STOP = 1
-    ws.SERVICE_CONTROL_INTERROGATE = 4
     ws.SERVICE_CONTROL_SHUTDOWN = 5
+    ws.SERVICE_CONTROL_PRESHUTDOWN = 0x0F
     ws.SERVICE_ACCEPT_STOP = 0x1
     ws.SERVICE_ACCEPT_SHUTDOWN = 0x4
     ws.SERVICE_ACCEPT_PRESHUTDOWN = 0x100
@@ -1073,6 +1073,8 @@ class _LoopHarness:
         self.runtime.upgrade_restart_event = threading.Event()
         self.start_calls: list[Any] = []
         self.stop_calls: list[Any] = []
+        # The `system_shutdown` argument of each `stop_runtime` call, in step with `stop_calls`.
+        self.stop_system_shutdown: list[bool] = []
         self.sm = MagicMock(name="servicemanager")
 
         # Patch the registry read at the service-module level so the
@@ -1118,11 +1120,12 @@ class _LoopHarness:
             "start_runtime",
             lambda rt, started_message="", **_kw: self.start_calls.append((rt, started_message)),
         )
-        monkeypatch.setattr(
-            runtime,
-            "stop_runtime",
-            lambda rt, stopped_message="": self.stop_calls.append((rt, stopped_message)),
-        )
+
+        def _record_stop(rt: Any, stopped_message: str = "", system_shutdown: bool = False) -> None:
+            self.stop_calls.append((rt, stopped_message))
+            self.stop_system_shutdown.append(system_shutdown)
+
+        monkeypatch.setattr(runtime, "stop_runtime", _record_stop)
 
         # load_dotenv is imported directly inside the function from
         # `dotenv`, so patch it on the dotenv module.
@@ -1552,16 +1555,18 @@ class TestRunServiceLoopLogging:
 
 
 class _FakeServiceFramework:
-    """The parts of pywin32's ``win32serviceutil.ServiceFramework`` that decide which
-    controls a service accepts and how a control reaches it, copied from pywin32 311 (the
-    version in ``uv.lock``): ``GetAcceptedControls``, ``ReportServiceStatus`` and
-    ``ServiceCtrlHandlerEx``.
+    """A trimmed copy of the parts of pywin32's ``win32serviceutil.ServiceFramework`` that
+    decide which controls a service accepts and how a control reaches it, taken from pywin32
+    311 (the version in ``uv.lock``): ``GetAcceptedControls``, ``ReportServiceStatus``,
+    ``ServiceCtrlHandlerEx``, ``SvcOtherEx`` and ``SvcOther``.
 
     The real class only imports on Windows, and what the service class gets right or wrong
-    is what pywin32 does with its methods: it reports SERVICE_ACCEPT_SHUTDOWN only for a
-    class that has a ``SvcShutdown``, and sends SERVICE_CONTROL_SHUTDOWN only to that
-    method. This copy keeps those rules, with no ``SvcStop`` or ``SvcShutdown`` of its own,
-    as in pywin32. It records what the service reports to the SCM instead of sending it.
+    is what pywin32 does with its methods: it accepts stop, and shutdown only for a class
+    that has a ``SvcShutdown``, never preshutdown, which reaches the class as an unknown
+    control through ``SvcOtherEx``. This copy keeps those rules and drops what the service
+    doesn't use: pause and continue, interrogate, and ``SvcOther``'s ``print``. It has no
+    ``SvcStop`` or ``SvcShutdown`` of its own, as in pywin32, and it records what the service
+    reports to the SCM instead of sending it.
     """
 
     def __init__(self, args: list[str]) -> None:
@@ -1581,13 +1586,19 @@ class _FakeServiceFramework:
     ) -> None:
         self.reported.append((serviceStatus, self.GetAcceptedControls(), waitHint))
 
+    def SvcOtherEx(self, control: int, event_type: int, data: Any) -> None:
+        return self.SvcOther(control)
+
+    def SvcOther(self, control: int) -> None:
+        return None
+
     def ServiceCtrlHandlerEx(self, control: int, event_type: int, data: Any) -> None:
         ws = sys.modules["win32service"]
         if control == ws.SERVICE_CONTROL_STOP:
             return self.SvcStop()  # type: ignore[attr-defined]
         if control == ws.SERVICE_CONTROL_SHUTDOWN:
             return self.SvcShutdown()  # type: ignore[attr-defined]
-        raise AssertionError(f"the fake framework has no route for control {control}")
+        return self.SvcOtherEx(control, event_type, data)
 
 
 @pytest.fixture
@@ -1604,41 +1615,71 @@ def service_class(service_module: ModuleType, monkeypatch: pytest.MonkeyPatch) -
 class TestServiceClass:
     """What the service class tells the SCM it accepts, and what it does with each control."""
 
-    def test_the_service_accepts_a_stop_and_a_system_shutdown(self, service_class: type) -> None:
-        # A service that accepts no shutdown is listed by `sc queryex` as IGNORES_SHUTDOWN, and
-        # a reboot kills its process with no `stopped` heartbeat and no `watcher_stopped` event.
+    def test_the_service_accepts_a_stop_and_the_preshutdown_of_the_system(
+        self, service_class: type
+    ) -> None:
+        # A service that accepts neither is listed by `sc queryex` as IGNORES_SHUTDOWN, and a
+        # restart kills its process with no `stopped` heartbeat and no `watcher_stopped` event.
         ws = sys.modules["win32service"]
         accepted = service_class(["DataHubWatcher"]).GetAcceptedControls()
 
         assert accepted & ws.SERVICE_ACCEPT_STOP
-        assert accepted & ws.SERVICE_ACCEPT_SHUTDOWN
-        # Preshutdown is not used: the shutdown control gives the stop its chance to finish
-        # with no change to the service's registration, which a PC upgraded in place lacks.
-        assert not accepted & ws.SERVICE_ACCEPT_PRESHUTDOWN
+        assert accepted & ws.SERVICE_ACCEPT_PRESHUTDOWN
+        # Windows sends preshutdown before any shutdown control, and a service that has
+        # stopped on it is not sent the shutdown control, so the service doesn't ask for it.
+        assert not accepted & ws.SERVICE_ACCEPT_SHUTDOWN
 
-    @pytest.mark.parametrize("control_name", ["SERVICE_CONTROL_STOP", "SERVICE_CONTROL_SHUTDOWN"])
-    def test_a_stop_and_a_shutdown_both_report_a_stop_in_progress(
-        self, service_class: type, control_name: str
+    def test_preshutdown_reaches_the_service_through_pywins_unknown_control_route(
+        self, service_class: type
     ) -> None:
+        # pywin32 311 has no preshutdown route of its own: ServiceCtrlHandlerEx sends the
+        # control to SvcOtherEx, which the service class overrides.
         ws = sys.modules["win32service"]
         svc = service_class(["DataHubWatcher"])
         assert not svc._stop_event.is_set()
 
+        svc.ServiceCtrlHandlerEx(ws.SERVICE_CONTROL_PRESHUTDOWN, 0, None)
+
+        assert svc._stop_event.is_set()
+        assert svc._system_shutdown.is_set()
+
+    @pytest.mark.parametrize(
+        ("control_name", "is_system_shutdown"),
+        [("SERVICE_CONTROL_STOP", False), ("SERVICE_CONTROL_PRESHUTDOWN", True)],
+    )
+    def test_a_stop_and_a_preshutdown_both_report_a_stop_in_progress(
+        self, service_class: type, control_name: str, is_system_shutdown: bool
+    ) -> None:
+        ws = sys.modules["win32service"]
+        svc = service_class(["DataHubWatcher"])
+
         svc.ServiceCtrlHandlerEx(getattr(ws, control_name), 0, None)
 
         assert svc._stop_event.is_set()
-        state, accepted, wait_hint = svc.reported[-1]
+        # Only a preshutdown says Windows is shutting down: the final heartbeat of a
+        # `service stop` must not, or the server would keep requested uploads queued.
+        assert svc._system_shutdown.is_set() is is_system_shutdown
+        state, accepted, _wait_hint = svc.reported[-1]
         assert state == ws.SERVICE_STOP_PENDING
-        assert accepted & ws.SERVICE_ACCEPT_SHUTDOWN
-        # Microsoft gives a shutdown about 20 s, so a hint beyond that promises time the
-        # SCM won't wait.
-        assert 0 < wait_hint <= 20_000
+        assert accepted & ws.SERVICE_ACCEPT_PRESHUTDOWN
 
-    def test_a_system_shutdown_stops_the_runtime_as_a_service_stop_does(
-        self, service_class: type, harness: _LoopHarness
+    def test_a_control_the_service_does_not_handle_changes_nothing(
+        self, service_class: type
     ) -> None:
+        svc = service_class(["DataHubWatcher"])
+
+        # 130 is in the range of user-defined controls. It goes to pywin32's SvcOtherEx.
+        svc.ServiceCtrlHandlerEx(130, 0, None)
+
+        assert not svc._stop_event.is_set()
+        assert not svc._system_shutdown.is_set()
+        assert svc.reported == []
+
+    def _run_until_stopped_by(
+        self, service_class: type, harness: _LoopHarness, control: str
+    ) -> Any:
+        """Start the service's runtime, send *control*, and wait for the service to stop."""
         ws = sys.modules["win32service"]
-        sm = sys.modules["servicemanager"]
         svc = service_class(["DataHubWatcher"])
         runner = threading.Thread(target=svc.SvcDoRun, daemon=True)
         runner.start()
@@ -1649,7 +1690,7 @@ class TestServiceClass:
             assert harness.start_calls, "the service never started its runtime"
             assert harness.stop_calls == []
 
-            svc.ServiceCtrlHandlerEx(ws.SERVICE_CONTROL_SHUTDOWN, 0, None)
+            svc.ServiceCtrlHandlerEx(getattr(ws, control), 0, None)
             runner.join(timeout=10)
             stopped = not runner.is_alive()
         finally:
@@ -1657,12 +1698,37 @@ class TestServiceClass:
             svc._stop_event.set()
             runner.join(timeout=10)
 
-        assert stopped, "the service kept running after the system shutdown"
-        # The stop is the one `service stop` runs: the runtime stops with the ordinary
-        # message, which sends the final `stopped` heartbeat and the `watcher_stopped` event.
-        assert [message for _rt, message in harness.stop_calls] == ["Service stopped"]
+        assert stopped, f"the service kept running after {control}"
+        return svc
+
+    def test_a_system_shutdown_stops_the_runtime_and_marks_the_final_heartbeat(
+        self, service_class: type, harness: _LoopHarness
+    ) -> None:
+        sm = sys.modules["servicemanager"]
+
+        self._run_until_stopped_by(service_class, harness, "SERVICE_CONTROL_PRESHUTDOWN")
+
+        # The stop is the one `service stop` runs, with a message that tells a restart of the
+        # PC apart, and with the mark that keeps requested uploads queued across the restart.
+        assert [message for _rt, message in harness.stop_calls] == [
+            "Service stopped: Windows is shutting down"
+        ]
+        assert harness.stop_system_shutdown == [True]
         info_messages = [c.args[0] for c in sm.LogInfoMsg.call_args_list]
         assert any("Windows is shutting down" in m for m in info_messages)
+        sm.LogErrorMsg.assert_not_called()
+
+    def test_a_service_stop_keeps_the_ordinary_message_and_sends_no_mark(
+        self, service_class: type, harness: _LoopHarness
+    ) -> None:
+        sm = sys.modules["servicemanager"]
+
+        self._run_until_stopped_by(service_class, harness, "SERVICE_CONTROL_STOP")
+
+        assert [message for _rt, message in harness.stop_calls] == ["Service stopped"]
+        assert harness.stop_system_shutdown == [False]
+        info_messages = [c.args[0] for c in sm.LogInfoMsg.call_args_list]
+        assert not any("Windows is shutting down" in m for m in info_messages)
         sm.LogErrorMsg.assert_not_called()
 
 

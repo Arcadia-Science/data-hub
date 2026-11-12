@@ -162,8 +162,9 @@ class ServiceStatus:
     pid: int | None
     win32_exit_code: int
     service_exit_code: int
-    # The controls `sc queryex` lists under the state: ``STOPPABLE``, ``NOT_PAUSABLE``,
-    # ``ACCEPTS_SHUTDOWN`` or ``IGNORES_SHUTDOWN``. Empty for a stopped service.
+    # The controls `sc queryex` lists under the state: ``STOPPABLE`` or ``NOT_STOPPABLE``,
+    # ``PAUSABLE`` or ``NOT_PAUSABLE``, and the shutdown ones: ``ACCEPTS_SHUTDOWN``,
+    # ``IGNORES_SHUTDOWN`` and ``ACCEPTS_PRESHUTDOWN``. Empty for a stopped service.
     controls: tuple[str, ...] = ()
 
     @property
@@ -181,15 +182,17 @@ class ServiceStatus:
         return self.win32_exit_code
 
     @property
-    def accepts_shutdown(self) -> bool | None:
-        """Whether the service told the SCM it handles a system shutdown (``SvcShutdown``),
-        which `sc queryex` lists as ``ACCEPTS_SHUTDOWN`` or ``IGNORES_SHUTDOWN``. ``None``
-        when it lists neither (a stopped service lists no controls)."""
-        if "ACCEPTS_SHUTDOWN" in self.controls:
+    def accepts_preshutdown(self) -> bool | None:
+        """Whether the service told the SCM it takes the notification that Windows sends
+        before a restart or a shutdown (``SERVICE_ACCEPT_PRESHUTDOWN``), which `sc queryex`
+        lists as ``ACCEPTS_PRESHUTDOWN``. ``False`` when it lists controls without it, and
+        ``None`` when it lists none (a stopped service lists no controls).
+
+        Microsoft says `sc` prints ``ACCEPTS_PRESHUTDOWN`` on Windows 7 and later. On Vista
+        it printed ``IGNORES_SHUTDOWN`` for such a service, which is a bug of `sc`."""
+        if "ACCEPTS_PRESHUTDOWN" in self.controls:
             return True
-        if "IGNORES_SHUTDOWN" in self.controls:
-            return False
-        return None
+        return False if self.controls else None
 
 
 class ScError(RuntimeError):
@@ -207,7 +210,7 @@ _STATE = re.compile(r"^\s*STATE\s*:\s*(\d+)", re.MULTILINE)
 _WIN32_EXIT = re.compile(r"^\s*WIN32_EXIT_CODE\s*:\s*(\d+)", re.MULTILINE)
 _SERVICE_EXIT = re.compile(r"^\s*SERVICE_EXIT_CODE\s*:\s*(\d+)", re.MULTILINE)
 _PID = re.compile(r"^\s*PID\s*:\s*(\d+)", re.MULTILINE)
-# The controls are on the line after the state: `(STOPPABLE, NOT_PAUSABLE, IGNORES_SHUTDOWN)`.
+# The controls are on the line after the state: `(STOPPABLE, NOT_PAUSABLE, ACCEPTS_PRESHUTDOWN)`.
 _CONTROLS = re.compile(r"^\s*STATE\s*:\s*\d+[^\n]*\n\s*\(([A-Z_, ]+)\)", re.MULTILINE)
 _SC_FAILED = re.compile(r"FAILED\s+(\d+)")
 
