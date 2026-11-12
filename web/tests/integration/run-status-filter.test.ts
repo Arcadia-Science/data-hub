@@ -19,6 +19,7 @@ type FileStatus =
   | "detected"
   | "upload_requested"
   | "uploaded"
+  | "queued"
   | "processing"
   | "completed"
   | "failed";
@@ -88,6 +89,11 @@ describe("Run status filter", () => {
     await seedRun("rs-failed", ["failed", "completed"]);
     await seedRun("rs-pending", ["detected", "completed"]);
     await seedRun("rs-uploaded", ["uploaded", "completed"]);
+    // Queued ranks between uploaded and processing: it outranks files that
+    // are processing or done, and an uploaded file outranks it.
+    await seedRun("rs-queued", ["queued", "processing", "completed"]);
+    await seedRun("rs-queued-only", ["queued", "queued"]);
+    await seedRun("rs-uploaded-queued", ["uploaded", "queued"]);
     await seedRun("rs-processing", ["processing", "completed"]);
     // Same file states as rs-processing, only the start timestamp differs.
     await seedRun("rs-stalled", ["processing", "completed"], PAST_STALL_WINDOW);
@@ -129,6 +135,35 @@ describe("Run status filter", () => {
     expect(total).toBe(2);
   });
 
+  it("'queued' matches runs with a queued file and nothing ranked above it", async () => {
+    const { ids, total } = await fetchRuns("status=queued");
+    expect(new Set(ids)).toEqual(new Set(["rs-queued", "rs-queued-only"]));
+    expect(total).toBe(2);
+  });
+
+  it("'uploaded' still wins over a queued file in the same run", async () => {
+    const { ids } = await fetchRuns("status=uploaded");
+    expect(new Set(ids)).toEqual(
+      new Set(["rs-uploaded", "rs-uploaded-queued"])
+    );
+  });
+
+  it("reports the queued count on each run", async () => {
+    const res = await api(
+      `/api/v1/instrument-runs?instrument_id=${instrumentId}&per_page=100&status=queued`,
+      { token }
+    );
+    const body = await res.json();
+    const byRun = new Map<string, { files_queued: number }>(
+      body.data.map((r: { run_id: string; files_queued: number }) => [
+        r.run_id,
+        r,
+      ])
+    );
+    expect(byRun.get("rs-queued")?.files_queued).toBe(1);
+    expect(byRun.get("rs-queued-only")?.files_queued).toBe(2);
+  });
+
   it("'processing' matches only in-flight runs, not stalled ones", async () => {
     const { ids, total } = await fetchRuns("status=processing");
     expect(ids).toEqual(["rs-processing"]);
@@ -149,7 +184,7 @@ describe("Run status filter", () => {
 
   it("ignores unknown status values instead of erroring or over-filtering", async () => {
     const { total } = await fetchRuns("status=bogus");
-    expect(total).toBe(8);
+    expect(total).toBe(11);
   });
 
   // Every seeded run must land in exactly one bucket, or the priority chain

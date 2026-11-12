@@ -49,6 +49,7 @@ A run’s status tells you how far its files have got from the instrument to the
 | Stalled | At least one file has been processing for more than 20 minutes without finishing. Reprocess it to try again. |
 | Pending upload | The watcher found the files but hasn’t sent them yet. |
 | Uploaded | The files are in storage. Processing hasn’t started, or this instrument type has no processor. |
+| Queued | You chose **Reprocess**, and the files are waiting for a free processing slot. They start as other files finish. |
 | Processing | The server is reading the files, extracting metadata, and building reports. |
 | Completed | Processing finished. |
 | Empty | The run has no files. |
@@ -89,7 +90,7 @@ The files table has separate **Type** and **Status** filters. Use them to show, 
 
 ### Live file updates [#live-file-updates]
 
-While files are uploading or processing, the run page checks for updates every 5 seconds for up to 5 minutes. After that it stops and shows **Stopped checking for file updates**. Choose **Refresh** to check for another 5 minutes. Uploading or reprocessing files from the page also starts a new 5 minutes.
+While files are uploading, queued, or processing, the run page checks for updates every 5 seconds for up to 5 minutes. After that it stops and shows **Stopped checking for file updates**. Choose **Refresh** to check for another 5 minutes. Uploading or reprocessing files from the page also starts a new 5 minutes.
 
 ## Claim who ran it [#claim-who-ran-it]
 
@@ -142,11 +143,24 @@ Reprocessing runs server-side processing again. Use it after a file failed or st
 - To reprocess several files, select them in the files table and choose **Reprocess** in the bar.
 - To reprocess whole runs, select them in a run list and choose **Reprocess** in the bar.
 
-Reprocessing sends only the original instrument files. Files Data Hub generated, such as videos, previews, and CSVs, have no **Reprocess** button and are rebuilt from the originals.
+Reprocessing sends only the original instrument files. Files Data Hub generated, such as videos, previews, and CSVs, have no **Reprocess** button and are rebuilt from the originals. Reprocessed files go through a queue; see [How reprocessing is queued](/docs/browse-runs#reprocess-queue).
 
-**Delete** marks the run deleted without removing stored files. To find a deleted run again, turn on **Show deleted runs** under **Add filter**, then open it and choose **Restore**. Anyone signed in can delete or restore a run.
+**Delete** marks the run deleted without removing stored files. To find a deleted run again, turn on **Show deleted runs** under **Add filter**, then open it and choose **Restore**. Anyone signed in can delete or restore a run. Files that were queued for reprocessing when the run was deleted stay queued and don’t start while the run is deleted. If you restore the run, they start as processing slots free up.
 
 ![Deleted run page with a red banner naming who deleted it and when, and a Restore button](/images/deleted-run.webp)
+
+### How reprocessing is queued [#reprocess-queue]
+
+Reprocessing starts at most 10 files at a time, counted across all runs and instruments. When you choose **Reprocess**, each file goes into a queue:
+
+- A file that can start right away shows **Processing**.
+- A file that has to wait shows **Queued**. It starts when another file finishes, and files that were queued earlier start first.
+- A run with queued files shows **Queued** in the runs list, unless a file in it failed, stalled, is waiting to upload, or is uploaded and not yet processing.
+- If Data Hub can’t send a file to the processor, or the processor answers with an error, the file shows **Failed** with a message that says so, and the next queued file starts. Reprocess the failed file to try again.
+
+Files that arrive from a watcher upload count toward the 10, but they start right away and never wait in the queue. A file that has been processing for more than 20 minutes without finishing stops counting, so one stuck file doesn’t hold up the queue.
+
+A large run takes several rounds. For example, reprocessing a run of 80 files starts 10 files, and the other 70 show **Queued** until slots open. You can leave the page, because the queue keeps running. You can’t cancel a queued file, and a queued file has no **Reprocess** button. An admin who runs Data Hub can change the limit with the `PROCESSING_CONCURRENCY_LIMIT` variable; see the [web application environment variables](https://github.com/Arcadia-Science/data-hub/blob/production/docs/developer/getting-started.md#web-application).
 
 ### Request an upload [#request-upload]
 

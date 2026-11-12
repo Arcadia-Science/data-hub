@@ -238,6 +238,9 @@
           "files_uploaded": {
             "type": "integer"
           },
+          "files_queued": {
+            "type": "integer"
+          },
           "files_processing": {
             "type": "integer"
           },
@@ -287,6 +290,7 @@
           "files_failed",
           "files_pending_upload",
           "files_uploaded",
+          "files_queued",
           "files_processing",
           "files_stalled",
           "total_size_bytes",
@@ -519,6 +523,7 @@
               "detected",
               "upload_requested",
               "uploaded",
+              "queued",
               "processing",
               "completed",
               "failed"
@@ -955,6 +960,7 @@
               "detected",
               "upload_requested",
               "uploaded",
+              "queued",
               "processing",
               "completed",
               "failed"
@@ -1761,6 +1767,7 @@
                     "stalled",
                     "pending",
                     "uploaded",
+                    "queued",
                     "processing",
                     "completed",
                     "empty"
@@ -1775,6 +1782,7 @@
                       "stalled",
                       "pending",
                       "uploaded",
+                      "queued",
                       "processing",
                       "completed",
                       "empty"
@@ -2046,6 +2054,7 @@
                     "stalled",
                     "pending",
                     "uploaded",
+                    "queued",
                     "processing",
                     "completed",
                     "empty"
@@ -2060,6 +2069,7 @@
                       "stalled",
                       "pending",
                       "uploaded",
+                      "queued",
                       "processing",
                       "completed",
                       "empty"
@@ -2849,7 +2859,7 @@
       "post": {
         "operationId": "reprocessInstrumentRun",
         "summary": "Reprocess a run",
-        "description": "Requires scope `runs:reprocess`. Reprocesses every `uploaded`, `failed`, `completed`, or stalled `processing` raw file on the run. Processed artifacts are skipped. The instrument must have a Lambda processor.",
+        "description": "Requires scope `runs:reprocess`. Queues every `uploaded`, `failed`, `completed`, or stalled `processing` raw file on the run for reprocessing. Each file starts as soon as a processing slot is free (at most 10 raw files process at once by default), and a file that does not start right away waits as `queued`. `files_queued` counts every file accepted, whether it started or is waiting. Processed artifacts are skipped. The instrument must have a Lambda processor.",
         "tags": [
           "Runs"
         ],
@@ -4364,6 +4374,7 @@
                       "detected",
                       "upload_requested",
                       "uploaded",
+                      "queued",
                       "processing",
                       "completed",
                       "failed"
@@ -5073,7 +5084,7 @@
       "post": {
         "operationId": "reprocessFile",
         "summary": "Reprocess a file",
-        "description": "Requires scope `files:reprocess`. Raw files only. Eligible statuses: `uploaded`, `failed`, `completed`, or stalled `processing` (file must have an S3 location). The file's instrument must have a Lambda processor.",
+        "description": "Requires scope `files:reprocess`. Raw files only. Eligible statuses: `uploaded`, `failed`, `completed`, or stalled `processing` (file must have an S3 location). The file's instrument must have a Lambda processor. The file is queued first and starts as soon as a processing slot is free. Returns `processing` when the file started right away. Returns `queued` when it did not, for example because 10 raw files are already processing (the default limit across Data Hub). A file that is already `queued` returns `409`.",
         "tags": [
           "Files"
         ],
@@ -5104,7 +5115,8 @@
                     "status": {
                       "type": "string",
                       "enum": [
-                        "processing"
+                        "processing",
+                        "queued"
                       ]
                     },
                     "file_id": {

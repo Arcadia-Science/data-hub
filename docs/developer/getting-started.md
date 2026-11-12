@@ -59,7 +59,8 @@ vercel env pull
 | `S3_PROCESSED_BUCKET` | No | S3 bucket the Lambda writes processed artifacts to. Only read to build the MCP Apps content security policy — download URLs come from `files.s3_bucket`. Leave it unset and the run report View cannot load processed images, video, or CSVs. See [MCP Apps](mcp-apps.md#content-security-policy) |
 | `LAMBDA_FUNCTION_URL` | No | Lambda Function URL. Required for file reprocessing and run-archive downloads. |
 | `STALLED_PROCESSING_AFTER_MINUTES` | No | Minutes a file may stay in `processing` before it is treated as stalled and becomes reprocessable (defaults to 20). Empty, zero, negative, or non-numeric values keep the default. |
-| `CRON_SECRET` | No | Shared secret for Vercel Cron jobs. The upload-queue sweep (`web/vercel.json`) rejects invocations without it |
+| `PROCESSING_CONCURRENCY_LIMIT` | No | Most raw files that reprocessing keeps processing at once across Data Hub (defaults to 10). Reprocessing queues files beyond the limit. Files from watcher uploads count toward it but are never queued. Empty, zero, negative, fractional, or non-numeric values keep the default. See [The reprocess queue](lambda.md#the-reprocess-queue). |
+| `CRON_SECRET` | No | Shared secret for Vercel Cron jobs. The upload-queue sweep and the reprocess-queue cron (`web/vercel.json`) reject invocations without it |
 | `INTEGRATION_SECRETS_KEY` | No | 64 hex characters (32 bytes). Encrypts Slack and Linear secrets admins save in the database. Generate with `openssl rand -hex 32`. Saving a secret fails until this is set. Plaintext Slack webhook URLs saved before this existed still work until an admin saves again |
 | `SLACK_BOT_TOKEN` | No | Slack bot token (`xoxb-…`) for personal Slack DM notifications. Used only when an admin has not saved a bot token under Settings > Integrations |
 | `SLACK_CLIENT_ID` | No | Slack app client ID for Connect Slack. Used only when an admin has not saved a client ID under Settings > Integrations |

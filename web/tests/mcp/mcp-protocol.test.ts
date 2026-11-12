@@ -40,6 +40,7 @@ const {
     files_failed: 0,
     files_pending_upload: 0,
     files_uploaded: 0,
+    files_queued: 0,
     files_processing: 0,
     files_stalled: 0,
     total_size_bytes: 1234,
@@ -193,6 +194,7 @@ const {
       uploadedAt: new Date("2025-01-01T00:00:00Z"),
       processedAt: new Date("2025-01-01T00:00:00Z"),
       processingStartedAt: null,
+      queuedAt: null,
       fileCreatedAt: null,
       createdAt: new Date("2025-01-01T00:00:00Z"),
       deletedAt: null,
@@ -515,7 +517,11 @@ vi.mock("@/lib/api/run-archive", () => ({
 vi.mock("@/lib/api/file-reprocessing", () => ({
   reprocessFile: vi.fn().mockImplementation((id: number) => {
     if (id === 42) {
-      return { ok: true, fileId: id };
+      return { ok: true, fileId: id, fileStatus: "processing" };
+    }
+    // The processing limit is reached, so the file waits in the queue.
+    if (id === 43) {
+      return { ok: true, fileId: id, fileStatus: "queued" };
     }
     return {
       ok: false,
@@ -1551,6 +1557,21 @@ describe("MCP Protocol (in-memory)", () => {
     expect(parsed.fileId).toBe(42);
   });
 
+  it("reprocess_file reports a file that is waiting for a processing slot as queued", async () => {
+    const result = await client.callTool({
+      name: "reprocess_file",
+      arguments: { fileId: 43 },
+    });
+    expect(result.isError).toBeFalsy();
+    expectStructuredMatchesText(result);
+    const parsed = parseText(result.content) as {
+      status: string;
+      fileId: number;
+    };
+    expect(parsed.status).toBe("queued");
+    expect(parsed.fileId).toBe(43);
+  });
+
   it("dismiss_file returns the soft-deleted file", async () => {
     const result = await client.callTool({
       name: "dismiss_file",
@@ -1789,6 +1810,28 @@ describe("MCP Protocol (in-memory)", () => {
     // The error payload prefixes the structured code so clients can branch
     // on NOT_FOUND vs CONFLICT vs INTERNAL_ERROR without parsing the message.
     expect(text).toContain("[NOT_FOUND]");
+  });
+
+  it("reprocess tool descriptions and status filters name the queued status", async () => {
+    const { tools } = await client.listTools();
+    const byName = (name: string) => tools.find((t) => t.name === name);
+
+    expect(byName("reprocess_file")?.description).toContain("'queued'");
+    expect(byName("reprocess_run")?.description).toContain("'queued'");
+
+    const fileStatuses = (
+      byName("list_run_files")?.inputSchema.properties?.status as {
+        items: { enum: string[] };
+      }
+    ).items.enum;
+    expect(fileStatuses).toContain("queued");
+
+    const runStatuses = (
+      byName("search_runs")?.inputSchema.properties?.status as {
+        items: { enum: string[] };
+      }
+    ).items.enum;
+    expect(runStatuses).toContain("queued");
   });
 
   it("reprocess_file is annotated as destructive", async () => {
@@ -2055,6 +2098,16 @@ describe("MCP Protocol (in-memory)", () => {
     expect(parsed).toHaveProperty("runStatus");
     expect(parsed).toHaveProperty("dates");
     expect(parsed).not.toHaveProperty("toolRouting");
+    // Queued sits between uploaded and processing, in the values and in the
+    // priority order the derivation text spells out.
+    const values = parsed.runStatus.values.map(
+      (v: { value: string }) => v.value
+    );
+    expect(values.indexOf("queued")).toBe(values.indexOf("uploaded") + 1);
+    expect(values.indexOf("processing")).toBe(values.indexOf("queued") + 1);
+    expect(parsed.runStatus.derivation).toMatch(
+      /uploaded > queued[^>]*> processing/
+    );
   });
 
   it("exposes server instructions after initialize", () => {

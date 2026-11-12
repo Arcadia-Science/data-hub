@@ -7,6 +7,9 @@ import time
 DEADLINE_MARGIN_MS = 60_000
 
 _deadline_monotonic: float | None = None
+# When the Lambda runtime will kill this invocation. `_deadline_monotonic` is
+# earlier by DEADLINE_MARGIN_MS.
+_time_limit_monotonic: float | None = None
 
 
 class ProcessingDeadlineError(Exception):
@@ -15,14 +18,31 @@ class ProcessingDeadlineError(Exception):
 
 def set_deadline_from_remaining_ms(remaining_ms: int) -> None:
     """Remember when this invocation should stop starting new work."""
-    global _deadline_monotonic
-    _deadline_monotonic = time.monotonic() + max(0, remaining_ms - DEADLINE_MARGIN_MS) / 1000
+    global _deadline_monotonic, _time_limit_monotonic
+    now = time.monotonic()
+    _deadline_monotonic = now + max(0, remaining_ms - DEADLINE_MARGIN_MS) / 1000
+    _time_limit_monotonic = now + max(0, remaining_ms) / 1000
 
 
 def clear_deadline() -> None:
     """Forget any deadline. Local runs and tests use this."""
-    global _deadline_monotonic
+    global _deadline_monotonic, _time_limit_monotonic
     _deadline_monotonic = None
+    _time_limit_monotonic = None
+
+
+def seconds_until_time_limit() -> float | None:
+    """Seconds left before the Lambda runtime kills this invocation.
+
+    Returns ``None`` when no deadline is set, which is how the CLI and the
+    tests run. The API client reads this to stop retrying a call that could
+    not finish in time. It reads the runtime's own limit, not the earlier
+    deadline that `check_deadline` uses: that margin is the time left to
+    write a failure, and the retries of that write need it.
+    """
+    if _time_limit_monotonic is None:
+        return None
+    return max(0.0, _time_limit_monotonic - time.monotonic())
 
 
 def check_deadline(step: str) -> None:

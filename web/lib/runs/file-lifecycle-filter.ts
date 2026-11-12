@@ -9,6 +9,7 @@
 export const FILES_LIFECYCLE_FILTER_VALUES = [
   "pending",
   "uploaded",
+  "queued",
   "processing",
   "stalled",
   "completed",

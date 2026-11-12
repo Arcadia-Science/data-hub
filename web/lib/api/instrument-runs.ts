@@ -350,6 +350,7 @@ function runStatusCondition(status: RunStatus, now: Date): SQL {
     sql`${files.status} in ('detected', 'upload_requested')`
   );
   const uploaded = existsRawFileWithStatus(sql`${files.status} = 'uploaded'`);
+  const queued = existsRawFileWithStatus(sql`${files.status} = 'queued'`);
   const processing = existsRawFileWithStatus(inFlightProcessingSql(now));
   const completed = existsRawFileWithStatus(sql`${files.status} = 'completed'`);
 
@@ -362,10 +363,12 @@ function runStatusCondition(status: RunStatus, now: Date): SQL {
       return sql`(not ${failed} and not ${stalled} and ${pending})`;
     case "uploaded":
       return sql`(not ${failed} and not ${stalled} and not ${pending} and ${uploaded})`;
+    case "queued":
+      return sql`(not ${failed} and not ${stalled} and not ${pending} and not ${uploaded} and ${queued})`;
     case "processing":
-      return sql`(not ${failed} and not ${stalled} and not ${pending} and not ${uploaded} and ${processing})`;
+      return sql`(not ${failed} and not ${stalled} and not ${pending} and not ${uploaded} and not ${queued} and ${processing})`;
     case "completed":
-      return sql`(not ${failed} and not ${stalled} and not ${pending} and not ${uploaded} and not ${processing} and ${completed})`;
+      return sql`(not ${failed} and not ${stalled} and not ${pending} and not ${uploaded} and not ${queued} and not ${processing} and ${completed})`;
     case "empty":
       return sql`not exists (select 1 from ${files} where ${rawFileScopeSql})`;
     default: {
@@ -652,9 +655,14 @@ export async function buildRunListQuery(filters: RunListFilters) {
   // A non-zero count signals the run has files requiring manual upload action.
   const filesPendingUpload = sql<number>`cast(count(${files.id}) filter (where ${files.status} in ('detected', 'upload_requested') and ${files.deletedAt} is null) as int)`;
 
-  // "Uploaded" = files in S3 waiting in the processing queue (not yet picked
-  // up). Distinct from "Processing" so the UI can show a different state.
+  // "Uploaded" = files in S3 waiting for their first processing (not yet
+  // picked up). Distinct from "Processing" so the UI can show a different
+  // state, and from "Queued", which is a reprocess request waiting for a slot.
   const filesUploaded = sql<number>`cast(count(${files.id}) filter (where ${files.status} = 'uploaded' and ${files.deletedAt} is null) as int)`;
+
+  // "Queued" = files waiting for a free processing slot after a reprocess
+  // request. They are in S3 and will start on their own.
+  const filesQueued = sql<number>`cast(count(${files.id}) filter (where ${files.status} = 'queued' and ${files.deletedAt} is null) as int)`;
 
   // "Processing" = files actively being processed server-side, still inside
   // the stall window. Past it the processor is gone and the file is counted
@@ -721,6 +729,7 @@ export async function buildRunListQuery(filters: RunListFilters) {
       files_failed: filesFailed,
       files_pending_upload: filesPendingUpload,
       files_uploaded: filesUploaded,
+      files_queued: filesQueued,
       files_processing: filesProcessing,
       files_stalled: filesStalled,
       total_size_bytes: totalSizeBytes,
@@ -827,8 +836,8 @@ export type RunFilesListFilters = RunFilesFilter & {
 const PENDING_FILE_STATUSES = ["detected", "upload_requested"] as const;
 
 // Ranks rows by the label the status column shows, alphabetically: Completed,
-// Dismissed, Failed, Pending, Processing, Stalled, Uploaded, Uploading. The
-// labels live in `FILE_STATUS_CONFIG`; keep the two in step when either
+// Dismissed, Failed, Pending, Processing, Queued, Stalled, Uploaded, Uploading.
+// The labels live in `FILE_STATUS_CONFIG`; keep the two in step when either
 // changes. Dismissed (soft-deleted) rows rank by their label too, so the
 // deleted check has to come first. Built per call because the Processing /
 // Stalled split reads the clock.
@@ -839,10 +848,11 @@ function statusSortRank(now: Date): SQL {
     when ${files.status} = 'failed' then 3
     when ${files.status} = 'detected' then 4
     when ${inFlightProcessingSql(now)} then 5
-    when ${files.status} = 'processing' then 6
-    when ${files.status} = 'uploaded' then 7
-    when ${files.status} = 'upload_requested' then 8
-    else 9
+    when ${files.status} = 'queued' then 6
+    when ${files.status} = 'processing' then 7
+    when ${files.status} = 'uploaded' then 8
+    when ${files.status} = 'upload_requested' then 9
+    else 10
   end`;
 }
 
@@ -994,10 +1004,15 @@ export interface RunFileStats {
   // poll forever) and `stalled` drives the Stalled filter.
   processing: number;
   processingInFlight: number;
+  // Files waiting for a free processing slot after a reprocess request. They
+  // start on their own, so they keep the auto-refresh going.
+  queued: number;
   rawActive: number;
   // Sum of raw-file `size_bytes` only — mirrors the runs-table Size column.
   rawTotalSizeBytes: number;
   stalled: number;
+  // Every file that has reached S3 and is not processing: uploaded, queued,
+  // completed, and failed.
   uploaded: number;
   // Files actively uploading to S3 (status = upload_requested). Tracked
   // separately from `pending` so the table only auto-refreshes while work is
@@ -1026,6 +1041,7 @@ export async function getRunFileStats(
       failed: sql<number>`cast(count(*) filter (where ${files.status} = 'failed' and ${activeNotDeleted}) as int)`,
       pending: sql<number>`cast(count(*) filter (where ${files.status} in ('detected', 'upload_requested') and ${activeNotDeleted}) as int)`,
       uploaded: sql<number>`cast(count(*) filter (where ${files.status} not in ('detected', 'upload_requested', 'processing') and ${activeNotDeleted}) as int)`,
+      queued: sql<number>`cast(count(*) filter (where ${files.status} = 'queued' and ${activeNotDeleted}) as int)`,
       processing: sql<number>`cast(count(*) filter (where ${files.status} = 'processing' and ${activeNotDeleted}) as int)`,
       processingInFlight: sql<number>`cast(count(*) filter (where ${inFlightProcessingSql(now)} and ${activeNotDeleted}) as int)`,
       stalled: sql<number>`cast(count(*) filter (where ${stalledProcessingSql(now)} and ${activeNotDeleted}) as int)`,

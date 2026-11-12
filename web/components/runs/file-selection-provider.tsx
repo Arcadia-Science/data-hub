@@ -18,6 +18,7 @@ import { isFilesScopeParam, selectionScopeKey } from "@/lib/selection-scope";
 
 const DOWNLOADABLE_STATUSES = new Set([
   "uploaded",
+  "queued",
   "processing",
   "completed",
   "failed",

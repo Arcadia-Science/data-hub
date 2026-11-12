@@ -133,9 +133,9 @@ export function FileBulkActionBar({
                   Reprocess {count} {noun}?
                 </AlertDialogTitle>
                 <AlertDialogDescription>
-                  Each selected file will be re-sent to the Lambda function for
-                  reprocessing. Any existing report data for these files will be
-                  cleared.
+                  Each selected file will be queued for reprocessing. Files
+                  start as processing slots free up, so some may wait as Queued.
+                  Any existing report data for these files will be cleared.
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>

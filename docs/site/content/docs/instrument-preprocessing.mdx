@@ -141,7 +141,7 @@ Every channel is reduced to one 2D frame per time point (a maximum projection ov
 
 A timelapse video plays at the capture rate or at 10 frames per second, whichever is faster, so slow captures stay watchable. A file that doesn’t record the time between frames plays at 10 frames per second. Each channel’s contrast comes from the first frame and stays the same for the whole video, so brightness doesn’t flicker and the first frame matches the JPG. Pixels that later grow brighter than the brightest 1% of the first frame show at full brightness, so a signal that grows strongly during the capture can look saturated.
 
-If the video can’t be made, for example because the timelapse can’t finish within the [15-minute processing limit](#when-processing-fails), the file shows **Failed** and the message says why. The JPG and the raw file are still available. A timelapse processed before Data Hub made videos gets its video when you choose **Reprocess** on the file or on the run.
+If the video can’t be made, for example because the timelapse can’t finish within the [15-minute processing limit](#when-processing-fails), the file shows **Failed** and the message says why. The JPG and the raw file are still available. A timelapse processed before Data Hub made videos gets its video when you choose **Reprocess** on the file or on the run. Timelapses take several minutes each, so reprocessing a run with many of them shows most files as **Queued** while 10 process at a time.
 
 Channel layout is identical across a Hina run, so metadata is written once by whichever file finishes processing first. Later files still get their JPG and skip the metadata write. Reprocessing one file therefore won’t correct run metadata if the layout changed mid-run.
 
@@ -207,6 +207,8 @@ A file with status `failed` carries an error message on the run page. Open the r
 Processing one file has a 15-minute limit. A file that hits the limit, or is too large to process at all, shows **Failed** with a message that explains why. The raw file stays in storage, and you can download it.
 
 A file that stays in processing for more than 20 minutes without finishing shows **Stalled**. That usually means the processor stopped without reporting back. Reprocess it to try again.
+
+Reprocessing puts a file in a queue and starts at most 10 files at a time. A file that has to wait shows **Queued** until a slot opens. See [How reprocessing is queued](/docs/browse-runs#reprocess-queue).
 
 Reprocessing is also the fix after an engineer corrects a parser: the code changed, but the stored result didn’t, until you ask for it again.
 

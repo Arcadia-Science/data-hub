@@ -26,12 +26,67 @@ Slack notifications are sent by the **web app**, not the Lambda — see [Slack n
 
 When a raw file fails processing (or needs to be re-run), users can trigger reprocessing from the run detail page in the web app. Processed artifacts (preview CSVs, posters, MP4s) are not eligible — they often share extensions with the watcher's raw patterns, and Lambda only ingests the original instrument files. This invokes the Lambda's Function URL instead of going through S3:
 
-1. The user clicks **Reprocess** on an uploaded, failed, or completed raw file in the web dashboard, or **Reprocess** on the run (which queues every eligible raw file).
-2. The web app's `POST /api/v1/files/:fileId/reprocess` endpoint transitions the file to `processing` status, clears any previous error, and sends a POST request to the Lambda Function URL.
-3. The Function URL is configured with `AuthType: AWS_IAM`, so the web app SigV4-signs the request using credentials it gets via Vercel OIDC federation (the `WebAppS3Role` IAM role, which has `lambda:InvokeFunctionUrl` on this function's ARN). The body is a JSON payload containing a synthetic S3 event.
-4. The Lambda handler detects the Function URL invocation (via `requestContext` in the event) and parses the S3 event from the request body. Inbound auth is enforced by AWS itself in front of the function — the handler never sees an unauthenticated request.
-5. From here, processing follows the same type-based dispatch as the S3 trigger path, except the cheap **union gate is skipped** so the handler always reaches the instrument lookup.
-6. If the matched processor's own filename gate rejects the file, the handler PATCHes it to `failed` with `The {instrument_type} processor does not handle '{filename}'` instead of returning quietly. The web app moved the row to `processing` before invoking, and processors return without touching the row when the name isn't theirs — so a silent no-op would strand it there forever. The same recovery covers a missing instrument and an unmapped `instrument_type`.
+1. The user clicks **Reprocess** on an uploaded, failed, completed, or stalled raw file in the web dashboard, selects several files and clicks **Reprocess**, or clicks **Reprocess** on one or more runs (which queues every eligible raw file). The REST routes and the MCP tools `reprocess_file` and `reprocess_run` take the same path.
+2. The web app checks each file, then moves every eligible file to `queued` status with one UPDATE. The UPDATE sets `queued_at` and clears the previous error, `processed_at`, and `processing_started_at`. A file that is already `queued` is rejected with a 409.
+3. The web app then runs the dispatcher, which moves queued files to `processing` while fewer than the processing limit are in flight. See [The reprocess queue](#the-reprocess-queue).
+4. For each file the dispatcher started, the web app sends a POST request to the Lambda Function URL. This happens in `after()`, once the HTTP response has been sent. See [When the invocation fails](#when-the-invocation-fails) for what the web app does with the response.
+5. The Function URL is configured with `AuthType: AWS_IAM`, so the web app SigV4-signs the request using credentials it gets via Vercel OIDC federation (the `WebAppS3Role` IAM role, which has `lambda:InvokeFunctionUrl` on this function's ARN). The body is a JSON payload containing a synthetic S3 event.
+6. The Lambda handler detects the Function URL invocation (via `requestContext` in the event) and parses the S3 event from the request body. Inbound auth is enforced by AWS itself in front of the function — the handler never sees an unauthenticated request.
+7. From here, processing follows the same type-based dispatch as the S3 trigger path, except the cheap **union gate is skipped** so the handler always reaches the instrument lookup.
+8. If the matched processor's own filename gate rejects the file, the handler PATCHes it to `failed` with `The {instrument_type} processor does not handle '{filename}'` instead of returning quietly. The web app moved the row to `processing` before invoking, and processors return without touching the row when the name isn't theirs — so a silent no-op would strand it there forever. The same recovery covers a missing instrument and an unmapped `instrument_type`.
+9. When the Lambda PATCHes the file to `completed` or `failed`, the web app starts the next queued file.
+
+#### The reprocess queue
+
+Starting every file of a large run at once is what the queue prevents. Each Lambda copy calls the web app several times in its first seconds. With dozens of copies running together, those calls scaled the web app out, each instance opened its own database connections, and Postgres ran out of connections (error `53300`), which also failed unrelated requests.
+
+The queue lives in the database. The `queued` value of `file_status` and the nullable `files.queued_at` column hold it. `dispatchQueuedFiles()` in `web/lib/api/file-reprocessing.ts` starts files from it:
+
+- It first runs one indexed read that asks whether any queued file can start. Files that are deleted, files in a deleted run, and files with no S3 location do not count, so a queue that holds only those opens no transaction.
+- It opens one transaction, sets `lock_timeout` to 5 seconds, and takes `pg_advisory_xact_lock`. The lock waits for the dispatcher that holds it. The holder keeps it for a few short queries, so the wait is short. After the holder commits, each waiter counts the files in flight again before it starts any file. That is why a burst of requests starts exactly the limit and never more. If the wait passes 5 seconds, the dispatcher logs a warning and returns without starting anything. The files stay queued, and the cron starts them.
+- It counts raw, non-deleted files in flight, which are `processing` files inside the stall window (see `inFlightProcessingSql` in `web/lib/runs/stalled-processing.sql.ts`). The room is the limit minus that count. A stalled file does not count, because its processor is gone.
+- It starts the oldest queued files first, ordered by `queued_at` and then file ID, up to the room. It skips the files that cannot start, which stay `queued`, so restoring a run puts its files back in line.
+- It sets each started file to `processing`, sets `processing_started_at`, and clears `queued_at`. After the commit it invokes the Lambda for each started file in `after()`. The Function URL is BUFFERED, so a request stays open until processing finishes. That is why the invocation cannot run inside the request that queued the file.
+- It does nothing when `LAMBDA_FUNCTION_URL` or the invoke credentials are missing. Files marked `processing` with no invocation would only sit in `processing` until they stall.
+
+Four things run the dispatcher:
+
+- Every reprocess request, right after it queues files.
+- Every `completed` or `failed` PATCH to `PATCH /api/v1/files/:fileId`, in `after()`. This is what keeps the queue moving. A repeat of a final status runs it again, which does no harm.
+- An invocation that ended without a result, after it marks its file `failed` (see below).
+- The `/api/cron/reprocess-queue` cron, every minute (`web/vercel.json`, authenticated with `CRON_SECRET`). It starts files that the other triggers miss: a file that stalled, a dispatch that gave up waiting for the lock, a dispatch that failed, and a file that went back to the queue after a 429. Which deployments run it depends on Vercel's schedule settings; see [CI and deployment](ci-and-deployment.md#web-application-vercel).
+
+The limit is 10 raw files unless `PROCESSING_CONCURRENCY_LIMIT` sets another number (see [Getting started](getting-started.md#web-application)). Raw files that S3 events start count toward the limit, but they start directly and never wait in the queue. Archive builds do not count.
+
+A queued file can still be PATCHed to `processing`, which is what the Lambda does when an S3 re-upload of that file starts it. The PATCH clears `queued_at`. Older watchers never see `queued`: they read a file's status only after marking it uploaded or cancelling an upload, and a queued file can do neither.
+
+#### When the invocation fails
+
+The dispatcher sets a file to `processing` before it invokes the Lambda, and the Lambda reports its own result with a PATCH. The web app also reads the HTTP response of the invocation, in `invokeLambdaForFile` in `web/lib/api/file-reprocessing.ts`. Because the Function URL is BUFFERED, a response means the invocation has ended. What the web app does depends on the outcome:
+
+| Outcome | What happens to the file |
+| --- | --- |
+| A non-2xx response other than 429 | The file becomes `failed` with `Processing ended without a result: the Lambda returned HTTP {status}. Reprocess the file to try again.` Then the dispatcher runs, so the next queued file takes the slot. |
+| Signing the request fails, or the connection fails before the request is sent (for example `ECONNREFUSED` or `ENOTFOUND`) | The file becomes `failed` with `Processing could not start: Data Hub could not send the request to the Lambda. Reprocess the file to try again.` Then the dispatcher runs. |
+| HTTP 429, which means the Lambda was throttled | The file goes back to `queued` in its old place in line. The dispatcher does not run, because the Lambda has no room. The cron tries again. |
+| An abort, a timeout, or a reset after the request was sent | Nothing changes. The Lambda may still be running and will report its own result. |
+
+The update that fails or requeues the file matches `status = 'processing'` and the exact `processing_started_at` that the dispatch wrote. If the Lambda already PATCHed the file, or a newer start replaced this one, nothing matches and the file is left alone.
+
+The `after()` callback runs only as long as the route's `maxDuration` allows, and `/mcp/v1` sets 60 seconds. A Lambda that runs longer than the route allows ends the callback before it answers. Nothing then reads the response, so a failure after that point is never seen by the web app. That file stays `processing` until it stalls (20 minutes), and the cron fills its slot after that.
+
+If the Lambda answers an error for every file, for example during an outage, each failure frees a slot that the next queued file takes, so the whole queue fails in turn. Each file keeps a message that says why, and **Reprocess** puts it back in the queue.
+
+#### Errors and retries on API calls
+
+The Lambda reports to the web app through `DataHubClient` in `lambda/src/data_hub_lambda/api_client.py`.
+
+- When an API error has no message, the error text names the status: `Data Hub API returned HTTP 500 with no error message`. Next.js answers a thrown route handler with an empty 500, and the processors store the error text on the file, so a blank message showed as a blank error.
+- Every call except `get_instrument` retries on a connection error, a timeout, or a 5xx (`_request_with_retry`). That covers `get_run`, `ensure_run`, `create_file`, `update_run`, `update_archive_job`, and every `update_file`, including one that sets `completed` or `failed`. A call makes four attempts at most. A 4xx is raised at once.
+- The waits before the retries are 1, 2, and 4 seconds. Each wait gets a random extra of up to 50% of itself (`_jittered`), so Lambdas that hit the same outage do not all retry at the same moment. The tests patch `_jittered` to keep the waits fixed.
+- A retry only starts when the invocation has enough time left. `deadline.seconds_until_time_limit()` gives the seconds before the Lambda runtime kills the invocation, from the same context reading that `handler.py` records with `record_invocation_deadline`. When that is less than the next wait plus one read timeout (30 seconds) plus a 5 second margin, the client raises the last error instead of retrying. The CLI and the tests set no deadline, so they keep the full schedule. The check uses the runtime limit and not the earlier `check_deadline` cutoff, because that cutoff leaves 60 seconds to write a failure, and the retries of that write need those seconds.
+- A repeat of a final status is safe because `PATCH /api/v1/files/:fileId` accepts `completed` after `completed` and `failed` after `failed`. The repeat keeps the first `processed_at`. If the first attempt reached the server and only the response was lost, the retry succeeds instead of failing a write that landed.
+- `get_instrument` keeps its own shorter retry and a short-lived cache.
 
 ### Function URL (archive build)
 

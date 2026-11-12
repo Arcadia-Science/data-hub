@@ -142,7 +142,7 @@ registry.registerPath({
   path: "/instruments/{instrumentId}/runs/{runId}/reprocess",
   operationId: "reprocessInstrumentRun",
   summary: "Reprocess a run",
-  description: `${scoped("runs:reprocess")} Reprocesses every \`uploaded\`, \`failed\`, \`completed\`, or stalled \`processing\` raw file on the run. Processed artifacts are skipped. The instrument must have a Lambda processor.`,
+  description: `${scoped("runs:reprocess")} Queues every \`uploaded\`, \`failed\`, \`completed\`, or stalled \`processing\` raw file on the run for reprocessing. Each file starts as soon as a processing slot is free (at most 10 raw files process at once by default), and a file that does not start right away waits as \`queued\`. \`files_queued\` counts every file accepted, whether it started or is waiting. Processed artifacts are skipped. The instrument must have a Lambda processor.`,
   tags: tag,
   security: bearerSecurity,
   request: { params: runParams },

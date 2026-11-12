@@ -74,6 +74,7 @@ export const fileStatusEnum = pgEnum("file_status", [
   "detected",
   "upload_requested",
   "uploaded",
+  "queued",
   "processing",
   "completed",
   "failed",
@@ -693,6 +694,9 @@ export const files = pgTable(
     // Distinguishes raw uploads from Lambda-generated artifacts.
     category: fileCategoryEnum("category").notNull().default("raw"),
     // detected → upload_requested → uploaded → processing → completed | failed
+    // Reprocessing goes through `queued`: a reprocess request marks the file
+    // `queued`, and the dispatcher in `lib/api/file-reprocessing.ts` moves it
+    // to `processing` once fewer than the concurrency limit are in flight.
     status: fileStatusEnum("status").notNull().default("detected"),
     // Instrument-specific key-value metadata extracted by the Lambda function
     // from this file. Stored as a flat object; multi-valued properties use
@@ -728,6 +732,13 @@ export const files = pgTable(
     // 900s hard limit this tells in-flight work from a processor that died
     // without reporting back. NULL predates the column and counts as stalled.
     processingStartedAt: timestamp("processing_started_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
+    // When a reprocess request put the file in the queue. The dispatcher
+    // starts the oldest `queued_at` first. Set while status = 'queued', NULL
+    // otherwise.
+    queuedAt: timestamp("queued_at", {
       withTimezone: true,
       mode: "date",
     }),

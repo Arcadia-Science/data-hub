@@ -35,6 +35,10 @@ import type {
 } from "@/lib/api/instrument-runs";
 import type { InstrumentType } from "@/lib/db/schema";
 import { buildArchiveHref } from "@/lib/runs/archive-href";
+import {
+  REPROCESS_REQUEST_CONCURRENCY,
+  settleWithConcurrency,
+} from "@/lib/runs/settle-with-concurrency";
 import { runDetailSearchParams } from "@/lib/search-params";
 import { FileBulkActionBar } from "./file-bulk-action-bar";
 import {
@@ -77,6 +81,7 @@ const FILES_CATEGORY_OPTIONS: FilesFilterOption<FilesCategoryFilter>[] = [
 const FILES_STATUS_OPTIONS: FilesFilterOption<FilesLifecycleFilter>[] = [
   { value: "pending", label: "Pending" },
   { value: "uploaded", label: "Uploaded" },
+  { value: "queued", label: "Queued" },
   { value: "processing", label: "Processing" },
   { value: "stalled", label: "Stalled" },
   { value: "completed", label: "Completed" },
@@ -113,10 +118,13 @@ function downloadSingleFile(ref: FileRef) {
 }
 
 export function RunFilesSection(props: RunFilesSectionProps) {
-  // `detected` files wait for a manual upload, so only uploads and processing
-  // keep the page refreshing.
+  // `detected` files wait for a manual upload, so only uploads, queued files,
+  // and processing keep the page refreshing. Queued files start on their own
+  // as processing slots free up.
   const hasInFlight =
-    props.stats.processingInFlight > 0 || props.stats.uploadRequested > 0;
+    props.stats.processingInFlight > 0 ||
+    props.stats.queued > 0 ||
+    props.stats.uploadRequested > 0;
   // TablePendingProvider wraps the whole section so the toolbar's URL updates
   // and PaginationNav share the same React transition, dimming the table
   // while the next server page streams in. The read-only path additionally
@@ -475,10 +483,12 @@ function BulkActionBarHost({
       return;
     }
     track(ids, async () => {
-      const results = await Promise.allSettled(
-        ids.map((fid) =>
-          fetch(`/api/v1/files/${fid}/reprocess`, { method: "POST" })
-        )
+      // A few requests at a time: every request queues a file and may start
+      // Lambda processing, so sending all of them at once is a burst.
+      const results = await settleWithConcurrency(
+        ids,
+        REPROCESS_REQUEST_CONCURRENCY,
+        (fid) => fetch(`/api/v1/files/${fid}/reprocess`, { method: "POST" })
       );
       const failed = results.filter(
         (r) =>
@@ -486,12 +496,14 @@ function BulkActionBarHost({
       ).length;
       const ok = ids.length - failed;
       if (failed === 0) {
-        toast.success(`Reprocessing ${ok} file${ok === 1 ? "" : "s"}`);
+        toast.success(
+          `Queued ${ok} file${ok === 1 ? "" : "s"} for reprocessing`
+        );
       } else if (ok === 0) {
         toast.error(`Failed to reprocess ${failed} file(s)`);
       } else {
         toast.warning(
-          `Reprocessing ${ok} file${ok === 1 ? "" : "s"}, ${failed} failed`
+          `Queued ${ok} file${ok === 1 ? "" : "s"} for reprocessing, ${failed} failed`
         );
       }
       actions.clear();
@@ -596,12 +608,17 @@ function handleSingleReprocess(
     const res = await fetch(`/api/v1/files/${fileId}/reprocess`, {
       method: "POST",
     });
+    const body = await res.json().catch(() => null);
     if (!res.ok) {
-      const body = await res.json().catch(() => null);
       toast.error(body?.error?.message ?? "Failed to start reprocessing");
       return;
     }
-    toast.success("Reprocessing started");
+    // The file shows Queued when it did not start right away.
+    toast.success(
+      body?.status === "queued"
+        ? "File queued for reprocessing"
+        : "Reprocessing started"
+    );
     onWorkStarted();
     router.refresh();
   });
