@@ -279,7 +279,9 @@ TRANSITIONS: tuple[Transition, ...] = (
         "before the worker has stopped the service (it queues another event, and writes the "
         "request and triggers the task again). The test checks on every heartbeat (1 s) and "
         "holds an upload in flight across the worker's `Stop-Service`: the stop waits up to "
-        "5 s for it, and the heartbeat keeps checking until then. The scenarios of the "
+        "5 s for it, and the heartbeat keeps checking until then. The test first checks "
+        "that a heartbeat tick ran between the dispatch and the old service's final "
+        "heartbeat, so a check did run in that window. The scenarios of the "
         "upgrade itself compare the events with a repeat counted once.",
         "ENG-2131",
         platforms=SERVICE,

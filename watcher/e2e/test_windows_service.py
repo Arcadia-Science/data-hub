@@ -1119,7 +1119,7 @@ def test_an_upgrade_is_dispatched_to_the_worker_once(
     # up to 5 seconds for it (`FileMonitor.stop`), and the heartbeat, with its update check every
     # second, keeps going until the stop gets past that wait. So checks come after the dispatch
     # however fast the worker is (on a runner it stops the service about a second after it is
-    # triggered).
+    # triggered). The precondition below checks that this window opened.
     proxy.add_fault("delay", path=r"/api/local-s3/", method="PUT", delay_seconds=20, count=1)
     write_run(watch_dir, "RUN001", {"held.csv": SMALL})
     proxy.wait_for_request(
@@ -1134,8 +1134,31 @@ def test_an_upgrade_is_dispatched_to_the_worker_once(
     server.wait_for_event(pc.watcher_id, event_type="update_succeeded")
     wait_for_watching_on(server, pc, bumped_version)
 
-    # One upgrade, one `update_started`.
+    # The precondition: an update check ran after the first dispatch. The dispatch comes in a
+    # tick's check, after that tick's heartbeat, and every later tick sends a `watching`
+    # heartbeat before its check. So a `watching` heartbeat between the first `update_started`
+    # and the old service's final `stopped` heartbeat shows that a check ran in the window,
+    # with the bug or without it. Without one, a single `update_started` would prove nothing:
+    # the strict xfail would report the bug fixed although no check had a chance to repeat it.
     dispatches = server.events(pc.watcher_id, event_type="update_started")
+    first_dispatch = min(dispatches, key=lambda e: e.created_at).created_at
+    beats = server.heartbeats(pc.watcher_id)
+    old_final = next(
+        (b for b in beats if b.status == "stopped" and b.created_at > first_dispatch), None
+    )
+    assert old_final is not None, "the old service sent no `stopped` heartbeat after the dispatch"
+    ticks = [
+        b
+        for b in beats
+        if b.status == "watching" and first_dispatch < b.created_at < old_final.created_at
+    ]
+    assert ticks, (
+        "no heartbeat tick ran between the dispatch and the old service's final heartbeat, so "
+        "no update check ran where a repeated dispatch could happen (did the worker's stop "
+        "end the held upload at once?)"
+    )
+
+    # One upgrade, one `update_started`.
     with known_bug():
         assert len(dispatches) == 1, (
             f"the upgrade was dispatched {len(dispatches)} times, at "
