@@ -4,9 +4,9 @@ A kill, or a write that fails, after the server accepted a run report used to le
 remembered as reported with no `pending_uploads` row: the next start had nothing to retry and
 the initial scan skipped the files, so they stayed `detected` for good. The state DB now gets the
 run, its manifest and the pending rows in one transaction after the server accepted the report.
-A write that doesn't go through leaves none of it. A process that goes on retries the write, and
-sends the server only the files it has not seen. A process that is killed leaves nothing, and the
-next start reports the files again.
+A write that doesn't go through leaves none of it. A process that goes on retries the write, sends
+the server nothing more until it has gone through, and then sends only the files it has not seen.
+A process that is killed leaves nothing, and the next start reports the files again.
 
 These tests use a real `StateDB`, `RunDetector` and `FileMonitor`, and a stand-in for the server
 and the uploader.
@@ -307,22 +307,25 @@ class TestAWriteThatFails:
         assert recorded
         assert sorted(manifest) == sorted(pending) == ["RUN1/a.csv", "RUN1/b.csv", "RUN1/c.csv"]
 
-    def test_the_next_file_of_the_run_is_a_patch_that_carries_the_run_to_the_state_db(
+    def test_the_next_file_of_the_run_records_the_run_before_its_patch(
         self, processes: Callable[..., Watcher], watch_dir: Path
     ) -> None:
         w = processes()
         _refuse_pending_rows(w.state_db)
         w.detector.on_stable_file(_write(watch_dir, "RUN1/a.csv"))
         _allow_pending_rows(w.state_db)
+        seen: list[tuple[bool, list[str], list[str]]] = []
+        w.client.update_run.side_effect = lambda *_: seen.append(_state(w.state_db, "RUN1"))
 
         w.detector.on_stable_file(_write(watch_dir, "RUN1/b.csv"))
 
-        # The server has the run, so a PATCH of the new file and no second POST. The write
-        # after it records the run, both files and both pending rows, and both are uploaded.
+        # The server has the run, so no second POST. What it accepted is written and its file
+        # uploaded before the PATCH of the new file, which is written and uploaded in turn.
         w.client.report_run.assert_called_once()
+        assert seen == [(True, ["RUN1/a.csv"], ["RUN1/a.csv"])]
         sent = w.client.update_run.call_args.args[2]["detected_files"]
         assert [f["relative_path"] for f in sent] == ["RUN1/b.csv"]
-        assert w.uploads == [("RUN1", ["a.csv", "b.csv"])]
+        assert w.uploads == [("RUN1", ["a.csv"]), ("RUN1", ["b.csv"])]
         assert _state(w.state_db, "RUN1") == (
             True,
             ["RUN1/a.csv", "RUN1/b.csv"],
@@ -348,7 +351,7 @@ class TestAWriteThatFails:
         assert _state(w.state_db, "RUN1") == (True, ["RUN1/a.csv"], ["RUN1/a.csv"])
         assert w.detector._retry_at == {}
 
-    def test_a_run_that_cannot_be_written_for_many_files_sends_small_requests(
+    def test_a_run_that_cannot_be_written_for_many_files_sends_one_post_and_then_one_patch(
         self, processes: Callable[..., Watcher], watch_dir: Path
     ) -> None:
         w = processes()
@@ -357,21 +360,27 @@ class TestAWriteThatFails:
         for name in names:
             _arrive(w, _write(watch_dir, f"RUN1/{name}"))
 
-        # One POST and a PATCH of one file each, not a POST of every file seen so far.
+        # One POST of the first file, and nothing else while the write is owed.
         w.client.report_run.assert_called_once()
-        sent = [c.args[2]["detected_files"] for c in w.client.update_run.call_args_list]
-        assert [[f["filename"] for f in files] for files in sent] == [[n] for n in names[1:]]
+        assert [f["filename"] for f in w.client.report_run.call_args.args[1]["detected_files"]] == [
+            names[0]
+        ]
+        w.client.update_run.assert_not_called()
         assert w.uploads == []
         _allow_pending_rows(w.state_db)
 
         _retry_now(w)
 
+        # The retry writes and uploads the first file, and one PATCH carries the other seven.
+        [sent] = [c.args[2]["detected_files"] for c in w.client.update_run.call_args_list]
+        assert [f["filename"] for f in sent] == names[1:]
         assert _state(w.state_db, "RUN1") == (
             True,
             [f"RUN1/{n}" for n in names],
             [f"RUN1/{n}" for n in names],
         )
-        assert w.uploads == [("RUN1", names)]
+        assert w.uploads == [("RUN1", names[:1]), ("RUN1", names[1:])]
+        assert w.detector._retry_at == {}
 
     def test_a_report_only_file_still_gets_no_pending_row_when_the_write_comes_later(
         self, processes: Callable[..., Watcher], watch_dir: Path
@@ -390,7 +399,7 @@ class TestAWriteThatFails:
             ["RUN1/a.csv", "RUN1/new.csv", "RUN1/old.csv"],
             ["RUN1/a.csv", "RUN1/new.csv"],
         )
-        assert w.uploads == [("RUN1", ["a.csv", "new.csv"])]
+        assert w.uploads == [("RUN1", ["a.csv"]), ("RUN1", ["new.csv"])]
 
     def test_a_patch_that_is_not_recorded_is_not_sent_again_with_the_next_file(
         self, processes: Callable[..., Watcher], watch_dir: Path
@@ -415,7 +424,7 @@ class TestAWriteThatFails:
             ["RUN1/b.csv"],
             ["RUN1/c.csv"],
         ]
-        assert w.uploads == [("RUN1", ["a.csv"]), ("RUN1", ["b.csv", "c.csv"])]
+        assert w.uploads == [("RUN1", ["a.csv"]), ("RUN1", ["b.csv"]), ("RUN1", ["c.csv"])]
         assert _state(w.state_db, "RUN1") == (
             True,
             ["RUN1/a.csv", "RUN1/b.csv", "RUN1/c.csv"],
