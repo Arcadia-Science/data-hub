@@ -450,7 +450,7 @@ requires-dist = [
 
 [[package]]
 name = "data-hub-watcher"
-version = "1.4.0"
+version = "1.4.1"
 source = { editable = "watcher" }
 dependencies = [
     { name = "awscrt" },
