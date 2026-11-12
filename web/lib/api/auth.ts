@@ -210,6 +210,28 @@ export async function requireAdminForSession(
   return null;
 }
 
+/**
+ * For routes where a token must list `scope` itself. `hasScope` also
+ * accepts the wildcard `*` and the legacy coarse scopes (`watchers:write`
+ * implies `watchers:admin`), which old watcher PCs still carry. Some
+ * actions are too sensitive to grant that way, such as pointing a watcher
+ * at another folder. Sessions pass; pair this with `requireAdminForSession`.
+ * Returns null when allowed, or a 403 `Response`.
+ */
+export function requireExplicitTokenScope(
+  authResult: AuthResult,
+  scope: Scope
+): Response | null {
+  if (authResult.authMethod !== "token" || authResult.scopes.includes(scope)) {
+    return null;
+  }
+  return apiError(
+    403,
+    FORBIDDEN,
+    `This requires a token that lists ${scope} explicitly. Legacy tokens with * or a coarse :write scope (such as watchers:write) aren't accepted.`
+  );
+}
+
 // Shared 401/403 gate so both authorize helpers keep an identical, hard-to-
 // minify-away null check (see `authenticateRequest` await note above).
 function enforceScope<T extends AuthResult>(

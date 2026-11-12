@@ -65,6 +65,15 @@ const MACHINE_ROUTES: {
     path: `/api/v1/watchers/${WATCHER_ID}/update-check`,
   },
   {
+    method: "GET",
+    path: `/api/v1/watchers/${WATCHER_ID}/config-revisions/latest`,
+  },
+  {
+    method: "POST",
+    path: `/api/v1/watchers/${WATCHER_ID}/config-revisions/1/result`,
+    body: { status: "applied" },
+  },
+  {
     method: "PATCH",
     path: "/api/v1/files/1",
     body: { status: "uploaded" },

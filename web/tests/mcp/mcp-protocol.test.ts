@@ -373,6 +373,11 @@ vi.mock("@/lib/api/watchers", () => ({
       hostname: "bench-pc",
       watcherVersion: "1.0.0",
       effectiveStatus: "watching",
+      statusReason: null,
+      configRevision: null,
+      appliedConfigRevision: null,
+      configRevisionStatus: null,
+      pcEditAwaitingRestart: false,
       lastHeartbeatAt: new Date("2025-01-01T12:00:00Z"),
       createdAt: new Date("2024-01-01T00:00:00Z"),
       deletedAt: null,
@@ -389,6 +394,11 @@ vi.mock("@/lib/api/watchers", () => ({
       hostname: "bench-pc",
       watcherVersion: "1.0.0",
       effectiveStatus: "watching",
+      statusReason: null,
+      configRevision: null,
+      appliedConfigRevision: null,
+      configRevisionStatus: null,
+      pcEditAwaitingRestart: false,
       lastHeartbeatAt: new Date("2025-01-01T12:00:00Z"),
       createdAt: new Date("2024-01-01T00:00:00Z"),
       deletedAt: null,
@@ -686,6 +696,7 @@ describe("MCP Protocol (in-memory)", () => {
     "request_run_upload_all",
     "dismiss_file",
     "send_feedback",
+    "update_watcher_config",
   ]);
 
   it("registers all expected tools", async () => {
@@ -831,7 +842,7 @@ describe("MCP Protocol (in-memory)", () => {
 
   it("every registered tool advertises outputSchema", async () => {
     const { tools } = await client.listTools();
-    expect(tools).toHaveLength(40);
+    expect(tools).toHaveLength(41);
     for (const tool of tools) {
       const schema = tool.outputSchema as
         | { type?: string; oneOf?: unknown; anyOf?: unknown }
@@ -1417,6 +1428,22 @@ describe("MCP Protocol (in-memory)", () => {
     };
     expect(parsed.id).toBe("watcher-1");
     expect(parsed.configYaml).toContain("watch:");
+  });
+
+  it("update_watcher_config refuses a caller it can't confirm is an admin", async () => {
+    // The in-memory transport carries no auth identity, so the admin check
+    // can't pass and nothing is written.
+    const result = await client.callTool({
+      name: "update_watcher_config",
+      arguments: {
+        watcherId: "watcher-1",
+        baseRevision: null,
+        settings: { upload_mode: "manual" },
+      },
+    });
+    expect(result.isError).toBe(true);
+    const [first] = result.content as Array<{ type: string; text: string }>;
+    expect(first?.text).toMatch(/Authenticated user/);
   });
 
   it("list_watcher_events returns paginated events", async () => {

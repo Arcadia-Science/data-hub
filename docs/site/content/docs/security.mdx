@@ -43,7 +43,7 @@ Revoking someone’s access on the Google side, by removing them from your Works
 | Role | Can do |
 | --- | --- |
 | **Member** | Sign in to the dashboard; view instruments, runs, files, and the token list; claim runs; comment, and edit or delete their own comments; delete and restore runs; send feedback and see the reports they sent. Cannot create or revoke tokens, confirm or update instruments, or manage other users. |
-| **Admin** | Everything members can, plus: confirm and update instruments; create and revoke tokens; promote and demote other users; delete any run comment; review every feedback report; manage **Settings → Integrations**; and set watcher release versions. |
+| **Admin** | Everything members can, plus: confirm and update instruments; change watcher configs; create and revoke tokens; promote and demote other users; delete any run comment; review every feedback report; manage **Settings → Integrations**; and set watcher release versions. |
 
 The first admin is bootstrapped from the `ADMIN_EMAILS` environment variable
 (comma-separated, case-insensitive); listed users are promoted on every sign-in.
@@ -60,8 +60,13 @@ check:
 - `POST /api/v1/tokens` and `DELETE /api/v1/tokens/:id`: admin-only, session-only. Bearer tokens cannot manage other tokens.
 - `GET /api/v1/users`, `PATCH /api/v1/users/:userId`: admin-only, session-only. Used by **Settings → Members**.
 - `/api/v1/settings/integrations/*`: admin-only, session-only. Used by **Settings → Integrations**.
+- `POST /api/v1/watchers/:watcherId/config-revisions`: session callers must be admin; tokens must list `watchers:admin` explicitly, so legacy `*` and `watchers:write` tokens get `403`. The MCP `update_watcher_config` tool is admin-only.
 - `DELETE` on a run comment: admins can delete any comment; everyone else, including tokens, can delete only their own.
 - `GET /api/v1/feedback`: admins get every report; members get only the reports they sent.
+
+### Remote watcher config [#remote-watcher-config]
+
+With watcher 1.4.0 and later, an admin, or a token that lists `watchers:admin` explicitly, can change a watcher’s watch folder to any folder the watcher’s account can read on the instrument PC. The watcher then uploads matching files from that folder. Grant admin and `watchers:admin` only to people and automation you trust with that access. Every change is recorded with who made it, on the watcher’s **Configuration** tab. Data Hub can’t change the watcher’s environment, API URL, token, or instrument ID.
 
 ## How tokens act [#how-tokens-act]
 
@@ -95,7 +100,7 @@ Every personal access token carries an array of permission **scopes**. A token-a
 | `files:reprocess` | Re-run the processing workflow for a file |
 | `watchers:read` | Read watcher status, heartbeats, and upload queues |
 | `watchers:report` | Register, heartbeat, send events, and push watcher config |
-| `watchers:admin` | Delete watchers |
+| `watchers:admin` | Delete watchers and change their config, including which folder on the instrument PC they upload from. Changing config needs this scope listed explicitly; legacy `*` and `watchers:write` tokens can’t |
 | `archive-jobs:read` | Read run-archive job status |
 | `archive-jobs:write` | Update run-archive job status (Lambda callback) |
 | `notifications:create` | Send notifications to people, optionally about a run |

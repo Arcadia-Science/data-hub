@@ -38,6 +38,8 @@ import {
   getPreferences,
   listInstrumentSubscriptions,
 } from "@/lib/api/notifications";
+import { getWatcherConfigState } from "@/lib/api/watcher-config/revisions";
+import { getWatcherById } from "@/lib/api/watchers";
 import { auth } from "@/lib/auth";
 import {
   hasActiveInstrumentFilters,
@@ -230,6 +232,13 @@ async function InstrumentHeaderSection({
     (s) => s.instrumentId === instrumentId
   );
 
+  // Admins get an "Edit watcher config" action for the live watcher.
+  const watcherConfig = await loadWatcherConfigForAdmin(
+    isAdmin && !instrument.activeWatcherDeregistered
+      ? instrument.activeWatcherId
+      : null
+  );
+
   return (
     <InstrumentHeader
       instrument={instrument}
@@ -238,8 +247,27 @@ async function InstrumentHeaderSection({
         enabled: subscriptionForThisInstrument?.enabled ?? false,
         masterMuted: notificationPrefs.runsAllMuted,
       }}
+      watcherConfig={watcherConfig}
     />
   );
+}
+
+async function loadWatcherConfigForAdmin(watcherId: string | null) {
+  if (!watcherId) {
+    return null;
+  }
+  const watcher = await getWatcherById(watcherId);
+  if (!watcher || watcher.deletedAt) {
+    return null;
+  }
+  return {
+    watcherId: watcher.id,
+    hostname: watcher.hostname,
+    online:
+      watcher.effectiveStatus === "watching" ||
+      watcher.effectiveStatus === "waiting",
+    state: await getWatcherConfigState(watcher),
+  };
 }
 
 async function InstrumentRunsSection({

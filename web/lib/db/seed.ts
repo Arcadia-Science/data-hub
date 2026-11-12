@@ -544,7 +544,7 @@ export async function seedInstruments(db: Db): Promise<SeededInstrument[]> {
 export interface SeededWatcher {
   id: string;
   instrumentId: string;
-  status: "registered" | "watching" | "stopped";
+  status: "registered" | "watching" | "stopped" | "waiting";
 }
 
 export async function seedWatchers(
