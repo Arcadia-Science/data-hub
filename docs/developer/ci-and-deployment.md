@@ -2,9 +2,11 @@
 
 ## GitHub Actions
 
-Six workflows run on pushes to `staging`/`production` and on pull requests targeting those branches. `apply-migrations.yml` runs on merges to `staging`/`production` that touch migration files, `deploy-lambda.yml` runs on merges that touch the Lambda or its infrastructure (see [Lambda (AWS)](#lambda-aws)), and `publish-watcher.yml` runs only on `watcher-v*` tag pushes and manual dispatch. `docs-screenshots.yml` runs monthly and on demand (see [Docs screenshots](local-development.md#docs-screenshots)).
+Six workflows run on pushes to `staging`/`production` and on pull requests targeting those branches. `apply-migrations.yml` runs on merges to `staging`/`production` that touch migration files, `deploy-lambda.yml` runs on merges that touch the Lambda or its infrastructure (see [Lambda (AWS)](#lambda-aws)), and `publish-watcher.yml` runs only on `watcher-v*` tag pushes and manual dispatch. `watcher-e2e.yml` is never part of a pull request: it runs on pushes to `production`, on manual dispatch, and as a job of `publish-watcher.yml`. `docs-screenshots.yml` runs monthly and on demand (see [Docs screenshots](local-development.md#docs-screenshots)).
 
 ### Python lint and typecheck (`python-lint.yml`)
+
+Runs when a change touches `lambda/`, `packages/`, `watcher/` (which includes the end-to-end suite in `watcher/e2e/`), the root `pyproject.toml`, `uv.lock`, the `Makefile` or the workflow itself.
 
 1. Install dependencies with `uv sync --all-packages`.
 2. `make py-lint` — Ruff linter and format check.
@@ -15,6 +17,7 @@ Six workflows run on pushes to `staging`/`production` and on pull requests targe
 - Starts a Postgres 17 service container.
 - Installs both Node.js 24 and Python packages.
 - `make py-test` — runs all pytest tests (unit and integration). Integration tests build and start a real Next.js production server, seed a test database, and exercise the Lambda and watcher against the live API.
+  It includes `watcher/tests/test_e2e_catalog.py`, which checks that the watcher end-to-end tests and their transition catalog agree (see [Testing](testing.md#the-transition-catalog)). The end-to-end tests themselves are not run here.
 - `make py-watcher-cli-catalog`, then fails if `docs/site/src/lib/cli-catalog.snapshot.json` changed. The docs site renders its watcher CLI reference from that committed file, so a change to the CLI or a watcher version bump has to commit the regenerated snapshot. The MCP docs bundle embeds the same page, so run `make docs-catalogs` and commit both files, or `docs-lint.yml` fails next.
 
 ### TypeScript lint and typecheck (`typescript-lint.yml`)
@@ -53,13 +56,33 @@ Triggered on pushes to `staging`/`production` (i.e. PR merges) that change files
 
 Production is gated by a required-reviewer protection rule on the `production` GitHub environment, so production migrations pause for manual approval before applying. Each environment needs a `DATABASE_URL` secret pointing at its PostgreSQL connection string, and that database must accept connections from GitHub-hosted runners.
 
+### Watcher end-to-end tests (`watcher-e2e.yml`)
+
+Runs the end-to-end suite described in [Testing](testing.md#end-to-end-tests-of-the-watcher): the real watcher against the real Next.js server and Postgres. It is not part of pull-request CI. It runs:
+
+- on every push to `production`, with no path filter,
+- on `workflow_dispatch`, from the Actions tab on any branch, to try a change before it is promoted, and
+- through `workflow_call`, as the `e2e` job of `publish-watcher.yml`. That call passes the name of the artifact that holds the wheel the release built (`wheel-artifact: dist`), which the job downloads and hands to the suite in `DATA_HUB_E2E_WHEEL`, so the release is tested as built.
+
+The `linux` job (`ubuntu-latest`, 45-minute limit):
+
+1. Starts a Postgres 17 service container and installs Node.js 24, `uv`, the web packages (`npm ci`) and the Python packages.
+2. Downloads the wheel artifact, when one is named.
+3. `make py-test-e2e`, with `DATA_HUB_E2E_ARTIFACTS` set to a folder under the runner's temp directory. The step has a 35-minute limit of its own, under the job's, so a hung test fails the step and the steps after it still run (a job that hits its own limit is cancelled with no chance to upload). `pytest` prints the stack of every thread when one test takes longer than 5 minutes (`-o faulthandler_timeout=300` in the Makefile target), which shows where a hang is.
+4. If the tests fail or the job is cancelled, uploads that folder as the `watcher-e2e-linux-artifacts` artifact (kept 14 days): per failed test, or for the test that was running when the run was cancelled, the watcher logs and state database, the server log, the fault proxy's request log, and a listing of the S3 stand-in.
+
+A release commit runs the suite twice: once when it is pushed to `production`, and again when the `watcher-v*` tag on it starts `publish-watcher.yml`, whose `e2e` job is a release gate. That is intended, because the tag run tests the wheel it is about to publish. Don't tag before the push run has finished unless you want the suite to run twice at once.
+
+A Windows job joins it when the Windows service driver lands.
+
 ### Publish watcher (`publish-watcher.yml`)
 
-Triggered on `watcher-v*` tag pushes and manual `workflow_dispatch` from `production`. The `build` job's `if:` guard refuses dispatches from any other branch so a feature branch can't accidentally publish whatever version is in its `pyproject.toml`. Builds the `data-hub-watcher` package, publishes it to PyPI via OIDC trusted publishing, and verifies the upload by installing the freshly published wheel into a clean venv. Three sequential jobs:
+Triggered on `watcher-v*` tag pushes and manual `workflow_dispatch` from `production`. The `build` job's `if:` guard refuses dispatches from any other branch so a feature branch can't accidentally publish whatever version is in its `pyproject.toml`. Builds the `data-hub-watcher` package, tests it end to end, publishes it to PyPI via OIDC trusted publishing, and verifies the upload by installing the freshly published wheel into a clean venv. Four sequential jobs (a manual dispatch runs all of them again, the end-to-end tests included. To retry after a PyPI outage, use "Re-run failed jobs" on the failed run, which runs only the jobs that didn't pass):
 
 1. **build** — Verifies the git tag matches `watcher/pyproject.toml` (`make py-check-watcher-version`), builds the wheel and sdist with `uv build --package data-hub-watcher`, and uploads them as a workflow artifact.
-2. **publish** — Downloads the artifact and uploads it to PyPI with [`pypa/gh-action-pypi-publish`](https://github.com/pypa/gh-action-pypi-publish) using OIDC trusted publishing. Gated on the `pypi` GitHub deployment environment so reviewer-required releases can be enforced from the GitHub UI without editing the workflow file.
-3. **verify** — In a fresh `uv venv`, installs `data-hub-watcher==<tag-version>` from PyPI and runs `data-hub-watcher --version` plus `python -c "import data_hub_watcher"` as a smoke test. Catches stale-mirror shadows and module-level import side-effect crashes.
+2. **e2e** — Calls [`watcher-e2e.yml`](#watcher-end-to-end-tests-watcher-e2eyml) with the `dist` artifact, so the end-to-end suite installs the wheel that is about to be published. It is a release gate: `publish` needs it, so a failing test stops the release before the `pypi` environment asks for approval.
+3. **publish** — Downloads the artifact and uploads it to PyPI with [`pypa/gh-action-pypi-publish`](https://github.com/pypa/gh-action-pypi-publish) using OIDC trusted publishing. Gated on the `pypi` GitHub deployment environment so reviewer-required releases can be enforced from the GitHub UI without editing the workflow file.
+4. **verify** — In a fresh `uv venv`, installs `data-hub-watcher==<tag-version>` from PyPI and runs `data-hub-watcher --version` plus `python -c "import data_hub_watcher"` as a smoke test. Catches stale-mirror shadows and module-level import side-effect crashes.
 
 See the [Watcher (PyPI)](#watcher-pypi) deployment section for the operator-facing release flow.
 

@@ -5,9 +5,10 @@ build/start), auth seeding, instrument seeding, and direct-DB helpers so
 that both suites spin up an identical environment with minimal boilerplate.
 
 The harness runs on POSIX and on Windows. It uses a local Postgres server on
-``127.0.0.1:5432`` unless ``DATA_HUB_TEST_PGHOST``, ``DATA_HUB_TEST_PGPORT``,
-``DATA_HUB_TEST_PGUSER`` or ``DATA_HUB_TEST_PGPASSWORD`` say otherwise. The
-standard ``PG*`` variables are deliberately ignored.
+``127.0.0.1:5432`` and the ``data_hub_test`` database unless ``DATA_HUB_TEST_PGHOST``,
+``DATA_HUB_TEST_PGPORT``, ``DATA_HUB_TEST_PGUSER``, ``DATA_HUB_TEST_PGPASSWORD`` or
+``DATA_HUB_TEST_PGDATABASE`` say otherwise. The standard ``PG*`` variables are
+deliberately ignored.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ import base64
 import hashlib
 import hmac
 import os
+import re
 import secrets
 import shutil
 import signal
@@ -32,11 +34,13 @@ from typing import TypedDict
 from urllib.parse import quote
 
 import psycopg2
+from psycopg2 import sql
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
+# The default database name. `DATA_HUB_TEST_PGDATABASE` replaces it.
 _TEST_DB = "data_hub_test"
 
 # The harness reads its own variable names, not libpq's `PGHOST`, `PGPORT`, `PGUSER` and
@@ -47,6 +51,9 @@ _PG_HOST_VAR = "DATA_HUB_TEST_PGHOST"
 _PG_PORT_VAR = "DATA_HUB_TEST_PGPORT"
 _PG_USER_VAR = "DATA_HUB_TEST_PGUSER"
 _PG_PASSWORD_VAR = "DATA_HUB_TEST_PGPASSWORD"
+# Lets two runs use separate databases at the same time, for example the integration suite
+# and the end-to-end suite, which both truncate tables.
+_PG_DATABASE_VAR = "DATA_HUB_TEST_PGDATABASE"
 
 _DEFAULT_PG_HOST = "127.0.0.1"
 _DEFAULT_PG_PORT = 5432
@@ -159,12 +166,22 @@ def _dsn_value(value: str) -> str:
     return f"'{escaped}'"
 
 
+# A database name the harness will create. The name is quoted when the database is made, so
+# Postgres keeps it exactly as given, capitals included, and it can be 63 bytes long. Only
+# plain names are accepted, so the name can't carry SQL or a character that a connection
+# string or URL would have to escape.
+_DATABASE_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,62}")
+
+
 @dataclass(frozen=True)
 class _PgSettings:
     host: str
     port: int
     user: str
     password: str
+    # The test database. The other connection helpers take a database name, because the
+    # harness also connects to the ``postgres`` database to create this one.
+    database: str = _TEST_DB
 
     def dsn(self, dbname: str) -> str:
         return (
@@ -181,8 +198,8 @@ class _PgSettings:
 
 
 def _pg_settings_from_env(env: Mapping[str, str] | None = None) -> _PgSettings:
-    """Read ``DATA_HUB_TEST_PGHOST``, ``DATA_HUB_TEST_PGPORT``, ``DATA_HUB_TEST_PGUSER``
-    and ``DATA_HUB_TEST_PGPASSWORD``.
+    """Read ``DATA_HUB_TEST_PGHOST``, ``DATA_HUB_TEST_PGPORT``, ``DATA_HUB_TEST_PGUSER``,
+    ``DATA_HUB_TEST_PGPASSWORD`` and ``DATA_HUB_TEST_PGDATABASE``.
 
     Unset or empty values fall back to the defaults, except the password: an empty
     ``DATA_HUB_TEST_PGPASSWORD`` means an empty password. The standard ``PG*`` variables
@@ -200,11 +217,18 @@ def _pg_settings_from_env(env: Mapping[str, str] | None = None) -> _PgSettings:
         raise ValueError(
             f"{_PG_HOST_VAR} must be a host name or address, not a socket directory, got {host!r}"
         )
+    database = source.get(_PG_DATABASE_VAR) or _TEST_DB
+    if _DATABASE_NAME.fullmatch(database) is None:
+        raise ValueError(
+            f"{_PG_DATABASE_VAR} must be a plain database name (letters, digits and "
+            f"underscores, not starting with a digit, at most 63 characters), got {database!r}"
+        )
     return _PgSettings(
         host=host,
         port=port,
         user=source.get(_PG_USER_VAR) or _DEFAULT_PG_USER,
         password=source.get(_PG_PASSWORD_VAR, _DEFAULT_PG_PASSWORD),
+        database=database,
     )
 
 
@@ -702,8 +726,9 @@ def start_test_server() -> Generator[IntegrationEnv, None, None]:
     """Create the test DB, push schema, build + start Next.js, seed auth, and yield.
 
     Postgres comes from ``DATA_HUB_TEST_PGHOST``, ``DATA_HUB_TEST_PGPORT``,
-    ``DATA_HUB_TEST_PGUSER`` and ``DATA_HUB_TEST_PGPASSWORD`` (read when this is
-    called), and defaults to ``postgres:postgres@127.0.0.1:5432``. The server's output
+    ``DATA_HUB_TEST_PGUSER``, ``DATA_HUB_TEST_PGPASSWORD`` and ``DATA_HUB_TEST_PGDATABASE``
+    (read when this is called), and defaults to ``postgres:postgres@127.0.0.1:5432`` and the
+    ``data_hub_test`` database, which is created if it is missing. The server's output
     goes to ``IntegrationEnv.server_log`` and its S3 stand-in to
     ``IntegrationEnv.s3_mirror_root``, both in a temp directory that is left in place
     after the run so a failure can be inspected.
@@ -718,16 +743,16 @@ def start_test_server() -> Generator[IntegrationEnv, None, None]:
     next_cli = _resolve_next_cli()
     pg = _pg_settings_from_env()
     admin_dsn = pg.dsn("postgres")
-    test_dsn = pg.dsn(_TEST_DB)
-    database_url = pg.database_url(_TEST_DB)
+    test_dsn = pg.dsn(pg.database)
+    database_url = pg.database_url(pg.database)
 
     # 1. Ensure the test database exists.
     admin_conn = psycopg2.connect(admin_dsn)
     admin_conn.autocommit = True
     with admin_conn.cursor() as cur:
-        cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (_TEST_DB,))
+        cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (pg.database,))
         if not cur.fetchone():
-            cur.execute(f"CREATE DATABASE {_TEST_DB}")  # noqa: S608
+            cur.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(pg.database)))
     admin_conn.close()
 
     # 2. Push the Drizzle schema.
