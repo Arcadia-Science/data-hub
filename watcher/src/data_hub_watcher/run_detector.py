@@ -4,6 +4,13 @@
 groups them by run ID (extracted via a regex applied to the POSIX-normalized
 relative path), reports new / updated runs to the Data Hub API, and — in
 auto mode — hands them off to an upload callback immediately after reporting.
+
+After the server accepts a report, everything the next start needs to carry on
+is written in one transaction (`StateDB.record_report`): the run, the file
+manifest and, in auto mode, a `pending_uploads` row for each file to upload.
+Nothing is remembered before the server has accepted the report, and a write
+that fails or is cut short by a kill remembers nothing, so the next start's
+initial scan reports the files again.
 """
 
 from __future__ import annotations
@@ -345,12 +352,19 @@ class RunDetector:
         except ValueError:
             return info.filename
 
-    def _persist_detected_files(self, run: RunState) -> None:
-        """Record the current `run.files` manifest in the state DB.
+    def _record_accepted_report(
+        self, run: RunState, *, new_run: bool, to_upload: list[FileInfo]
+    ) -> None:
+        """Remember in the state DB a report the server has accepted.
 
-        Called after every successful POST / PATCH so that on restart
-        the initial scan can skip these files and the run can be
-        hydrated back into `_runs` without re-reporting.
+        Stores the current `run.files` manifest, so that on restart the
+        initial scan can skip these files and the run can be hydrated back
+        into `_runs` without re-reporting, and (with *new_run*) the run
+        itself. In auto mode it also queues the *to_upload* files in
+        `pending_uploads`, so the next start retries any upload that did not
+        finish. Everything goes in one transaction (see
+        `StateDB.record_report`). Raises if the write fails, and then none of
+        it was written.
         """
         rows = [
             (
@@ -362,7 +376,12 @@ class RunDetector:
             )
             for info in run.files
         ]
-        self._state_db.record_detected_files(run.run_id, rows)
+        self._state_db.record_report(
+            run.run_id,
+            rows,
+            new_run=new_run,
+            pending_relative_paths=[self._relative_path(info) for info in to_upload],
+        )
 
     def _report_new_run(self, run: RunState) -> None:
         acquired = _run_acquired_at(run.files)
@@ -379,13 +398,21 @@ class RunDetector:
         except Exception as exc:
             self._handle_report_failure(run, "create", exc)
             return
-        run.reported = True
         self._note_report_success(run)
+
+        uploadable = [f for f in run.files if f.upload]
+        to_upload = uploadable if self._upload_cb else []
+        # The run counts as reported, here and in the state DB, only once this
+        # write has gone through. If it raises, the monitor records
+        # `stable_callback_failed` and nothing is retried here, as before. The
+        # run stays unreported, so the next stable file of the run reports it
+        # again along with the files seen so far, and so does the next start.
+        # The server accepts a repeated report and keeps one row per file.
+        self._record_accepted_report(run, new_run=True, to_upload=to_upload)
+        run.reported = True
         run.api_run_id = resp.id
         run.patched_file_count = len(run.files)
         run.acquired_at_sent = acquired
-        self._state_db.record_run_reported(run.run_id)
-        self._persist_detected_files(run)
         self._counters.runs_reported += 1
 
         self._reporter.queue_event(
@@ -397,7 +424,6 @@ class RunDetector:
         )
         logger.info("Reported new run %s (%d files)", run.run_id, len(run.files))
 
-        uploadable = [f for f in run.files if f.upload]
         if self._upload_cb and uploadable:
             succeeded = self._upload_cb(run.run_id, uploadable)
             # Report-only files count as handled so the cursor moves past them.
@@ -416,9 +442,10 @@ class RunDetector:
 
         On failure the PATCH cursor is left untouched, so a scheduled retry
         or the next stable file's PATCH carries the backlog (plus the new
-        entry). The upload callback continues to receive only files the
-        uploader hasn't seen yet (`uploaded_file_count` is independent
-        of the PATCH cursor).
+        entry). The same goes when the PATCH went through and writing it to
+        the state DB failed. The upload callback continues to receive only
+        files the uploader hasn't seen yet (`uploaded_file_count` is
+        independent of the PATCH cursor).
         """
         new_files = run.files[run.patched_file_count :]
         # An out-of-order stable file may carry an older birthtime than
@@ -449,10 +476,17 @@ class RunDetector:
             self._handle_report_failure(run, "update", exc)
             return
         self._note_report_success(run)
+
+        not_uploaded = run.files[run.uploaded_file_count :]
+        upload_new = [f for f in not_uploaded if f.upload]
+        to_upload = upload_new if self._upload_cb else []
+        # As in `_report_new_run`, the cursor moves only once this write has
+        # gone through. If it raises, the next PATCH, from a new file, sends
+        # the backlog again, and so does the initial scan of the next start.
+        self._record_accepted_report(run, new_run=False, to_upload=to_upload)
         run.patched_file_count = len(run.files)
         if earlier_acquired is not None:
             run.acquired_at_sent = earlier_acquired
-        self._persist_detected_files(run)
         logger.info(
             "Updated run %s (sent %d new file(s), %d total)",
             run.run_id,
@@ -460,8 +494,6 @@ class RunDetector:
             len(run.files),
         )
 
-        not_uploaded = run.files[run.uploaded_file_count :]
-        upload_new = [f for f in not_uploaded if f.upload]
         if self._upload_cb and upload_new:
             succeeded = self._upload_cb(run.run_id, upload_new)
             # Report-only files count as handled so the cursor moves past them.

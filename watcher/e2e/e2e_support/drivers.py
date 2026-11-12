@@ -1014,11 +1014,11 @@ class WatcherDriver(ABC):
         """Make the watcher's next insert into ``table`` of its state database take minutes.
 
         It adds a trigger that joins ``sqlite_master`` with itself nine times (about 2e10
-        rows) before the insert goes through, so the watcher sits exactly between the write
-        before it and this one: for ``pending_uploads``, between "the run was reported" and
-        "the files were recorded as pending". Every other write commits as usual. The watcher
-        has to be started once so the database exists, and the trigger is in place for the
-        ``with`` block.
+        rows) before the insert goes through, so the watcher is stuck in that statement: for
+        ``pending_uploads``, after the server has the run and before the watcher has committed
+        anything about it, because the run, its files and their pending rows are one
+        transaction. Every other write commits as usual. The watcher has to be started once so
+        the database exists, and the trigger is in place for the ``with`` block.
 
         The trigger is always dropped when the block ends. A watcher that is still stuck inside
         it then holds the write lock, and nothing else can free it, so it is killed. A scenario

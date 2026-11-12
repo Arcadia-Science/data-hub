@@ -690,7 +690,7 @@ class TestRunReportRetries:
     ) -> None:
         client.report_run.return_value = SimpleNamespace(id="run")
         state_db = MagicMock()
-        state_db.record_run_reported.side_effect = sqlite3.OperationalError("disk full")
+        state_db.record_report.side_effect = [sqlite3.OperationalError("disk full"), None]
         detector = _make_detector(
             r"^(R\d)_", tmp_path, client=client, reporter=reporter, state_db=state_db
         )
@@ -699,9 +699,19 @@ class TestRunReportRetries:
         with pytest.raises(sqlite3.OperationalError):
             detector.on_stable_file(self._file(tmp_path, "R1_a.csv"))
 
-        assert detector._runs["R1"].reported
+        # Nothing is retried on a timer, and the run is not remembered as reported: the
+        # state DB has nothing about it, so the in-memory state doesn't either.
+        assert not detector._runs["R1"].reported
         assert detector._retry_at == {}
         assert self._kinds(reporter) == []
+
+        # The next file of the run reports it again, with both files, and this time it sticks.
+        detector.on_stable_file(self._file(tmp_path, "R1_b.csv"))
+        assert client.report_run.call_count == 2
+        sent = client.report_run.call_args.args[1]["detected_files"]
+        assert [f["filename"] for f in sent] == ["R1_a.csv", "R1_b.csv"]
+        assert detector._runs["R1"].reported
+        client.update_run.assert_not_called()
 
     def test_unexpected_error_during_a_retry_counts_as_a_failed_attempt(
         self,

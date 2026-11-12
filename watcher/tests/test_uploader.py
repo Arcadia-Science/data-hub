@@ -1033,6 +1033,8 @@ class TestStopDuringPrep:
         up, path = self._stopped_during_prep(
             mock_client, state_db, tmp_path, _single_presigned("big.bin")
         )
+        # The run detector records the row with the run report, before the upload starts.
+        state_db.record_pending_uploads("RUN-001", ["big.bin"])
 
         with patch.object(Uploader, "_put_to_presigned_url") as put_file:
             assert up.upload_files("RUN-001", [_file_info(path)]) == 0
@@ -1061,6 +1063,8 @@ class TestAbort:
             else _single_presigned("big.bin")
         )
         mock_client.get_part_urls.side_effect = _part_urls
+        # The run detector records the row with the run report, before the upload starts.
+        state_db.record_pending_uploads("RUN-001", ["big.bin"])
         bytes_sent: list[int] = []
 
         def put(url: str, *, data: _FileSlice, **kwargs: object) -> MagicMock:
@@ -1291,6 +1295,8 @@ class TestPendingUploads:
         ok.write_text("ok")
         bad = run_dir / "bad.csv"
         bad.write_text("bad")
+        # The run detector records the rows with the run report, before the upload starts.
+        state_db.record_pending_uploads("RUN-1", ["RUN-1/ok.csv", "RUN-1/bad.csv"])
 
         with patch.object(uploader, "_upload_single", side_effect=lambda path, run_id: path == ok):
             assert uploader.upload_files("RUN-1", [_file_info(ok), _file_info(bad)]) == 1
@@ -1306,6 +1312,8 @@ class TestPendingUploads:
         for name in ("a.csv", "b.csv", "c.csv"):
             (run_dir / name).write_text("x")
             files.append(_file_info(run_dir / name))
+        # The run detector records the rows with the run report, before the upload starts.
+        state_db.record_pending_uploads("RUN-1", [f"RUN-1/{f.filename}" for f in files])
         attempted: list[str] = []
 
         def upload(path: Path, run_id: str) -> bool:

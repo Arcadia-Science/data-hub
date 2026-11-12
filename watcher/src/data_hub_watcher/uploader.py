@@ -551,6 +551,11 @@ class Uploader:
         Called by `RunDetector` immediately after a successful run report
         (auto mode only).  Returns the number of files successfully uploaded.
 
+        The detector has already recorded each file in ``pending_uploads``,
+        in the same transaction as the run report, so a kill during the
+        upload leaves a row for the next start to retry. A success clears
+        the row, and nothing here writes it.
+
         When ``upload_parallelism > 1`` the per-file
         :meth:`_upload_single` calls run on short-lived daemon threads
         (see :func:`_run_workers`), and their PUTs share the
@@ -569,10 +574,6 @@ class Uploader:
             self._state_db.record_run_uploaded(run_id)
             return 0
 
-        self._state_db.record_pending_uploads(
-            run_id, [_relative_path(info.path, self._watch_dir) for info in files]
-        )
-
         uploaded: list[Path] = []
 
         def upload(info: FileInfo) -> None:
@@ -581,8 +582,8 @@ class Uploader:
 
         # With one worker, or one file, this is a plain loop on this thread.
         # A stop starts no further file. The files that did not start, and
-        # one that a stop cut off, keep the ``pending_uploads`` row recorded
-        # above, because only a success clears it, so the next start's
+        # one that a stop cut off, keep their ``pending_uploads`` row, because
+        # only a success clears it, so the next start's
         # ``retry_pending_uploads`` uploads them.
         _run_workers(
             files,

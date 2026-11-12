@@ -23,6 +23,7 @@ gives us cooperative serialisation without ever surfacing
 """
 
 from __future__ import annotations
+import contextlib
 import logging
 import sqlite3
 import threading
@@ -473,11 +474,16 @@ class StateDB:
         if not rows:
             return
         with self._write_lock:
-            self._conn.executemany(
-                "INSERT OR IGNORE INTO pending_uploads (relative_path, run_id) VALUES (?, ?)",
-                rows,
-            )
+            self._insert_pending_uploads(self._conn, rows)
             self._conn.commit()
+
+    @staticmethod
+    def _insert_pending_uploads(conn: sqlite3.Connection, rows: list[tuple[str, str]]) -> None:
+        """Statement of `record_pending_uploads`, for the caller to commit."""
+        conn.executemany(
+            "INSERT OR IGNORE INTO pending_uploads (relative_path, run_id) VALUES (?, ?)",
+            rows,
+        )
 
     def pending_uploads(self) -> list[PendingUploadRecord]:
         """Return every pending upload, oldest first."""
@@ -529,20 +535,33 @@ class StateDB:
         are issued) keep the table consistent with the in-memory
         `RunState`. *file_created_at* may be `None` for legacy callers.
         """
-        rows = [
-            (run_id, rel_path, filename, size_bytes, mtime, file_created_at)
-            for rel_path, filename, size_bytes, mtime, file_created_at in files
-        ]
+        rows = self._detected_file_rows(run_id, files)
         if not rows:
             return
         with self._write_lock:
-            self._conn.executemany(
-                "INSERT OR REPLACE INTO detected_files "
-                "(run_id, relative_path, filename, size_bytes, mtime, file_created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                rows,
-            )
+            self._insert_detected_files(self._conn, rows)
             self._conn.commit()
+
+    @staticmethod
+    def _detected_file_rows(
+        run_id: str, files: Iterable[tuple[str, str, int, float, float | None]]
+    ) -> list[tuple[str, str, str, int, float, float | None]]:
+        return [
+            (run_id, rel_path, filename, size_bytes, mtime, file_created_at)
+            for rel_path, filename, size_bytes, mtime, file_created_at in files
+        ]
+
+    @staticmethod
+    def _insert_detected_files(
+        conn: sqlite3.Connection, rows: list[tuple[str, str, str, int, float, float | None]]
+    ) -> None:
+        """Statement of `record_detected_files`, for the caller to commit."""
+        conn.executemany(
+            "INSERT OR REPLACE INTO detected_files "
+            "(run_id, relative_path, filename, size_bytes, mtime, file_created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            rows,
+        )
 
     def has_detected_stat_match(self, relative_path: str, size_bytes: int, mtime: float) -> bool:
         """Return True if this file was already reported as part of some run.
@@ -782,14 +801,60 @@ class StateDB:
         The sub-SELECT keeps uploaded_at intact if the run was already recorded
         (e.g. a retry after a previous partial failure).
         """
-        now = datetime.now(timezone.utc).isoformat()
         with self._write_lock:
-            self._conn.execute(
-                "INSERT OR REPLACE INTO runs (run_id, reported_at, uploaded_at) "
-                "VALUES (?, ?, (SELECT uploaded_at FROM runs WHERE run_id = ?))",
-                (run_id, now, run_id),
-            )
+            self._insert_run_reported(self._conn, run_id)
             self._conn.commit()
+
+    @staticmethod
+    def _insert_run_reported(conn: sqlite3.Connection, run_id: str) -> None:
+        """Statement of `record_run_reported`, for the caller to commit."""
+        now = datetime.now(timezone.utc).isoformat()
+        conn.execute(
+            "INSERT OR REPLACE INTO runs (run_id, reported_at, uploaded_at) "
+            "VALUES (?, ?, (SELECT uploaded_at FROM runs WHERE run_id = ?))",
+            (run_id, now, run_id),
+        )
+
+    def record_report(
+        self,
+        run_id: str,
+        files: Iterable[tuple[str, str, int, float, float | None]],
+        *,
+        new_run: bool,
+        pending_relative_paths: Iterable[str] = (),
+    ) -> None:
+        """Remember a run report the server accepted, all in one transaction.
+
+        Writes the `runs` row (`record_run_reported`, only with *new_run*: a
+        PATCH leaves the row alone), the manifest rows for *files*
+        (`record_detected_files`) and a `pending_uploads` row for each of
+        *pending_relative_paths* (`record_pending_uploads`). A kill or a failed
+        write leaves all of it or none of it.
+
+        That matters in auto mode. The next start skips a file that has a
+        `detected_files` row and retries one that has a `pending_uploads` row,
+        so a file with the first and not the second is never uploaded. With
+        none of it the initial scan finds the file again and reports it again,
+        which the server accepts and dedups. A failed write is rolled back
+        here, so rows written before the failing one aren't left in an open
+        transaction on this thread's connection for the next write to commit.
+        """
+        rows = self._detected_file_rows(run_id, files)
+        pending = [(rel_path, run_id) for rel_path in pending_relative_paths]
+        with self._write_lock:
+            try:
+                if new_run:
+                    self._insert_run_reported(self._conn, run_id)
+                if rows:
+                    self._insert_detected_files(self._conn, rows)
+                if pending:
+                    self._insert_pending_uploads(self._conn, pending)
+                self._conn.commit()
+            except BaseException:
+                # Don't let a failed rollback hide the error that caused it.
+                with contextlib.suppress(sqlite3.Error):
+                    self._conn.rollback()
+                raise
 
     def last_run_reported_at(self) -> str | None:
         """Most recent ``reported_at`` timestamp across all runs, or None.
