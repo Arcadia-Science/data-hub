@@ -202,6 +202,13 @@ export const reprocessRunOutputSchema = z.object({
   filesFailed: z.number().int(),
 });
 
+export const cancelQueuedFilesOutputSchema = z.object({
+  instrumentId: z.string(),
+  runId: z.string(),
+  // Queued files that became `failed`. Zero when none were queued.
+  filesCancelled: z.number().int(),
+});
+
 export const deleteRunOutputSchema = z.object({
   instrumentId: z.string(),
   runId: z.string(),

@@ -41,6 +41,19 @@ export function isStalledProcessing(
   );
 }
 
+// How long a file must sit in `processing` before the reprocess-queue cron puts
+// it back in the queue. It is never shorter than the default window, even when
+// `STALLED_PROCESSING_AFTER_MINUTES` is set lower to show files as Stalled
+// sooner. Lambda stops an invocation after 15 minutes, and the default window
+// adds 5 more. A shorter window could put back a file whose Lambda is still
+// running, and then two Lambdas would work on the same file.
+export function requeueStalledAfterMs(): number {
+  return Math.max(
+    stalledProcessingAfterMs(),
+    DEFAULT_STALLED_PROCESSING_AFTER_MS
+  );
+}
+
 // A file is stalled once it started before this instant. The SQL fragments in
 // `stalled-processing.sql.ts` compare against the same boundary.
 export function stalledProcessingCutoff(now: Date = new Date()): Date {

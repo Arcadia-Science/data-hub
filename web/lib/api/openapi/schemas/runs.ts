@@ -242,6 +242,13 @@ export const runReprocessed = z.object({
   files_failed: z.number().int(),
 });
 
+export const runQueuedCancelled = z.object({
+  instrument_id: z.string(),
+  run_id: z.string(),
+  // Queued files that became `failed`. Zero when none were queued.
+  files_cancelled: z.number().int(),
+});
+
 export const requestUploadBody = z.object({
   file_ids: z.array(z.union([z.string(), z.number()])).min(1),
 });

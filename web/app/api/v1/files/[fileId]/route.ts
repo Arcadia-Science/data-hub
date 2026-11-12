@@ -30,6 +30,11 @@ interface RouteContext {
 //                   step is a PATCH. A queued file can still be PATCHed to
 //                   `processing`, which is what the Lambda does when an S3
 //                   re-upload of that file starts it directly.
+//                   The dispatcher also stamps each start with a `dispatch_id`
+//                   so it can tell its own start from a later one. A PATCH
+//                   keeps that ID on processing → processing (the Lambda's own
+//                   first update) and clears it on a move into `processing`
+//                   from any other status and on `completed` and `failed`.
 //   Cancel request: upload_requested → detected (watcher gave up locating
 //                   the local file after repeated polls; clears the queue
 //                   entry)
@@ -166,11 +171,24 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
     ) {
       updates.processedAt = now;
     }
+    // The start that the dispatcher made ends with a final status. Clearing the
+    // ID means a late HTTP answer from that start cannot overwrite the result.
+    if (body.status === "completed" || body.status === "failed") {
+      updates.dispatchId = null;
+    }
     if (body.status === "processing") {
       updates.processingStartedAt = now;
       // A queued file that starts another way (an S3 re-upload) leaves the
       // queue.
       updates.queuedAt = null;
+      // The Lambda's own first update arrives while the file is already
+      // `processing`, and it keeps the dispatcher's ID. A move into
+      // `processing` from any other status is a start the dispatcher did not
+      // make, such as an S3 upload, so it clears the ID. An older dispatch's
+      // late answer then cannot fail this start.
+      if (file.status !== "processing") {
+        updates.dispatchId = null;
+      }
       if (file.status === "completed" || file.status === "failed") {
         updates.processedAt = null;
         updates.errorMessage = null;

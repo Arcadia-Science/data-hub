@@ -3,6 +3,7 @@ import {
   DEFAULT_STALLED_PROCESSING_AFTER_MS,
   isStalledProcessing,
   minutesUntilProcessingIsStalled,
+  requeueStalledAfterMs,
   stalledProcessingAfterMs,
   stalledProcessingCutoff,
 } from "@/lib/runs/stalled-processing";
@@ -43,6 +44,26 @@ describe("stalledProcessingAfterMs", () => {
         DEFAULT_STALLED_PROCESSING_AFTER_MS
       );
     }
+  });
+});
+
+describe("requeueStalledAfterMs", () => {
+  it("is the default window when the env var is unset", () => {
+    delete process.env.STALLED_PROCESSING_AFTER_MINUTES;
+    expect(requeueStalledAfterMs()).toBe(DEFAULT_STALLED_PROCESSING_AFTER_MS);
+  });
+
+  it("never drops below the default window when the env var is shorter", () => {
+    process.env.STALLED_PROCESSING_AFTER_MINUTES = "1";
+    // Files show as Stalled after a minute, but Lambda may still be running
+    // for up to 15, so they are not put back before the default window.
+    expect(stalledProcessingAfterMs()).toBe(60 * 1000);
+    expect(requeueStalledAfterMs()).toBe(DEFAULT_STALLED_PROCESSING_AFTER_MS);
+  });
+
+  it("follows the env var when it is longer than the default window", () => {
+    process.env.STALLED_PROCESSING_AFTER_MINUTES = "45";
+    expect(requeueStalledAfterMs()).toBe(45 * 60 * 1000);
   });
 });
 

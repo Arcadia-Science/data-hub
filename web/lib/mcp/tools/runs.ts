@@ -1,6 +1,9 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import { actorToken, actorUser } from "@/lib/api/actor";
-import { reprocessRun } from "@/lib/api/file-reprocessing";
+import {
+  cancelQueuedFilesForRun,
+  reprocessRun,
+} from "@/lib/api/file-reprocessing";
 import {
   buildRunListQuery,
   getAttributionsByRunIds,
@@ -38,6 +41,7 @@ import {
 import { validateSearchRunsMetadataFilters } from "@/lib/mcp/validate-run-filters";
 import {
   addRunCommentTool,
+  cancelQueuedFilesTool,
   claimRunsTool,
   claimRunTool,
   deleteRunCommentTool,
@@ -465,6 +469,26 @@ export function registerRunTools(server: McpServer) {
         runId: result.runId,
         filesQueued: result.filesQueued,
         filesFailed: result.filesFailed,
+      });
+    }
+  );
+
+  server.registerTool(
+    cancelQueuedFilesTool.name,
+    toolRegistrationConfig(cancelQueuedFilesTool),
+    async ({ instrumentId, runId }, ctx) => {
+      const writeError = requireMcpWrite(ctx.http?.authInfo);
+      if (writeError) {
+        return writeError;
+      }
+      const result = await cancelQueuedFilesForRun(instrumentId, runId);
+      if (!result.ok) {
+        return errorResult(result.message);
+      }
+      return structuredResult({
+        instrumentId: result.instrumentId,
+        runId: result.runId,
+        filesCancelled: result.filesCancelled,
       });
     }
   );

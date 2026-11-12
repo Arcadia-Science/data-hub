@@ -1,4 +1,14 @@
-import { and, asc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  eq,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  or,
+  sql,
+} from "drizzle-orm";
 import { after } from "next/server";
 import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
 import { touchRuns } from "@/lib/api/touch-runs";
@@ -12,6 +22,7 @@ import { REPROCESSABLE_STATUSES } from "@/lib/runs/reprocessable-statuses";
 import {
   isStalledProcessing,
   minutesUntilProcessingIsStalled,
+  requeueStalledAfterMs,
 } from "@/lib/runs/stalled-processing";
 import {
   inFlightProcessingSql,
@@ -24,6 +35,12 @@ function getLambdaUrl(): string | null {
     return null;
   }
   return url;
+}
+
+// False when the Function URL or the credentials to call it are missing. Then
+// nothing can start a queued file.
+export function isLambdaConfigured(): boolean {
+  return getLambdaUrl() !== null;
 }
 
 export type ReprocessResult =
@@ -159,7 +176,7 @@ export async function queueFilesForReprocessing(
 
   // Checked per file, after the file's own checks, so a file that cannot be
   // reprocessed for another reason still says so when Lambda is not set up.
-  const lambdaConfigured = getLambdaUrl() !== null;
+  const lambdaConfigured = isLambdaConfigured();
   const now = new Date();
   const eligible: ReprocessCandidate[] = [];
   for (const id of ids) {
@@ -196,6 +213,11 @@ export async function queueFilesForReprocessing(
       processedAt: null,
       errorMessage: null,
       processingStartedAt: null,
+      // A new request ends any earlier start, so a late answer from that start
+      // finds nothing to match. It also gives the file its one automatic retry
+      // back.
+      dispatchId: null,
+      stallRequeues: 0,
     })
     .where(
       and(
@@ -336,6 +358,82 @@ export async function reprocessRun(
   };
 }
 
+// What a file shows after its queue entry is cancelled.
+const CANCELLED_QUEUED_MESSAGE =
+  "Reprocessing was cancelled before it started. Reprocess the file to try again.";
+
+// Takes every queued file of one run out of the queue and marks it `failed`,
+// with a message that says why. Without this, a queue entry ends only when the
+// dispatcher starts the file (or an S3 upload does), so a file stays queued for
+// as long as the dispatcher cannot start it.
+//
+// Takes the run's internal ID, so it works for a soft-deleted run too, whose
+// queued files cannot start. Deleted files are left alone. One guarded UPDATE
+// does the work: a file the dispatcher started in the meantime no longer
+// matches `status = 'queued'` and is skipped. Returns the number cancelled.
+export async function cancelQueuedFiles(
+  runInternalId: string
+): Promise<number> {
+  const cancelled = await db
+    .update(files)
+    .set({
+      status: "failed",
+      queuedAt: null,
+      dispatchId: null,
+      processedAt: new Date(),
+      errorMessage: CANCELLED_QUEUED_MESSAGE,
+    })
+    .where(
+      and(
+        eq(files.instrumentRunId, runInternalId),
+        eq(files.status, "queued"),
+        isNull(files.deletedAt)
+      )
+    )
+    .returning({ id: files.id });
+  if (cancelled.length > 0) {
+    await touchRuns([runInternalId]);
+  }
+  return cancelled.length;
+}
+
+export type CancelQueuedResult =
+  | {
+      ok: true;
+      instrumentId: string;
+      runId: string;
+      filesCancelled: number;
+    }
+  | {
+      ok: false;
+      status: 404;
+      code: "NOT_FOUND";
+      message: string;
+    };
+
+// Finds the run by its instrument and run ID, then cancels its queued files.
+// Shared by the REST route and the MCP tool. A soft-deleted run is accepted.
+export async function cancelQueuedFilesForRun(
+  instrumentId: string,
+  runId: string
+): Promise<CancelQueuedResult> {
+  const run = await lookupRunByNaturalKey(instrumentId, runId);
+  if (!run) {
+    return {
+      ok: false,
+      status: 404,
+      code: "NOT_FOUND",
+      message: `Run '${runId}' not found for instrument '${instrumentId}'`,
+    };
+  }
+  return {
+    ok: true,
+    instrumentId: run.instrumentId,
+    runId: run.runId,
+    filesCancelled: await cancelQueuedFiles(run.id),
+  };
+}
+
 // Held for the length of one dispatch transaction, so two dispatchers never
 // count the same free slots and start more files than the limit allows.
 // `pg_advisory_xact_lock` waits for the lock instead of giving up. The next
@@ -373,15 +471,16 @@ function hasPgErrorCode(err: unknown, code: string): boolean {
 }
 
 interface StartedFile {
+  // The ID that this dispatch gave the start (`files.dispatch_id`). Updates to
+  // the file match on it, so they only apply while this start is the current
+  // one.
+  dispatchId: string;
   id: number;
   // When the file was queued. A start that the Lambda throttles puts the file
   // back in this place in line.
   queuedAt: Date | null;
   s3Bucket: string;
   s3Key: string;
-  // The `processing_started_at` that this dispatch wrote. An update that
-  // matches it only touches the file while that start is still the current one.
-  startedAt: Date;
 }
 
 // The queued files that the dispatcher may start. Deleted files and files in
@@ -465,7 +564,13 @@ async function claimQueuedFiles(): Promise<StartedFile[]> {
 
       const started = await tx
         .update(files)
-        .set({ status: "processing", processingStartedAt: now, queuedAt: null })
+        .set({
+          status: "processing",
+          processingStartedAt: now,
+          queuedAt: null,
+          // One fresh ID per file: `gen_random_uuid()` runs once for each row.
+          dispatchId: sql`gen_random_uuid()`,
+        })
         .where(
           and(
             inArray(
@@ -480,7 +585,7 @@ async function claimQueuedFiles(): Promise<StartedFile[]> {
           id: files.id,
           s3Bucket: files.s3Bucket,
           s3Key: files.s3Key,
-          startedAt: files.processingStartedAt,
+          dispatchId: files.dispatchId,
           runId: files.instrumentRunId,
         });
       await touchRuns(
@@ -489,14 +594,14 @@ async function claimQueuedFiles(): Promise<StartedFile[]> {
       );
 
       return started.flatMap((f) =>
-        f.s3Bucket && f.s3Key && f.startedAt
+        f.s3Bucket && f.s3Key && f.dispatchId
           ? [
               {
                 id: f.id,
                 queuedAt: queuedAtById.get(f.id) ?? null,
                 s3Bucket: f.s3Bucket,
                 s3Key: f.s3Key,
-                startedAt: f.startedAt,
+                dispatchId: f.dispatchId,
               },
             ]
           : []
@@ -542,8 +647,9 @@ export async function dispatchQueuedFiles(): Promise<number[]> {
   // The callback lives only as long as the route's `maxDuration` (60 s on
   // /mcp/v1). A run that outlasts it ends the callback before the Lambda
   // answers, so nothing reads that response and a failure after that point is
-  // never seen here. The file then stays `processing` until it stalls, and the
-  // reprocess-queue cron takes its slot after that.
+  // never seen here. The file then stays `processing` until it stalls. After
+  // that the reprocess-queue cron gives its slot to another file and puts the
+  // file back in the queue once (`requeueStalledDispatches`).
   after(async () => {
     await Promise.all(
       started.map((file) => invokeLambdaForFile(lambdaUrl, file))
@@ -642,15 +748,19 @@ async function invokeLambdaForFile(
   await failStartedFile(file, noResultMessage(res.status));
 }
 
-// Both updates below match the status and the exact `processing_started_at`
-// that the dispatch wrote. If the Lambda has already written a final status,
-// or a newer start has replaced this one, nothing matches and the file is left
-// as it is.
+// Both updates below match the status and the dispatch ID that the claim wrote.
+// If the Lambda has already written a final status, or another start has
+// replaced this one (an S3 upload, a new reprocess request, a requeue, or a
+// newer dispatch), the ID is gone or different and nothing matches.
+//
+// The timestamp cannot do this job. The Lambda's own first update,
+// `PATCH status: "processing"`, moves `processing_started_at` while this start
+// is still the current one. That update leaves `dispatch_id` alone.
 function stillThisStart(file: StartedFile) {
   return and(
     eq(files.id, file.id),
     eq(files.status, "processing"),
-    eq(files.processingStartedAt, file.startedAt)
+    eq(files.dispatchId, file.dispatchId)
   );
 }
 
@@ -664,7 +774,12 @@ async function failStartedFile(
   try {
     const [updated] = await db
       .update(files)
-      .set({ status: "failed", processedAt: new Date(), errorMessage: message })
+      .set({
+        status: "failed",
+        processedAt: new Date(),
+        errorMessage: message,
+        dispatchId: null,
+      })
       .where(stillThisStart(file))
       .returning({ runId: files.instrumentRunId });
     if (!updated) {
@@ -693,6 +808,7 @@ async function requeueStartedFile(file: StartedFile): Promise<void> {
         status: "queued",
         queuedAt: file.queuedAt ?? new Date(),
         processingStartedAt: null,
+        dispatchId: null,
       })
       .where(stillThisStart(file))
       .returning({ runId: files.instrumentRunId });
@@ -702,4 +818,62 @@ async function requeueStartedFile(file: StartedFile): Promise<void> {
   } catch (err) {
     console.error(`Failed to put file ${file.id} back in the queue:`, err);
   }
+}
+
+// How many times the dispatcher puts the same file back in the queue after its
+// start stalls. A file that stalls again stays Stalled for a person to handle.
+const MAX_STALL_REQUEUES = 1;
+
+// Gives a file that the dispatcher started, and that then stalled, one more
+// try. Such a file has no Lambda behind it: a deploy or a crash hit between the
+// claim's commit and the invocation, or the Lambda ended without saving a
+// result and nothing saw its answer. Without this it stays Stalled until a
+// person reprocesses it.
+//
+// One UPDATE puts the file at the back of the queue. It matches only when all
+// of these hold:
+//   - The file is `processing`, has a `dispatch_id` (the dispatcher started it,
+//     so a start from an S3 upload is left alone), and has not been put back
+//     before.
+//   - The file is raw and not deleted, and its run is not deleted.
+//   - Its start is older than `requeueStalledAfterMs()`, or it has no start
+//     time.
+//
+// Returns the number of files put back. The caller dispatches afterwards.
+export async function requeueStalledDispatches(
+  now: Date = new Date()
+): Promise<number> {
+  const cutoff = new Date(now.getTime() - requeueStalledAfterMs());
+  const requeued = await db
+    .update(files)
+    .set({
+      status: "queued",
+      queuedAt: now,
+      processingStartedAt: null,
+      dispatchId: null,
+      stallRequeues: sql`${files.stallRequeues} + 1`,
+    })
+    .where(
+      and(
+        eq(files.status, "processing"),
+        isNotNull(files.dispatchId),
+        lt(files.stallRequeues, MAX_STALL_REQUEUES),
+        eq(files.category, "raw"),
+        isNull(files.deletedAt),
+        or(
+          isNull(files.processingStartedAt),
+          lt(files.processingStartedAt, cutoff)
+        ),
+        inArray(
+          files.instrumentRunId,
+          db
+            .select({ id: instrumentRuns.id })
+            .from(instrumentRuns)
+            .where(isNull(instrumentRuns.deletedAt))
+        )
+      )
+    )
+    .returning({ runId: files.instrumentRunId });
+  await touchRuns(requeued.map((row) => row.runId));
+  return requeued.length;
 }

@@ -156,11 +156,14 @@ Reprocessing starts at most 10 files at a time, counted across all runs and inst
 - A file that can start right away shows **Processing**.
 - A file that has to wait shows **Queued**. It starts when another file finishes, and files that were queued earlier start first.
 - A run with queued files shows **Queued** in the runs list, unless a file in it failed, stalled, is waiting to upload, or is uploaded and not yet processing.
-- If Data Hub can’t send a file to the processor, or the processor answers with an error, the file shows **Failed** with a message that says so, and the next queued file starts. Reprocess the failed file to try again.
+- If Data Hub can’t send a file to the processor, or the processor ends with an error without saving a result, the file shows **Failed** with a message that says so, and the next queued file starts. Reprocess the failed file to try again.
+- To take the waiting files out of the queue, choose **Cancel queued** at the top of the run page. Each queued file shows **Failed** with a message that says the reprocess was cancelled, and you can reprocess it again. Files that have already started aren’t affected.
 
 Files that arrive from a watcher upload count toward the 10, but they start right away and never wait in the queue. A file that has been processing for more than 20 minutes without finishing stops counting, so one stuck file doesn’t hold up the queue.
 
-A large run takes several rounds. For example, reprocessing a run of 80 files starts 10 files, and the other 70 show **Queued** until slots open. You can leave the page, because the queue keeps running. You can’t cancel a queued file, and a queued file has no **Reprocess** button. An admin who runs Data Hub can change the limit with the `PROCESSING_CONCURRENCY_LIMIT` variable; see the [web application environment variables](https://github.com/Arcadia-Science/data-hub/blob/production/docs/developer/getting-started.md#web-application).
+A large run takes several rounds. For example, reprocessing a run of 80 files starts 10 files, and the other 70 show **Queued** until slots open. You can leave the page, because the queue keeps running. A queued file has no **Reprocess** button. An admin who runs Data Hub can change the limit with the `PROCESSING_CONCURRENCY_LIMIT` variable; see the [web application environment variables](https://github.com/Arcadia-Science/data-hub/blob/production/docs/developer/getting-started.md#web-application).
+
+If a file that the queue started never finishes, for example because Data Hub restarted just as it started the file, it shows **Stalled** after 20 minutes. The queue then puts it back in line once. If it stalls a second time, it stays **Stalled** until you reprocess it.
 
 ### Request an upload [#request-upload]
 

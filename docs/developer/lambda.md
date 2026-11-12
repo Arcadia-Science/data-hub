@@ -27,7 +27,7 @@ Slack notifications are sent by the **web app**, not the Lambda — see [Slack n
 When a raw file fails processing (or needs to be re-run), users can trigger reprocessing from the run detail page in the web app. Processed artifacts (preview CSVs, posters, MP4s) are not eligible — they often share extensions with the watcher's raw patterns, and Lambda only ingests the original instrument files. This invokes the Lambda's Function URL instead of going through S3:
 
 1. The user clicks **Reprocess** on an uploaded, failed, completed, or stalled raw file in the web dashboard, selects several files and clicks **Reprocess**, or clicks **Reprocess** on one or more runs (which queues every eligible raw file). The REST routes and the MCP tools `reprocess_file` and `reprocess_run` take the same path.
-2. The web app checks each file, then moves every eligible file to `queued` status with one UPDATE. The UPDATE sets `queued_at` and clears the previous error, `processed_at`, and `processing_started_at`. A file that is already `queued` is rejected with a 409.
+2. The web app checks each file, then moves every eligible file to `queued` status with one UPDATE. The UPDATE sets `queued_at`, clears the previous error, `processed_at`, `processing_started_at`, and `dispatch_id`, and resets `stall_requeues` to 0. A file that is already `queued` is rejected with a 409.
 3. The web app then runs the dispatcher, which moves queued files to `processing` while fewer than the processing limit are in flight. See [The reprocess queue](#the-reprocess-queue).
 4. For each file the dispatcher started, the web app sends a POST request to the Lambda Function URL. This happens in `after()`, once the HTTP response has been sent. See [When the invocation fails](#when-the-invocation-fails) for what the web app does with the response.
 5. The Function URL is configured with `AuthType: AWS_IAM`, so the web app SigV4-signs the request using credentials it gets via Vercel OIDC federation (the `WebAppS3Role` IAM role, which has `lambda:InvokeFunctionUrl` on this function's ARN). The body is a JSON payload containing a synthetic S3 event.
@@ -46,19 +46,19 @@ The queue lives in the database. The `queued` value of `file_status` and the nul
 - It opens one transaction, sets `lock_timeout` to 5 seconds, and takes `pg_advisory_xact_lock`. The lock waits for the dispatcher that holds it. The holder keeps it for a few short queries, so the wait is short. After the holder commits, each waiter counts the files in flight again before it starts any file. That is why a burst of requests starts exactly the limit and never more. If the wait passes 5 seconds, the dispatcher logs a warning and returns without starting anything. The files stay queued, and the cron starts them.
 - It counts raw, non-deleted files in flight, which are `processing` files inside the stall window (see `inFlightProcessingSql` in `web/lib/runs/stalled-processing.sql.ts`). The room is the limit minus that count. A stalled file does not count, because its processor is gone.
 - It starts the oldest queued files first, ordered by `queued_at` and then file ID, up to the room. It skips the files that cannot start, which stay `queued`, so restoring a run puts its files back in line.
-- It sets each started file to `processing`, sets `processing_started_at`, and clears `queued_at`. After the commit it invokes the Lambda for each started file in `after()`. The Function URL is BUFFERED, so a request stays open until processing finishes. That is why the invocation cannot run inside the request that queued the file.
-- It does nothing when `LAMBDA_FUNCTION_URL` or the invoke credentials are missing. Files marked `processing` with no invocation would only sit in `processing` until they stall.
+- It sets each started file to `processing`, sets `processing_started_at`, clears `queued_at`, and gives the file a new `dispatch_id` (see [The dispatch ID](#the-dispatch-id)). After the commit it invokes the Lambda for each started file in `after()`. The Function URL is BUFFERED, so a request stays open until processing finishes. That is why the invocation cannot run inside the request that queued the file.
+- It does nothing when `LAMBDA_FUNCTION_URL` or the invoke credentials are missing. Files marked `processing` with no invocation would only sit in `processing` until they stall. Queued files then stay `queued`; see [Cancelling queued files](#cancelling-queued-files).
 
 Four things run the dispatcher:
 
 - Every reprocess request, right after it queues files.
 - Every `completed` or `failed` PATCH to `PATCH /api/v1/files/:fileId`, in `after()`. This is what keeps the queue moving. A repeat of a final status runs it again, which does no harm.
 - An invocation that ended without a result, after it marks its file `failed` (see below).
-- The `/api/cron/reprocess-queue` cron, every minute (`web/vercel.json`, authenticated with `CRON_SECRET`). It starts files that the other triggers miss: a file that stalled, a dispatch that gave up waiting for the lock, a dispatch that failed, and a file that went back to the queue after a 429. Which deployments run it depends on Vercel's schedule settings; see [CI and deployment](ci-and-deployment.md#web-application-vercel).
+- The `/api/cron/reprocess-queue` cron, every minute (`web/vercel.json`, authenticated with `CRON_SECRET`). It first puts stalled dispatcher starts back in the queue (see [Stalled starts](#stalled-starts)). It then starts files that the other triggers miss: a file that stalled, a dispatch that gave up waiting for the lock, a dispatch that failed, and a file that went back to the queue after a 429. When the Lambda is not configured it starts and requeues nothing, and it logs one warning per run if a startable file is queued. Which deployments run it depends on Vercel's schedule settings; see [CI and deployment](ci-and-deployment.md#web-application-vercel).
 
 The limit is 10 raw files unless `PROCESSING_CONCURRENCY_LIMIT` sets another number (see [Getting started](getting-started.md#web-application)). Raw files that S3 events start count toward the limit, but they start directly and never wait in the queue. Archive builds do not count.
 
-A queued file can still be PATCHed to `processing`, which is what the Lambda does when an S3 re-upload of that file starts it. The PATCH clears `queued_at`. Older watchers never see `queued`: they read a file's status only after marking it uploaded or cancelling an upload, and a queued file can do neither.
+A queued file can still be PATCHed to `processing`, which is what the Lambda does when an S3 re-upload of that file starts it. The PATCH clears `queued_at` and `dispatch_id`. Older watchers never see `queued`: they read a file's status only after marking it uploaded or cancelling an upload, and a queued file can do neither.
 
 #### When the invocation fails
 
@@ -66,16 +66,56 @@ The dispatcher sets a file to `processing` before it invokes the Lambda, and the
 
 | Outcome | What happens to the file |
 | --- | --- |
-| A non-2xx response other than 429 | The file becomes `failed` with `Processing ended without a result: the Lambda returned HTTP {status}. Reprocess the file to try again.` Then the dispatcher runs, so the next queued file takes the slot. |
+| A non-2xx response other than 429 | The file becomes `failed` with `Processing ended without a result: the Lambda returned HTTP {status}. Reprocess the file to try again.` This holds even when the Lambda had already PATCHed `processing` and then crashed before it saved `failed`. Then the dispatcher runs, so the next queued file takes the slot. |
 | Signing the request fails, or the connection fails before the request is sent (for example `ECONNREFUSED` or `ENOTFOUND`) | The file becomes `failed` with `Processing could not start: Data Hub could not send the request to the Lambda. Reprocess the file to try again.` Then the dispatcher runs. |
 | HTTP 429, which means the Lambda was throttled | The file goes back to `queued` in its old place in line. The dispatcher does not run, because the Lambda has no room. The cron tries again. |
 | An abort, a timeout, or a reset after the request was sent | Nothing changes. The Lambda may still be running and will report its own result. |
 
-The update that fails or requeues the file matches `status = 'processing'` and the exact `processing_started_at` that the dispatch wrote. If the Lambda already PATCHed the file, or a newer start replaced this one, nothing matches and the file is left alone.
+The update that fails or requeues the file matches `status = 'processing'` and the `dispatch_id` that the claim wrote. If the Lambda already saved a final status, or another start replaced this one, nothing matches and the file is left alone. See [The dispatch ID](#the-dispatch-id).
 
-The `after()` callback runs only as long as the route's `maxDuration` allows, and `/mcp/v1` sets 60 seconds. A Lambda that runs longer than the route allows ends the callback before it answers. Nothing then reads the response, so a failure after that point is never seen by the web app. That file stays `processing` until it stalls (20 minutes), and the cron fills its slot after that.
+The `after()` callback runs only as long as the route's `maxDuration` allows, and `/mcp/v1` sets 60 seconds. A Lambda that runs longer than the route allows ends the callback before it answers. Nothing then reads the response, so a failure after that point is never seen by the web app. That file stays `processing` until it stalls (20 minutes). After that the cron fills its slot, and it puts the file back in the queue once; see [Stalled starts](#stalled-starts).
 
 If the Lambda answers an error for every file, for example during an outage, each failure frees a slot that the next queued file takes, so the whole queue fails in turn. Each file keeps a message that says why, and **Reprocess** puts it back in the queue.
+
+#### The dispatch ID
+
+The claim gives every file it starts a fresh ID in the same UPDATE (`gen_random_uuid()`, built into Postgres 13 and later). `processing_started_at` cannot do this job. Every processor PATCHes `processing` as its first step, and that PATCH moves `processing_started_at` while the dispatcher's start is still the current one. `PATCH /api/v1/files/:fileId` therefore treats `dispatch_id` like this:
+
+- `processing → processing` leaves it alone. This is the Lambda's own first update.
+- A move into `processing` from any other status clears it. That is a start the dispatcher did not make, such as an S3 upload of a queued, completed, failed, or uploaded file. A late answer from an older dispatch then cannot fail the new start.
+- A move to `completed` or `failed` clears it.
+
+Queuing a file, failing it after a bad invocation, putting it back after a 429 or a stall, and cancelling it also clear the ID. A NULL `dispatch_id` on a `processing` file means the dispatcher did not start it.
+
+#### Stalled starts
+
+Some files sit in `processing` with no Lambda behind them. A deploy or a crash can hit between the claim's commit and the invocation in `after()`, or the Lambda can end without saving a result and its answer can be lost. After the stall window such a file stops holding a slot, but it stays Stalled until a person reprocesses it.
+
+`requeueStalledDispatches()` in `web/lib/api/file-reprocessing.ts` gives a file one more try. One UPDATE moves a file back to `queued` when all of these hold:
+
+- It is `processing`, has a `dispatch_id` (the dispatcher started it), and has `stall_requeues` below 1.
+- It is a raw file that is not deleted, and its run is not deleted.
+- `processing_started_at` is older than the cutoff, or is null.
+
+The cutoff is the larger of `STALLED_PROCESSING_AFTER_MINUTES` and the 20-minute default. Lambda stops an invocation after 15 minutes, so a shorter window could put back a file whose Lambda is still running, and two Lambdas would then work on the same file.
+
+The UPDATE sets `queued_at` to now (the back of the queue), clears `processing_started_at` and `dispatch_id`, adds 1 to `stall_requeues`, and touches the run. A file that stalls a second time stays Stalled for a person to handle. A manual reprocess sets `stall_requeues` back to 0. Files that an S3 upload started have no `dispatch_id` and are not put back.
+
+The reprocess-queue cron calls it before it dispatches, so the file can start again in the same run.
+
+#### Cancelling queued files
+
+Only the dispatcher takes a file out of the queue. If `LAMBDA_FUNCTION_URL` or the credentials are removed after files are queued, the dispatcher does nothing and the files show Queued until someone cancels them.
+
+`cancelQueuedFiles(runInternalId)` in `web/lib/api/file-reprocessing.ts` does it with one guarded UPDATE. It moves the run's non-deleted files from `queued` to `failed`, clears `queued_at` and `dispatch_id`, sets `processed_at`, and sets the error message `Reprocessing was cancelled before it started. Reprocess the file to try again.` It then touches the run and returns the count. It also works for a soft-deleted run, whose queued files cannot start. A file that the dispatcher started in the meantime no longer matches `status = 'queued'` and is left alone.
+
+Three callers use it:
+
+- `POST /api/v1/instruments/:instrumentId/runs/:runId/cancel-queued` returns `{instrument_id, run_id, files_cancelled}`. It needs the same scope as the run reprocess route (`runs:reprocess`), accepts a browser session, and returns 404 for an unknown run.
+- The MCP tool `cancel_queued_files` takes `{instrumentId, runId}` and returns `{instrumentId, runId, filesCancelled}`.
+- The **Cancel queued** button in the run page header, which shows while the run has queued files.
+
+When the Lambda is not configured and a startable file is queued, the cron logs a warning that says so, once per run.
 
 #### Errors and retries on API calls
 

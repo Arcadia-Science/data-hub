@@ -1,7 +1,10 @@
 import type { ChildProcess } from "node:child_process";
 import { execSync, spawn } from "node:child_process";
+import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import net from "node:net";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { startLinearFakeServer } from "@arcadiascience/app-feedback-toolkit/testing";
 import { Client, Pool } from "pg";
 import { CREATE_NATURAL_FILENAME_COLLATION } from "@/lib/db/collations";
@@ -17,6 +20,9 @@ let serverProcess: ChildProcess | null = null;
 let lambdaServerProcess: ChildProcess | null = null;
 let lambdaStubServer: http.Server | null = null;
 let slackCaptureServer: http.Server | null = null;
+// Where the main server's stderr goes, so a test can check what the server
+// logged (see `readServerLogSince` in helpers.ts). Removed at teardown.
+let serverLogDir: string | null = null;
 let closeLinearFake: (() => Promise<void>) | null = null;
 
 // Captured Slack DM calls (chat.postMessage). Separate from the webhook buffer
@@ -448,7 +454,14 @@ export async function setup() {
     }
   );
 
+  // `console.warn` and `console.error` from the server's routes land here. A
+  // route that only logs, such as the reprocess-queue cron's warning when the
+  // Lambda is not configured, can be checked from the log.
+  serverLogDir = mkdtempSync(path.join(tmpdir(), "data-hub-test-server-"));
+  const serverLogPath = path.join(serverLogDir, "stderr.log");
+  writeFileSync(serverLogPath, "");
   serverProcess.stderr?.on("data", (data: Buffer) => {
+    appendFileSync(serverLogPath, data);
     const msg = data.toString();
     if (msg.includes("Error") || msg.includes("error")) {
       console.error("[next start stderr]", msg);
@@ -500,6 +513,7 @@ export async function setup() {
   process.env.__TEST_BASE_URL = baseUrl;
   process.env.__TEST_LAMBDA_BASE_URL = lambdaBaseUrl;
   process.env.__TEST_LAMBDA_STUB_URL = lambdaStubUrl;
+  process.env.__TEST_SERVER_LOG = serverLogPath;
   process.env.__TEST_DATABASE_URL = databaseUrl;
   process.env.__TEST_AUTH_SECRET = authSecret;
   process.env.__TEST_SLACK_CAPTURE_URL = slackCaptureBaseUrl;
@@ -549,6 +563,10 @@ async function teardown() {
       slackCaptureServer?.close((err) => (err ? reject(err) : resolve()))
     );
     slackCaptureServer = null;
+  }
+  if (serverLogDir) {
+    rmSync(serverLogDir, { recursive: true, force: true });
+    serverLogDir = null;
   }
   if (closeLinearFake) {
     await closeLinearFake();

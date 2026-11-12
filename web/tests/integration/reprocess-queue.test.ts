@@ -1,23 +1,30 @@
+import { randomUUID } from "node:crypto";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   DISPATCH_LOCK_NAME,
   hasStartableQueuedFiles,
+  requeueStalledDispatches,
 } from "@/lib/api/file-reprocessing";
 import {
   fileReprocessed,
   runListResponse,
+  runQueuedCancelled,
   runReprocessed,
 } from "@/lib/api/openapi";
 import { files, instrumentRuns, instruments } from "@/lib/db/schema";
+import { isStalledProcessing } from "@/lib/runs/stalled-processing";
 import {
   api,
   clearLambdaInvocations,
   closeTestDb,
   getTestDb,
   lambdaApi,
+  readServerLogSince,
   resetDb,
+  seedSessionCookie,
   seedTestUser,
+  serverLogSize,
   setLambdaResponse,
   settleLambdaInvocations,
   waitForLambdaInvocations,
@@ -47,10 +54,13 @@ const MINUTE_MS = 60 * 1000;
 
 let token: string;
 
+// `extra` is added to every file row, for columns the status alone does not
+// set, such as `dispatchId` or `stallRequeues`.
 async function seedRun(
   runId: string,
   count: number,
-  status: FileStatus = "uploaded"
+  status: FileStatus = "uploaded",
+  extra: Partial<typeof files.$inferInsert> = {}
 ): Promise<{ fileIds: number[]; runInternalId: string }> {
   const db = getTestDb();
   const [run] = await db
@@ -74,6 +84,7 @@ async function seedRun(
           processingStartedAt:
             status === "processing" ? new Date(Date.now() - MINUTE_MS) : null,
           queuedAt: status === "queued" ? new Date() : null,
+          ...extra,
         };
       })
     )
@@ -125,6 +136,14 @@ function patchFileRequest(fileId: number, status: string) {
     token,
     body: { status },
   });
+}
+
+// Moves a file's start back in time, as if its processing began that long ago.
+async function startedMinutesAgo(ids: number[], minutes: number) {
+  await getTestDb()
+    .update(files)
+    .set({ processingStartedAt: new Date(Date.now() - minutes * MINUTE_MS) })
+    .where(inArray(files.id, ids));
 }
 
 function runCron(secret?: string) {
@@ -187,11 +206,15 @@ describe("Reprocess queue", () => {
       for (const r of processing) {
         expect(r.processingStartedAt).not.toBeNull();
         expect(r.queuedAt).toBeNull();
+        expect(r.dispatchId).not.toBeNull();
       }
+      // Each start gets its own dispatch ID.
+      expect(new Set(processing.map((r) => r.dispatchId)).size).toBe(LIMIT);
       for (const r of queued) {
         expect(r.queuedAt).not.toBeNull();
         expect(r.processingStartedAt).toBeNull();
         expect(r.errorMessage).toBeNull();
+        expect(r.dispatchId).toBeNull();
       }
 
       // The run reads as Queued, with the file counts to match.
@@ -435,9 +458,15 @@ describe("Reprocess queue", () => {
       });
 
       // One processing file started 21 minutes ago and never reported back.
+      // An S3 upload started it, so it has no dispatch ID, and the cron does
+      // not put it back in the queue (see "a stalled start that the dispatcher
+      // made" for the files it does put back).
       await getTestDb()
         .update(files)
-        .set({ processingStartedAt: new Date(Date.now() - 21 * MINUTE_MS) })
+        .set({
+          processingStartedAt: new Date(Date.now() - 21 * MINUTE_MS),
+          dispatchId: null,
+        })
         .where(eq(files.id, fileIds[0]));
 
       expect(await (await runCron(CRON_SECRET)).json()).toEqual({
@@ -566,6 +595,7 @@ describe("Reprocess queue", () => {
       );
       expect(failed.processedAt).not.toBeNull();
       expect(failed.queuedAt).toBeNull();
+      expect(failed.dispatchId).toBeNull();
       expect(await idsWithStatus(fileIds, "processing")).toEqual(
         fileIds.slice(1, LIMIT + 1)
       );
@@ -588,6 +618,7 @@ describe("Reprocess queue", () => {
       expect(rows[0].status).toBe("queued");
       expect(rows[0].processingStartedAt).toBeNull();
       expect(rows[0].errorMessage).toBeNull();
+      expect(rows[0].dispatchId).toBeNull();
       // It keeps its place in line: the time it was first queued.
       expect(rows[0].queuedAt?.getTime()).toBe(rows[LIMIT].queuedAt?.getTime());
       expect(await idsWithStatus(fileIds, "processing")).toEqual(
@@ -641,25 +672,159 @@ describe("Reprocess queue", () => {
       expect(row.errorMessage).toBeNull();
     });
 
-    it("does not fail a start that a newer start has replaced", async () => {
+    it("does not fail a start that a newer dispatch has replaced", async () => {
       const runId = "restarted";
       const { fileIds } = await seedRun(runId, 1);
       await setLambdaResponse(keyOf(runId, 0), { status: 502, delayMs: 800 });
 
       await reprocessRunRequest(runId);
       await waitForLambdaInvocations(1);
-      // Another start of the same file, with its own start time.
-      const newerStart = new Date(Date.now() + 60 * 1000);
+      // Another dispatch started the same file and gave its start its own ID.
+      const newerDispatchId = randomUUID();
       await getTestDb()
         .update(files)
-        .set({ processingStartedAt: newerStart })
+        .set({ dispatchId: newerDispatchId })
         .where(eq(files.id, fileIds[0]));
       await settleLambdaInvocations(1200);
 
       const [row] = await fileRows(fileIds);
       expect(row.status).toBe("processing");
       expect(row.errorMessage).toBeNull();
-      expect(row.processingStartedAt?.getTime()).toBe(newerStart.getTime());
+      expect(row.dispatchId).toBe(newerDispatchId);
+    });
+
+    it("fails a start whose Lambda reported processing and then crashed, and starts the next queued file", async () => {
+      // Every processor sends `PATCH status: "processing"` as its first step.
+      // That update moves `processing_started_at`, so a guard that compares
+      // the timestamp stops matching and the file holds its slot until it
+      // stalls. The dispatch ID is not touched by that update.
+      const runId = "crashed-after-start";
+      const { fileIds } = await seedRun(runId, LIMIT + 1);
+      await setLambdaResponse(keyOf(runId, 0), { status: 502, delayMs: 1500 });
+      // The Lambda's own token only needs `files:update`.
+      const { token: lambdaToken } = await seedTestUser({
+        scopes: ["files:update"],
+      });
+
+      await reprocessRunRequest(runId);
+      await waitForLambdaInvocations(LIMIT);
+      const [claimed] = await fileRows(fileIds);
+      expect(claimed.status).toBe("processing");
+      expect(claimed.dispatchId).not.toBeNull();
+
+      const res = await lambdaApi(`/api/v1/files/${fileIds[0]}`, {
+        method: "PATCH",
+        token: lambdaToken,
+        body: { status: "processing" },
+      });
+      expect(res.status).toBe(200);
+      const [reported] = await fileRows(fileIds);
+      expect(reported.status).toBe("processing");
+      // The Lambda's update moved the start time and kept the dispatch ID.
+      expect(reported.processingStartedAt?.getTime()).toBeGreaterThan(
+        claimed.processingStartedAt?.getTime() ?? 0
+      );
+      expect(reported.dispatchId).toBe(claimed.dispatchId);
+
+      // The Lambda then crashes without saving `failed`, and the Function URL
+      // answers 502. The eleventh file takes the freed slot.
+      await waitForLambdaInvocations(LIMIT + 1);
+      expect(await settleLambdaInvocations()).toHaveLength(LIMIT + 1);
+
+      const [failed] = await fileRows(fileIds);
+      expect(failed.status).toBe("failed");
+      expect(failed.errorMessage).toBe(
+        "Processing ended without a result: the Lambda returned HTTP 502. Reprocess the file to try again."
+      );
+      expect(failed.dispatchId).toBeNull();
+      expect(await idsWithStatus(fileIds, "processing")).toEqual(
+        fileIds.slice(1, LIMIT + 1)
+      );
+      expect(await idsWithStatus(fileIds, "queued")).toEqual([]);
+    });
+
+    it.each([
+      "queued",
+      "completed",
+    ] as const)("does not fail an S3-style start of a %s file when an older dispatch's 502 arrives", async (before) => {
+      const runId = `s3-start-${before}`;
+      const { fileIds } = await seedRun(runId, 1);
+      await setLambdaResponse(keyOf(runId, 0), { status: 502, delayMs: 1000 });
+
+      await reprocessRunRequest(runId);
+      await waitForLambdaInvocations(1);
+      // Put the file where an S3 upload would find it, with the dispatch ID
+      // still on the row. The PATCH below must clear that ID.
+      await getTestDb()
+        .update(files)
+        .set({
+          status: before,
+          queuedAt: before === "queued" ? new Date() : null,
+          processedAt: before === "completed" ? new Date() : null,
+          processingStartedAt: null,
+        })
+        .where(eq(files.id, fileIds[0]));
+      expect((await fileRows(fileIds))[0].dispatchId).not.toBeNull();
+
+      // The Lambda that an S3 upload started reports processing.
+      expect((await patchFileRequest(fileIds[0], "processing")).status).toBe(
+        200
+      );
+      expect((await fileRows(fileIds))[0].dispatchId).toBeNull();
+      await settleLambdaInvocations(1500);
+
+      const [row] = await fileRows(fileIds);
+      expect(row.status).toBe("processing");
+      expect(row.errorMessage).toBeNull();
+    });
+
+    it.each([
+      "completed",
+      "failed",
+    ] as const)("keeps the dispatch ID until the Lambda saves %s, and then clears it", async (finalStatus) => {
+      const runId = `final-${finalStatus}`;
+      const { fileIds } = await seedRun(runId, 1);
+
+      await reprocessRunRequest(runId);
+      await waitForLambdaInvocations(1);
+      const [claimed] = await fileRows(fileIds);
+      expect(claimed.dispatchId).not.toBeNull();
+
+      expect((await patchFileRequest(fileIds[0], "processing")).status).toBe(
+        200
+      );
+      expect((await fileRows(fileIds))[0].dispatchId).toBe(claimed.dispatchId);
+
+      expect((await patchFileRequest(fileIds[0], finalStatus)).status).toBe(
+        200
+      );
+      const [done] = await fileRows(fileIds);
+      expect(done.status).toBe(finalStatus);
+      expect(done.dispatchId).toBeNull();
+    });
+
+    it("ends the earlier start when a reprocess request queues the file again", async () => {
+      // Ten files are in flight, so the stalled one has to wait in the queue.
+      await seedRun("busy", LIMIT, "processing");
+      const { fileIds } = await seedRun(
+        "stalled-once-started",
+        1,
+        "processing",
+        {
+          dispatchId: randomUUID(),
+          stallRequeues: 1,
+        }
+      );
+      await startedMinutesAgo(fileIds, 21);
+
+      const res = await reprocessFileRequest(fileIds[0]);
+      expect(res.status).toBe(200);
+      expect(fileReprocessed.parse(await res.json()).status).toBe("queued");
+
+      const [row] = await fileRows(fileIds);
+      expect(row.status).toBe("queued");
+      expect(row.dispatchId).toBeNull();
+      expect(row.stallRequeues).toBe(0);
     });
   });
 
@@ -829,6 +994,467 @@ describe("Reprocess queue", () => {
             and(inArray(files.id, fileIds), eq(files.status, "processing"))
           )
       ).toEqual([]);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // A start that stalled
+  // -------------------------------------------------------------------------
+
+  describe("a stalled start that the dispatcher made", () => {
+    it("goes back to the back of the queue once, and the oldest waiting file takes the free slot", async () => {
+      const { fileIds } = await seedRun("stall-requeue", LIMIT + 2);
+      await reprocessRunRequest("stall-requeue");
+      await waitForLambdaInvocations(LIMIT);
+      const [first] = await fileRows(fileIds);
+      expect(first.dispatchId).not.toBeNull();
+      expect(first.stallRequeues).toBe(0);
+
+      // A deploy or a crash hit between the claim and the invocation, so no
+      // Lambda is behind this file. It stays `processing` past the window.
+      await startedMinutesAgo([fileIds[0]], 21);
+      const res = await runCron(CRON_SECRET);
+      expect(res.status).toBe(200);
+      // The stalled file freed a slot, and the oldest waiting file took it.
+      expect(await res.json()).toEqual({ started_files: 1 });
+      await waitForLambdaInvocations(LIMIT + 1);
+
+      const rows = await fileRows(fileIds);
+      expect(rows[0].status).toBe("queued");
+      expect(rows[0].stallRequeues).toBe(1);
+      expect(rows[0].dispatchId).toBeNull();
+      expect(rows[0].processingStartedAt).toBeNull();
+      expect(rows[0].errorMessage).toBeNull();
+      // Back of the line: later than the file that was already waiting.
+      const lastWaiting = rows[LIMIT + 1];
+      expect(lastWaiting.status).toBe("queued");
+      expect(rows[0].queuedAt?.getTime()).toBeGreaterThan(
+        lastWaiting.queuedAt?.getTime() ?? Number.POSITIVE_INFINITY
+      );
+      expect(rows[LIMIT].status).toBe("processing");
+    });
+
+    it("is put back once and only once", async () => {
+      const { fileIds } = await seedRun("once", 1);
+      await reprocessRunRequest("once");
+      await waitForLambdaInvocations(1);
+      const [first] = await fileRows(fileIds);
+
+      // The first stall: back in the queue, and started again in the same run
+      // of the cron because there is room.
+      await startedMinutesAgo(fileIds, 21);
+      expect(await (await runCron(CRON_SECRET)).json()).toEqual({
+        started_files: 1,
+      });
+      await waitForLambdaInvocations(2);
+      const [second] = await fileRows(fileIds);
+      expect(second.status).toBe("processing");
+      expect(second.stallRequeues).toBe(1);
+      expect(second.dispatchId).not.toBeNull();
+      expect(second.dispatchId).not.toBe(first.dispatchId);
+
+      // The second stall: the file stays Stalled for a person to handle.
+      await startedMinutesAgo(fileIds, 21);
+      expect(await (await runCron(CRON_SECRET)).json()).toEqual({
+        started_files: 0,
+      });
+      expect(await settleLambdaInvocations()).toHaveLength(2);
+      const [third] = await fileRows(fileIds);
+      expect(third.status).toBe("processing");
+      expect(third.stallRequeues).toBe(1);
+      expect(third.dispatchId).toBe(second.dispatchId);
+      expect(
+        isStalledProcessing({
+          status: third.status,
+          processingStartedAt: third.processingStartedAt,
+        })
+      ).toBe(true);
+    });
+
+    it("counts a missing start time as stalled, and leaves a start inside the window", async () => {
+      const inside = await seedRun("inside-window", 1, "processing", {
+        dispatchId: randomUUID(),
+      });
+      await startedMinutesAgo(inside.fileIds, 19);
+      const noStart = await seedRun("no-start-time", 1, "processing", {
+        dispatchId: randomUUID(),
+        processingStartedAt: null,
+      });
+
+      expect(await requeueStalledDispatches()).toBe(1);
+
+      const [insideRow] = await fileRows(inside.fileIds);
+      expect(insideRow.status).toBe("processing");
+      expect(insideRow.stallRequeues).toBe(0);
+      const [noStartRow] = await fileRows(noStart.fileIds);
+      expect(noStartRow.status).toBe("queued");
+      expect(noStartRow.stallRequeues).toBe(1);
+    });
+
+    it("leaves a start that an S3 upload made, which has no dispatch ID", async () => {
+      const { fileIds } = await seedRun("s3-started", 1, "processing");
+      await startedMinutesAgo(fileIds, 21);
+
+      expect(await (await runCron(CRON_SECRET)).json()).toEqual({
+        started_files: 0,
+      });
+      expect(await settleLambdaInvocations()).toHaveLength(0);
+      const [row] = await fileRows(fileIds);
+      expect(row.status).toBe("processing");
+      expect(row.dispatchId).toBeNull();
+      expect(row.stallRequeues).toBe(0);
+    });
+
+    it("leaves deleted files, processed artifacts, files in deleted runs, and files already put back once", async () => {
+      const stalledDispatch = () => ({ dispatchId: randomUUID() });
+      const a = await seedRun("leave-a", 4, "processing", stalledDispatch());
+      const [deletedFile, artifact, putBackOnce, eligible] = a.fileIds;
+      const b = await seedRun("leave-b", 1, "processing", stalledDispatch());
+      await startedMinutesAgo([...a.fileIds, ...b.fileIds], 21);
+
+      const db = getTestDb();
+      await db
+        .update(files)
+        .set({ deletedAt: new Date() })
+        .where(eq(files.id, deletedFile));
+      await db
+        .update(files)
+        .set({ category: "processed" })
+        .where(eq(files.id, artifact));
+      await db
+        .update(files)
+        .set({ stallRequeues: 1 })
+        .where(eq(files.id, putBackOnce));
+      await db
+        .update(instrumentRuns)
+        .set({ deletedAt: new Date() })
+        .where(eq(instrumentRuns.id, b.runInternalId));
+
+      expect(await requeueStalledDispatches()).toBe(1);
+
+      expect(
+        await idsWithStatus([...a.fileIds, ...b.fileIds], "queued")
+      ).toEqual([eligible]);
+      expect(
+        await idsWithStatus([...a.fileIds, ...b.fileIds], "processing")
+      ).toEqual([deletedFile, artifact, putBackOnce, ...b.fileIds]);
+    });
+
+    it("is put back only after the default window, even when files show as stalled sooner", async () => {
+      const young = await seedRun("floor-young", 1, "processing", {
+        dispatchId: randomUUID(),
+      });
+      const old = await seedRun("floor-old", 1, "processing", {
+        dispatchId: randomUUID(),
+      });
+      await startedMinutesAgo(young.fileIds, 5);
+      await startedMinutesAgo(old.fileIds, 21);
+
+      const previous = process.env.STALLED_PROCESSING_AFTER_MINUTES;
+      process.env.STALLED_PROCESSING_AFTER_MINUTES = "1";
+      try {
+        // With a one-minute window the five-minute-old start reads as Stalled,
+        // but its Lambda may still be running, so it is not put back.
+        const [youngRow] = await fileRows(young.fileIds);
+        expect(
+          isStalledProcessing({
+            status: youngRow.status,
+            processingStartedAt: youngRow.processingStartedAt,
+          })
+        ).toBe(true);
+        expect(await requeueStalledDispatches()).toBe(1);
+      } finally {
+        if (previous === undefined) {
+          delete process.env.STALLED_PROCESSING_AFTER_MINUTES;
+        } else {
+          process.env.STALLED_PROCESSING_AFTER_MINUTES = previous;
+        }
+      }
+
+      expect(await idsWithStatus(young.fileIds, "processing")).toEqual(
+        young.fileIds
+      );
+      expect(await idsWithStatus(old.fileIds, "queued")).toEqual(old.fileIds);
+    });
+
+    it("gets its one retry back after a person reprocesses the file", async () => {
+      const { fileIds } = await seedRun("retry-back", 1, "processing", {
+        dispatchId: randomUUID(),
+        stallRequeues: 1,
+      });
+      await startedMinutesAgo(fileIds, 21);
+
+      // The file is Stalled and was already put back once, so the cron leaves
+      // it. A person reprocesses it, and the count starts again.
+      expect(await (await runCron(CRON_SECRET)).json()).toEqual({
+        started_files: 0,
+      });
+      const res = await reprocessFileRequest(fileIds[0]);
+      expect(res.status).toBe(200);
+      await waitForLambdaInvocations(1);
+      const [restarted] = await fileRows(fileIds);
+      expect(restarted.status).toBe("processing");
+      expect(restarted.stallRequeues).toBe(0);
+      expect(restarted.dispatchId).not.toBeNull();
+
+      await startedMinutesAgo(fileIds, 21);
+      expect(await (await runCron(CRON_SECRET)).json()).toEqual({
+        started_files: 1,
+      });
+      await waitForLambdaInvocations(2);
+      expect((await fileRows(fileIds))[0].stallRequeues).toBe(1);
+    });
+
+    it("is left alone when the Lambda is not configured", async () => {
+      // The main test server has no Lambda Function URL. Nothing could start a
+      // file that went back in the queue, so the cron does not put it there.
+      const { fileIds } = await seedRun("no-lambda-stall", 1, "processing", {
+        dispatchId: randomUUID(),
+      });
+      await startedMinutesAgo(fileIds, 21);
+
+      const res = await api("/api/cron/reprocess-queue", {
+        headers: { Authorization: `Bearer ${CRON_SECRET}` },
+      });
+      expect(res.status).toBe(200);
+      const [row] = await fileRows(fileIds);
+      expect(row.status).toBe("processing");
+      expect(row.stallRequeues).toBe(0);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Cancelling queued files
+  // -------------------------------------------------------------------------
+
+  describe("cancelling queued files", () => {
+    // The main test server has no Lambda Function URL: cancelling is how a
+    // person clears files that nothing can start.
+    function cancelRequest(
+      runId: string,
+      options: { token?: string; headers?: Record<string, string> } = {
+        token,
+      }
+    ) {
+      return api(
+        `/api/v1/instruments/${instrumentId}/runs/${encodeURIComponent(runId)}/cancel-queued`,
+        { method: "POST", ...options }
+      );
+    }
+
+    async function runUpdatedAt(runInternalId: string) {
+      const [run] = await getTestDb()
+        .select({ updatedAt: instrumentRuns.updatedAt })
+        .from(instrumentRuns)
+        .where(eq(instrumentRuns.id, runInternalId));
+      return run.updatedAt.getTime();
+    }
+
+    it("fails the run's queued files with a message, and leaves every other file alone", async () => {
+      // The `dispatchId` on these queued rows is stale on purpose: cancelling
+      // clears it.
+      const queued = await seedRun("cancel-me", 3, "queued", {
+        dispatchId: randomUUID(),
+      });
+      const db = getTestDb();
+      const run = { id: queued.runInternalId };
+
+      // More files in the same run: one for each other status, and a queued
+      // file that was dismissed.
+      const extraRows = await db
+        .insert(files)
+        .values(
+          (
+            [
+              ["uploaded.csv", "uploaded"],
+              ["running.csv", "processing"],
+              ["done.csv", "completed"],
+              ["broken.csv", "failed"],
+              ["dismissed.csv", "queued"],
+            ] as const
+          ).map(([filename, status]) => ({
+            instrumentRunId: run.id,
+            filename,
+            relativePath: filename,
+            s3Bucket: "test-bucket",
+            s3Key: `${instrumentId}/cancel-me/${filename}`,
+            category: "raw" as const,
+            status,
+            queuedAt: status === "queued" ? new Date() : null,
+            processingStartedAt: status === "processing" ? new Date() : null,
+            dispatchId: status === "processing" ? randomUUID() : null,
+            errorMessage: status === "failed" ? "parser error" : null,
+            deletedAt: filename === "dismissed.csv" ? new Date() : null,
+          }))
+        )
+        .returning({ id: files.id });
+      const extraIds = extraRows.map((r) => r.id);
+      const extraBefore = await fileRows(extraIds);
+      const updatedBefore = await runUpdatedAt(run.id);
+
+      const res = await cancelRequest("cancel-me");
+      expect(res.status).toBe(200);
+      const data = runQueuedCancelled.parse(await res.json());
+      expect(data).toEqual({
+        instrument_id: instrumentId,
+        run_id: "cancel-me",
+        files_cancelled: 3,
+      });
+
+      for (const row of await fileRows(queued.fileIds)) {
+        expect(row.status).toBe("failed");
+        expect(row.errorMessage).toBe(
+          "Reprocessing was cancelled before it started. Reprocess the file to try again."
+        );
+        expect(row.queuedAt).toBeNull();
+        expect(row.dispatchId).toBeNull();
+        expect(row.processedAt).not.toBeNull();
+      }
+      // The other files, including the dismissed queued one, are unchanged.
+      expect(await fileRows(extraIds)).toEqual(extraBefore);
+      expect(await runUpdatedAt(run.id)).toBeGreaterThan(updatedBefore);
+    });
+
+    it("answers 0 when no file is queued, and does not touch other runs", async () => {
+      await seedRun("nothing-queued", 2, "completed");
+      const other = await seedRun("other-run", 2, "queued");
+
+      const res = await cancelRequest("nothing-queued");
+      expect(res.status).toBe(200);
+      expect(runQueuedCancelled.parse(await res.json()).files_cancelled).toBe(
+        0
+      );
+      expect(await idsWithStatus(other.fileIds, "queued")).toEqual(
+        other.fileIds
+      );
+    });
+
+    it("answers 404 for an unknown run or instrument", async () => {
+      const run = await cancelRequest("no-such-run");
+      expect(run.status).toBe(404);
+      expect((await run.json()).error.code).toBe("NOT_FOUND");
+
+      const instrument = await api(
+        "/api/v1/instruments/no-such-instrument/runs/anything/cancel-queued",
+        { method: "POST", token }
+      );
+      expect(instrument.status).toBe(404);
+    });
+
+    it("clears the queued files of a deleted run, and skips deleted files", async () => {
+      const { fileIds, runInternalId } = await seedRun(
+        "deleted-run-queue",
+        3,
+        "queued"
+      );
+      const db = getTestDb();
+      await db
+        .update(files)
+        .set({ deletedAt: new Date() })
+        .where(eq(files.id, fileIds[0]));
+      await db
+        .update(instrumentRuns)
+        .set({ deletedAt: new Date() })
+        .where(eq(instrumentRuns.id, runInternalId));
+
+      const res = await cancelRequest("deleted-run-queue");
+      expect(res.status).toBe(200);
+      expect(runQueuedCancelled.parse(await res.json()).files_cancelled).toBe(
+        2
+      );
+      expect(await idsWithStatus(fileIds, "failed")).toEqual(fileIds.slice(1));
+      expect(await idsWithStatus(fileIds, "queued")).toEqual([fileIds[0]]);
+    });
+
+    it("needs the same scope as reprocessing a run, and accepts a browser session", async () => {
+      await seedRun("auth-run", 1, "queued");
+
+      expect((await cancelRequest("auth-run", {})).status).toBe(401);
+
+      const readOnly = await seedTestUser({ scopes: ["runs:read"] });
+      const denied = await cancelRequest("auth-run", {
+        token: readOnly.token,
+      });
+      expect(denied.status).toBe(403);
+
+      const person = await seedTestUser();
+      const viaSession = await cancelRequest("auth-run", {
+        headers: { Cookie: await seedSessionCookie(person.userId) },
+      });
+      expect(viaSession.status).toBe(200);
+      expect(
+        runQueuedCancelled.parse(await viaSession.json()).files_cancelled
+      ).toBe(1);
+
+      // `runs:reprocess` alone is enough.
+      const reprocessor = await seedTestUser({ scopes: ["runs:reprocess"] });
+      const allowed = await cancelRequest("auth-run", {
+        token: reprocessor.token,
+      });
+      expect(allowed.status).toBe(200);
+    });
+
+    it("leaves cancelled files out of the queue until someone reprocesses them", async () => {
+      const { fileIds } = await seedRun("cancel-then-retry", 2, "queued");
+      expect(
+        (await (await cancelRequest("cancel-then-retry")).json())
+          .files_cancelled
+      ).toBe(2);
+
+      // The dispatcher has nothing to start.
+      expect(await (await runCron(CRON_SECRET)).json()).toEqual({
+        started_files: 0,
+      });
+      expect(await settleLambdaInvocations(300)).toHaveLength(0);
+
+      // A cancelled file can be reprocessed like any failed file.
+      const res = await reprocessFileRequest(fileIds[0]);
+      expect(res.status).toBe(200);
+      expect(fileReprocessed.parse(await res.json()).status).toBe("processing");
+      await waitForLambdaInvocations(1);
+      const [retried] = await fileRows([fileIds[0]]);
+      expect(retried.status).toBe("processing");
+      expect(retried.errorMessage).toBeNull();
+      expect((await fileRows([fileIds[1]]))[0].status).toBe("failed");
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // The cron when the Lambda is not configured
+  // -------------------------------------------------------------------------
+
+  describe("the cron when the Lambda is not configured", () => {
+    const WARNING =
+      /queued for reprocessing, but the Lambda is not configured/g;
+
+    async function cronWarnings(): Promise<number> {
+      const offset = serverLogSize();
+      const res = await api("/api/cron/reprocess-queue", {
+        headers: { Authorization: `Bearer ${CRON_SECRET}` },
+      });
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ started_files: 0 });
+      return (await readServerLogSince(offset)).match(WARNING)?.length ?? 0;
+    }
+
+    it("logs one warning per run while files are waiting in the queue", async () => {
+      await seedRun("warn-me", 3, "queued");
+
+      expect(await cronWarnings()).toBe(1);
+      expect(await cronWarnings()).toBe(1);
+    });
+
+    it("logs nothing when no queued file could start", async () => {
+      expect(await cronWarnings()).toBe(0);
+
+      // A queued file in a deleted run cannot start, so it is not a reason to
+      // warn.
+      const { runInternalId } = await seedRun("warn-deleted", 1, "queued");
+      await getTestDb()
+        .update(instrumentRuns)
+        .set({ deletedAt: new Date() })
+        .where(eq(instrumentRuns.id, runInternalId));
+      expect(await cronWarnings()).toBe(0);
     });
   });
 });

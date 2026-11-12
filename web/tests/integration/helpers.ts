@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
+import { readFileSync, statSync } from "node:fs";
 import { makeSignature } from "better-auth/crypto";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
@@ -282,6 +283,37 @@ export async function waitForLambdaQuiet(
   throw new Error(
     `Lambda stub still receiving invocations after ${timeoutMs}ms`
   );
+}
+
+// ---------------------------------------------------------------------------
+// The main test server's stderr. Global setup writes it to a file, so a test
+// can check what a route logged with `console.warn` or `console.error`.
+// Record the size before the request and read what came after it.
+// ---------------------------------------------------------------------------
+
+function getServerLogPath(): string {
+  const logPath = process.env.__TEST_SERVER_LOG;
+  if (!logPath) {
+    throw new Error("__TEST_SERVER_LOG not set — global setup failed?");
+  }
+  return logPath;
+}
+
+export function serverLogSize(): number {
+  return statSync(getServerLogPath()).size;
+}
+
+/**
+ * The server's stderr written after `offset` (from `serverLogSize`). Waits a
+ * moment first, because the server's output reaches the file a little after
+ * the response is sent.
+ */
+export async function readServerLogSince(
+  offset: number,
+  settleMs = 500
+): Promise<string> {
+  await new Promise((r) => setTimeout(r, settleMs));
+  return readFileSync(getServerLogPath()).subarray(offset).toString("utf8");
 }
 
 /**

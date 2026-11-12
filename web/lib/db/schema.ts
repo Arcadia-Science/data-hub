@@ -10,6 +10,7 @@ import {
   pgEnum,
   pgTable,
   primaryKey,
+  smallint,
   text,
   timestamp,
   unique,
@@ -824,6 +825,18 @@ export const files = pgTable(
       withTimezone: true,
       mode: "date",
     }),
+    // Names the start that the reprocess dispatcher made. The dispatcher sets
+    // a fresh ID when it moves a file from `queued` to `processing`, and its
+    // own later writes to the file match on that ID. The Lambda's own
+    // processing -> processing update keeps it. Every other change of the
+    // file's start clears it: a start from an S3 upload, a final status, a new
+    // reprocess request, a cancel, and a requeue. NULL means the dispatcher
+    // did not start the file's current run of processing.
+    dispatchId: uuid("dispatch_id"),
+    // How many times the dispatcher has put this file back in the queue after
+    // its start stalled. The reprocess-queue cron does that once. A manual
+    // reprocess resets the count.
+    stallRequeues: smallint("stall_requeues").notNull().default(0),
     // On-disk creation time of the file, reported by the watcher
     // (st_birthtime where available, else st_mtime). NULL for
     // Lambda-created files and rows predating this column.

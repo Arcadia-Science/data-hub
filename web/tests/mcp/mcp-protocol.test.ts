@@ -547,6 +547,19 @@ vi.mock("@/lib/api/file-reprocessing", () => ({
     filesQueued: 1,
     filesFailed: 0,
   }),
+  cancelQueuedFilesForRun: vi
+    .fn()
+    .mockImplementation((instrumentId: string, runId: string) => {
+      if (runId === "run-1") {
+        return { ok: true, instrumentId, runId, filesCancelled: 3 };
+      }
+      return {
+        ok: false,
+        status: 404,
+        code: "NOT_FOUND",
+        message: `Run '${runId}' not found for instrument '${instrumentId}'`,
+      };
+    }),
 }));
 
 vi.mock("@/lib/api/run-lifecycle", () => ({
@@ -696,6 +709,7 @@ describe("MCP Protocol (in-memory)", () => {
     "edit_run_comment",
     "delete_run_comment",
     "reprocess_run",
+    "cancel_queued_files",
     "delete_run",
     "restore_run",
     "request_run_upload",
@@ -848,7 +862,7 @@ describe("MCP Protocol (in-memory)", () => {
 
   it("every registered tool advertises outputSchema", async () => {
     const { tools } = await client.listTools();
-    expect(tools).toHaveLength(41);
+    expect(tools).toHaveLength(42);
     for (const tool of tools) {
       const schema = tool.outputSchema as
         | { type?: string; oneOf?: unknown; anyOf?: unknown }
@@ -1909,6 +1923,39 @@ describe("MCP Protocol (in-memory)", () => {
     expect(parsed.filesQueued).toBe(1);
     expect(parsed.filesFailed).toBe(0);
     expectStructuredMatchesText(result);
+  });
+
+  it("cancel_queued_files returns the number of files cancelled", async () => {
+    const result = await client.callTool({
+      name: "cancel_queued_files",
+      arguments: { instrumentId: "test-plate-reader", runId: "run-1" },
+    });
+    expect(result.isError).toBeFalsy();
+    expect(parseText(result.content)).toEqual({
+      instrumentId: "test-plate-reader",
+      runId: "run-1",
+      filesCancelled: 3,
+    });
+    expectStructuredMatchesText(result);
+  });
+
+  it("cancel_queued_files reports an unknown run as an error", async () => {
+    const result = await client.callTool({
+      name: "cancel_queued_files",
+      arguments: { instrumentId: "test-plate-reader", runId: "no-such-run" },
+    });
+    expect(result.isError).toBe(true);
+    const text = (result.content as Array<{ type: string; text: string }>)[0]
+      .text;
+    expect(text).toContain("not found");
+  });
+
+  it("cancel_queued_files is a write tool that does not delete anything", async () => {
+    const { tools } = await client.listTools();
+    const tool = tools.find((t) => t.name === "cancel_queued_files");
+    expect(tool?.annotations?.readOnlyHint).toBe(false);
+    expect(tool?.annotations?.destructiveHint).toBe(false);
+    expect(tool?.description).toContain("'failed'");
   });
 
   it("delete_run and restore_run return structured lifecycle payloads", async () => {

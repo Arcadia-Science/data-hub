@@ -6,6 +6,7 @@ import { runReportToolUiMeta } from "@/lib/mcp/ui-apps";
 import { RUN_STATUS_VALUES } from "@/lib/runs/run-status";
 import {
   addRunCommentOutputSchema,
+  cancelQueuedFilesOutputSchema,
   claimRunOutputSchema,
   claimRunsOutputSchema,
   deleteRunCommentOutputSchema,
@@ -328,6 +329,28 @@ export const reprocessRunTool = {
   annotations: { readOnlyHint: false, destructiveHint: true },
 } as const satisfies McpToolDef;
 
+export const cancelQueuedFilesTool = {
+  name: "cancel_queued_files",
+  group: "runs",
+  scope: "runs:reprocess",
+  title: "Cancel Queued Files",
+  description:
+    "Take every queued file of a run out of the reprocessing queue. Each one becomes 'failed' with a message that says the reprocess was cancelled, and can be reprocessed again. Files that have already started processing are not affected. Use it when queued files are not going to start, or after a reprocess_run that was a mistake. filesCancelled is 0 when the run has no queued files. Works on a soft-deleted run too.",
+  inputSchema: {
+    instrumentId: z.string().describe("Instrument identifier"),
+    runId: z.string().describe("Run identifier within the instrument"),
+  },
+  outputSchema: cancelQueuedFilesOutputSchema,
+  // Nothing is deleted or overwritten: the files keep their data and a later
+  // reprocess starts them again. Calling it twice cancels nothing the second
+  // time.
+  annotations: {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: true,
+  },
+} as const satisfies McpToolDef;
+
 export const deleteRunTool = {
   name: "delete_run",
   group: "runs",
@@ -423,6 +446,7 @@ export const RUN_TOOL_DEFS = [
   editRunCommentTool,
   deleteRunCommentTool,
   reprocessRunTool,
+  cancelQueuedFilesTool,
   deleteRunTool,
   restoreRunTool,
   requestRunUploadTool,
