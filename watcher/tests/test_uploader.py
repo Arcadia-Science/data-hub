@@ -470,8 +470,8 @@ class TestUploadFilesParallelism:
         # We have to seed the ``runs`` row first so the UPDATE inside
         # ``record_run_uploaded`` actually flips a column we can read
         # back. This mirrors how the run-detector orders calls in real
-        # life (POST run → record_run_reported → upload_files → empty).
-        state_db.record_run_reported("RUN-EMPTY")
+        # life (POST run → record_report → upload_files → empty).
+        state_db.record_report("RUN-EMPTY", [], new_run=True)
 
         succeeded = uploader.upload_files("RUN-EMPTY", [])
 
@@ -1034,7 +1034,7 @@ class TestStopDuringPrep:
             mock_client, state_db, tmp_path, _single_presigned("big.bin")
         )
         # The run detector records the row with the run report, before the upload starts.
-        state_db.record_pending_uploads("RUN-001", ["big.bin"])
+        state_db.record_report("RUN-001", [], new_run=False, pending_relative_paths=["big.bin"])
 
         with patch.object(Uploader, "_put_to_presigned_url") as put_file:
             assert up.upload_files("RUN-001", [_file_info(path)]) == 0
@@ -1064,7 +1064,7 @@ class TestAbort:
         )
         mock_client.get_part_urls.side_effect = _part_urls
         # The run detector records the row with the run report, before the upload starts.
-        state_db.record_pending_uploads("RUN-001", ["big.bin"])
+        state_db.record_report("RUN-001", [], new_run=False, pending_relative_paths=["big.bin"])
         bytes_sent: list[int] = []
 
         def put(url: str, *, data: _FileSlice, **kwargs: object) -> MagicMock:
@@ -1296,7 +1296,9 @@ class TestPendingUploads:
         bad = run_dir / "bad.csv"
         bad.write_text("bad")
         # The run detector records the rows with the run report, before the upload starts.
-        state_db.record_pending_uploads("RUN-1", ["RUN-1/ok.csv", "RUN-1/bad.csv"])
+        state_db.record_report(
+            "RUN-1", [], new_run=False, pending_relative_paths=["RUN-1/ok.csv", "RUN-1/bad.csv"]
+        )
 
         with patch.object(uploader, "_upload_single", side_effect=lambda path, run_id: path == ok):
             assert uploader.upload_files("RUN-1", [_file_info(ok), _file_info(bad)]) == 1
@@ -1313,7 +1315,12 @@ class TestPendingUploads:
             (run_dir / name).write_text("x")
             files.append(_file_info(run_dir / name))
         # The run detector records the rows with the run report, before the upload starts.
-        state_db.record_pending_uploads("RUN-1", [f"RUN-1/{f.filename}" for f in files])
+        state_db.record_report(
+            "RUN-1",
+            [],
+            new_run=False,
+            pending_relative_paths=[f"RUN-1/{f.filename}" for f in files],
+        )
         attempted: list[str] = []
 
         def upload(path: Path, run_id: str) -> bool:
@@ -1337,7 +1344,9 @@ class TestPendingUploads:
         self, uploader: Uploader, state_db: StateDB, run_dir: Path
     ) -> None:
         (run_dir / "data.csv").write_text("x")
-        state_db.record_pending_uploads("RUN-1", ["RUN-1/data.csv"])
+        state_db.record_report(
+            "RUN-1", [], new_run=False, pending_relative_paths=["RUN-1/data.csv"]
+        )
 
         with patch.object(uploader, "_upload_single", return_value=True) as upload:
             uploader.retry_pending_uploads()
@@ -1349,7 +1358,9 @@ class TestPendingUploads:
         self, uploader: Uploader, state_db: StateDB, run_dir: Path
     ) -> None:
         (run_dir / "data.csv").write_text("x")
-        state_db.record_pending_uploads("RUN-1", ["RUN-1/data.csv"])
+        state_db.record_report(
+            "RUN-1", [], new_run=False, pending_relative_paths=["RUN-1/data.csv"]
+        )
 
         with patch.object(uploader, "_upload_single", return_value=False):
             uploader.retry_pending_uploads()
@@ -1362,7 +1373,9 @@ class TestPendingUploads:
         self, uploader: Uploader, state_db: StateDB, run_dir: Path
     ) -> None:
         (run_dir / "data.csv").write_text("x")
-        state_db.record_pending_uploads("RUN-1", ["RUN-1/data.csv"])
+        state_db.record_report(
+            "RUN-1", [], new_run=False, pending_relative_paths=["RUN-1/data.csv"]
+        )
 
         with patch.object(uploader, "_upload_single", return_value=False):
             for _ in range(MAX_PENDING_UPLOAD_ATTEMPTS):
@@ -1383,7 +1396,12 @@ class TestPendingUploads:
     ) -> None:
         (run_dir / "broken.csv").write_text("x")
         (run_dir / "fine.csv").write_text("x")
-        state_db.record_pending_uploads("RUN-1", ["RUN-1/broken.csv", "RUN-1/fine.csv"])
+        state_db.record_report(
+            "RUN-1",
+            [],
+            new_run=False,
+            pending_relative_paths=["RUN-1/broken.csv", "RUN-1/fine.csv"],
+        )
 
         def upload(path: Path, run_id: str) -> bool:
             if path.name == "broken.csv":
@@ -1401,7 +1419,9 @@ class TestPendingUploads:
         assert (pending.relative_path, pending.attempts) == ("RUN-1/broken.csv", 1)
 
     def test_retry_drops_a_file_that_is_gone(self, uploader: Uploader, state_db: StateDB) -> None:
-        state_db.record_pending_uploads("RUN-1", ["RUN-1/deleted.csv"])
+        state_db.record_report(
+            "RUN-1", [], new_run=False, pending_relative_paths=["RUN-1/deleted.csv"]
+        )
 
         with patch.object(uploader, "_upload_single") as upload:
             uploader.retry_pending_uploads()
@@ -1431,7 +1451,9 @@ class TestPendingUploads:
             stop_event=stop,
         )
         (run_dir / "data.csv").write_text("x")
-        state_db.record_pending_uploads("RUN-1", ["RUN-1/data.csv"])
+        state_db.record_report(
+            "RUN-1", [], new_run=False, pending_relative_paths=["RUN-1/data.csv"]
+        )
 
         def interrupted(path: Path, run_id: str) -> bool:
             stop.set()
@@ -2724,7 +2746,7 @@ class TestParallelQueue:
         for i in range(3):
             (run_dir / f"p-{i}.csv").write_text("x")
             paths.append(f"RUN-1/p-{i}.csv")
-        state_db.record_pending_uploads("RUN-1", paths)
+        state_db.record_report("RUN-1", [], new_run=False, pending_relative_paths=paths)
         up = _make_uploader(mock_client, state_db, tmp_path, parallelism=3)
         barrier = threading.Barrier(3, timeout=3)
 

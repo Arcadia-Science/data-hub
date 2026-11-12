@@ -87,6 +87,19 @@ def test_a_later_report_leaves_the_run_row_alone(db: StateDB) -> None:
     assert [p.relative_path for p in db.pending_uploads()] == ["run/b.csv"]
 
 
+def test_a_repeated_report_of_a_new_run_keeps_the_run_s_uploaded_time(db: StateDB) -> None:
+    # A POST that is sent again after a write failed, or after a restart, records the run again.
+    db.record_report("run", _manifest("a.csv"), new_run=True)
+    db.record_run_uploaded("run")
+    before = db.get_run("run")
+    assert before is not None and before.uploaded_at is not None
+
+    db.record_report("run", _manifest("a.csv"), new_run=True)
+
+    after = db.get_run("run")
+    assert after is not None and after.uploaded_at == before.uploaded_at
+
+
 def test_a_file_that_is_pending_already_keeps_its_attempt_count(db: StateDB) -> None:
     db.record_report("run", _manifest("a.csv"), new_run=True, pending_relative_paths=["run/a.csv"])
     assert db.bump_pending_upload_attempts("run/a.csv") == 1
@@ -129,7 +142,12 @@ def test_a_failed_report_does_not_undo_an_earlier_one(db: StateDB) -> None:
 
 
 def test_a_reader_never_sees_part_of_a_report(db: StateDB) -> None:
-    """Other threads, and a process that is killed, see a whole report or none of it."""
+    """A thread that reads while others write sees a whole report or none of it.
+
+    A process killed in the middle of a report is the end-to-end test's case
+    (`watcher/e2e/test_upload_auto.py`); here the readers are other threads, which see what a
+    restarted process would: only what was committed.
+    """
     files = 5
     writers = 4
     reports_each = 25

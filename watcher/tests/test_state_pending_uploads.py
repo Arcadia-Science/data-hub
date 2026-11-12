@@ -17,8 +17,10 @@ def db(tmp_path: Path) -> Generator[StateDB, None, None]:
 
 
 def test_lists_rows_oldest_first_and_clears_one(db: StateDB) -> None:
-    db.record_pending_uploads("run-b", ["run-b/z.tif"])
-    db.record_pending_uploads("run-a", ["run-a/a.tif", "run-a/b.tif"])
+    db.record_report("run-b", [], new_run=False, pending_relative_paths=["run-b/z.tif"])
+    db.record_report(
+        "run-a", [], new_run=False, pending_relative_paths=["run-a/a.tif", "run-a/b.tif"]
+    )
 
     assert [(p.relative_path, p.run_id, p.attempts) for p in db.pending_uploads()] == [
         ("run-b/z.tif", "run-b", 0),
@@ -32,11 +34,11 @@ def test_lists_rows_oldest_first_and_clears_one(db: StateDB) -> None:
 
 
 def test_recording_a_file_again_keeps_its_attempt_count(db: StateDB) -> None:
-    db.record_pending_uploads("run", ["run/a.tif"])
+    db.record_report("run", [], new_run=False, pending_relative_paths=["run/a.tif"])
     assert db.bump_pending_upload_attempts("run/a.tif") == 1
 
     # The auto path can hand the same file over again within one session.
-    db.record_pending_uploads("run", ["run/a.tif"])
+    db.record_report("run", [], new_run=False, pending_relative_paths=["run/a.tif"])
 
     assert db.bump_pending_upload_attempts("run/a.tif") == 2
 
@@ -46,7 +48,7 @@ def test_bumping_a_missing_row_returns_zero(db: StateDB) -> None:
 
 
 def test_record_upload_clears_the_pending_row(db: StateDB) -> None:
-    db.record_pending_uploads("run", ["run/a.tif", "run/b.tif"])
+    db.record_report("run", [], new_run=False, pending_relative_paths=["run/a.tif", "run/b.tif"])
 
     db.record_upload(
         "a.tif",

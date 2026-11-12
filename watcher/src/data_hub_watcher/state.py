@@ -324,7 +324,7 @@ class StateDB:
             )
             # detected_files predates the file_created_at column; add it
             # as nullable so legacy rows survive the migration. New rows
-            # always populate it (record_detected_files passes the value
+            # always populate it (record_report passes the value
             # through).
             detected_cols = {
                 row[1] for row in self._conn.execute("PRAGMA table_info(detected_files)")
@@ -464,27 +464,6 @@ class StateDB:
     # pending_uploads
     # ------------------------------------------------------------------
 
-    def record_pending_uploads(self, run_id: str, relative_paths: Iterable[str]) -> None:
-        """Mark files as handed to the auto-mode uploader.
-
-        Existing rows keep their attempt count, so a file retried within
-        one session doesn't reset its restart budget.
-        """
-        rows = [(rel_path, run_id) for rel_path in relative_paths]
-        if not rows:
-            return
-        with self._write_lock:
-            self._insert_pending_uploads(self._conn, rows)
-            self._conn.commit()
-
-    @staticmethod
-    def _insert_pending_uploads(conn: sqlite3.Connection, rows: list[tuple[str, str]]) -> None:
-        """Statement of `record_pending_uploads`, for the caller to commit."""
-        conn.executemany(
-            "INSERT OR IGNORE INTO pending_uploads (relative_path, run_id) VALUES (?, ?)",
-            rows,
-        )
-
     def pending_uploads(self) -> list[PendingUploadRecord]:
         """Return every pending upload, oldest first."""
         cur = self._conn.execute(
@@ -521,47 +500,6 @@ class StateDB:
     # ------------------------------------------------------------------
     # detected_files
     # ------------------------------------------------------------------
-
-    def record_detected_files(
-        self,
-        run_id: str,
-        files: Iterable[tuple[str, str, int, float, float | None]],
-    ) -> None:
-        """Persist the file manifest for a reported run.
-
-        *files* is an iterable of `(relative_path, filename, size_bytes,
-        mtime, file_created_at)` tuples. Rows are upserted so repeated
-        calls for the same run (e.g. as more files stabilise and PATCHes
-        are issued) keep the table consistent with the in-memory
-        `RunState`. *file_created_at* may be `None` for legacy callers.
-        """
-        rows = self._detected_file_rows(run_id, files)
-        if not rows:
-            return
-        with self._write_lock:
-            self._insert_detected_files(self._conn, rows)
-            self._conn.commit()
-
-    @staticmethod
-    def _detected_file_rows(
-        run_id: str, files: Iterable[tuple[str, str, int, float, float | None]]
-    ) -> list[tuple[str, str, str, int, float, float | None]]:
-        return [
-            (run_id, rel_path, filename, size_bytes, mtime, file_created_at)
-            for rel_path, filename, size_bytes, mtime, file_created_at in files
-        ]
-
-    @staticmethod
-    def _insert_detected_files(
-        conn: sqlite3.Connection, rows: list[tuple[str, str, str, int, float, float | None]]
-    ) -> None:
-        """Statement of `record_detected_files`, for the caller to commit."""
-        conn.executemany(
-            "INSERT OR REPLACE INTO detected_files "
-            "(run_id, relative_path, filename, size_bytes, mtime, file_created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            rows,
-        )
 
     def has_detected_stat_match(self, relative_path: str, size_bytes: int, mtime: float) -> bool:
         """Return True if this file was already reported as part of some run.
@@ -795,26 +733,6 @@ class StateDB:
             return None
         return RunRecord(run_id=row[0], reported_at=row[1], uploaded_at=row[2])
 
-    def record_run_reported(self, run_id: str) -> None:
-        """Mark a run as reported, preserving any existing uploaded_at timestamp.
-
-        The sub-SELECT keeps uploaded_at intact if the run was already recorded
-        (e.g. a retry after a previous partial failure).
-        """
-        with self._write_lock:
-            self._insert_run_reported(self._conn, run_id)
-            self._conn.commit()
-
-    @staticmethod
-    def _insert_run_reported(conn: sqlite3.Connection, run_id: str) -> None:
-        """Statement of `record_run_reported`, for the caller to commit."""
-        now = datetime.now(timezone.utc).isoformat()
-        conn.execute(
-            "INSERT OR REPLACE INTO runs (run_id, reported_at, uploaded_at) "
-            "VALUES (?, ?, (SELECT uploaded_at FROM runs WHERE run_id = ?))",
-            (run_id, now, run_id),
-        )
-
     def record_report(
         self,
         run_id: str,
@@ -825,11 +743,22 @@ class StateDB:
     ) -> None:
         """Remember a run report the server accepted, all in one transaction.
 
-        Writes the `runs` row (`record_run_reported`, only with *new_run*: a
-        PATCH leaves the row alone), the manifest rows for *files*
-        (`record_detected_files`) and a `pending_uploads` row for each of
-        *pending_relative_paths* (`record_pending_uploads`). A kill or a failed
-        write leaves all of it or none of it.
+        The only way run reports, manifests and pending uploads are written, so
+        that nothing can store one without the others. It writes:
+
+        - the `runs` row, with *new_run* only: a PATCH leaves the row (and its
+          `reported_at`) alone. A run that has a row keeps its `uploaded_at`,
+          which is what a repeated POST after a failed write needs.
+        - the manifest rows for *files*, as `(relative_path, filename,
+          size_bytes, mtime, file_created_at)` tuples. Rows are upserted, so
+          repeated calls for the same run (as more files stabilise and PATCHes
+          are issued) keep the table consistent with the in-memory
+          `RunState`. *file_created_at* may be `None`.
+        - a `pending_uploads` row for each of *pending_relative_paths*. A file
+          that has a row keeps its attempt count, so a file retried within one
+          session doesn't reset its restart budget.
+
+        A kill or a failed write leaves all of it or none of it.
 
         That matters in auto mode. The next start skips a file that has a
         `detected_files` row and retries one that has a `pending_uploads` row,
@@ -839,16 +768,32 @@ class StateDB:
         here, so rows written before the failing one aren't left in an open
         transaction on this thread's connection for the next write to commit.
         """
-        rows = self._detected_file_rows(run_id, files)
+        manifest = [
+            (run_id, rel_path, filename, size_bytes, mtime, file_created_at)
+            for rel_path, filename, size_bytes, mtime, file_created_at in files
+        ]
         pending = [(rel_path, run_id) for rel_path in pending_relative_paths]
         with self._write_lock:
             try:
                 if new_run:
-                    self._insert_run_reported(self._conn, run_id)
-                if rows:
-                    self._insert_detected_files(self._conn, rows)
+                    self._conn.execute(
+                        "INSERT OR REPLACE INTO runs (run_id, reported_at, uploaded_at) "
+                        "VALUES (?, ?, (SELECT uploaded_at FROM runs WHERE run_id = ?))",
+                        (run_id, datetime.now(timezone.utc).isoformat(), run_id),
+                    )
+                if manifest:
+                    self._conn.executemany(
+                        "INSERT OR REPLACE INTO detected_files "
+                        "(run_id, relative_path, filename, size_bytes, mtime, file_created_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?)",
+                        manifest,
+                    )
                 if pending:
-                    self._insert_pending_uploads(self._conn, pending)
+                    self._conn.executemany(
+                        "INSERT OR IGNORE INTO pending_uploads (relative_path, run_id) "
+                        "VALUES (?, ?)",
+                        pending,
+                    )
                 self._conn.commit()
             except BaseException:
                 # Don't let a failed rollback hide the error that caused it.
