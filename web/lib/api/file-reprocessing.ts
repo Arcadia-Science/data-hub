@@ -22,7 +22,6 @@ import { REPROCESSABLE_STATUSES } from "@/lib/runs/reprocessable-statuses";
 import {
   isStalledProcessing,
   minutesUntilProcessingIsStalled,
-  requeueStalledAfterMs,
 } from "@/lib/runs/stalled-processing";
 import {
   inFlightProcessingSql,
@@ -832,18 +831,15 @@ const MAX_STALL_REQUEUES = 1;
 //
 // One UPDATE puts the file at the back of the queue. It matches only when all
 // of these hold:
-//   - The file is `processing`, has a `dispatch_id` (the dispatcher started it,
-//     so a start from an S3 upload is left alone), and has not been put back
-//     before.
+//   - The file is stalled (`stalledProcessingSql`), has a `dispatch_id` (the
+//     dispatcher started it, so a start from an S3 upload is left alone), and
+//     has not been put back before.
 //   - The file is raw and not deleted, and its run is not deleted.
-//   - Its start is older than `requeueStalledAfterMs()`, or it has no start
-//     time.
 //
 // Returns the number of files put back. The caller dispatches afterwards.
 export async function requeueStalledDispatches(
   now: Date = new Date()
 ): Promise<number> {
-  const cutoff = new Date(now.getTime() - requeueStalledAfterMs());
   const requeued = await db
     .update(files)
     .set({
@@ -855,15 +851,11 @@ export async function requeueStalledDispatches(
     })
     .where(
       and(
-        eq(files.status, "processing"),
+        stalledProcessingSql(now),
         isNotNull(files.dispatchId),
         lt(files.stallRequeues, MAX_STALL_REQUEUES),
         eq(files.category, "raw"),
         isNull(files.deletedAt),
-        or(
-          isNull(files.processingStartedAt),
-          lt(files.processingStartedAt, cutoff)
-        ),
         inArray(
           files.instrumentRunId,
           db

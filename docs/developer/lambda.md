@@ -97,7 +97,7 @@ Some files sit in `processing` with no Lambda behind them. A deploy or a crash c
 - It is a raw file that is not deleted, and its run is not deleted.
 - `processing_started_at` is older than the cutoff, or is null.
 
-The cutoff is the larger of `STALLED_PROCESSING_AFTER_MINUTES` and the 20-minute default. Lambda stops an invocation after 15 minutes, so a shorter window could put back a file whose Lambda is still running, and two Lambdas would then work on the same file.
+The cutoff is the stall window, the same one that shows the file as Stalled. `stalledProcessingAfterMs()` never returns less than 20 minutes, even when `STALLED_PROCESSING_AFTER_MINUTES` is set lower. Lambda stops an invocation after 15 minutes, so a shorter window could free the slot of a file whose Lambda is still running, let someone reprocess it, or put it back in the queue, and two Lambdas would then work on the same file.
 
 The UPDATE sets `queued_at` to now (the back of the queue), clears `processing_started_at` and `dispatch_id`, adds 1 to `stall_requeues`, and touches the run. A file that stalls a second time stays Stalled for a person to handle. A manual reprocess sets `stall_requeues` back to 0. Files that an S3 upload started have no `dispatch_id` and are not put back.
 

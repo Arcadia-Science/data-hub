@@ -1140,7 +1140,7 @@ describe("Reprocess queue", () => {
       ).toEqual([deletedFile, artifact, putBackOnce, ...b.fileIds]);
     });
 
-    it("is put back only after the default window, even when files show as stalled sooner", async () => {
+    it("is put back only after 20 minutes, even when a shorter window is set", async () => {
       const young = await seedRun("floor-young", 1, "processing", {
         dispatchId: randomUUID(),
       });
@@ -1153,15 +1153,16 @@ describe("Reprocess queue", () => {
       const previous = process.env.STALLED_PROCESSING_AFTER_MINUTES;
       process.env.STALLED_PROCESSING_AFTER_MINUTES = "1";
       try {
-        // With a one-minute window the five-minute-old start reads as Stalled,
-        // but its Lambda may still be running, so it is not put back.
+        // A one-minute window is raised to 20 minutes. The five-minute-old
+        // start's Lambda may still be running, so it is not Stalled and is not
+        // put back.
         const [youngRow] = await fileRows(young.fileIds);
         expect(
           isStalledProcessing({
             status: youngRow.status,
             processingStartedAt: youngRow.processingStartedAt,
           })
-        ).toBe(true);
+        ).toBe(false);
         expect(await requeueStalledDispatches()).toBe(1);
       } finally {
         if (previous === undefined) {
