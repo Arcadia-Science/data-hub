@@ -306,20 +306,25 @@ export async function setup() {
     INTEGRATION_SECRETS_KEY: "a".repeat(64),
     __TEST_LINEAR_API_URL: linearFakeUrl,
   };
-  // Strip the Lambda Function URL so "not configured" test cases work
+  // The variables below are set to "" rather than removed: `next build` and
+  // `next start` fill in any variable missing from the environment from
+  // `web/.env*`, so a removed one could come back from a developer's
+  // `.env.local`. Every reader treats "" as unset.
+  //
+  // Blank the Lambda Function URL so "not configured" test cases work
   // regardless of the developer's local .env. Tests that need a stubbed
   // Lambda HTTP call should mock fetch rather than set this URL.
-  serverEnv.LAMBDA_FUNCTION_URL = undefined;
+  serverEnv.LAMBDA_FUNCTION_URL = "";
   // Pin the stall window to the default so a local override cannot make
   // the 21-minute backdate in files.test.ts look still in-flight.
-  serverEnv.STALLED_PROCESSING_AFTER_MINUTES = undefined;
-  // Strip AWS_ROLE_ARN as well so the SigV4 path in `lib/lambda.ts`
+  serverEnv.STALLED_PROCESSING_AFTER_MINUTES = "";
+  // Blank AWS_ROLE_ARN as well so the SigV4 path in `lib/lambda.ts`
   // doesn't try to assume a Vercel OIDC role inside tests. The test
   // server still gets static AWS_ACCESS_KEY_ID/SECRET via the dummy
   // values plumbed above, which is enough to satisfy
   // `hasInvokeCredentials()` for any test that wants to exercise the
   // archive-builder configured path without standing up a real Lambda.
-  serverEnv.AWS_ROLE_ARN = undefined;
+  serverEnv.AWS_ROLE_ARN = "";
 
   execSync("npx next build", {
     cwd: import.meta.dirname ? `${import.meta.dirname}/../..` : process.cwd(),
@@ -327,11 +332,20 @@ export async function setup() {
     stdio: "pipe",
   });
 
-  serverProcess = spawn("npx", ["next", "start", "-p", String(port)], {
-    cwd: import.meta.dirname ? `${import.meta.dirname}/../..` : process.cwd(),
-    env: serverEnv,
-    stdio: "pipe",
-  });
+  // `-H 127.0.0.1` keeps the server off the machine's other interfaces
+  // (`next start` listens on every one by default). The upload stand-in at
+  // `/api/local-s3` takes unauthenticated PUTs, so a host on the LAN could
+  // otherwise write into the mirror for the length of a run. It matches the
+  // loopback address in `baseUrl`.
+  serverProcess = spawn(
+    "npx",
+    ["next", "start", "-H", "127.0.0.1", "-p", String(port)],
+    {
+      cwd: import.meta.dirname ? `${import.meta.dirname}/../..` : process.cwd(),
+      env: serverEnv,
+      stdio: "pipe",
+    }
+  );
 
   serverProcess.stderr?.on("data", (data: Buffer) => {
     const msg = data.toString();

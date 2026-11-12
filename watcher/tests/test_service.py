@@ -1227,6 +1227,41 @@ class TestRunServiceLoopHappyPath:
         assert second_args == (harness.env_path,)
         assert second_kwargs == {"override": True}
 
+    def test_a_test_only_override_in_the_registered_env_file_is_announced(
+        self, harness: _LoopHarness
+    ) -> None:
+        # The service loads its env file after the modules are imported, and
+        # the package index is only read when an upgrade runs. The startup
+        # announcement has to come after the load, and reach the Event Log.
+        index_url = "http://127.0.0.1:8123/simple/"
+        index_var = "DATA_HUB_WATCHER_INDEX_URL"
+
+        def load_env_file(*args: Any, **kwargs: Any) -> None:
+            harness.dotenv_calls.append((args, kwargs))
+            if kwargs.get("override"):
+                harness.monkeypatch.setenv(index_var, index_url)
+
+        import dotenv
+
+        harness.monkeypatch.setattr(dotenv, "load_dotenv", load_env_file)
+        stop_event = threading.Event()
+        stop_event.set()
+
+        harness.svc._run_service_loop(stop_event, harness.sm)
+
+        warnings = [str(call.args[0]) for call in harness.sm.LogWarningMsg.call_args_list]
+        (announcement,) = [w for w in warnings if "Test-only overrides are active" in w]
+        assert f"{index_var}={index_url}" in announcement
+
+    def test_nothing_is_announced_without_a_test_only_override(self, harness: _LoopHarness) -> None:
+        stop_event = threading.Event()
+        stop_event.set()
+
+        harness.svc._run_service_loop(stop_event, harness.sm)
+
+        warnings = [str(call.args[0]) for call in harness.sm.LogWarningMsg.call_args_list]
+        assert not any("Test-only overrides" in w for w in warnings)
+
 
 class TestRunServiceLoopFailures:
     def test_registry_read_failure_exits_with_error_log(self, harness: _LoopHarness) -> None:

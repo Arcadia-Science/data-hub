@@ -1,8 +1,9 @@
-// Local-disk S3 mirror dispatch for the dev workflow. When
-// `LOCAL_S3_MIRROR` is set (and `NODE_ENV !== "production"`),
-// `web/lib/s3.ts` short-circuits its AWS SDK calls and serves bytes
-// from this mirror instead. The mirror layout matches an S3 bucket
-// layout: `<root>/<bucket>/<key>`.
+// Local-disk S3 stand-ins. When `LOCAL_S3_MIRROR` is set (and
+// `NODE_ENV !== "production"`), `web/lib/s3.ts` short-circuits its AWS SDK
+// calls and serves bytes from that mirror instead. The integration harness
+// gets a narrower stand-in from `INTEGRATION_TEST_S3_MIRROR`, which covers
+// uploads only (see below). Both roots use the layout of an S3 bucket:
+// `<root>/<bucket>/<key>`.
 //
 // Kept in its own module so the AWS code path in `s3.ts` stays
 // untouched and so callers never need to know which implementation
@@ -11,17 +12,30 @@
 // the same mirror; the lambda CLI's `data-hub-process handler`
 // command is the python-side writer.
 //
+// What each root covers:
+//
+// - Dev mirror (`getLocalMirrorRoot`, `LOCAL_S3_MIRROR`): every S3 call
+//   in `s3.ts`, which is presigned download and upload URLs,
+//   `headS3Object`, `getS3ObjectStream`, and the multipart helpers. The
+//   route's GET, HEAD, and PUT handlers serve it too.
+// - Integration mirror (`integrationTestMirrorRoot`,
+//   `INTEGRATION_TEST_S3_MIRROR`): uploads only. That is the multipart
+//   helpers (create, part, complete, abort, checksum), the whole-file
+//   presigned PUT URL, and the route's whole-file PUT. Download URLs,
+//   `headS3Object`, and `getS3ObjectStream` still use AWS, and the route's
+//   GET and HEAD 404. The harness runs `next start`, which sets
+//   `NODE_ENV=production`, so the dev mirror is off there and this root is
+//   used instead.
+//
 // Production-safety: `getLocalMirrorRoot()` returns `null` whenever
-// `NODE_ENV === "production"`, so the local code path can never be
-// activated in a Vercel production build even if the env var is
-// somehow leaked into that environment. Multipart helpers use
-// `mirrorRootForMultipart` instead, which also reads
-// `INTEGRATION_TEST_S3_MIRROR` when `VERCEL` is unset. Vercel sets
-// `VERCEL` on every deployment, so that path stays off there too.
+// `NODE_ENV === "production"`, and `integrationTestMirrorRoot()` returns
+// `null` whenever `VERCEL` is set. Vercel sets `VERCEL` and runs with
+// `NODE_ENV=production`, so a deployment cannot take either path even if
+// one of these variables leaks in.
 
 import { createHash, randomBytes } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
-import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { type Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -246,20 +260,53 @@ export class MirrorMultipartError extends Error {
   }
 }
 
-// `next start` in the integration harness sets NODE_ENV=production, which
-// turns `getLocalMirrorRoot` off. The harness sets this instead so multipart
-// tests can run without AWS. Vercel always sets `VERCEL`, so a deployment
-// cannot take this path.
-export function mirrorRootForMultipart(): string | null {
-  const local = getLocalMirrorRoot();
-  if (local) {
-    return local;
-  }
+// Root for the integration harness's stand-in. `next start` in the harness
+// sets NODE_ENV=production, which turns `getLocalMirrorRoot` off, so the
+// harness sets `INTEGRATION_TEST_S3_MIRROR` instead. Vercel always sets
+// `VERCEL`, so a deployment cannot take this path.
+export function integrationTestMirrorRoot(): string | null {
   if (process.env.VERCEL) {
     return null;
   }
   const testRoot = process.env.INTEGRATION_TEST_S3_MIRROR;
   return testRoot ? path.resolve(testRoot) : null;
+}
+
+// Root for every upload the stand-ins can take. The dev mirror wins when it
+// is on. Otherwise the integration mirror is used, and it is off on Vercel.
+// The multipart helpers in `s3.ts`, the whole-file presign, and the PUT
+// handler in the local-s3 route all call this.
+export function mirrorRootForUploads(): string | null {
+  return getLocalMirrorRoot() ?? integrationTestMirrorRoot();
+}
+
+// Write `body` to `destination` all or nothing, the way S3 stores an object:
+// a PUT that is cut off stores nothing, and it leaves any earlier object at
+// that key as it was. The bytes go to a temporary file in the same folder
+// (a rename only replaces a file atomically within one file system), and the
+// file is renamed into place once the stream has ended. If the stream fails,
+// the temporary file is removed. `through` are transforms between the body
+// and the file, such as a hasher.
+//
+// The folder of `destination` must exist. The temporary name does not
+// include the name of the destination, so a long key cannot make it too
+// long for the file system.
+export async function writeStreamAtomically(
+  destination: string,
+  body: Readable,
+  ...through: Transform[]
+): Promise<void> {
+  const temporary = path.join(
+    path.dirname(destination),
+    `.partial-${randomBytes(8).toString("hex")}`
+  );
+  try {
+    await pipeline([body, ...through, createWriteStream(temporary)]);
+    await rename(temporary, destination);
+  } catch (err) {
+    await rm(temporary, { force: true });
+    throw err;
+  }
 }
 
 interface MultipartMeta {
@@ -359,7 +406,9 @@ export async function localSavePart(
       callback(null, chunk);
     },
   });
-  await pipeline(body, hasher, createWriteStream(partPath));
+  // Atomic, so a part PUT that is cut off leaves an earlier upload of the
+  // same part intact, as S3 does.
+  await writeStreamAtomically(partPath, body, hasher);
   return `"${hash.digest("hex")}"`;
 }
 

@@ -28,6 +28,11 @@ import yaml
 from data_hub_watcher import runtime
 from data_hub_watcher.api_client import ApiError, DataHubClient
 from data_hub_watcher.config_io import save_config
+from data_hub_watcher.constants import (
+    DEFAULT_CHECK_INTERVAL_TICKS,
+    DEFAULT_IDLE_TICKS_REQUIRED,
+    HEARTBEAT_INTERVAL_SECONDS,
+)
 from data_hub_watcher.events import EventType
 from data_hub_watcher.heartbeat import HeartbeatLoop
 from data_hub_watcher.models import (
@@ -884,6 +889,64 @@ class TestWaitingState:
         ]
         assert started[-1] == "Watcher resumed on test-host"
 
+    def test_waiting_keeps_the_production_timers_without_overrides(self, env: _Env) -> None:
+        sup = env.supervisor(self._missing_cfg(env))
+        sup.start()
+
+        waiting = sup._waiting
+        assert waiting is not None
+        assert waiting.heartbeat._interval == HEARTBEAT_INTERVAL_SECONDS
+        assert waiting.updater._check_interval_ticks == DEFAULT_CHECK_INTERVAL_TICKS
+        assert waiting.updater._idle_ticks_required == DEFAULT_IDLE_TICKS_REQUIRED
+
+    def test_waiting_heartbeat_and_updater_use_the_test_only_overrides(
+        self, env: _Env, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A waiting watcher builds its own heartbeat and updater, not through
+        # `build_runtime`, so it has to read the overrides itself.
+        monkeypatch.setenv("DATA_HUB_WATCHER_HEARTBEAT_INTERVAL_SECONDS", "7")
+        monkeypatch.setenv("DATA_HUB_WATCHER_UPDATE_CHECK_INTERVAL_TICKS", "3")
+        monkeypatch.setenv("DATA_HUB_WATCHER_UPDATE_IDLE_TICKS", "2")
+        sup = env.supervisor(self._missing_cfg(env))
+        sup.start()
+
+        waiting = sup._waiting
+        assert waiting is not None
+        assert waiting.heartbeat._interval == 7
+        assert waiting.updater._check_interval_ticks == 3
+        assert waiting.updater._idle_ticks_required == 2
+
+    def test_start_failure_backoff_counts_in_overridden_heartbeat_intervals(
+        self, env: _Env, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from data_hub_watcher.monitor import FileMonitor
+
+        def failing_start(_self: FileMonitor) -> None:
+            raise OSError("inotify watch limit reached")
+
+        def tick() -> None:
+            waiting = sup._waiting
+            assert waiting is not None
+            waiting.heartbeat._on_tick()  # type: ignore[misc]
+            sup.poll(timeout=0)
+
+        def seconds_until_next_attempt() -> float:
+            return sup._next_start_attempt - time.monotonic()
+
+        monkeypatch.setenv("DATA_HUB_WATCHER_HEARTBEAT_INTERVAL_SECONDS", "7")
+        monkeypatch.setattr(FileMonitor, "start", failing_start)
+        sup = env.supervisor(self._missing_cfg(env))
+        sup.start()
+        (env.tmp_path / "later").mkdir()
+
+        # The first failure waits one heartbeat interval before the next try
+        # (a minute in production), the second two.
+        tick()
+        assert 0 < seconds_until_next_attempt() <= 7
+        sup._next_start_attempt = 0.0
+        tick()
+        assert 7 < seconds_until_next_attempt() <= 14
+
     def test_config_still_loads_with_a_missing_folder(self, env: _Env) -> None:
         from data_hub_watcher.config_io import load_config
 
@@ -892,6 +955,97 @@ class TestWaitingState:
         cfg = load_config(env.config_path)
 
         assert cfg.instrument.watch_directory == (env.tmp_path / "later").resolve()
+
+
+class TestStartAnnouncesTestOnlyOverrides:
+    """`start` says which test-only overrides are set, whichever mode it starts in.
+
+    The package index is only read when an upgrade is dispatched, so a PC with
+    only that variable left set would otherwise log nothing until it installs
+    from the index.
+    """
+
+    INDEX_URL = "DATA_HUB_WATCHER_INDEX_URL"
+    INDEX = "http://127.0.0.1:8123/simple/"
+
+    def _announcements(self, caplog: pytest.LogCaptureFixture) -> list[str]:
+        return [
+            r.getMessage()
+            for r in caplog.records
+            if r.name == "data_hub_watcher.testing_overrides"
+            and "Test-only overrides are active" in r.getMessage()
+        ]
+
+    def test_an_index_url_set_on_its_own_is_announced_when_watching_starts(
+        self, env: _Env, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        caplog.set_level(logging.WARNING)
+        monkeypatch.setenv(self.INDEX_URL, self.INDEX)
+        sup = env.supervisor()
+
+        sup.start()
+
+        assert sup.rt is not None
+        (announcement,) = self._announcements(caplog)
+        assert f"{self.INDEX_URL}={self.INDEX}" in announcement
+
+    def test_an_index_url_set_on_its_own_is_announced_when_waiting_starts(
+        self, env: _Env, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        caplog.set_level(logging.WARNING)
+        monkeypatch.setenv(self.INDEX_URL, self.INDEX)
+        sup = env.supervisor(env.write_config(_cfg(env.tmp_path / "later")))
+
+        sup.start()
+
+        assert sup.rt is None and sup.waiting_reason is not None
+        (announcement,) = self._announcements(caplog)
+        assert f"{self.INDEX_URL}={self.INDEX}" in announcement
+
+    def test_it_is_announced_before_the_first_heartbeat(
+        self, env: _Env, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # If starting fails part-way, the log still says what was set.
+        caplog.set_level(logging.WARNING)
+        monkeypatch.setenv(self.INDEX_URL, self.INDEX)
+        seen_when_first_heartbeat_sent: list[int] = []
+
+        def first_heartbeat(*_args: Any, **_kwargs: Any) -> HeartbeatResponse:
+            seen_when_first_heartbeat_sent.append(len(self._announcements(caplog)))
+            return HeartbeatResponse(ok=True)
+
+        env.client.send_heartbeat.side_effect = first_heartbeat
+        sup = env.supervisor()
+
+        sup.start()
+
+        assert seen_when_first_heartbeat_sent[0] == 1
+
+    def test_it_is_announced_once_however_often_the_runtime_is_rebuilt(
+        self, env: _Env, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        caplog.set_level(logging.WARNING)
+        monkeypatch.setenv(self.INDEX_URL, self.INDEX)
+        sup = env.supervisor()
+        sup.start()
+        env.client.get_latest_config_revision.return_value = _revision(
+            2, _settings(env.watch_dir, file_patterns=["*.csv", "*.txt"])
+        )
+
+        _deliver(sup, 2)
+
+        assert sup.applied_revision == 2
+        assert len(self._announcements(caplog)) == 1
+
+    def test_nothing_is_announced_when_no_override_is_set(
+        self, env: _Env, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        caplog.set_level(logging.WARNING)
+        sup = env.supervisor()
+
+        sup.start()
+
+        assert self._announcements(caplog) == []
 
 
 class TestStartupSync:

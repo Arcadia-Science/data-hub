@@ -92,6 +92,16 @@ CONFIG_APPLY_DRAIN_TIMEOUT_SECONDS = 120
 WAITING_START_RETRY_MAX_SECONDS = 15 * 60
 DEFAULT_STABILITY_PERIOD_SECONDS = 5
 
+# Auto-update cadence, counted in heartbeat ticks. With a 60-second heartbeat
+# this works out to roughly "5 minutes idle before we even consider an update"
+# and "one update check per hour". Both are deliberately conservative: we'd
+# rather miss an update window than interrupt a running experiment.
+DEFAULT_IDLE_TICKS_REQUIRED = 5
+DEFAULT_CHECK_INTERVAL_TICKS = 60
+
+# Default index for `pip install` / `uv tool install` invocations.
+DEFAULT_INDEX_URL = "https://pypi.org/simple/"
+
 # Built-in presets for the ``init`` / ``config edit`` wizard.
 # Each entry: (key, description, pattern, recursive_default).
 # The stored config always uses a raw ``pattern`` + ``recursive``; these

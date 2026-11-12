@@ -23,13 +23,14 @@ import pytest
 from click.testing import CliRunner
 
 from data_hub_watcher import cli as cli_module
+from data_hub_watcher.constants import DEFAULT_INDEX_URL
 from data_hub_watcher.models import (
     InstrumentConfig,
     RunDetectionConfig,
     WatcherConfig,
     WatcherUpdateInfoResponse,
 )
-from data_hub_watcher.self_update import InstallMethod
+from data_hub_watcher.self_update import InstallMethod, run_upgrade
 from data_hub_watcher.upgrade_worker import (
     UPGRADE_REQUEST_FILENAME,
     read_upgrade_request,
@@ -137,6 +138,36 @@ class TestSelfUpdateWindowsUvToolWorkerDispatch:
         assert req.pkg_spec == "data-hub-watcher[windows-service]==9.9.9"
         assert req.uv_executable == "/fake/bin/uv.exe"
         assert trigger_calls == [None]
+
+    @pytest.mark.parametrize(
+        ("override", "expected"),
+        [
+            (None, DEFAULT_INDEX_URL),
+            ("http://127.0.0.1:8123/simple/", "http://127.0.0.1:8123/simple/"),
+        ],
+        ids=["pypi_by_default", "test_only_override"],
+    )
+    def test_request_sentinel_carries_the_index_url(
+        self,
+        configured: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        override: str | None,
+        expected: str,
+    ) -> None:
+        self._force_windows_uv_tool(monkeypatch)
+        import data_hub_watcher.scheduled_task as st_module
+
+        monkeypatch.setattr(st_module, "task_exists", lambda **_kw: True)
+        monkeypatch.setattr(st_module, "trigger_upgrade_task", lambda **_kw: None)
+        if override is not None:
+            monkeypatch.setenv("DATA_HUB_WATCHER_INDEX_URL", override)
+
+        result = CliRunner().invoke(cli_module.cli, ["self-update"])
+
+        assert result.exit_code == 0, result.output
+        req = read_upgrade_request(configured)
+        assert req is not None
+        assert req.index_url == expected
 
     def test_refuses_with_actionable_error_when_task_missing(
         self,
@@ -257,3 +288,37 @@ class TestSelfUpdatePosixStillUsesInProcess:
 
         assert result.exit_code == 0, result.output
         assert "Upgrade to 9.9.9 complete" in result.output
+
+    def test_inline_upgrade_installs_from_the_test_only_index(
+        self,
+        configured: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # The inline path calls `run_upgrade` without an index, so the
+        # override has to be applied further down, where the command is built.
+        monkeypatch.setenv("DATA_HUB_WATCHER_INDEX_URL", "http://127.0.0.1:8123/simple/")
+        monkeypatch.setattr(sys, "platform", "linux")
+        monkeypatch.setattr(cli_module, "detect_install_method", lambda: InstallMethod.PIP)
+
+        import subprocess
+
+        argvs: list[list[str]] = []
+
+        def fake_subprocess(cmd: list[str], **_kw: Any) -> subprocess.CompletedProcess[str]:
+            argvs.append(cmd)
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="ok\n", stderr="")
+
+        monkeypatch.setattr(
+            cli_module,
+            "run_upgrade",
+            lambda method, target_version=None: run_upgrade(
+                method, target_version=target_version, runner=fake_subprocess
+            ),
+        )
+
+        result = CliRunner().invoke(cli_module.cli, ["self-update"])
+
+        assert result.exit_code == 0, result.output
+        (argv,) = argvs
+        assert argv[argv.index("--index-url") + 1] == "http://127.0.0.1:8123/simple/"
+        assert argv[-1] == "data-hub-watcher==9.9.9"

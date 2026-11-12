@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from data_hub_watcher.api_client import ApiError, DataHubClient
-from data_hub_watcher.constants import WATCHER_VERSION
+from data_hub_watcher.constants import HEARTBEAT_INTERVAL_SECONDS, WATCHER_VERSION
 from data_hub_watcher.events import EventReporter
 
 logger = logging.getLogger(__name__)
@@ -122,7 +122,14 @@ class HeartbeatLoop:
     def stop(self, *, send_stopped: bool = True) -> None:
         self._stop_event.set()
         if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=self._interval + 5)
+            # A tick in progress when stop is requested can take far longer than
+            # a short interval: the heartbeat request alone can run for tens of
+            # seconds, and the event flush and the update check follow it. The
+            # final "stopped" heartbeat below must not overtake that tick's
+            # "watching" one, or the server ends on "watching". So the wait
+            # never drops below the production interval, which a short test
+            # override of the interval would otherwise shrink.
+            self._thread.join(timeout=max(self._interval, HEARTBEAT_INTERVAL_SECONDS) + 5)
         # Send a final "stopped" heartbeat so the server knows the watcher
         # shut down gracefully rather than silently disappearing. Skipped when
         # the runtime is being rebuilt for a new config, because a new loop

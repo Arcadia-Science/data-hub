@@ -15,6 +15,7 @@ from typing import Any
 import click
 from pydantic import ValidationError
 
+from data_hub_watcher import testing_overrides
 from data_hub_watcher.api_client import ApiError, DataHubClient
 from data_hub_watcher.config_io import config_checksum, load_config, save_config
 from data_hub_watcher.constants import (
@@ -45,7 +46,6 @@ from data_hub_watcher.models import (
 from data_hub_watcher.remote_config import editable_settings_problem
 from data_hub_watcher.runtime import WatcherSupervisor, run_supervisor
 from data_hub_watcher.self_update import (
-    DEFAULT_INDEX_URL,
     InstallMethod,
     UvExecutableNotFoundError,
     _resolve_uv_executable,
@@ -1568,7 +1568,7 @@ def _dispatch_self_update_via_worker(
         target_version=target_version,
         pkg_spec=pkg_spec,
         uv_executable=uv_path,
-        index_url=DEFAULT_INDEX_URL,
+        index_url=testing_overrides.index_url(),
         previous_version=current_version,
         install_method=InstallMethod.UV_TOOL.value,
     )

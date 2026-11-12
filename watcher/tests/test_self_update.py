@@ -16,9 +16,9 @@ from unittest.mock import patch
 
 import pytest
 
+from data_hub_watcher.constants import DEFAULT_INDEX_URL
 from data_hub_watcher.models import WatcherUpdateInfoResponse
 from data_hub_watcher.self_update import (
-    DEFAULT_INDEX_URL,
     PACKAGE_NAME,
     InstallMethod,
     UpdateDecision,
@@ -246,6 +246,47 @@ class TestBuildUpgradeCommand:
         )
         assert "https://pypi.example.com/simple/" in cmd
 
+    @pytest.mark.parametrize("method", [InstallMethod.UV_TOOL, InstallMethod.PIP])
+    def test_test_only_index_url_replaces_pypi(
+        self, monkeypatch: pytest.MonkeyPatch, method: InstallMethod
+    ) -> None:
+        monkeypatch.setenv("DATA_HUB_WATCHER_INDEX_URL", "http://127.0.0.1:8123/simple/")
+
+        cmd = build_upgrade_command(
+            method,
+            target_version="0.3.0",
+            uv_executable="/usr/local/bin/uv",
+            python_executable="python",
+        )
+
+        assert cmd[cmd.index("--index-url") + 1] == "http://127.0.0.1:8123/simple/"
+        assert DEFAULT_INDEX_URL not in cmd
+
+    def test_explicit_index_url_wins_over_the_test_only_override(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("DATA_HUB_WATCHER_INDEX_URL", "http://127.0.0.1:8123/simple/")
+
+        cmd = build_upgrade_command(
+            InstallMethod.PIP,
+            target_version="0.3.0",
+            index_url="https://pypi.example.com/simple/",
+            python_executable="python",
+        )
+
+        assert cmd[cmd.index("--index-url") + 1] == "https://pypi.example.com/simple/"
+
+    def test_bad_test_only_index_url_falls_back_to_pypi(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("DATA_HUB_WATCHER_INDEX_URL", "ftp://127.0.0.1/simple/")
+
+        cmd = build_upgrade_command(
+            InstallMethod.PIP, target_version="0.3.0", python_executable="python"
+        )
+
+        assert cmd[cmd.index("--index-url") + 1] == DEFAULT_INDEX_URL
+
     @pytest.mark.parametrize("method", [InstallMethod.EDITABLE, InstallMethod.UNKNOWN])
     def test_unsupported_methods_raise(self, method: InstallMethod) -> None:
         with pytest.raises(ValueError, match="Cannot build an upgrade command"):
@@ -367,6 +408,23 @@ class TestRunUpgrade:
         assert captured["kwargs"]["check"] is False
         assert captured["kwargs"]["capture_output"] is True
         assert captured["kwargs"]["text"] is True
+
+    def test_in_process_upgrade_installs_from_the_test_only_index(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # `run_upgrade` is the in-process path (the CLI and the updater both
+        # call it without an index), so the override has to take effect inside it.
+        monkeypatch.setenv("DATA_HUB_WATCHER_INDEX_URL", "http://127.0.0.1:8123/simple/")
+        argvs: list[list[str]] = []
+
+        def fake_runner(cmd: list[str], **kwargs: Any) -> Any:
+            argvs.append(cmd)
+            return None
+
+        run_upgrade(InstallMethod.PIP, target_version="0.3.0", runner=fake_runner)
+
+        (argv,) = argvs
+        assert argv[argv.index("--index-url") + 1] == "http://127.0.0.1:8123/simple/"
 
     @pytest.mark.parametrize("method", [InstallMethod.EDITABLE, InstallMethod.UNKNOWN])
     def test_refuses_editable_and_unknown(self, method: InstallMethod) -> None:
