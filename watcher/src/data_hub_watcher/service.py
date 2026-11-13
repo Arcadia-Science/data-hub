@@ -600,6 +600,7 @@ def _run_service_loop(
     """
     import platform
 
+    import click
     from dotenv import load_dotenv
 
     from data_hub_watcher.api_client import ApiError, DataHubClient
@@ -674,7 +675,18 @@ def _run_service_loop(
         load_dotenv(base_env)
     load_dotenv(env_path, override=True)
     apply_log_level_from_env()
-    cfg = load_config(path)
+    try:
+        cfg = load_config(path)
+    except (click.ClickException, OSError) as exc:
+        # Log the reason the way the other start-up refusals do, so it reaches watcher.log
+        # and the Event Log, not only the SCM's traceback.
+        message = exc.format_message() if isinstance(exc, click.ClickException) else str(exc)
+        logger.error(
+            "Cannot load config %s: %s. Check it with 'data-hub-watcher config validate'.",
+            path,
+            message,
+        )
+        raise SystemExit(1) from exc
     inst = cfg.instrument
 
     base_url = cfg.api_base_url

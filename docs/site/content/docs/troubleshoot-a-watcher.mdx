@@ -181,6 +181,8 @@ Upgrade failure modes (`update_started` → `update_failed`, editable installs, 
 
 ### The service exits immediately
 
+A config file that doesn't load (missing, unreadable, malformed, or with a value the watcher doesn't accept) stops the service, and `watcher.log` says why on a line that contains `Cannot load config`. Watchers before 1.4.2 wrote only a traceback to the Application event log. To check the file, run `data-hub-watcher config validate`, fix what it reports, and start the service again.
+
 If it stops before writing to `watcher.log`:
 
 - Check `C:\ProgramData\DataHubWatcher\service-bootstrap.log` for a pre-dispatcher crash (missing `pywin32`, moved venv, corrupt install)

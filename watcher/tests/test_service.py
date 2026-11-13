@@ -32,6 +32,7 @@ from types import ModuleType
 from typing import Any
 from unittest.mock import MagicMock
 
+import click
 import pytest
 
 from data_hub_watcher.api_client import ApiError
@@ -1336,6 +1337,51 @@ class TestRunServiceLoopFailures:
         assert excinfo.value.code == 1
         harness.sm.LogErrorMsg.assert_called_once()
         assert "watcher_id" in harness.sm.LogErrorMsg.call_args.args[0]
+        assert harness.start_calls == []
+
+    def test_a_config_that_is_malformed_is_logged_once_and_exits(
+        self, harness: _LoopHarness
+    ) -> None:
+        # ``load_config`` raises ClickException for a config that is missing, malformed or
+        # invalid. It is logged like the other refusals, instead of escaping as an unhandled
+        # exception.
+        from data_hub_watcher import config_io
+
+        def malformed(_path: Path) -> None:
+            raise click.ClickException("Malformed YAML in config.yaml:\nunclosed bracket")
+
+        harness.monkeypatch.setattr(config_io, "load_config", malformed)
+
+        with pytest.raises(SystemExit) as excinfo:
+            harness.svc._run_service_loop(threading.Event(), harness.sm)
+
+        assert excinfo.value.code == 1
+        harness.sm.LogErrorMsg.assert_called_once()
+        msg = harness.sm.LogErrorMsg.call_args.args[0]
+        assert "Cannot load config" in msg
+        assert "Malformed YAML" in msg
+        assert "config validate" in msg
+        assert harness.start_calls == []
+
+    def test_a_config_that_cannot_be_read_is_logged_once_and_exits(
+        self, harness: _LoopHarness
+    ) -> None:
+        # An OSError from reading the file is logged the same way.
+        from data_hub_watcher import config_io
+
+        def unreadable(_path: Path) -> None:
+            raise PermissionError(13, "Permission denied")
+
+        harness.monkeypatch.setattr(config_io, "load_config", unreadable)
+
+        with pytest.raises(SystemExit) as excinfo:
+            harness.svc._run_service_loop(threading.Event(), harness.sm)
+
+        assert excinfo.value.code == 1
+        harness.sm.LogErrorMsg.assert_called_once()
+        msg = harness.sm.LogErrorMsg.call_args.args[0]
+        assert "Cannot load config" in msg
+        assert "Permission denied" in msg
         assert harness.start_calls == []
 
 

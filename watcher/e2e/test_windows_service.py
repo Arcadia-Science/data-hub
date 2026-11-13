@@ -1157,32 +1157,21 @@ def test_an_upgrade_is_dispatched_to_the_worker_once(
         )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=KnownBugStillPresent,
-    reason=(
-        "ENG-2130: `_run_service_loop` calls `load_config` "
-        "outside any `try`, so the error is raised out of `SvcRun` and reaches only the Event "
-        "Log, where every other start-up refusal is logged in watcher.log"
-    ),
-)
 @pytest.mark.covers("service.config_invalid->logged_in_watcher_log")
 def test_a_config_that_does_not_load_is_logged_in_the_service_log(watcher: WatcherFactory) -> None:
     pc = service_pc(watcher)
     pc.install_service()
     pc.write_config_text("instrument: [unclosed\n")
 
-    # The start is refused, as for any config that doesn't load, and the driver finds the
-    # message where pywin32 put it: in the Event Log's entry for the failed `SvcRun`.
+    # The start is refused, as for any other start-up refusal.
     refused_start(pc)
     assert "Malformed YAML" in pc.log_text()
 
-    # PROPOSED: the service logs it, as it logs the other refusals, in the file an operator reads.
-    with known_bug():
-        assert "Malformed YAML" in pc.watcher_log_text(), (
-            "watcher.log has no word about the config that failed to load:\n"
-            + pc.watcher_log_text()[-1500:]
-        )
+    # The service logs the reason, as it logs the other refusals, in the file an operator reads.
+    assert "Malformed YAML" in pc.watcher_log_text(), (
+        "watcher.log has no word about the config that failed to load:\n"
+        + pc.watcher_log_text()[-1500:]
+    )
 
 
 @pytest.mark.xfail(
