@@ -637,6 +637,96 @@ describe("same-named files from different folders", () => {
       expect(rows).toHaveLength(2);
     });
 
+    // A dismissed row can end up with an S3 key: the processor adopts the file
+    // between the dismiss reading its status and updating it, or an upload
+    // finishes after the dismiss. S3 keys are unique and built from the stored
+    // name, so a different file at that path must not get the same name.
+    async function markReachedS3(fileId: number, runId: string, name: string) {
+      await getTestDb()
+        .update(filesTable)
+        .set({
+          status: "uploaded",
+          s3Bucket: "test-bucket",
+          s3Key: `${instrumentId}/${runId}/${name}`,
+          uploadedAt: new Date(),
+        })
+        .where(eq(filesTable.id, fileId));
+    }
+
+    it("gives a different file another name when the dismissed file reached S3", async () => {
+      const runId = "dismissed-path-reached-s3";
+      await createRunWith(runId, reported(1));
+      const [dismissed] = await runFiles(runId);
+      await dismissAll(runId);
+      await markReachedS3(dismissed.id, runId, "sample.tif");
+      const taggedName = taggedFilename("sample.tif", relativePath);
+
+      await report(runId, reported(900, laterCreatedAt));
+
+      const rows = await runFiles(runId);
+      expect(
+        rows.map((row) => [row.filename, row.deleted_at === null])
+      ).toEqual([
+        ["sample.tif", false],
+        [taggedName, true],
+      ]);
+
+      // The new file uploads under its own key, so the Lambda can register it
+      // without clashing with the key the dismissed row holds.
+      const upload = await requestUpload(runId, reported(900, laterCreatedAt));
+      expect(upload.status).toBe(200);
+      const uploadBody = await upload.json();
+      expect(uploadBody.s3_key).toBe(`${instrumentId}/${runId}/${taggedName}`);
+      const adopted = await api(
+        `/api/v1/instruments/${instrumentId}/runs/${runId}/files`,
+        {
+          method: "POST",
+          token,
+          body: {
+            s3_bucket: "test-bucket",
+            s3_key: uploadBody.s3_key,
+            filename: taggedName,
+            size_bytes: 900,
+          },
+        }
+      );
+      expect(adopted.status).toBe(200);
+      const adoptedBody = await adopted.json();
+      expect(adoptedBody.id).toBe(uploadBody.file_id);
+      expect(adoptedBody.status).toBe("uploaded");
+    });
+
+    it("keeps a file at another path from taking the name of a dismissed file that reached S3", async () => {
+      const runId = "dismissed-path-reached-s3-other-path";
+      const dismissedPath = "day-1/sample.tif";
+      const otherPath = "day-2/sample.tif";
+      await createRunWith(runId, reported(1, firstCreatedAt, dismissedPath));
+      const [dismissed] = await runFiles(runId);
+      await dismissAll(runId);
+      await markReachedS3(dismissed.id, runId, "sample.tif");
+
+      await report(runId, reported(2, laterCreatedAt, otherPath));
+
+      const rows = await runFiles(runId);
+      expect(rows.map((row) => [row.relative_path, row.filename])).toEqual([
+        [dismissedPath, "sample.tif"],
+        [otherPath, taggedFilename("sample.tif", otherPath)],
+      ]);
+    });
+
+    it("keeps the dismissed file dismissed when it reached S3", async () => {
+      const runId = "dismissed-path-reached-s3-same";
+      await createRunWith(runId, reported(1));
+      const [dismissed] = await runFiles(runId);
+      await dismissAll(runId);
+      await markReachedS3(dismissed.id, runId, "sample.tif");
+
+      await report(runId, reported(1));
+      expect((await requestUpload(runId, reported(1))).status).toBe(409);
+
+      expect(await runFiles(runId)).toHaveLength(1);
+    });
+
     it("does not dismiss a file that reaches S3 while the dismiss is waiting", async () => {
       const runId = "dismissed-path-dismiss-race";
       await createRunWith(runId, reported(1));

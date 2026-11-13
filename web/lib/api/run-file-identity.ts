@@ -3,10 +3,12 @@
 // or newer store a later copy from another folder as `<stem>~<hash>.<ext>`.
 // Older watchers still upload by the bare name, so callers keep the old insert.
 //
-// A dismissed row (`deleted_at` set) holds neither its name nor its path. A
-// file reported at a dismissed row's path is stored as a new row when its size
-// or creation time differs from that row's, and skipped when both match,
-// because a watcher that forgot the file reports the same one again.
+// A dismissed row (`deleted_at` set) holds no path. A file reported at a
+// dismissed row's path is stored as a new row when its size or creation time
+// differs from that row's, and skipped when both match, because a watcher that
+// forgot the file reports the same one again. A dismissed row holds its name
+// only once it has an S3 key: a dismiss can lose a race with an upload, and
+// the key is built from the name and is unique, so a new file takes another name.
 
 import { createHash } from "node:crypto";
 import { and, eq, inArray, isNotNull, isNull, or, type SQL } from "drizzle-orm";
@@ -15,6 +17,8 @@ import type { DbExecutor } from "@/lib/db";
 import { files } from "@/lib/db/schema";
 
 const TAG_HEX_LENGTH = 8;
+// The tag when the short one is already another folder's name.
+const LONG_TAG_HEX_LENGTH = 16;
 
 export interface IncomingRunFile {
   fileCreatedAt: Date | null;
@@ -32,7 +36,10 @@ export interface StoredRunFile {
 // What a dismissed row records about the file that was dismissed.
 export interface DismissedRunFile {
   fileCreatedAt: Date | null;
-  relativePath: string;
+  filename: string;
+  relativePath: string | null;
+  // Set when the file reached S3 before or after it was dismissed.
+  s3Key: string | null;
   sizeBytes: number | null;
 }
 
@@ -122,6 +129,9 @@ function groupDismissedByPath(
 ): Map<string, DismissedRunFile[]> {
   const byPath = new Map<string, DismissedRunFile[]>();
   for (const row of dismissed) {
+    if (row.relativePath == null) {
+      continue;
+    }
     const atPath = byPath.get(row.relativePath);
     if (atPath) {
       atPath.push(row);
@@ -132,33 +142,54 @@ function groupDismissedByPath(
   return byPath;
 }
 
+// The names a dismissed row still holds because it has an S3 key. The key is
+// `<instrument>/<run>/<stored name>` and unique, so a second row under one of
+// these names would collide on it the moment its file is stored.
+function namesHeldByDismissed(dismissed: DismissedRunFile[]): Set<string> {
+  return new Set(
+    dismissed.filter((row) => row.s3Key != null).map((row) => row.filename)
+  );
+}
+
 function chooseFilename(
   incoming: IncomingRunFile,
-  byName: Map<string, NameClaim>
+  byName: Map<string, NameClaim>,
+  heldNames: Set<string>
 ): string {
   const plain = byName.get(incoming.filename);
-  if (!plain || plain.relativePath === incoming.relativePath) {
-    return plain?.filename ?? incoming.filename;
+  if (plain?.relativePath === incoming.relativePath) {
+    return plain.filename;
+  }
+  if (!(plain || heldNames.has(incoming.filename))) {
+    return incoming.filename;
   }
   const tagged = taggedFilename(incoming.filename, incoming.relativePath);
   const taggedOwner = byName.get(tagged);
-  if (!taggedOwner || taggedOwner.relativePath === incoming.relativePath) {
+  if (taggedOwner?.relativePath === incoming.relativePath) {
+    return tagged;
+  }
+  if (!(taggedOwner || heldNames.has(tagged))) {
     return tagged;
   }
   // Eight hex digits collided with a file from another folder. A longer
   // slice of the same hash still identifies this folder on the next report.
-  return taggedFilename(incoming.filename, incoming.relativePath, 16);
+  return taggedFilename(
+    incoming.filename,
+    incoming.relativePath,
+    LONG_TAG_HEX_LENGTH
+  );
 }
 
 /**
  * Pure decision for one report batch. `existing` is the active rows that
  * already use one of these paths or names. `dismissed` is the dismissed rows at
- * these paths: a file that no active row has is skipped when it is the same as
- * any of them (see `isSameAsDismissed`). Results line up with `incoming`.
+ * these paths, and those with an S3 key that use one of these names: a file
+ * that no active row has is skipped when it is the same as a dismissed row at
+ * its path (see `isSameAsDismissed`). Results line up with `incoming`.
  * A name claimed by an earlier item in the batch counts, so two copies
  * reported together don't both try to take the plain name. A skipped file
- * claims nothing, and a dismissed row never claims a name, so a new file may
- * take the name of the file that was dismissed.
+ * claims nothing. A dismissed row claims its name only when it has an S3 key,
+ * so a new file may take the name of a dismissed file that never reached S3.
  */
 export function decideStoredNames(
   incoming: IncomingRunFile[],
@@ -168,6 +199,7 @@ export function decideStoredNames(
   const byPath = new Map<string, NameClaim>();
   const byName = new Map<string, NameClaim>();
   const dismissedByPath = groupDismissedByPath(dismissed);
+  const heldNames = namesHeldByDismissed(dismissed);
 
   for (const row of existing) {
     const claim: NameClaim = {
@@ -193,7 +225,7 @@ export function decideStoredNames(
       };
     }
 
-    const filename = chooseFilename(file, byName);
+    const filename = chooseFilename(file, byName, heldNames);
     const owner = byName.get(filename);
     if (owner && owner.relativePath === file.relativePath) {
       byPath.set(file.relativePath, owner);
@@ -264,18 +296,29 @@ async function loadMatchingFiles(
     );
 }
 
-// Dismissed rows at the given paths, for a whole batch in one query.
+// Dismissed rows at the given paths, plus the dismissed rows with an S3 key
+// under the given names, for a whole batch in one query.
 async function loadDismissedFiles(
   executor: DbExecutor,
   instrumentRunId: string,
-  paths: string[]
+  paths: string[],
+  names: string[]
 ): Promise<DismissedRunFile[]> {
-  if (paths.length === 0) {
+  const matchers: (SQL | undefined)[] = [];
+  if (paths.length > 0) {
+    matchers.push(inArray(files.relativePath, paths));
+  }
+  if (names.length > 0) {
+    matchers.push(and(isNotNull(files.s3Key), inArray(files.filename, names)));
+  }
+  if (matchers.length === 0) {
     return [];
   }
-  const rows = await executor
+  return await executor
     .select({
+      filename: files.filename,
       relativePath: files.relativePath,
+      s3Key: files.s3Key,
       sizeBytes: files.sizeBytes,
       fileCreatedAt: files.fileCreatedAt,
     })
@@ -284,12 +327,9 @@ async function loadDismissedFiles(
       and(
         eq(files.instrumentRunId, instrumentRunId),
         isNotNull(files.deletedAt),
-        inArray(files.relativePath, paths)
+        or(...matchers)
       )
     );
-  return rows.flatMap((row) =>
-    row.relativePath ? [{ ...row, relativePath: row.relativePath }] : []
-  );
 }
 
 export async function resolveRunFiles(
@@ -310,19 +350,26 @@ export async function resolveRunFiles(
   );
   let decisions = decideStoredNames(incoming, existing);
 
-  // A file that no active row has may be one that was dismissed. Only then
-  // look at the dismissed rows, so a re-report of known files costs nothing.
-  const newPaths = [
-    ...new Set(
-      incoming
-        .filter((_, index) => decisions[index]?.action === "insert")
-        .map((file) => file.relativePath)
-    ),
-  ];
+  // A file that no active row has may be one that was dismissed, and the name
+  // it would get may belong to a dismissed row. Only then look at the
+  // dismissed rows, so a re-report of known files costs nothing. The names
+  // are every one the file can be given: plain, tagged, and the longer tag.
+  const newFiles = incoming.filter(
+    (_, index) => decisions[index]?.action === "insert"
+  );
   const dismissed = await loadDismissedFiles(
     executor,
     instrumentRunId,
-    newPaths
+    [...new Set(newFiles.map((file) => file.relativePath))],
+    [
+      ...new Set(
+        newFiles.flatMap((file) => [
+          file.filename,
+          taggedFilename(file.filename, file.relativePath),
+          taggedFilename(file.filename, file.relativePath, LONG_TAG_HEX_LENGTH),
+        ])
+      ),
+    ]
   );
   if (dismissed.length > 0) {
     decisions = decideStoredNames(incoming, existing, dismissed);
@@ -458,7 +505,8 @@ export async function recordDetectedFiles(
       await loadDismissedFiles(
         executor,
         instrumentRunId,
-        reported.map((file) => file.relative_path)
+        reported.map((file) => file.relative_path),
+        []
       )
     );
     const fresh = reported.filter(

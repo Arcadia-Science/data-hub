@@ -42,6 +42,8 @@ function dismissed(
 ): DismissedRunFile {
   return {
     relativePath,
+    filename: relativePath.slice(relativePath.lastIndexOf("/") + 1),
+    s3Key: null,
     sizeBytes: 100,
     fileCreatedAt: new Date("2026-09-21T17:00:00.000Z"),
     ...overrides,
@@ -300,5 +302,82 @@ describe("decideStoredNames with dismissed files", () => {
       { action: "insert", filename: "sample.tif" },
       { action: "insert", filename: taggedFilename("sample.tif", later) },
     ]);
+  });
+
+  describe("when a dismissed file reached S3", () => {
+    const heldKey = "inst/RUN001/sample.tif";
+
+    it("gives a different file at the path another name than the dismissed file's", () => {
+      const [decision] = decideStoredNames(
+        [incoming(path, { sizeBytes: 250 })],
+        [],
+        [dismissed(path, { s3Key: heldKey })]
+      );
+      expect(decision).toEqual({
+        action: "insert",
+        filename: taggedFilename("sample.tif", path),
+      });
+    });
+
+    it("still skips the dismissed file itself", () => {
+      const [decision] = decideStoredNames(
+        [incoming(path)],
+        [],
+        [dismissed(path, { s3Key: heldKey })]
+      );
+      expect(decision).toEqual({ action: "dismissed" });
+    });
+
+    it("keeps the name from a file at another path", () => {
+      const later = "alice/day-2/capture-b/sample.tif";
+      const [decision] = decideStoredNames(
+        [incoming(later, { sizeBytes: 250 })],
+        [],
+        [dismissed(path, { s3Key: heldKey })]
+      );
+      expect(decision).toEqual({
+        action: "insert",
+        filename: taggedFilename("sample.tif", later),
+      });
+    });
+
+    it("widens the tag when the dismissed file also held the short tagged name", () => {
+      const tagged = taggedFilename("sample.tif", path);
+      const [decision] = decideStoredNames(
+        [incoming(path, { sizeBytes: 250 })],
+        [],
+        [
+          dismissed(path, { s3Key: heldKey }),
+          dismissed(path, { filename: tagged, s3Key: `inst/RUN001/${tagged}` }),
+        ]
+      );
+      expect(decision).toEqual({
+        action: "insert",
+        filename: taggedFilename("sample.tif", path, 16),
+      });
+    });
+
+    it("keeps a dismissed row without an S3 key from holding its name", () => {
+      const [decision] = decideStoredNames(
+        [incoming(path, { sizeBytes: 250 })],
+        [],
+        [dismissed(path)]
+      );
+      expect(decision).toEqual({ action: "insert", filename: "sample.tif" });
+    });
+
+    it("maps a re-report to the active row that took the other name", () => {
+      const tagged = taggedFilename("sample.tif", path);
+      const [decision] = decideStoredNames(
+        [incoming(path, { sizeBytes: 250 })],
+        [stored(12, path, tagged)],
+        [dismissed(path, { s3Key: heldKey })]
+      );
+      expect(decision).toEqual({
+        action: "existing",
+        fileId: 12,
+        filename: tagged,
+      });
+    });
   });
 });
