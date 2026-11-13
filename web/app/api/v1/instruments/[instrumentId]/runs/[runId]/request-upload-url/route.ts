@@ -7,6 +7,7 @@ import {
   INTERNAL_ERROR,
   NOT_FOUND,
   PAYLOAD_TOO_LARGE,
+  runDeletedError,
 } from "@/lib/api/errors";
 import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
 import { beginMultipartUpload } from "@/lib/api/multipart-upload";
@@ -68,7 +69,9 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   }
 
   if (run.deletedAt) {
-    return apiError(409, CONFLICT, "Cannot upload files to a soft-deleted run");
+    return runDeletedError(
+      "This run was deleted on Data Hub. Restore it to upload files."
+    );
   }
 
   const body = await readJsonBody(request, requestUploadUrlBody);

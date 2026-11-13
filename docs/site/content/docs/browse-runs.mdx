@@ -176,6 +176,8 @@ Reprocessing sends only the original instrument files. Files Data Hub generated,
 
 Deleting a run also cancels the uploads that were requested for its files, so the watcher stops trying to send them. Those files go back to **Pending**. Restoring the run doesn’t bring the requests back. Choose **Upload** again if you still want the files. See [Request an upload](/docs/browse-runs#request-upload).
 
+While a run is deleted, Data Hub refuses a watcher’s reports of it, so the watcher’s new files aren’t added. After you restore the run, restart the watcher to send them. Watchers before 1.4.3 also send them when another file of the run finishes. See [A run was deleted on Data Hub](/docs/troubleshoot-a-watcher#a-run-was-deleted-on-data-hub).
+
 ![Deleted run page with a red banner naming who deleted it and when, and a Restore button](/images/deleted-run.webp)
 
 ### How reprocessing is queued [#reprocess-queue]
