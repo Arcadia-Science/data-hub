@@ -140,6 +140,28 @@ class TestSetupFileLogging:
         assert logging.getLogger().level == logging.INFO
 
 
+class TestApplyLogLevelFromEnv:
+    """The service calls this again after it has loaded its env file."""
+
+    def test_sets_the_root_level_from_the_env_var(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("DATA_HUB_WATCHER_LOG_LEVEL", "DEBUG")
+        logging.getLogger().setLevel(logging.INFO)
+
+        logging_setup.apply_log_level_from_env()
+
+        assert logging.getLogger().level == logging.DEBUG
+
+    def test_leaves_the_level_alone_when_the_var_is_unset(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("DATA_HUB_WATCHER_LOG_LEVEL", raising=False)
+        logging.getLogger().setLevel(logging.WARNING)
+
+        logging_setup.apply_log_level_from_env()
+
+        assert logging.getLogger().level == logging.WARNING
+
+
 class TestServiceManagerHandler:
     def test_error_routes_to_log_error_msg(self) -> None:
         sm = MagicMock(name="servicemanager")

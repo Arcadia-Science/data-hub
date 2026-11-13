@@ -82,6 +82,11 @@ def _apply_root_level() -> None:
         logging.getLogger().setLevel(_resolve_root_level())
 
 
+def apply_log_level_from_env() -> None:
+    """Re-read ``DATA_HUB_WATCHER_LOG_LEVEL`` after an env file has been loaded."""
+    _apply_root_level()
+
+
 def _watcher_log_path() -> Path:
     return WATCHER_LOG_DIR / LOG_FILENAME
 

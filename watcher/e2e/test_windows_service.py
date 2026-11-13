@@ -493,14 +493,6 @@ def _watching_gaps(beats: list[HeartbeatRow]) -> list[float]:
     ]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=KnownBugStillPresent,
-    reason=(
-        "ENG-2119: the service sets its log level before it loads the "
-        "env file, so DATA_HUB_WATCHER_LOG_LEVEL there is ignored"
-    ),
-)
 @pytest.mark.covers("service.env_file->log_level_honored")
 def test_the_log_level_in_the_env_file_is_honored_by_the_service(
     watcher: WatcherFactory, server: ServerView, proxy: FaultProxy
@@ -523,8 +515,7 @@ def test_the_log_level_in_the_env_file_is_honored_by_the_service(
     )
     server.wait_for_heartbeats(pc.watcher_id, count=2)
 
-    with known_bug():
-        pc.wait_for_log(r"\[DEBUG\]", timeout=10)
+    pc.wait_for_log(r"\[DEBUG\]", timeout=10)
 
 
 @pytest.mark.covers("service.config_revision->applied_without_restart")

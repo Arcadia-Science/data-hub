@@ -104,12 +104,11 @@ TRANSITIONS: tuple[Transition, ...] = (
         "restarted.",
         platforms=SERVICE,
     ),
-    xfail_bug(
+    covered(
         MACHINE,
         "service.env_file->log_level_honored",
         "`DATA_HUB_WATCHER_LOG_LEVEL` in the registered env file sets the service's log "
         "level, as it does for `watch`.",
-        "ENG-2119",
         platforms=SERVICE,
     ),
     covered(

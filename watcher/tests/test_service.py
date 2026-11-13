@@ -1559,6 +1559,40 @@ class TestRunServiceLoopLogging:
         harness.sm.LogWarningMsg.assert_called_once()
         assert "Upload is slow" in harness.sm.LogWarningMsg.call_args.args[0]
 
+    def test_a_log_level_set_in_the_registered_env_file_is_applied(
+        self,
+        harness: _LoopHarness,
+    ) -> None:
+        # The service sets up logging before it loads its env file, so a level set in that file
+        # has to be applied after the load. The fake load_dotenv sets the variable on the override
+        # load, which is the one for the registered file.
+        def load_env_file(*args: Any, **kwargs: Any) -> None:
+            harness.dotenv_calls.append((args, kwargs))
+            if kwargs.get("override"):
+                harness.monkeypatch.setenv("DATA_HUB_WATCHER_LOG_LEVEL", "DEBUG")
+
+        import dotenv
+
+        harness.monkeypatch.setattr(dotenv, "load_dotenv", load_env_file)
+        stop_event = threading.Event()
+        stop_event.set()
+
+        harness.svc._run_service_loop(stop_event, harness.sm)
+
+        assert len(harness.start_calls) == 1
+        assert logging.getLogger().level == logging.DEBUG
+
+        # DEBUG and INFO lines from another module now reach the logger, and they still stay out
+        # of the Event Log, as INFO lines do.
+        harness.sm.reset_mock()
+        monitor_logger = logging.getLogger("data_hub_watcher.monitor")
+        assert monitor_logger.isEnabledFor(logging.DEBUG)
+        monitor_logger.debug("Polling: a.csv")
+        monitor_logger.info("File stable: a.csv")
+
+        harness.sm.LogInfoMsg.assert_not_called()
+        harness.sm.LogWarningMsg.assert_not_called()
+
     def test_service_lifecycle_lines_reach_the_event_log(
         self,
         harness: _LoopHarness,

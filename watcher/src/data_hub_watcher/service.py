@@ -610,6 +610,7 @@ def _run_service_loop(
         state_db_dir,
     )
     from data_hub_watcher.logging_setup import (
+        apply_log_level_from_env,
         attach_servicemanager_handler,
         setup_file_logging,
     )
@@ -627,10 +628,11 @@ def _run_service_loop(
     # Python starts the root logger at WARNING, and the CLI's
     # ``basicConfig`` never runs in the service's process, so without
     # this every INFO line (the "starting" and "is running" lines among
-    # them) would be dropped. ``DATA_HUB_WATCHER_LOG_LEVEL`` still wins
-    # inside ``setup_file_logging``, but only when it is in the process
-    # environment: the registered env file is loaded further down in this
-    # function, so a value set there is ignored (known bug ENG-2119).
+    # them) would be dropped. ``setup_file_logging`` applies
+    # ``DATA_HUB_WATCHER_LOG_LEVEL`` when it is in the process environment.
+    # The registered env file is loaded further down this function, and
+    # ``apply_log_level_from_env`` applies a value set there right after
+    # that load.
     #
     # The Event Log takes this module's own INFO lines (``logger.name``
     # is ``__main__`` when the SCM runs the file, so it isn't hard-coded)
@@ -671,6 +673,7 @@ def _run_service_loop(
     if base_env != env_path and base_env.exists():
         load_dotenv(base_env)
     load_dotenv(env_path, override=True)
+    apply_log_level_from_env()
     cfg = load_config(path)
     inst = cfg.instrument
 
