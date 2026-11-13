@@ -13,6 +13,7 @@ type RunDetailLayoutProps = Pick<
   | "filesDownloadableCount"
   | "filesPagination"
   | "instrumentId"
+  | "notebookLinksSlot"
   | "run"
   | "runId"
   | "runNavSlot"
@@ -25,8 +26,8 @@ type RunDetailLayoutProps = Pick<
 
 /**
  * The part of a run page that every instrument shares: the header with its
- * cancel-queued and delete or restore buttons, the metadata card, and the files
- * table. A variant supplies only what differs, its metadata badges and its
+ * cancel-queued and delete or restore buttons, the metadata card, the lab
+ * notebook links, and the files table. A variant supplies only what differs, its metadata badges and its
  * report, so a new header action or a change to the files layout happens here
  * once.
  */
@@ -39,6 +40,7 @@ export function RunDetailLayout({
   filesDownloadableCount,
   filesPagination,
   instrumentId,
+  notebookLinksSlot,
   run,
   runId,
   runNavSlot,
@@ -75,6 +77,7 @@ export function RunDetailLayout({
         >
           {badges}
         </RunDetail.Metadata>
+        {notebookLinksSlot}
         <RunDetail.Files
           files={files}
           filteredDownloadableCount={filesDownloadableCount}

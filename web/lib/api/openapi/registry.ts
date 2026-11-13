@@ -49,6 +49,10 @@ export const commentIdParam = z
   .string()
   .uuid()
   .openapi({ example: "3f1a2b4c-5d6e-7f80-9a1b-2c3d4e5f6071" });
+export const notebookLinkIdParam = z
+  .string()
+  .uuid()
+  .openapi({ example: "9b2c4e1a-7d3f-4a5b-8c6d-0e1f2a3b4c5d" });
 export const archiveJobIdParam = z.string().uuid();
 
 export function jsonResponse(

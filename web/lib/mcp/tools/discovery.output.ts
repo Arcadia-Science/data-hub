@@ -23,8 +23,22 @@ const searchRunResultSchema = z.object({
   createdAt: isoDateTime,
   fileCount: z.number().int(),
   totalSizeBytes: z.number(),
-  matchReason: z.enum(["run_id", "file", "instrument", "ran_by"]),
+  matchReason: z.enum([
+    "run_id",
+    "notebook_link",
+    "file",
+    "instrument",
+    "ran_by",
+  ]),
   matchedFilename: z.string().nullable(),
+  // Set when `matchReason` is "notebook_link".
+  matchedNotebookLink: z
+    .object({
+      url: z.string(),
+      label: z.string().nullable(),
+      displayName: z.string(),
+    })
+    .nullable(),
 });
 
 const searchFileResultSchema = z.object({

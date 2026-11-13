@@ -13,6 +13,7 @@ export const ALL_SCOPES = [
   "runs:reprocess",
   "runs:upload",
   "runs:comment",
+  "runs:link",
   "files:read",
   "files:create",
   "files:update",

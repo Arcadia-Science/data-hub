@@ -6,6 +6,7 @@ import {
   lookupFileForDownload,
 } from "@/lib/api/files";
 import { prepareRunArchive } from "@/lib/api/run-archive";
+import { getRunClaimStatus } from "@/lib/api/run-attributions";
 import { toolRegistrationConfig } from "@/lib/mcp/catalog/register";
 import {
   errorResult,
@@ -57,23 +58,29 @@ export function registerFileTools(server: McpServer) {
         return errorResult(`File '${fileId}' not found.`);
       }
 
-      const downloadUrl = await getPresignedDownloadUrl(
-        lookup.s3Bucket,
-        lookup.s3Key,
-        {
+      const [downloadUrl, run] = await Promise.all([
+        getPresignedDownloadUrl(lookup.s3Bucket, lookup.s3Key, {
           contentType: contentTypeForDownload(
             lookup.contentType,
             lookup.filename
           ),
           expiresIn: PRESIGNED_DOWNLOAD_URL_EXPIRY_SECONDS,
-        }
-      );
+        }),
+        getRunClaimStatus(lookup.runUuid),
+      ]);
+      // The run was deleted between the two lookups.
+      if (!run) {
+        return errorResult(`File '${fileId}' not found.`);
+      }
 
       return structuredResult({
         fileId,
         filename: lookup.filename,
         downloadUrl,
         expiresInSeconds: PRESIGNED_DOWNLOAD_URL_EXPIRY_SECONDS,
+        instrumentId: run.instrumentId,
+        runId: run.runId,
+        unclaimed: run.unclaimed,
       });
     }
   );
@@ -103,6 +110,7 @@ export function registerFileTools(server: McpServer) {
           sizeBytes: result.sizeBytes,
           expiresInSeconds: result.expiresInSeconds,
           contentType: "application/zip",
+          unclaimed: result.unclaimed,
         });
       }
 
@@ -113,6 +121,7 @@ export function registerFileTools(server: McpServer) {
         jobId: result.jobId,
         retryAfterSeconds: result.retryAfterSeconds,
         hint: "Call get_run_archive again after the suggested wait to retrieve the download URL.",
+        unclaimed: result.unclaimed,
       });
     }
   );

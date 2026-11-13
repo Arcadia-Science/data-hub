@@ -16,6 +16,10 @@ import {
   type FilterOption,
   type InstrumentFilterParamKey,
 } from "./filterable-column-header";
+import {
+  NOTEBOOK_LINK_FILTER_OPTIONS,
+  NotebookLinksCell,
+} from "./notebook-links-cell";
 import { RanByCell } from "./ran-by-cell";
 import { RawFileColumnHeader } from "./raw-file-column-header";
 import { RunIdCell } from "./run-id-cell";
@@ -37,8 +41,8 @@ export interface MetadataColumn {
 
 /**
  * The runs table every instrument shares: a checkbox, the run ID, file count
- * and size, then the instrument's own metadata columns, then who ran it and
- * when. An instrument's table passes only its metadata columns, so a new
+ * and size, then the instrument's own metadata columns, then who ran it, its
+ * lab notebook links, and when. An instrument's table passes only its metadata columns, so a new
  * shared column or a fix to row selection happens here once.
  */
 export function RunRowsTable({
@@ -80,6 +84,13 @@ export function RunRowsTable({
               paramKey="ran_by"
             />
           </TableHead>
+          <TableHead>
+            <FilterableColumnHeader
+              label="Lab Notebook"
+              options={NOTEBOOK_LINK_FILTER_OPTIONS}
+              paramKey="has_notebook_link"
+            />
+          </TableHead>
           <RunTimeHeads />
         </TableRow>
       </TableHeader>
@@ -114,6 +125,9 @@ export function RunRowsTable({
                   instrumentId={row.instrument_id}
                   runId={row.run_id}
                 />
+              </TableCell>
+              <TableCell>
+                <NotebookLinksCell links={row.notebook_links} />
               </TableCell>
               <RunTimeCells row={row} />
             </TableRow>
