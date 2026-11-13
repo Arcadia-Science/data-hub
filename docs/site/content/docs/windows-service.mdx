@@ -68,6 +68,16 @@ Windows 10 and 11 turn on Fast Startup by default. With it, **Shut down** in the
 
 Watchers older than 1.4.1 don’t ask Windows to tell them about a restart, so a restart ends them with no final heartbeat and no `watcher_stopped` event. Updating to 1.4.1 is enough: the service tells Windows what it handles each time it runs, so no `service reinstall` is needed.
 
+## When the watcher is deregistered [#when-the-watcher-is-deregistered]
+
+With watcher 1.4.3 and later, the service stops about three minutes after someone deregisters its watcher or retires its instrument. It stays stopped. The service exits cleanly, so the restart-on-failure recovery doesn’t start it again.
+
+The error is in `watcher.log` and in the Application event log: `This watcher was deregistered on Data Hub, so its registration no longer exists. Run 'data-hub-watcher init' to register it again.` The service sends no `watcher_stopped` event and no final heartbeat, because Data Hub would refuse both.
+
+Starting the service again, including at boot, checks the registration first. If the watcher is still deregistered, the start logs the same error and the service stops with an error. Windows then tries again twice, after about one minute and then about two minutes. After that, it leaves the service stopped.
+
+To use the PC again, run `data-hub-watcher init` on the PC. Then run `data-hub-watcher service start` from an Administrator terminal. See [Troubleshoot a watcher](/docs/troubleshoot-a-watcher#the-watcher-was-deregistered).
+
 ## Do not run `watch` alongside the service
 
 Running `data-hub-watcher watch` interactively while the service is also running is not supported: both processes would race on the same log file and watch directory. Stop the service first if you need the CLI for debugging:
