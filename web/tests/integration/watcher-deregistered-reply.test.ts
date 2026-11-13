@@ -4,6 +4,7 @@ import {
   instruments,
   personalAccessTokens,
   watcherHeartbeats,
+  watcherReleaseConfig,
   watchers,
 } from "@/lib/db/schema";
 import {
@@ -139,6 +140,40 @@ describe("The 404 for a deregistered watcher", () => {
       expect(((await res.json()) as Reply).error.code).toBe(
         "WATCHER_DEREGISTERED"
       );
+    });
+
+    it("tells a deregistered watcher that is below the version floor, not 426", async () => {
+      const watcherId = await registerWatcher("deregistered-old", ownerToken);
+      await deregister(watcherId);
+      const setFloor = (floor: string) =>
+        getTestDb()
+          .update(watcherReleaseConfig)
+          .set({ minSupportedVersion: floor });
+      await setFloor("1.0.0");
+      try {
+        const sendOldVersion = (id: string) =>
+          api(`/api/v1/watchers/${id}/heartbeat`, {
+            method: "POST",
+            token: ownerToken,
+            body: { status: "watching", watcher_version: "0.5.0" },
+          });
+
+        const res = await sendOldVersion(watcherId);
+        const activeRes = await sendOldVersion(activeWatcherId);
+
+        // The deregistered reply comes before the floor check: a watcher that
+        // has to update would otherwise be told to, and never learn that its
+        // registration is gone.
+        expect(res.status).toBe(404);
+        expect(((await res.json()) as Reply).error.code).toBe(
+          "WATCHER_DEREGISTERED"
+        );
+        // The floor is in force: an active watcher of the same version is sent away.
+        expect(activeRes.status).toBe(426);
+      } finally {
+        // The baseline of the integration setup.
+        await setFloor("0.1.0");
+      }
     });
 
     it("keeps NOT_FOUND for a watcher ID that was never registered", async () => {
