@@ -27,7 +27,6 @@ __all__ = [
     "ExclusiveWriter",
     "GrowingFile",
     "make_readable",
-    "make_unreadable",
     "payload",
     "write_file",
     "write_run",
@@ -72,27 +71,8 @@ def write_file(path: Path, content: bytes | int = SMALL, *, mtime: float | None 
     return data
 
 
-def make_unreadable(path: Path) -> None:
-    """Take every permission off a file, so the watcher can see it but not open it.
-
-    It stands in, on Linux and macOS, for a file that an instrument keeps open with exclusive
-    sharing on Windows: both are a file that is there and can't be read yet, until
-    :func:`make_readable`. A user that can read any file (root) can't be shut out this way, so
-    the test is skipped for it.
-    """
-    path.chmod(0)
-    try:
-        path.open("rb").close()
-    except PermissionError:
-        return
-    path.chmod(0o644)
-    import pytest  # noqa: PLC0415
-
-    pytest.skip("this user can read a file that has no permissions")
-
-
 def make_readable(path: Path) -> None:
-    """Give the file back the permissions of an ordinary file."""
+    """Give a file that the ``unreadable_file`` fixture shut out an ordinary file's permissions."""
     path.chmod(0o644)
 
 

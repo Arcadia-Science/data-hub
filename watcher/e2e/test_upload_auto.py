@@ -20,6 +20,7 @@ The queue (manual mode, "Request upload") has its own file, ``test_upload_queue.
 from __future__ import annotations
 import hashlib
 import re
+from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
 
@@ -34,7 +35,6 @@ from e2e_support.files import (
     LARGE,
     SMALL,
     make_readable,
-    make_unreadable,
     payload,
     write_file,
     write_run,
@@ -945,6 +945,7 @@ def test_a_file_that_cannot_be_read_yet_waits_and_is_uploaded_once_it_can_be_rea
     proxy: FaultProxy,
     instrument_id: str,
     watch_dir: Path,
+    unreadable_file: Callable[[Path], None],
 ) -> None:
     pc = watcher()
     start_watching(pc, server)
@@ -954,7 +955,7 @@ def test_a_file_that_cannot_be_read_yet_waits_and_is_uploaded_once_it_can_be_rea
     # keeps open.)
     target = watch_dir / RUN / "small.csv"
     content = write_file(target, SMALL)
-    make_unreadable(target)
+    unreadable_file(target)
 
     # That is one event that says it will be retried, not a failed attempt.
     waiting = server.wait_for_event(

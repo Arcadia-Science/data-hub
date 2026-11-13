@@ -14,7 +14,7 @@ keep the three-poll scenarios short.
 """
 
 from __future__ import annotations
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import NamedTuple
 
@@ -25,7 +25,7 @@ from data_hub_watcher import testing_overrides
 from e2e_support.admin import Admin
 from e2e_support.drivers import WatcherDriver
 from e2e_support.factory import WatcherFactory
-from e2e_support.files import LARGE, SMALL, make_readable, make_unreadable, write_file, write_run
+from e2e_support.files import LARGE, SMALL, make_readable, write_file, write_run
 from e2e_support.proxy_helpers import silence_heartbeats
 from e2e_support.server import FileRow, ServerView
 from e2e_support.waiting import KnownBugStillPresent, known_bug, stays_true, wait_until
@@ -742,11 +742,12 @@ def test_a_requested_file_that_cannot_be_read_yet_stays_requested_and_uploads_on
     admin: Admin,
     instrument_id: str,
     watch_dir: Path,
+    unreadable_file: Callable[[Path], None],
 ) -> None:
     pc = manual_watcher(watcher, server)
     a = detect_run(server, instrument_id, watch_dir, RUN, {"a.csv": SMALL})["a.csv"]
     target = watch_dir / RUN / "a.csv"
-    make_unreadable(target)
+    unreadable_file(target)
 
     admin.request_upload(instrument_id, RUN, [a.row.id]).raise_for_status()
     waiting = server.wait_for_event(
