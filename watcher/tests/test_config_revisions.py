@@ -12,6 +12,7 @@ import collections
 import itertools
 import logging
 import os
+import shutil
 import sqlite3
 import threading
 import time
@@ -24,6 +25,7 @@ from unittest.mock import MagicMock
 import pytest
 import requests
 import yaml
+from watchdog.events import DirDeletedEvent, DirMovedEvent, FileDeletedEvent
 
 from data_hub_watcher import runtime
 from data_hub_watcher.api_client import DEFAULT_TIMEOUT, ApiError, DataHubClient
@@ -964,6 +966,382 @@ class TestWaitingState:
         cfg = load_config(env.config_path)
 
         assert cfg.instrument.watch_directory == (env.tmp_path / "later").resolve()
+
+
+class TestWatchFolderVanishesWhileWatching:
+    """The watch folder disappears under a running watcher (watcher 1.4.3).
+
+    The watcher moves to the waiting state, as it does when the folder is missing
+    at start, and starts watching again once the folder is back.
+    """
+
+    PART_SIZE = 64
+    PART_COUNT = 4
+
+    @staticmethod
+    def _tick(sup: WatcherSupervisor) -> None:
+        """One heartbeat tick of the running runtime, then the supervisor's poll."""
+        assert sup.rt is not None
+        sup.rt.heartbeat._on_tick()  # type: ignore[misc]
+        sup.poll(timeout=0)
+
+    @staticmethod
+    def _waiting_tick(sup: WatcherSupervisor) -> None:
+        waiting = sup._waiting
+        assert waiting is not None
+        waiting.heartbeat._on_tick()  # type: ignore[misc]
+        sup.poll(timeout=0)
+
+    @staticmethod
+    def _events(env: _Env, sup: WatcherSupervisor) -> list[dict[str, Any]]:
+        sup.reporter.flush()
+        return [e for c in env.client.send_events.call_args_list for e in c.args[1]]
+
+    @staticmethod
+    def _started_messages(events: list[dict[str, Any]]) -> list[str]:
+        return [e["message"] for e in events if e["event_type"] == "watcher_started"]
+
+    @staticmethod
+    def _unavailable_reasons(events: list[dict[str, Any]]) -> list[str]:
+        return [
+            e["details"]["reason"]
+            for e in events
+            if (e.get("details") or {}).get("kind") == "watch_directory_unavailable"
+        ]
+
+    def test_a_tick_with_the_folder_gone_moves_the_watcher_to_waiting(
+        self, env: _Env, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        sup = env.supervisor()
+        sup.start()
+        old_rt = sup.rt
+        assert old_rt is not None
+        assert self._started_messages(self._events(env, sup)) == ["Watcher started on test-host"]
+
+        shutil.rmtree(env.watch_dir)
+        with caplog.at_level(logging.INFO, logger="data_hub_watcher.runtime"):
+            self._tick(sup)
+
+        assert sup.rt is None
+        reason = sup.waiting_reason
+        assert reason is not None and reason.startswith("watch_directory not found")
+        # The old runtime is stopped for good, not left running next to the waiting loop.
+        assert old_rt.heartbeat._thread is not None and not old_rt.heartbeat._thread.is_alive()
+        assert old_rt.monitor._checker_thread is not None
+        assert not old_rt.monitor._checker_thread.is_alive()
+        assert not old_rt.state_db._connections
+        # The heartbeat now says `waiting`, with the reason, and the watcher never "stopped".
+        payload = env.client.send_heartbeat.call_args.args[1]
+        assert payload["status"] == "waiting"
+        assert payload["status_reason"] == reason
+        statuses = [c.args[1]["status"] for c in env.client.send_heartbeat.call_args_list]
+        assert "stopped" not in statuses
+        # One error event for the move, and no second `watcher_started` (or a stop event).
+        events = self._events(env, sup)
+        assert self._started_messages(events) == ["Watcher started on test-host"]
+        assert self._unavailable_reasons(events) == [reason]
+        assert EventType.WATCHER_STOPPED.value not in [e["event_type"] for e in events]
+        # One warning, which names the reason.
+        warnings = [
+            r.getMessage()
+            for r in caplog.records
+            if r.name == "data_hub_watcher.runtime" and r.levelno >= logging.WARNING
+        ]
+        assert len(warnings) == 1
+        assert reason in warnings[0]
+
+    def test_a_tick_with_the_folder_there_changes_nothing(self, env: _Env) -> None:
+        sup = env.supervisor()
+        sup.start()
+        rt = sup.rt
+        assert rt is not None
+
+        self._tick(sup)
+
+        assert sup.rt is rt
+        assert sup.waiting_reason is None
+        assert self._started_messages(self._events(env, sup)) == ["Watcher started on test-host"]
+
+    def test_it_resumes_when_the_folder_is_back_and_waits_again_when_it_goes_again(
+        self, env: _Env
+    ) -> None:
+        sup = env.supervisor()
+        sup.start()
+        old_rt = sup.rt
+        shutil.rmtree(env.watch_dir)
+        self._tick(sup)
+        assert sup.rt is None
+
+        # Still gone: a tick of the waiting heartbeat changes nothing.
+        self._waiting_tick(sup)
+        assert sup.rt is None and sup.waiting_reason is not None
+
+        env.watch_dir.mkdir()
+        self._waiting_tick(sup)
+
+        new_rt = sup.rt
+        assert new_rt is not None and new_rt is not old_rt
+        assert sup.waiting_reason is None
+        assert new_rt.heartbeat._thread is not None and new_rt.heartbeat._thread.is_alive()
+        payload = env.client.send_heartbeat.call_args.args[1]
+        assert payload["status"] == "watching"
+        # The new runtime watches the new folder: a file written to it is picked up.
+        (env.watch_dir / "RUN002_new.csv").write_text("a,b\n1,2\n")
+        _wait_until(lambda: any(p.name == "RUN002_new.csv" for p in list(new_rt.monitor._pending)))
+        events = self._events(env, sup)
+        assert self._started_messages(events) == [
+            "Watcher started on test-host",
+            "Watcher resumed on test-host",
+        ]
+
+        # It can happen again, and reports the new stretch of waiting once more.
+        shutil.rmtree(env.watch_dir)
+        self._tick(sup)
+        assert sup.rt is None and sup.waiting_reason is not None
+        events = self._events(env, sup)
+        assert len(self._unavailable_reasons(events)) == 2
+        assert len(self._started_messages(events)) == 2
+
+    def test_the_check_runs_on_the_poll_thread_when_the_heartbeat_ticks(
+        self, env: _Env, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A real heartbeat thread, ticking every second: its tick must only ask for the
+        # check, which `poll` runs on this thread.
+        monkeypatch.setenv("DATA_HUB_WATCHER_HEARTBEAT_INTERVAL_SECONDS", "1")
+        checked_on: list[threading.Thread] = []
+        real_problem = runtime.watch_directory_problem
+
+        def spy(path: Path) -> str | None:
+            checked_on.append(threading.current_thread())
+            return real_problem(path)
+
+        monkeypatch.setattr(runtime, "watch_directory_problem", spy)
+        # Leave watchdog's own report of the deleted folder out of it: only the tick asks.
+        from data_hub_watcher import monitor as monitor_module
+
+        monkeypatch.setattr(monitor_module._EventHandler, "_note_root_event", lambda *_: None)
+        sup = env.supervisor()
+        sup.start()
+        checked_on.clear()
+
+        shutil.rmtree(env.watch_dir)
+        deadline = time.monotonic() + 15
+        while sup.waiting_reason is None:
+            assert time.monotonic() < deadline, "the watcher never moved to waiting"
+            sup.poll(timeout=0.5)
+
+        assert checked_on
+        assert set(checked_on) == {threading.current_thread()}
+
+    def test_a_delete_event_for_the_folder_itself_asks_for_a_check_at_once(
+        self, env: _Env, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        handlers = _record_handlers(monkeypatch)
+        sup = env.supervisor()
+        sup.start()
+        [handler] = handlers
+        sup._folder_check_due.clear()
+        shutil.rmtree(env.watch_dir)
+
+        # No heartbeat tick: watchdog's report alone asks for the check.
+        handler.on_deleted(DirDeletedEvent(str(env.watch_dir)))
+        assert sup._folder_check_due.is_set()
+        sup.poll(timeout=0)
+
+        assert sup.rt is None
+        assert sup.waiting_reason is not None
+        assert sup.waiting_reason.startswith("watch_directory not found")
+
+    def test_a_delete_inside_the_folder_asks_for_nothing(
+        self, env: _Env, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        handlers = _record_handlers(monkeypatch)
+        sup = env.supervisor()
+        sup.start()
+        [handler] = handlers
+        sup._folder_check_due.clear()
+
+        handler.on_deleted(FileDeletedEvent(str(env.watch_dir / "RUN001_sample.csv")))
+        handler.on_deleted(DirDeletedEvent(str(env.watch_dir / "subfolder")))
+        handler.on_moved(DirMovedEvent(str(env.watch_dir / "subfolder"), str(env.tmp_path / "x")))
+
+        assert not sup._folder_check_due.is_set()
+        rt = sup.rt
+        assert rt is not None
+        sup.poll(timeout=0)
+        assert sup.rt is rt
+
+    def test_a_file_monitor_that_stopped_watching_is_rebuilt(self, env: _Env) -> None:
+        sup = env.supervisor()
+        sup.start()
+        old_rt = sup.rt
+        assert old_rt is not None
+        assert old_rt.monitor.is_watching()
+
+        # Deleted and created again before the watcher looked: the folder is there, but
+        # watchdog stopped watching the one that was deleted.
+        shutil.rmtree(env.watch_dir)
+        env.watch_dir.mkdir()
+        _wait_until(lambda: not old_rt.monitor.is_watching())
+        self._tick(sup)
+
+        new_rt = sup.rt
+        assert new_rt is not None and new_rt is not old_rt
+        assert sup.waiting_reason is None
+        assert new_rt.monitor.is_watching()
+        assert self._started_messages(self._events(env, sup)) == [
+            "Watcher started on test-host",
+            "Watcher resumed on test-host",
+        ]
+
+    def test_uploads_get_a_short_wait_and_start_again_when_the_folder_is_back(
+        self, env: _Env, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # An auto-mode upload an earlier start never finished, so the runtime's upload
+        # worker sends it as soon as it starts.
+        big = env.watch_dir / "RUN009_big.csv"
+        content = bytes(i % 251 for i in range(self.PART_SIZE * self.PART_COUNT))
+        big.write_bytes(content)
+        cfg = env.write_config(_cfg(env.watch_dir))
+        state = env.state()
+        try:
+            state.record_report(
+                "RUN009", [], new_run=False, pending_relative_paths=["RUN009_big.csv"]
+            )
+        finally:
+            state.close()
+
+        upload_numbers = itertools.count(1)
+
+        def presign(*args: Any, **kwargs: Any) -> PresignedUploadResponse:
+            return PresignedUploadResponse(
+                upload_type="multipart",
+                upload_id=f"upload-{next(upload_numbers)}",
+                part_size=self.PART_SIZE,
+                part_count=self.PART_COUNT,
+                s3_bucket="test-bucket",
+                s3_key="test-instrument/RUN009/RUN009_big.csv",
+                file_id=9,
+                expires_in=900,
+                already_uploaded=False,
+            )
+
+        def part_urls(file_id: int, upload_id: str, numbers: list[int]) -> Any:
+            return MultipartPartUrlsResponse(
+                expires_in=900,
+                parts=[
+                    MultipartPartUrl(
+                        part_number=n, upload_url=f"https://s3.example/{upload_id}/{n}"
+                    )
+                    for n in numbers
+                ],
+            )
+
+        env.client.request_upload_url.side_effect = presign
+        env.client.get_part_urls.side_effect = part_urls
+
+        # Each part reads its body a byte at a time. While `slow` is set, a part takes
+        # about three seconds, far past the wait below.
+        slow = threading.Event()
+        slow.set()
+        lock = threading.Lock()
+        sending: collections.Counter[str] = collections.Counter()
+
+        def put(session: Any, url: str, *, data: Any, **kwargs: Any) -> MagicMock:
+            upload_id = url.split("/")[-2]
+            with lock:
+                sending[upload_id] += 1
+            try:
+                while data.read(1):
+                    if slow.is_set():
+                        time.sleep(0.05)
+            finally:
+                with lock:
+                    sending[upload_id] -= 1
+            response = MagicMock()
+            response.headers = {"ETag": f'"{url}"'}
+            return response
+
+        monkeypatch.setattr(requests.Session, "put", put)
+        # The wait for a runtime whose folder is gone is its own, shorter limit. The one
+        # for a config rebuild stays at its default, so reaching for it would hang.
+        monkeypatch.setattr(runtime, "WATCH_FOLDER_GONE_DRAIN_TIMEOUT_SECONDS", 0.2)
+        monkeypatch.setattr(runtime, "CONFIG_APPLY_DRAIN_TIMEOUT_SECONDS", 600)
+
+        sup = env.supervisor(cfg)
+        sup.start()
+        # All four parts are sending at once, within upload_parallelism (4).
+        _wait_until(lambda: sending["upload-1"] == self.PART_COUNT)
+
+        # The parts hold the file open, so removing the folder works on POSIX, where an
+        # open file can be deleted.
+        shutil.rmtree(env.watch_dir)
+        self._tick(sup)
+
+        assert sup.rt is None and sup.waiting_reason is not None
+        # The parts were cut off, not waited for: they would finish and complete the
+        # upload if the move waited as long as a config rebuild does.
+        with lock:
+            assert sending["upload-1"] == 0
+        assert env.client.complete_multipart_upload.call_args_list == []
+
+        slow.clear()
+        env.watch_dir.mkdir()
+        big.write_bytes(content)
+        self._waiting_tick(sup)
+        assert sup.rt is not None
+
+        # The interrupted file kept its pending_uploads row, so the new runtime sends it
+        # again from the start and finishes it.
+        def pending() -> list[str]:
+            state = env.state()
+            try:
+                return [p.relative_path for p in state.pending_uploads()]
+            finally:
+                state.close()
+
+        _wait_until(lambda: pending() == [])
+        [complete] = env.client.complete_multipart_upload.call_args_list
+        assert complete.args[1] == "upload-2"
+        events = self._events(env, sup)
+        assert EventType.UPLOAD_FAILED.value not in [e["event_type"] for e in events]
+
+    def test_a_stop_after_the_move_is_a_clean_stop(self, env: _Env) -> None:
+        sup = env.supervisor()
+        sup.start()
+        shutil.rmtree(env.watch_dir)
+        self._tick(sup)
+        assert sup.waiting_reason is not None
+        env.client.send_heartbeat.reset_mock()
+
+        sup.stop(stopped_message="Watcher stopped by user", operator_stop=True)
+
+        assert env.client.send_heartbeat.call_args.args[1]["status"] == "stopped"
+        stopped = [
+            e
+            for c in env.client.send_events.call_args_list
+            for e in c.args[1]
+            if e["event_type"] == EventType.WATCHER_STOPPED.value
+        ]
+        assert [e["message"] for e in stopped] == ["Watcher stopped by user"]
+
+
+def _record_handlers(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
+    """Make every `FileMonitor` built from now on keep the event handler it schedules.
+
+    The tests then hand the handler the events watchdog would report.
+    """
+    from data_hub_watcher import monitor as monitor_module
+
+    handlers: list[Any] = []
+
+    class RecordingObserver(monitor_module.Observer):  # type: ignore[misc]
+        def schedule(self, event_handler: Any, path: Any, **kwargs: Any) -> Any:
+            handlers.append(event_handler)
+            return super().schedule(event_handler, path, **kwargs)
+
+    monkeypatch.setattr(monitor_module, "Observer", RecordingObserver)
+    return handlers
 
 
 class TestStartAnnouncesTestOnlyOverrides:

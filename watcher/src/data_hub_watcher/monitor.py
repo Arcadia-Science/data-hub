@@ -69,13 +69,21 @@ class _PendingFile:
 
 
 class _EventHandler(FileSystemEventHandler):
-    """Watchdog handler that forwards matching create/modify events."""
+    """Watchdog handler that forwards matching create/modify events.
+
+    It also reports when the watched folder itself is deleted or moved, through
+    *on_root_gone*. That is all it does with a delete or move: a file or folder
+    removed from inside the watch folder is ignored, as it always was.
+    """
 
     def __init__(
         self,
         matches: Callable[[str], bool],
         on_event: Callable[[Path], None],
         recursive: bool,
+        *,
+        root: str | None = None,
+        on_root_gone: Callable[[], None] | None = None,
     ) -> None:
         super().__init__()
         # Pre-compiled matcher shared with the FileMonitor so we
@@ -83,6 +91,28 @@ class _EventHandler(FileSystemEventHandler):
         self._matches = matches
         self._on_event = on_event
         self._recursive = recursive
+        # The path the observer was scheduled with. Where watchdog reports the loss
+        # of the watched folder, it gives exactly that string as the event's
+        # `src_path`, so a plain comparison is enough.
+        self._root = root
+        self._on_root_gone = on_root_gone
+
+    def on_deleted(self, event: FileSystemEvent) -> None:
+        self._note_root_event(event)
+
+    def on_moved(self, event: FileSystemEvent) -> None:
+        self._note_root_event(event)
+
+    def _note_root_event(self, event: FileSystemEvent) -> None:
+        if self._on_root_gone is None or self._root is None:
+            return
+        if str(event.src_path) != self._root:
+            return
+        logger.info("Watchdog reports that the watch folder %s was deleted or moved", self._root)
+        try:
+            self._on_root_gone()
+        except Exception:
+            logger.exception("Callback for a deleted watch folder failed")
 
     def on_created(self, event: FileSystemEvent) -> None:
         if isinstance(event, FileCreatedEvent) and not event.is_directory:
@@ -142,6 +172,12 @@ class FileMonitor:
     on_report_only_file:
         Called instead of `on_stable_file` for files picked out by
         `report_only`. Falls back to `on_stable_file` when unset.
+    on_watch_root_gone:
+        Called when watchdog reports the watch folder itself deleted or moved
+        (not a file or folder inside it), on the observer's thread, so it must
+        only note the event and return. It is a prompt to check sooner, not a
+        guarantee: whether watchdog reports the loss of the folder depends on the
+        platform and on how the path was written, so `is_watching` is the check.
     """
 
     def __init__(
@@ -158,12 +194,14 @@ class FileMonitor:
         on_tick: Callable[[], None] | None = None,
         report_only: Callable[[str, float], bool] | None = None,
         on_report_only_file: Callable[[Path], None] | None = None,
+        on_watch_root_gone: Callable[[], None] | None = None,
     ) -> None:
         self._watch_dir = watch_directory
         self._patterns = file_patterns
         self._seed_baseline = seed_baseline
         self._report_only = report_only
         self._on_report_only = on_report_only_file or on_stable_file
+        self._on_watch_root_gone = on_watch_root_gone
         # Paths the initial scan picked out with `report_only`. Removed once
         # the file is dispatched, times out or disappears.
         self._report_only_paths: set[Path] = set()
@@ -198,7 +236,13 @@ class FileMonitor:
         """Run the initial scan, start the watchdog observer, and begin the stability checker."""
         self._initial_scan()
 
-        handler = _EventHandler(self._matches_name, self._enqueue, self._recursive)
+        handler = _EventHandler(
+            self._matches_name,
+            self._enqueue,
+            self._recursive,
+            root=str(self._watch_dir),
+            on_root_gone=self._on_watch_root_gone,
+        )
         self._observer.schedule(handler, str(self._watch_dir), recursive=self._recursive)
         self._observer.start()
 
@@ -233,6 +277,17 @@ class FileMonitor:
         else:
             logger.info("FileMonitor stopping: its stability checker is still running")
         return stopped
+
+    def is_watching(self) -> bool:
+        """Whether watchdog is still watching the folder.
+
+        watchdog 6.0.0's emitter stops itself when its folder is deleted, and a folder
+        created at the same path afterwards isn't watched again. Nothing else says so:
+        the stability checker and the observer thread keep running.
+        """
+        return self._observer.is_alive() and all(
+            emitter.is_alive() for emitter in self._observer.emitters
+        )
 
     def join(self, timeout: float) -> bool:
         """Wait up to *timeout* for the stability checker to exit, after `stop`.

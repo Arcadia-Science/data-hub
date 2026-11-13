@@ -6,7 +6,7 @@ waiting state), ``models.py`` (``watch_directory_problem``).
 
 from __future__ import annotations
 
-from e2e_support.catalog.model import CLI, Transition, covered, excluded, xfail_bug
+from e2e_support.catalog.model import CLI, Transition, covered, excluded
 
 MACHINE = "setup_startup"
 
@@ -152,12 +152,14 @@ TRANSITIONS: tuple[Transition, ...] = (
         "`could not start watching` reason, retries after 1, 2, 4 and 8 heartbeat "
         "intervals, and queues events only when the reason changes.",
     ),
-    xfail_bug(
+    covered(
         MACHINE,
         "waiting.folder_vanished->waiting_then_resumed",
         "When the watch folder disappears while the watcher runs, it moves to `waiting` "
-        "with a reason, and starts watching again when the folder returns.",
-        "ENG-2110",
+        "with a `watch_directory not found` reason, queues one `watch_directory_unavailable` "
+        "event and no second `watcher_started`. When the folder returns, the watcher starts "
+        "watching it again without a restart (a `watcher_started` event says it resumed), and "
+        "a file written to it is uploaded.",
     ),
     # --- left to unit tests -----------------------------------------------------------------
     excluded(

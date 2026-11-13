@@ -41,6 +41,7 @@ from data_hub_watcher.constants import (
     SYSTEM_SHUTDOWN_STATUS_REASON,
     SYSTEM_SHUTDOWN_STOP_BUDGET_SECONDS,
     WAITING_START_RETRY_MAX_SECONDS,
+    WATCH_FOLDER_GONE_DRAIN_TIMEOUT_SECONDS,
 )
 from data_hub_watcher.events import EventReporter, EventType, WatcherEvent
 from data_hub_watcher.heartbeat import HeartbeatLoop, WatcherCounters
@@ -257,6 +258,7 @@ def build_runtime(
     report_only: Callable[[str, float], bool] | None = None,
     config_revision: Callable[[], int | None] | None = None,
     on_config_revision: Callable[[int | None], None] | None = None,
+    request_folder_check: Callable[[], None] | None = None,
 ) -> WatcherRuntime:
     """Construct the full runtime graph from a validated config.
 
@@ -278,6 +280,11 @@ def build_runtime(
     across rebuilds, *report_only* marks files for the first scan to report without
     uploading (see :class:`FileMonitor`), and *config_revision* /
     *on_config_revision* connect the heartbeat to the config-revision check.
+    *request_folder_check* asks the supervisor to check the watch folder. It is
+    called on every heartbeat tick, after the updater's, and when watchdog reports
+    the folder itself deleted or moved. Both run on other threads than the
+    supervisor's, so it must only note the request and return: the supervisor does
+    the check on its own thread.
     """
     if not cfg.watcher_id:
         raise ValueError("cfg.watcher_id must be set before building the runtime")
@@ -373,6 +380,7 @@ def build_runtime(
         seed_baseline=seed_baseline,
         report_only=report_only,
         on_report_only_file=functools.partial(detector.on_stable_file, upload=False),
+        on_watch_root_gone=request_folder_check,
     )
 
     # Feeds the in-process auto-updater on every tick. Upload-queue polling
@@ -383,6 +391,11 @@ def build_runtime(
             updater.on_tick()
         except Exception:
             logger.exception("Updater tick failed")
+        if request_folder_check is not None:
+            try:
+                request_folder_check()
+            except Exception:
+                logger.exception("Folder check request failed")
 
     heartbeat = HeartbeatLoop(
         client=client,
@@ -937,12 +950,16 @@ class WatcherSupervisor:
     * **The waiting state.** If the watch folder is missing or unreadable at
       startup, only a heartbeat (status ``waiting``) and the updater run. Each
       heartbeat tick checks the folder again, and a new revision can fix it.
+      A watcher that is already running checks the folder on each heartbeat
+      tick too, and when watchdog reports it deleted, and moves to the waiting
+      state if it is gone.
     * **Startup sync.** Before the monitor starts, the config is pushed with
       ``based_on_revision`` and ``modified_at``, and a pending revision is
       applied first.
 
-    Applying happens on the thread that calls :meth:`poll`, never on the
-    heartbeat thread, because the rebuild has to stop and join the heartbeat.
+    Applying a revision and moving between watching and waiting happen on the
+    thread that calls :meth:`poll`, never on the heartbeat thread, because the
+    move has to stop and join the heartbeat.
     """
 
     def __init__(
@@ -1087,8 +1104,9 @@ class WatcherSupervisor:
                 self._revision_due.clear()
                 self.apply_config_revision()
             if self._folder_check_due.is_set():
+                # Cleared before the check, so a tick during it asks for another.
                 self._folder_check_due.clear()
-                self._check_waiting_folder()
+                self._check_folder()
         except Exception:
             # Keep the main loop alive; the next heartbeat retries.
             logger.exception("Handling a config change failed")
@@ -1627,6 +1645,7 @@ class WatcherSupervisor:
             report_only=_any_rule(rules),
             config_revision=lambda: self._applied,
             on_config_revision=self._on_heartbeat_revision,
+            request_folder_check=self._request_folder_check,
         )
         check_marker = not self._upgrade_marker_checked
         self._upgrade_marker_checked = True
@@ -1650,13 +1669,16 @@ class WatcherSupervisor:
         self._start_failures = 0
         self._next_start_attempt = 0.0
 
-    def _enter_waiting(self, reason: str, *, started_message: str) -> None:
+    def _enter_waiting(self, reason: str, *, started_message: str | None) -> None:
         """Run only the heartbeat and the updater until the folder can be watched.
 
         Events are queued when waiting starts (`watcher_started` and a
         `watch_directory_unavailable` error) and when the reason changes (the
         error only). Coming back with the same reason, after a retry failed
         the same way or a revision was rolled back, queues nothing.
+
+        A watcher that was already running passes no *started_message*: it has
+        started, so the move to waiting queues the error only.
         """
         new_stretch = self._waiting_event_reason is None
         reason_changed = reason != self._waiting_event_reason
@@ -1687,8 +1709,7 @@ class WatcherSupervisor:
                 updater.on_tick()
             except Exception:
                 logger.exception("Updater tick failed")
-            self._folder_check_due.set()
-            self._wake.set()
+            self._request_folder_check()
 
         inst = self.cfg.instrument
         heartbeat = HeartbeatLoop(
@@ -1706,7 +1727,7 @@ class WatcherSupervisor:
             config_revision=lambda: self._applied,
             on_config_revision=self._on_heartbeat_revision,
         )
-        if new_stretch:
+        if new_stretch and started_message is not None:
             self.reporter.queue_event(
                 WatcherEvent(event_type=EventType.WATCHER_STARTED, message=started_message)
             )
@@ -1728,6 +1749,57 @@ class WatcherSupervisor:
             reason=reason,
         )
         self._waiting_event_reason = reason
+
+    def _request_folder_check(self) -> None:
+        """Ask the `poll` thread to check the watch folder.
+
+        Called from other threads: the heartbeat thread on every tick, and
+        watchdog's thread when it reports the watch folder deleted or moved.
+        """
+        self._folder_check_due.set()
+        self._wake.set()
+
+    def _check_folder(self) -> None:
+        if self._waiting is not None:
+            self._check_waiting_folder()
+        else:
+            self._check_running_folder()
+
+    def _check_running_folder(self) -> None:
+        """Move a running watcher to the waiting state when its watch folder is gone.
+
+        The runtime is torn down as for a config rebuild, but with a short wait for
+        uploads (`WATCH_FOLDER_GONE_DRAIN_TIMEOUT_SECONDS`), and the heartbeat then
+        reports `waiting` with the reason. No `watcher_started` event is queued,
+        because the watcher has not stopped: the move queues the
+        `watch_directory_unavailable` error the waiting state always queues.
+        `_check_waiting_folder` starts watching again once the folder is back.
+
+        A folder that is there can still leave the watcher blind: watchdog stops
+        watching a folder that was deleted, so one that was deleted and created
+        again before this check is not being watched. The runtime is rebuilt, with
+        the usual wait for uploads, when its file monitor has stopped watching.
+        """
+        rt = self.rt
+        if rt is None:
+            return
+        problem = watch_directory_problem(self.cfg.instrument.watch_directory)
+        if problem is not None:
+            logger.info("Watch folder is gone; stopping uploads and the file monitor")
+            self._teardown_for_rebuild(drain_timeout=WATCH_FOLDER_GONE_DRAIN_TIMEOUT_SECONDS)
+            self._enter_waiting(problem, started_message=None)
+            return
+        if rt.monitor.is_watching():
+            return
+        logger.warning(
+            "The file monitor has stopped watching %s, although the folder is there (it was "
+            "deleted and created again, or watching failed); watching it anew",
+            self.cfg.instrument.watch_directory,
+        )
+        self._teardown_for_rebuild()
+        self._start_or_wait_on_error(
+            started_message=f"{self.role} resumed on {self.host}", retry=True
+        )
 
     def _check_waiting_folder(self) -> None:
         waiting = self._waiting
@@ -1756,19 +1828,21 @@ class WatcherSupervisor:
             started_message=f"{self.role} resumed on {self.host}", retry=True
         )
 
-    def _teardown_for_rebuild(self) -> None:
+    def _teardown_for_rebuild(self, *, drain_timeout: float | None = None) -> None:
         """Stop the running loops without reporting the watcher as stopped.
 
         Returns only once every upload thread of the old runtime has exited
         (see `_stop_upload_threads`), so its state DB is closed with nothing
         left to write to it, and the next runtime never uploads alongside it.
+        *drain_timeout* is how long uploads in progress may take to finish
+        first (`CONFIG_APPLY_DRAIN_TIMEOUT_SECONDS` unless given).
 
         The `UpgradeHandoff` stays as it is: the supervisor owns it, and the next
         runtime's updater is given it.
         """
         rt, self.rt = self.rt, None
         if rt is not None:
-            _stop_upload_threads(rt)
+            _stop_upload_threads(rt, drain_timeout=drain_timeout)
             rt.heartbeat.stop(send_stopped=False)
             rt.reporter.flush()
             rt.state_db.close()
@@ -1783,7 +1857,7 @@ _CUT_OFF_JOIN_STEP_SECONDS = 0.5
 _CUT_OFF_LOG_INTERVAL_SECONDS = 60
 
 
-def _stop_upload_threads(rt: WatcherRuntime) -> None:
+def _stop_upload_threads(rt: WatcherRuntime, *, drain_timeout: float | None = None) -> None:
     """Stop *rt*'s upload worker and file monitor, and return once both have exited.
 
     The upload worker, auto-mode uploads on the monitor's thread, and the file
@@ -1791,25 +1865,26 @@ def _stop_upload_threads(rt: WatcherRuntime) -> None:
     new file or part starts. Each thread waits for the threads it started, so
     once the worker and the monitor have exited, no upload thread is left.
 
-    Uploads in progress get up to ``CONFIG_APPLY_DRAIN_TIMEOUT_SECONDS`` to
-    finish. Past that, `Uploader.abort` cuts off the PUTs and hashing still
-    running, and this keeps waiting, in short steps, until the threads have
-    unwound. A file that was cut off keeps its ``pending_uploads`` row, or
-    stays in the server's queue: a rebuild sends no ``stopped`` heartbeat, so
-    the server doesn't cancel the request.
+    Uploads in progress get up to *drain_timeout* to finish
+    (``CONFIG_APPLY_DRAIN_TIMEOUT_SECONDS`` unless given). Past that,
+    `Uploader.abort` cuts off the PUTs and hashing still running, and this
+    keeps waiting, in short steps, until the threads have unwound. A file that
+    was cut off keeps its ``pending_uploads`` row, or stays in the server's
+    queue: a rebuild sends no ``stopped`` heartbeat, so the server doesn't
+    cancel the request.
     """
-    deadline = time.monotonic() + CONFIG_APPLY_DRAIN_TIMEOUT_SECONDS
+    if drain_timeout is None:
+        drain_timeout = CONFIG_APPLY_DRAIN_TIMEOUT_SECONDS
+    deadline = time.monotonic() + drain_timeout
     worker = rt.upload_worker
-    worker_done = (
-        worker.stop(timeout=CONFIG_APPLY_DRAIN_TIMEOUT_SECONDS) if worker is not None else True
-    )
+    worker_done = worker.stop(timeout=drain_timeout) if worker is not None else True
     monitor_done = rt.monitor.stop(timeout=max(1.0, deadline - time.monotonic()))
     if worker_done and monitor_done:
         return
     logger.warning(
-        "Uploads were still running after %ss; cutting them off to apply the new "
-        "config. The new config uploads them again.",
-        CONFIG_APPLY_DRAIN_TIMEOUT_SECONDS,
+        "Uploads were still running after %ss; cutting them off. They are uploaded "
+        "again once the watcher is watching.",
+        drain_timeout,
     )
     rt.uploader.abort()
     next_log = time.monotonic() + _CUT_OFF_LOG_INTERVAL_SECONDS

@@ -141,6 +141,13 @@ UPLOAD_POLL_INTERVAL_SECONDS = 60
 # still running, and the rebuild waits for their threads to exit before it
 # starts the new runtime.
 CONFIG_APPLY_DRAIN_TIMEOUT_SECONDS = 120
+# The same wait when the watch folder has disappeared under a running watcher.
+# Every part of a large file opens the file again, so once the folder is gone the
+# parts that haven't started can't open it and the upload can't finish either way:
+# waiting longer only keeps the watcher reporting `watching` while its folder is
+# missing. The files that were cut off are uploaded again once the folder is back
+# (`pending_uploads` rows, or the server's queue).
+WATCH_FOLDER_GONE_DRAIN_TIMEOUT_SECONDS = 10
 # While waiting with the watch folder present, a start that keeps failing is
 # retried after 1, 2, 4 and 8 heartbeat intervals, then every 15 minutes, so a
 # persistent failure doesn't rebuild the runtime and log a traceback every
