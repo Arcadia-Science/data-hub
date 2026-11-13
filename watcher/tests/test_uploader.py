@@ -2887,16 +2887,21 @@ class TestMultipartUpload:
 
     @staticmethod
     def _changing_file(
-        mock_client: MagicMock, state_db: StateDB, tmp_path: Path
+        mock_client: MagicMock,
+        state_db: StateDB,
+        tmp_path: Path,
+        *,
+        stop_event: threading.Event | None = None,
     ) -> tuple[Uploader, Path, bytes, os.stat_result]:
         """An uploader, a 16-byte file, and the 20 bytes the file holds once it changes.
 
-        The first upload has four 4-byte parts and the second has five.
+        The first upload has four 4-byte parts and the second has five. Pass *stop_event*
+        for an uploader that `request_stop` reaches.
         """
         path = tmp_path / "big.bin"
         path.write_bytes(bytes(range(16)))
         before = path.stat()
-        up = _make_uploader(mock_client, state_db, tmp_path, parallelism=1)
+        up = _make_uploader(mock_client, state_db, tmp_path, parallelism=1, stop_event=stop_event)
         first = _multipart_presigned(part_size=4, part_count=4)
         second = _multipart_presigned(part_size=4, part_count=5)
         second.upload_id = "def456"
@@ -2993,6 +2998,73 @@ class TestMultipartUpload:
         assert up._counters.files_uploaded == 0
         cast(MagicMock, up._reporter).queue_event.assert_not_called()
         assert not state_db.has_stat_match("big.bin", 20, path.stat().st_mtime)
+
+    def test_a_normal_stop_during_the_second_hash_opens_no_new_upload(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path
+    ) -> None:
+        up, path, changed, before = self._changing_file(
+            mock_client, state_db, tmp_path, stop_event=threading.Event()
+        )
+        hashes = itertools.count()
+
+        def digests(file_path: Path, cancel: threading.Event) -> tuple[str, str]:
+            result = file_digests(file_path, cancel)
+            if next(hashes) == 1:
+                # `request_stop` doesn't cut a hash off, so this hash runs to its end.
+                up.request_stop()
+            return result
+
+        def complete(*args: object) -> None:
+            self._change(path, changed, before)
+            raise self._bad_digest()
+
+        mock_client.complete_multipart_upload.side_effect = complete
+
+        with (
+            patch("data_hub_watcher.uploader.file_digests", side_effect=digests) as hashing,
+            patch.object(up._s3_session, "put", return_value=_etag_response(1)),
+        ):
+            assert up._upload_single(path, "RUN-001") is False
+
+        assert hashing.call_count == 2
+        # The second upload is never requested, so there is none for nothing to abort.
+        mock_client.request_upload_url.assert_called_once()
+        mock_client.abort_multipart_upload.assert_called_once_with(42, "abc123")
+        mock_client.complete_multipart_upload.assert_called_once()
+        assert up._counters.errors == 0
+        assert up._counters.files_uploaded == 0
+        cast(MagicMock, up._reporter).queue_event.assert_not_called()
+        assert not state_db.has_stat_match("big.bin", 20, path.stat().st_mtime)
+
+    def test_a_stop_before_the_restart_reads_the_file_again_hashes_nothing(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path
+    ) -> None:
+        up, path, changed, before = self._changing_file(
+            mock_client, state_db, tmp_path, stop_event=threading.Event()
+        )
+
+        def complete(*args: object) -> None:
+            self._change(path, changed, before)
+            raise self._bad_digest()
+
+        def abort(*args: object) -> None:
+            # The stop comes while the first upload is being aborted.
+            up.request_stop()
+
+        mock_client.complete_multipart_upload.side_effect = complete
+        mock_client.abort_multipart_upload.side_effect = abort
+
+        with (
+            patch("data_hub_watcher.uploader.file_digests", wraps=file_digests) as hashing,
+            patch.object(up._s3_session, "put", return_value=_etag_response(1)),
+        ):
+            assert up._upload_single(path, "RUN-001") is False
+
+        # Only the first hash was made, and no second upload was requested.
+        assert hashing.call_count == 1
+        mock_client.request_upload_url.assert_called_once()
+        assert up._counters.errors == 0
+        cast(MagicMock, up._reporter).queue_event.assert_not_called()
 
     def test_a_hash_that_fails_during_the_restart_is_reported_and_starts_no_upload(
         self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path
@@ -3102,11 +3174,14 @@ class TestMultipartUpload:
         with patch.object(up._s3_session, "put", return_value=_etag_response(1)):
             assert up._upload_single(path, "RUN-001") is False
 
-        # A failed upload is tried again as the file is then, so nothing is left open.
+        # The restart asked for the size the file has now. The first upload was aborted and
+        # the single-request answer opened no upload, so none is left open on the server.
         assert mock_client.request_upload_url.call_args_list[1].kwargs["size_bytes"] == 4
+        mock_client.abort_multipart_upload.assert_called_once_with(42, "abc123")
         [event] = _events(up)
         assert event.event_type == EventType.UPLOAD_FAILED
         assert "did not return a multipart upload" in event.details["error"]
+        assert up._counters.errors == 1
         assert up._counters.files_uploaded == 0
 
 

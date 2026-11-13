@@ -324,7 +324,9 @@ class _Transfer:
 
     It starts when the first upload slot is taken and ends when the file's
     bytes are in S3. Hashing and the wait for that first slot are left out;
-    later waits for a slot, and backoff between attempts, count.
+    later waits for a slot, and backoff between attempts, count. So does the
+    second hash of a restart after a rejected checksum, because it runs after
+    the first parts were sent.
     """
 
     def __init__(self) -> None:
@@ -1604,16 +1606,31 @@ class Uploader:
 
         The server rejected the checksum of the first attempt, so the file is not what
         was hashed: it changed while the parts were sent. Its size may have changed
-        too, so the new upload is requested with the size the file has now. The caller
-        has aborted the first upload, so a stop, a failure or a file that can't be read
-        yet leaves nothing open on the server. Returns the new digests and stat with
-        the new upload and its ID, or ``None`` when the restart can't go on. *s3_key*
-        is the first upload's, for the failure event. Raises `CantReadYet` for a file
-        that can't be read yet.
+        too, so the new upload is requested with the size the file has now.
+
+        The caller has aborted the first upload. If that abort failed, the server aborts
+        the stored upload ID itself at the file's next upload-URL request. A stop is
+        checked before the file is read again and after it is hashed (`request_stop`
+        doesn't cut a hash off, `abort` does), so a stop that is already requested never
+        opens a new upload, and neither does a failed hash or a file that can't be read
+        yet. A stop that comes during the request itself leaves the upload it opened to
+        the server, which aborts it at the file's next request, as for a first upload.
+
+        Returns the new digests and stat with the new upload and its ID, or ``None`` when
+        the restart can't go on. *s3_key* is the first upload's, for the failure event.
+        Raises `CantReadYet` for a file that can't be read yet.
         """
+        if self._stop_requested():
+            logger.info("Stop requested; deferring %s", path.name)
+            return None
         stat = _stat(path)
         digests = self._take_digests(path, partial(file_digests, path, self._abort))
         if digests is None:
+            return None
+        if self._stop_requested():
+            # `request_stop` doesn't cut the hash off, so a stop that came during it
+            # is seen here. A new upload now would be one nothing aborts.
+            logger.info("Stop requested; deferring %s", path.name)
             return None
         sha, crc64nvme = digests
         try:
