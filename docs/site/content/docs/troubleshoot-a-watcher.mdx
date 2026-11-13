@@ -88,7 +88,15 @@ A failure that isn’t a connection problem or a server error, such as `401 Unau
 
 Older watchers try again only when another file in the run finishes or the watcher restarts. Restart the watcher to report the run.
 
-A `409 Conflict` means someone deleted the run on Data Hub. Data Hub refuses the watcher’s reports of a deleted run, so files that appear in the run’s folder while it is deleted are not attached. Restoring the run doesn’t send those files by itself. After you restore the run, the watcher sends them the next time it reports the run, which happens when another file appears in the run’s folder or when the watcher restarts. Restart the watcher to send them now. Then they are attached to the run and, in automatic mode, uploaded.
+## A run was deleted on Data Hub [#a-run-was-deleted-on-data-hub]
+
+A run report that fails with `409 Conflict` and a message that starts “This run was deleted on Data Hub” means someone deleted the run. Data Hub refuses a watcher’s report of a deleted run, and the files in that report aren’t added to it.
+
+Watcher 1.4.3 and later record one `run_report_failed` event for the run and stop reporting it until the watcher restarts. A restart tries once more, and records one more event if the run is still deleted. After you restore the run, restart the watcher to send its files.
+
+Earlier watchers record one event for each file, and do it again each time they start. After you restore the run, they send its files when another file of the run finishes or the watcher restarts.
+
+To stop the errors without restoring the run, move the run’s files out of the watch folder.
 
 ## Files are not being detected
 
@@ -163,7 +171,7 @@ Run `data-hub-watcher state forget --prefix your_folder_name/` on the instrument
 </Step>
 
 <Step>
-Start the watcher again. It reports the files in that folder again and uploads the ones Data Hub doesn’t have.
+Start the watcher again. It reports the files in that folder again and uploads the ones Data Hub doesn’t have. A run that was deleted on Data Hub refuses its files instead. See [A run was deleted on Data Hub](#a-run-was-deleted-on-data-hub).
 </Step>
 
 </Steps>
