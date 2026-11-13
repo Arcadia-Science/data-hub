@@ -83,9 +83,14 @@ SYSTEM_SHUTDOWN_STATUS_REASON = "system_shutdown"
 # `watcher_stopped` event, and then the final heartbeat, which gets the last
 # `STOP_FINAL_HEARTBEAT_SECONDS` so a slow flush can't starve it. Each of those two
 # requests has an HTTP timeout of at most `STOP_HTTP_TIMEOUT`, cut down to fit the time it
-# has. An upload that was cut off is uploaded again at the next start: it keeps its
-# `pending_uploads` row, or stays in the server's queue. The service loop notices a stop
-# within a second, so the SCM is told to wait `SERVICE_STOP_WAIT_HINT_MILLISECONDS`.
+# has. In auto mode an upload that was cut off is uploaded again at
+# the next start, from its `pending_uploads` row. A file that someone requested is not:
+# a plain `stopped` heartbeat makes the server cancel the instrument's requested
+# uploads, so it has to be requested again. Only a final heartbeat marked as a restart
+# keeps them queued: `SYSTEM_SHUTDOWN_STATUS_REASON` for Windows restarting, and
+# `auto_update` for an update once the watcher sends it (`RESTART_STOP_REASONS` in
+# `web/lib/api/watcher-status.ts`). The service loop notices a stop within a second, so
+# the SCM is told to wait `SERVICE_STOP_WAIT_HINT_MILLISECONDS`.
 STOP_BUDGET_SECONDS = 25
 STOP_RESERVE_SECONDS = 10
 STOP_FINAL_HEARTBEAT_SECONDS = 5
@@ -98,6 +103,7 @@ SERVICE_STOP_WAIT_HINT_MILLISECONDS = 30_000
 # preshutdown timeout: 10 s by default from Windows 10 build 15063 and 180 s
 # before it. A stop for Windows shutting down limits itself to about 8 s on any
 # build, so it can't hold the restart up. It is 7 s for the stop itself, which
+# build, so it can't hold the restart up. It is 7 s for the stop itself, which
 # starts when the service loop notices the stop, up to 1 s after Windows sends
 # it. It is the same sequence as any other stop, with much shorter waits: uploads
 # are cut off first (`Uploader.abort`), each of the four joins (file monitor's
@@ -105,7 +111,8 @@ SERVICE_STOP_WAIT_HINT_MILLISECONDS = 30_000
 # most 1 s, and the events and the final heartbeat share what is left of the 7 s,
 # each request with a connect timeout of at most 2 s and a read timeout of at most
 # 3 s. A file whose upload was cut off is uploaded again at the next start, as after
-# any other stop.
+# any other stop. A file someone requested stays queued, because the final
+# heartbeat is marked as a restart.
 SYSTEM_SHUTDOWN_STOP_BUDGET_SECONDS = 7
 SYSTEM_SHUTDOWN_JOIN_SECONDS = 1
 SYSTEM_SHUTDOWN_HTTP_TIMEOUT: tuple[float, float] = (2, 3)  # (connect, read) seconds
@@ -117,9 +124,10 @@ UPLOAD_POLL_INTERVAL_SECONDS = 60
 # and lets the PUTs already sending finish: up to `upload_parallelism` whole
 # files or 64 MB parts. A file that didn't finish, such as a large file that
 # still had parts to send, keeps its `pending_uploads` row or stays in the
-# server's queue, as after a restart. Past the limit the uploader cuts off
-# the PUTs and hashing still running, and the rebuild waits for their
-# threads to exit before it starts the new runtime.
+# server's queue: a rebuild sends no `stopped` heartbeat, so the server doesn't
+# cancel the request. Past the limit the uploader cuts off the PUTs and hashing
+# still running, and the rebuild waits for their threads to exit before it
+# starts the new runtime.
 CONFIG_APPLY_DRAIN_TIMEOUT_SECONDS = 120
 # While waiting with the watch folder present, a start that keeps failing is
 # retried after 1, 2, 4 and 8 heartbeat intervals, then every 15 minutes, so a

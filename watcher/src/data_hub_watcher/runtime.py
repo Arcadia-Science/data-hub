@@ -702,9 +702,11 @@ def _stop_uploads_by(rt: WatcherRuntime, until: float) -> tuple[bool, bool]:
     starts, on the worker or on the monitor's own thread (an auto-mode upload runs
     there). Parts already sending finish. The waits come after, all against the same
     limit. A thread still running at *until* is cut off (`Uploader.abort` ends the PUTs
-    and hashing in progress) and gets `STOP_MIN_WAIT_SECONDS` more to unwind. A file
-    that was cut off is uploaded after the next start, from its `pending_uploads` row
-    or the server's queue.
+    and hashing in progress) and gets `STOP_MIN_WAIT_SECONDS` more to unwind. In auto
+    mode a file that was cut off is uploaded after the next start, from its
+    `pending_uploads` row. A file that someone requested is not: the plain `stopped`
+    heartbeat that ends this stop makes the server cancel the instrument's requested
+    uploads, so it has to be requested again.
     """
     rt.uploader.request_stop()
     # Tells the stability checker to stop and waits for the observer only. The checker may
@@ -795,8 +797,12 @@ def stop_runtime(
        Windows shutting down (see `HeartbeatLoop.send_final_heartbeat`).
     7. The state database is closed, unless a thread that uploads is still running.
 
-    Steps 4 to 6 are `_stop_heartbeat_and_report`. A file whose upload was cut off is
-    uploaded after the next start, from its `pending_uploads` row or the server's queue.
+    Steps 4 to 6 are `_stop_heartbeat_and_report`. In auto mode a file whose upload was
+    cut off is uploaded after the next start, from its `pending_uploads` row. A file that
+    someone requested is cancelled by the plain `stopped` heartbeat of a normal stop, and
+    has to be requested again. A stop for a Windows restart (*system_shutdown*) keeps the
+    requests queued, and so will a stop for an update once the watcher marks that one
+    (`RESTART_STOP_REASONS` in `web/lib/api/watcher-status.ts`).
     """
     deadline = _stop_deadline(system_shutdown)
     if system_shutdown:
@@ -820,9 +826,12 @@ def stop_runtime(
     # ``StateDB.close`` assumes writer threads have joined; a large upload
     # outliving the join once wrote post-close. If one won't stop in time, skip
     # the close rather than race it (the OS reaps). The worker's file and part
+    # the close rather than race it (the OS reaps). The worker's file and part
     # threads are daemon threads, so a PUT still in flight does not hold the
-    # process open past this point. That file is retried at the next start, from
-    # ``pending_uploads`` or the server's queue.
+    # process open past this point. In auto mode that file is retried at the next
+    # start, from ``pending_uploads``. A requested file is not, after a normal stop:
+    # the server cancels it with the `stopped` heartbeat. Only a stop for a Windows
+    # restart leaves it queued.
     if not upload_worker_stopped:
         logger.warning(
             "Upload worker still running at shutdown; leaving the state DB "
@@ -1712,7 +1721,8 @@ def _stop_upload_threads(rt: WatcherRuntime) -> None:
     finish. Past that, `Uploader.abort` cuts off the PUTs and hashing still
     running, and this keeps waiting, in short steps, until the threads have
     unwound. A file that was cut off keeps its ``pending_uploads`` row, or
-    stays in the server's queue, as after a restart.
+    stays in the server's queue: a rebuild sends no ``stopped`` heartbeat, so
+    the server doesn't cancel the request.
     """
     deadline = time.monotonic() + CONFIG_APPLY_DRAIN_TIMEOUT_SECONDS
     worker = rt.upload_worker
