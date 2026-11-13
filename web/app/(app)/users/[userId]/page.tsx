@@ -33,6 +33,7 @@ import {
 } from "@/lib/api/dashboard";
 import { buildRunListQuery } from "@/lib/api/instrument-runs";
 import { listCommentFeed } from "@/lib/api/run-comments";
+import { parseHasNotebookLinkParam } from "@/lib/api/validators";
 import { auth } from "@/lib/auth";
 import {
   onRunsEmptyLabel,
@@ -184,6 +185,7 @@ async function UserRunsSection({
       page: params.page,
       perPage: params.per_page,
       includeDeleted: params.include_deleted,
+      hasNotebookLink: parseHasNotebookLinkParam(params.has_notebook_link),
       statuses: params.status.length > 0 ? params.status : undefined,
       sort: params.sort,
       order: params.order,

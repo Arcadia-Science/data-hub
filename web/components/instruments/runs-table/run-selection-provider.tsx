@@ -8,8 +8,18 @@ import { isRunListScopeParam, selectionScopeKey } from "@/lib/selection-scope";
 export interface RunCaps {
   delete: boolean;
   download: boolean;
+  // Lab notebook links can be added or removed.
+  link: boolean;
   reprocess: boolean;
   upload: boolean;
+}
+
+// A run's lab notebook link, as much as the bulk dialogs need to count and
+// name links across the selection.
+export interface RunNotebookLinkRef {
+  displayName: string;
+  url: string;
+  urlKey: string;
 }
 
 // Minimal per-row counts the bulk bar needs to populate confirmation
@@ -26,8 +36,12 @@ export interface RunRef {
   caps: RunCaps;
   id: string;
   instrumentId: string;
+  notebookLinks: RunNotebookLinkRef[];
   runId: string;
   stats: RunStats;
+  // Nobody has claimed the run, and it isn't deleted. A download asks the
+  // person whether they ran it.
+  unclaimed: boolean;
 }
 
 // Explicit context interface: state / actions / meta. Consumers never touch
@@ -50,6 +64,7 @@ interface RunSelectionContextValue {
     allCanDownload: boolean;
     allCanReprocess: boolean;
     allCanDelete: boolean;
+    allCanLink: boolean;
   };
   state: { selected: ReadonlyMap<string, RunRef> };
 }
@@ -151,6 +166,7 @@ export function RunSelectionProvider({
         allCanDownload: count > 0 && refs.every((r) => r.caps.download),
         allCanReprocess: count > 0 && refs.every((r) => r.caps.reprocess),
         allCanDelete: count > 0 && refs.every((r) => r.caps.delete),
+        allCanLink: count > 0 && refs.every((r) => r.caps.link),
       },
     };
   }, [selected, toggle, selectMany, clear]);

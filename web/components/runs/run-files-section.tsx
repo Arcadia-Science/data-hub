@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { debounce, useQueryStates } from "nuqs";
 import { toast } from "sonner";
 import { PaginationNav } from "@/components/pagination-nav";
+import { useRunDownloadClaimPrompt } from "@/components/runs/claim-prompt/run-claim-target";
 import {
   FilesFilterCombobox,
   type FilesFilterOption,
@@ -160,6 +161,7 @@ function RunFilesSectionContent({
   const router = useRouter();
   const { actions: autoRefreshActions } = useRunAutoRefresh();
   const { actions: archiveActions } = useArchiveDownload();
+  const promptClaim = useRunDownloadClaimPrompt();
   // Mutation transition (upload/dismiss/reprocess), distinct from the table's
   // navigation transition below. `track` also records which files an action
   // covers, so only their rows lock while it runs.
@@ -306,13 +308,14 @@ function RunFilesSectionContent({
             !(isFilterActive && filteredDownloadableCount === 0) && (
               <Button
                 className="h-8 gap-1 text-sm"
-                onClick={() =>
+                onClick={() => {
                   archiveActions.start({
                     archiveUrl: downloadHref,
                     runId,
                     defaultFilename: `${runId}.zip`,
-                  })
-                }
+                  });
+                  promptClaim();
+                }}
                 size="sm"
                 variant="outline"
               >
@@ -428,6 +431,7 @@ function BulkActionBarHost({
 }) {
   const router = useRouter();
   const { actions: archiveActions } = useArchiveDownload();
+  const promptClaim = useRunDownloadClaimPrompt();
   const { actions } = useFileSelection();
   const { actions: autoRefreshActions } = useRunAutoRefresh();
 
@@ -524,14 +528,15 @@ function BulkActionBarHost({
     if (refs.length === 1) {
       downloadSingleFile(refs[0]);
       toast.success(`Downloading ${refs[0].filename}`);
-      return;
+    } else {
+      archiveActions.start({
+        archiveUrl: buildArchiveHref(instrumentId, runId, {
+          fileIds: refs.map((ref) => ref.id),
+        }),
+        runId,
+      });
     }
-    archiveActions.start({
-      archiveUrl: buildArchiveHref(instrumentId, runId, {
-        fileIds: refs.map((ref) => ref.id),
-      }),
-      runId,
-    });
+    promptClaim();
   }
 
   return (

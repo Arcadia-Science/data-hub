@@ -13,7 +13,7 @@ import {
 } from "@/tests/integration/helpers";
 
 /** Bump when adding/removing an MCP tool so the change shows up in review. */
-const EXPECTED_MCP_TOOL_COUNT = 42;
+const EXPECTED_MCP_TOOL_COUNT = 45;
 
 function jsonRpc(method: string, params: unknown = {}, id = 1) {
   return {
@@ -320,6 +320,59 @@ describe("MCP Server (HTTP)", () => {
     });
     expect(result.isError).toBe(true);
     expect(result.content[0].text.toLowerCase()).toContain("not found");
+  });
+
+  // The assistant offers `claim_run` when a run it downloads from is
+  // unclaimed, so the download tool has to name the run and its claim status.
+  it("get_file_download_url names the file's run and says whether anyone has claimed it", async () => {
+    const db = getTestDb();
+    const claimRunId = "mcp-claim-status-run";
+    const [run] = await db
+      .insert(schema.instrumentRuns)
+      .values({ instrumentId, runId: claimRunId, source: "watcher" })
+      .returning({ id: schema.instrumentRuns.id });
+    const [file] = await db
+      .insert(schema.files)
+      .values({
+        instrumentRunId: run.id,
+        filename: "claim.csv",
+        relativePath: "claim.csv",
+        status: "uploaded",
+        s3Bucket: "test-raw-data-bucket",
+        s3Key: `${instrumentId}/${claimRunId}/claim.csv`,
+      })
+      .returning({ id: schema.files.id });
+
+    try {
+      const before = await callTool("get_file_download_url", {
+        fileId: file.id,
+      });
+      expect(before.isError).toBeFalsy();
+      expect(JSON.parse(before.content[0].text)).toMatchObject({
+        instrumentId,
+        runId: claimRunId,
+        unclaimed: true,
+      });
+
+      const claimed = await callTool("claim_run", {
+        instrumentId,
+        runId: claimRunId,
+      });
+      expect(claimed.isError).toBeFalsy();
+
+      const after = await callTool("get_file_download_url", {
+        fileId: file.id,
+      });
+      expect(after.isError).toBeFalsy();
+      expect(JSON.parse(after.content[0].text).unclaimed).toBe(false);
+    } finally {
+      // Later tests count this instrument's runs. Files don't cascade with
+      // their run, so they go first.
+      await db.delete(schema.files).where(eq(schema.files.id, file.id));
+      await db
+        .delete(schema.instrumentRuns)
+        .where(eq(schema.instrumentRuns.id, run.id));
+    }
   });
 
   // A run created as ` RUN1 ` is stored as `RUN1`, so a tool call has to find
@@ -1184,5 +1237,128 @@ describe("MCP Server (HTTP)", () => {
       }),
     });
     expect(res.status).toBe(401);
+  });
+
+  // ---- Lab notebook links ---------------------------------------------------
+  // The link tools act as the signed-in user. Another user can change the
+  // same link, and get_run, search_runs, and global_search report it.
+
+  it("add/update/remove_notebook_link round-trip and show up in the run tools", async () => {
+    const pageId = "0123456789abcdef0123456789abcdef";
+    const add = await callTool("add_notebook_link", {
+      instrumentId,
+      runIds: [runId, "mcp-missing-run"],
+      url: `https://www.notion.so/lab/Heat-stress-${pageId}`,
+      label: "Heat stress",
+      userId: "spoofed-user",
+    });
+    expect(add.isError).toBeFalsy();
+    const added = JSON.parse(add.content[0].text);
+    expect(added.counts).toMatchObject({ added: 1, not_found: 1 });
+    const link = added.results[0].link;
+    expect(link.created_by.id).toBe(userId);
+
+    const run = JSON.parse(
+      (await callTool("get_run", { instrumentId, runId })).content[0].text
+    );
+    expect(run.notebookLinks.map((l: { id: string }) => l.id)).toEqual([
+      link.id,
+    ]);
+
+    const update = await callTool(
+      "update_notebook_link",
+      { instrumentId, runId, linkId: link.id, label: null },
+      tokenB
+    );
+    expect(update.isError).toBeFalsy();
+    const updated = JSON.parse(update.content[0].text);
+    expect(updated.label).toBeNull();
+    expect(updated.display_name).toBe("notion.so › Heat stress");
+    expect(updated.created_by.id).toBe(userId);
+    expect(updated.updated_by.id).not.toBe(userId);
+
+    const linked = JSON.parse(
+      (
+        await callTool("search_runs", {
+          instrumentId,
+          hasNotebookLink: true,
+        })
+      ).content[0].text
+    );
+    expect(linked.data.map((r: { run_id: string }) => r.run_id)).toEqual([
+      runId,
+    ]);
+    expect(linked.data[0].notebook_links).toHaveLength(1);
+
+    const found = JSON.parse(
+      (
+        await callTool("global_search", {
+          query: `notion.so/Renamed-${pageId}?pvs=4`,
+          scope: "runs",
+        })
+      ).content[0].text
+    );
+    expect(found.runs[0]).toMatchObject({
+      runId,
+      matchReason: "notebook_link",
+    });
+
+    const remove = await callTool("remove_notebook_link", {
+      instrumentId,
+      runIds: [runId],
+      url: `http://notion.so/${pageId}`,
+    });
+    expect(remove.isError).toBeFalsy();
+    expect(JSON.parse(remove.content[0].text).counts.removed).toBe(1);
+
+    const unlinked = JSON.parse(
+      (
+        await callTool("search_runs", {
+          instrumentId,
+          hasNotebookLink: true,
+        })
+      ).content[0].text
+    );
+    expect(unlinked.data).toHaveLength(0);
+  });
+
+  it("update_notebook_link reports a duplicate link by its ID", async () => {
+    const add = JSON.parse(
+      (
+        await callTool("add_notebook_link", {
+          instrumentId,
+          runIds: [runId],
+          url: "https://example.com/eln/one",
+        })
+      ).content[0].text
+    );
+    const second = JSON.parse(
+      (
+        await callTool("add_notebook_link", {
+          instrumentId,
+          runIds: [runId],
+          url: "https://example.com/eln/two",
+        })
+      ).content[0].text
+    );
+    const clash = await callTool("update_notebook_link", {
+      instrumentId,
+      runId,
+      linkId: second.results[0].link.id,
+      url: "https://www.example.com/eln/one/",
+    });
+    expect(clash.isError).toBe(true);
+    expect(clash.content[0].text).toContain(add.results[0].link.id);
+
+    await callTool("remove_notebook_link", {
+      instrumentId,
+      runIds: [runId],
+      url: "https://example.com/eln/one",
+    });
+    await callTool("remove_notebook_link", {
+      instrumentId,
+      runIds: [runId],
+      url: "https://example.com/eln/two",
+    });
   });
 });

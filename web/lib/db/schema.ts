@@ -1305,6 +1305,85 @@ export const runAttributions = pgTable(
   ]
 );
 
+// Links from a run to the lab notebook pages for its experiment (Notion,
+// Benchling, Google Docs, or any other http or https page). Any signed-in
+// person, or a token with `runs:link`, can add, edit, or remove them. Removed
+// links are deleted outright; there is no history to keep them for.
+// The URL rules and limits live in `lib/notebook-links/url.ts`.
+export const runNotebookLinks = pgTable(
+  "run_notebook_links",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => instrumentRuns.id, { onDelete: "cascade" }),
+    // The link as people open it, query string and fragment kept.
+    url: text("url").notNull(),
+    // Two links with the same key point to the same page, so a run can't
+    // hold both. Built by `notebookUrlKey`; rows must be recomputed if those
+    // rules change.
+    urlKey: text("url_key").notNull(),
+    // Optional name for the link. NULL shows a name worked out from the URL.
+    label: text("label"),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "date",
+    })
+      .notNull()
+      .defaultNow(),
+    // Who added the link: a person, or a personal access token. At most one
+    // is set; both are NULL once the person who added it is deleted.
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdByToken: uuid("created_by_token").references(
+      () => personalAccessTokens.id,
+      { onDelete: "restrict" }
+    ),
+    updatedAt: timestamp("updated_at", {
+      withTimezone: true,
+      mode: "date",
+    })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+    // Who last changed the link. Set to the creator when the link is added.
+    updatedBy: text("updated_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    updatedByToken: uuid("updated_by_token").references(
+      () => personalAccessTokens.id,
+      { onDelete: "restrict" }
+    ),
+  },
+  (link) => [
+    check(
+      "run_notebook_links_one_creator",
+      sql`num_nonnulls(${link.createdBy}, ${link.createdByToken}) <= 1`
+    ),
+    check(
+      "run_notebook_links_one_updater",
+      sql`num_nonnulls(${link.updatedBy}, ${link.updatedByToken}) <= 1`
+    ),
+    // Also serves per-run lookups and the has-link filter, through its
+    // leading `run_id` column.
+    unique("uq_run_notebook_links_run_id_url_key").on(link.runId, link.urlKey),
+    // Trigram GIN indexes backing global-search `ilike '%…%'` on links.
+    // Require `pg_trgm` (created in migration 0029).
+    index("idx_run_notebook_links_url_key_trgm").using(
+      "gin",
+      sql`${link.urlKey} gin_trgm_ops`
+    ),
+    index("idx_run_notebook_links_url_trgm").using(
+      "gin",
+      sql`${link.url} gin_trgm_ops`
+    ),
+    index("idx_run_notebook_links_label_trgm")
+      .using("gin", sql`${link.label} gin_trgm_ops`)
+      .where(sql`${link.label} is not null`),
+  ]
+);
+
 // The Linear connection for feedback, owned by the feedback package. `updated_by`
 // is a plain user ID there, with no foreign key to `users`.
 // biome-ignore lint/performance/noBarrelFile: drizzle-kit reads this single schema entrypoint, which also re-exports the Better Auth tables below.

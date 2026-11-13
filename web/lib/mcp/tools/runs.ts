@@ -28,6 +28,8 @@ import {
 } from "@/lib/api/run-comments";
 import { restoreRun, softDeleteRun } from "@/lib/api/run-lifecycle";
 import { pickMetadataFilterArgs } from "@/lib/api/run-metadata-filters";
+import { notebookLinkToWire } from "@/lib/api/run-notebook-link-wire";
+import { listNotebookLinksForRun } from "@/lib/api/run-notebook-links";
 import { buildRunReport, getRunFailureSummary } from "@/lib/api/run-reports";
 import { requestAllRunUploads, requestRunUploads } from "@/lib/api/run-uploads";
 import { toolRegistrationConfig } from "@/lib/mcp/catalog/register";
@@ -108,6 +110,7 @@ export function registerRunTools(server: McpServer) {
         includeDeleted: args.includeDeleted ?? false,
         ...metadataFilters,
         ranBy,
+        hasNotebookLink: args.hasNotebookLink,
         statuses: args.status,
       });
       return structuredResult(result);
@@ -134,7 +137,11 @@ export function registerRunTools(server: McpServer) {
         deletedByToken: actorToken(deleter),
       };
 
-      const tasks: Promise<void>[] = [];
+      const tasks: Promise<void>[] = [
+        listNotebookLinksForRun(run.id).then((links) => {
+          payload.notebookLinks = links.map(notebookLinkToWire);
+        }),
+      ];
       if (extras.has("files")) {
         tasks.push(
           getRunFilesPage(run.id, { page: 1, perPage: 50 }).then(
@@ -159,9 +166,7 @@ export function registerRunTools(server: McpServer) {
           })
         );
       }
-      if (tasks.length > 0) {
-        await Promise.all(tasks);
-      }
+      await Promise.all(tasks);
 
       return structuredResult(payload);
     }

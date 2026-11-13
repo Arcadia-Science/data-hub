@@ -1,5 +1,5 @@
 {
-  "id": "2f11a707-c51e-4824-8ec3-12908858b975",
+  "id": "d110779f-11a2-43f7-99f5-f8b974c3b10e",
   "prevId": "5eb19bfc-1e2c-474b-a204-9f429ac44c8d",
   "version": "7",
   "dialect": "postgresql",
@@ -474,8 +474,8 @@
         }
       },
       "indexes": {
-        "uq_files_active_instrument_run_id_relative_path": {
-          "name": "uq_files_active_instrument_run_id_relative_path",
+        "uq_files_instrument_run_id_relative_path": {
+          "name": "uq_files_instrument_run_id_relative_path",
           "columns": [
             {
               "expression": "instrument_run_id",
@@ -491,7 +491,7 @@
             }
           ],
           "isUnique": true,
-          "where": "\"files\".\"relative_path\" is not null and \"files\".\"deleted_at\" is null",
+          "where": "\"files\".\"relative_path\" is not null",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -3284,6 +3284,219 @@
         "run_comments_one_author": {
           "name": "run_comments_one_author",
           "value": "num_nonnulls(\"run_comments\".\"user_id\", \"run_comments\".\"token_id\") = 1"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.run_notebook_links": {
+      "name": "run_notebook_links",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "url": {
+          "name": "url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "url_key": {
+          "name": "url_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "label": {
+          "name": "label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_by_token": {
+          "name": "created_by_token",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_by": {
+          "name": "updated_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_by_token": {
+          "name": "updated_by_token",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "idx_run_notebook_links_url_key_trgm": {
+          "name": "idx_run_notebook_links_url_key_trgm",
+          "columns": [
+            {
+              "expression": "\"url_key\" gin_trgm_ops",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "gin",
+          "with": {}
+        },
+        "idx_run_notebook_links_url_trgm": {
+          "name": "idx_run_notebook_links_url_trgm",
+          "columns": [
+            {
+              "expression": "\"url\" gin_trgm_ops",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "gin",
+          "with": {}
+        },
+        "idx_run_notebook_links_label_trgm": {
+          "name": "idx_run_notebook_links_label_trgm",
+          "columns": [
+            {
+              "expression": "\"label\" gin_trgm_ops",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"run_notebook_links\".\"label\" is not null",
+          "concurrently": false,
+          "method": "gin",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "run_notebook_links_run_id_instrument_runs_id_fk": {
+          "name": "run_notebook_links_run_id_instrument_runs_id_fk",
+          "tableFrom": "run_notebook_links",
+          "tableTo": "instrument_runs",
+          "columnsFrom": [
+            "run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "run_notebook_links_created_by_user_id_fk": {
+          "name": "run_notebook_links_created_by_user_id_fk",
+          "tableFrom": "run_notebook_links",
+          "tableTo": "user",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "run_notebook_links_created_by_token_personal_access_tokens_id_fk": {
+          "name": "run_notebook_links_created_by_token_personal_access_tokens_id_fk",
+          "tableFrom": "run_notebook_links",
+          "tableTo": "personal_access_tokens",
+          "columnsFrom": [
+            "created_by_token"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "run_notebook_links_updated_by_user_id_fk": {
+          "name": "run_notebook_links_updated_by_user_id_fk",
+          "tableFrom": "run_notebook_links",
+          "tableTo": "user",
+          "columnsFrom": [
+            "updated_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "run_notebook_links_updated_by_token_personal_access_tokens_id_fk": {
+          "name": "run_notebook_links_updated_by_token_personal_access_tokens_id_fk",
+          "tableFrom": "run_notebook_links",
+          "tableTo": "personal_access_tokens",
+          "columnsFrom": [
+            "updated_by_token"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "uq_run_notebook_links_run_id_url_key": {
+          "name": "uq_run_notebook_links_run_id_url_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "run_id",
+            "url_key"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "run_notebook_links_one_creator": {
+          "name": "run_notebook_links_one_creator",
+          "value": "num_nonnulls(\"run_notebook_links\".\"created_by\", \"run_notebook_links\".\"created_by_token\") <= 1"
+        },
+        "run_notebook_links_one_updater": {
+          "name": "run_notebook_links_one_updater",
+          "value": "num_nonnulls(\"run_notebook_links\".\"updated_by\", \"run_notebook_links\".\"updated_by_token\") <= 1"
         }
       },
       "isRLSEnabled": false

@@ -125,6 +125,15 @@ export function SearchRunRow({
           </span>
         </span>
       ) : null}
+      {result.matchReason === "notebook_link" && result.matchedNotebookLink ? (
+        <span className="block truncate text-muted-foreground text-xs">
+          Lab notebook:{" "}
+          <Highlight
+            query={query}
+            text={result.matchedNotebookLink.displayName}
+          />
+        </span>
+      ) : null}
     </ResultRowShell>
   );
 }

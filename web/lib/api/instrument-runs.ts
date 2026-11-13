@@ -24,6 +24,11 @@ import {
 import { type Actor, resolveActor } from "@/lib/api/actor";
 import { escapeLikePattern } from "@/lib/api/like-pattern";
 import { getCommentCountsByRunIds } from "@/lib/api/run-comments";
+import { notebookLinkToWire } from "@/lib/api/run-notebook-link-wire";
+import {
+  getNotebookLinksByRunIds,
+  notebookLinkCondition,
+} from "@/lib/api/run-notebook-links";
 import { db } from "@/lib/db";
 import type { InstrumentType } from "@/lib/db/schema";
 import {
@@ -322,6 +327,8 @@ import type { RunMetadataFilterArgs } from "@/lib/api/run-metadata-filters";
 interface RunListFilters extends RunMetadataFilterArgs {
   dateFrom?: string;
   dateTo?: string;
+  // True lists only runs with a lab notebook link; false only runs without.
+  hasNotebookLink?: boolean;
   includeDeleted: boolean;
   instrumentId?: string | string[];
   order?: string;
@@ -651,6 +658,10 @@ export async function buildRunListQuery(filters: RunListFilters) {
     );
   }
 
+  if (filters.hasNotebookLink !== undefined) {
+    conditions.push(notebookLinkCondition(filters.hasNotebookLink));
+  }
+
   if (filters.statuses && filters.statuses.length > 0) {
     const statusOr = or(
       ...filters.statuses.map((status) => runStatusCondition(status, now))
@@ -776,17 +787,22 @@ export async function buildRunListQuery(filters: RunListFilters) {
     .limit(perPage)
     .offset(offset);
 
-  // Attributions and comment counts stay off the files left-join so extra
-  // rows cannot multiply the file aggregates above.
+  // Attributions, comment counts, and notebook links stay off the files
+  // left-join so extra rows cannot multiply the file aggregates above.
   const runIds = rows.map((r) => r.id);
-  const [attributionsByRun, commentCountsByRun] = await Promise.all([
-    getAttributionsByRunIds(runIds),
-    getCommentCountsByRunIds(runIds),
-  ]);
+  const [attributionsByRun, commentCountsByRun, notebookLinksByRun] =
+    await Promise.all([
+      getAttributionsByRunIds(runIds),
+      getCommentCountsByRunIds(runIds),
+      getNotebookLinksByRunIds(runIds),
+    ]);
   const data = rows.map((row) => ({
     ...row,
     attributions: attributionsByRun.get(row.id) ?? [],
     comment_count: commentCountsByRun.get(row.id) ?? 0,
+    notebook_links: (notebookLinksByRun.get(row.id) ?? []).map(
+      notebookLinkToWire
+    ),
   }));
 
   return {

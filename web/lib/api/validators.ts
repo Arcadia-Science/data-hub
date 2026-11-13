@@ -60,3 +60,17 @@ export function parseRunStatusParam(
   }
   return seen.size > 0 ? [...seen] : undefined;
 }
+
+// `has_notebook_link=true` or `false`. Anything else, or no parameter, means
+// "don't filter".
+export function parseHasNotebookLinkParam(
+  value: string | null
+): boolean | undefined {
+  if (value === "true") {
+    return true;
+  }
+  if (value === "false") {
+    return false;
+  }
+  return;
+}

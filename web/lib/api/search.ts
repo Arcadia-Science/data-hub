@@ -23,8 +23,13 @@ import {
   personalAccessTokens,
   runAttributions,
   runComments,
+  runNotebookLinks,
   users,
 } from "@/lib/db/schema";
+import {
+  notebookLinkDisplayName,
+  notebookSearchKey,
+} from "@/lib/notebook-links/url";
 import { commentBodyPreview } from "@/lib/search-comment-preview";
 import { MIN_QUERY_LENGTH } from "@/lib/search-constants";
 
@@ -49,9 +54,15 @@ const ALL_TAB_PER_GROUP = 5;
 const SCOPED_LIMIT = 25;
 
 // Why a run surfaced. `run_id` is the run's own title (highest relevance);
-// `file` means a contained filename matched (drives the "Contains …" line);
-// `instrument`/`ran_by` are secondary metadata matches.
-export type RunMatchReason = "run_id" | "file" | "instrument" | "ran_by";
+// `notebook_link` means one of its lab notebook links matched, for example a
+// pasted notebook URL; `file` means a contained filename matched (drives the
+// "Contains …" line); `instrument`/`ran_by` are secondary metadata matches.
+export type RunMatchReason =
+  | "run_id"
+  | "notebook_link"
+  | "file"
+  | "instrument"
+  | "ran_by";
 
 export interface SearchRunResult {
   acquiredAt: string | null;
@@ -62,6 +73,12 @@ export interface SearchRunResult {
   instrumentName: string;
   // Set only when `matchReason` is "file" — an example matching filename.
   matchedFilename: string | null;
+  // Set only when `matchReason` is "notebook_link" — the link that matched.
+  matchedNotebookLink: {
+    displayName: string;
+    label: string | null;
+    url: string;
+  } | null;
   matchReason: RunMatchReason;
   runId: string;
   totalSizeBytes: number;
@@ -155,23 +172,43 @@ async function searchRuns(
   const substring = `%${escaped}%`;
   const prefix = `${escaped}%`;
 
-  // A run matches on its own id, its instrument's name, a contained (active)
-  // filename, or an attributed user's name/email.
+  // A query that looks like a URL is also compared by its same-page key, so
+  // a pasted link finds runs whose saved copy differs in `www.`, query
+  // string, fragment, or (for Notion) page title.
+  const urlKey = notebookSearchKey(query);
+  const linkPredicate = urlKey
+    ? sql`(l.url ilike ${substring} or l.label ilike ${substring} or l.url_key ilike ${`%${escapeLike(urlKey)}%`})`
+    : sql`(l.url ilike ${substring} or l.label ilike ${substring})`;
+  const exactLinkMatch = urlKey
+    ? sql`exists (select 1 from ${runNotebookLinks} l where l.run_id = ${instrumentRuns.id} and l.url_key = ${urlKey})`
+    : sql`false`;
+
+  // A run matches on its own id, one of its notebook links, its instrument's
+  // name, a contained (active) filename, or an attributed user's name/email.
+  const linkMatch = sql<boolean>`exists (select 1 from ${runNotebookLinks} l where l.run_id = ${instrumentRuns.id} and ${linkPredicate})`;
   const fileMatch = sql<boolean>`exists (select 1 from ${files} f where f.instrument_run_id = ${instrumentRuns.id} and f.deleted_at is null and f.filename ilike ${substring})`;
   const ranByMatch = sql<boolean>`exists (select 1 from ${runAttributions} ra join ${users} u on u.id = ra.user_id where ra.run_id = ${instrumentRuns.id} and (u.name ilike ${substring} or u.email ilike ${substring}))`;
 
   const matchCondition = or(
     ilike(instrumentRuns.runId, substring),
     ilike(instruments.displayName, substring),
+    linkMatch,
     fileMatch,
     ranByMatch
   ) as SQL;
 
   const where = and(isNull(instrumentRuns.deletedAt), matchCondition);
 
-  // Relevance: a prefix hit on the run id (the title) outranks any substring
-  // hit, which outranks a metadata-only match; recency breaks ties.
-  const relevance = sql<number>`case when ${instrumentRuns.runId} ilike ${prefix} then 2 when ${instrumentRuns.runId} ilike ${substring} then 1 else 0 end`;
+  // Relevance: a pasted URL that names the same page as one of the run's
+  // links ranks first; then a prefix hit on the run id (the title), then any
+  // run-id substring hit, then a metadata-only match; recency breaks ties.
+  const relevance = sql<number>`case when ${exactLinkMatch} then 3 when ${instrumentRuns.runId} ilike ${prefix} then 2 when ${instrumentRuns.runId} ilike ${substring} then 1 else 0 end`;
+
+  // The link to show for a link match: a same-page match first, then the
+  // oldest matching link.
+  const matchedLinkOrder = urlKey
+    ? sql`order by (l.url_key = ${urlKey}) desc, l.created_at, l.id`
+    : sql`order by l.created_at, l.id`;
 
   const rows = await db
     .select({
@@ -187,6 +224,13 @@ async function searchRuns(
       matchedRunId: sql<boolean>`bool_or(${instrumentRuns.runId} ilike ${substring})`,
       matchedInstrument: sql<boolean>`bool_or(${instruments.displayName} ilike ${substring})`,
       matchedFile: sql<boolean>`bool_or(${fileMatch})`,
+      matchedLink: sql<boolean>`bool_or(${linkMatch})`,
+      matchedLinkUrl: sql<
+        string | null
+      >`(select l.url from ${runNotebookLinks} l where l.run_id = ${instrumentRuns.id} and ${linkPredicate} ${matchedLinkOrder} limit 1)`,
+      matchedLinkLabel: sql<
+        string | null
+      >`(select l.label from ${runNotebookLinks} l where l.run_id = ${instrumentRuns.id} and ${linkPredicate} ${matchedLinkOrder} limit 1)`,
       matchedFilename: sql<
         string | null
       >`(select f.filename from ${files} f where f.instrument_run_id = ${instrumentRuns.id} and f.deleted_at is null and f.filename ilike ${substring} order by f.filename limit 1)`,
@@ -206,11 +250,14 @@ async function searchRuns(
     .limit(limit);
 
   return rows.map((row) => {
-    // Precedence: title match first, then a nested-file match (worth its own
+    // Precedence: title match first, then a notebook link (a pasted URL is a
+    // deliberate lookup), then a nested-file match (worth its own
     // "Contains …" line), then instrument, then attribution.
     let matchReason: RunMatchReason;
     if (row.matchedRunId) {
       matchReason = "run_id";
+    } else if (row.matchedLink) {
+      matchReason = "notebook_link";
     } else if (row.matchedFile) {
       matchReason = "file";
     } else if (row.matchedInstrument) {
@@ -230,6 +277,17 @@ async function searchRuns(
       totalSizeBytes: Number(row.totalSizeBytes),
       matchReason,
       matchedFilename: matchReason === "file" ? row.matchedFilename : null,
+      matchedNotebookLink:
+        matchReason === "notebook_link" && row.matchedLinkUrl
+          ? {
+              url: row.matchedLinkUrl,
+              label: row.matchedLinkLabel,
+              displayName: notebookLinkDisplayName(
+                row.matchedLinkUrl,
+                row.matchedLinkLabel
+              ),
+            }
+          : null,
     };
   });
 }

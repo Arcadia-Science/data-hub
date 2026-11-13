@@ -2,7 +2,11 @@ import type { NextRequest } from "next/server";
 import { authorize } from "@/lib/api/auth";
 import { buildRunListQuery } from "@/lib/api/instrument-runs";
 import { parseRunMetadataFilters } from "@/lib/api/run-metadata-filters";
-import { parseIntParam, parseRunStatusParam } from "@/lib/api/validators";
+import {
+  parseHasNotebookLinkParam,
+  parseIntParam,
+  parseRunStatusParam,
+} from "@/lib/api/validators";
 
 // ---------------------------------------------------------------------------
 // GET /api/v1/instrument-runs
@@ -39,6 +43,9 @@ export async function GET(request: NextRequest) {
     }),
     includeDeleted: searchParams.get("include_deleted") === "true",
     ranBy: searchParams.get("ran_by") ?? undefined,
+    hasNotebookLink: parseHasNotebookLinkParam(
+      searchParams.get("has_notebook_link")
+    ),
     statuses: parseRunStatusParam(searchParams),
     ...parseRunMetadataFilters(searchParams),
   });

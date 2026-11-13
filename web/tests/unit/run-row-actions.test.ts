@@ -7,6 +7,7 @@ import {
   canUploadRun,
   computeRunStats,
   reprocessableFileCount,
+  runRowToRef,
 } from "@/lib/runs/row-actions";
 
 // The row menu and bulk bar decide what to offer from these predicates alone,
@@ -37,6 +38,7 @@ const BASE: RunRow = {
   error_messages: [],
   comment_count: 0,
   attributions: [],
+  notebook_links: [],
 };
 
 function row(overrides: Partial<RunRow>): RunRow {
@@ -153,5 +155,31 @@ describe("the other row capabilities", () => {
     expect(canDownloadRun(deleted)).toBe(false);
     expect(canReprocessRun(deleted)).toBe(false);
     expect(canDeleteRun(deleted)).toBe(false);
+  });
+});
+
+// A bulk download from a runs list asks whether the person ran the unclaimed
+// runs, so this flag decides which runs the prompt names.
+describe("runRowToRef unclaimed", () => {
+  it("is true only for a run nobody has claimed that isn't deleted", () => {
+    expect(runRowToRef(BASE).unclaimed).toBe(true);
+    expect(
+      runRowToRef(
+        row({
+          attributions: [
+            {
+              userId: "user-alice",
+              displayName: "Alice",
+              initials: "A",
+              avatarUrl: null,
+            },
+          ],
+        })
+      ).unclaimed
+    ).toBe(false);
+    expect(
+      runRowToRef(row({ deleted_at: new Date("2025-02-01T00:00:00.000Z") }))
+        .unclaimed
+    ).toBe(false);
   });
 });
