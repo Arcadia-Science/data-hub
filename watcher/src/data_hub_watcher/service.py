@@ -648,6 +648,7 @@ def _run_service_loop(
     from data_hub_watcher.api_client import ApiError, DataHubClient
     from data_hub_watcher.config_io import load_config
     from data_hub_watcher.constants import (
+        DEREGISTERED_MESSAGE,
         env_file_path,
         resolve_state_db_path,
         state_db_dir,
@@ -657,7 +658,11 @@ def _run_service_loop(
         attach_servicemanager_handler,
         setup_file_logging,
     )
-    from data_hub_watcher.runtime import ShutdownReason, WatcherSupervisor
+    from data_hub_watcher.runtime import (
+        ShutdownReason,
+        WatcherSupervisor,
+        watcher_is_deregistered,
+    )
 
     # Wire up file logging + Windows Event Log routing BEFORE any
     # other work, so a registry-read or env-load failure on the very
@@ -787,6 +792,14 @@ def _run_service_loop(
         logger.error("No watcher_id in config. Run 'data-hub-watcher init' first.")
         raise SystemExit(1)
 
+    # A watcher that was deregistered while the service was stopped would run on with
+    # 404s. Refuse to start, like the other start-up refusals: the SCM tries again twice,
+    # a minute and two minutes later, which covers a brief server problem, and then leaves
+    # the service stopped. Any other failure of this check lets the service start as before.
+    if watcher_is_deregistered(client, cfg.watcher_id):
+        logger.error(DEREGISTERED_MESSAGE)
+        raise SystemExit(1)
+
     db_path = resolve_state_db_path(state_db_dir(path, service=True), cfg.environment)
     # Pass the registry-resolved config directory through to the
     # runtime so the auto-update sentinels land where the SYSTEM-owned
@@ -861,6 +874,17 @@ def _run_service_loop(
         # graceful exit and the SCM wouldn't restart us — see the long
         # comment on `_configure_recovery` for details.
         raise SystemExit(1)
+
+    if decision.is_deregistered:
+        # Return normally, not with `SystemExit(1)`: the SCM treats a failure exit as a
+        # reason to start the service again, and a deregistered watcher can never recover,
+        # so it would be started and stopped again every few minutes. The error that says
+        # why was logged, to watcher.log and the Event Log, when the heartbeats showed it.
+        logger.info(
+            "%s stopped: its registration was deleted on Data Hub, and the SCM will not restart it",
+            SERVICE_DISPLAY_NAME,
+        )
+        return
 
     logger.info("%s stopped", SERVICE_DISPLAY_NAME)
 

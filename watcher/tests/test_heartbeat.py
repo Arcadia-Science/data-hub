@@ -20,6 +20,10 @@ Two behaviours are exercised here:
    before the final ``stopped`` heartbeat is sent, however short the
    heartbeat interval is. ``send_final_heartbeat()`` sends it, with a short
    timeout when the stop has a deadline.
+
+4. A deregistered watcher: three heartbeats in a row that the server answers with its own
+   "watcher not found" reply end the loop and call ``on_deregistered``, and nothing else
+   does.
 """
 
 from __future__ import annotations
@@ -33,6 +37,7 @@ from data_hub_watcher.api_client import DEFAULT_TIMEOUT, ApiError
 from data_hub_watcher.constants import SYSTEM_SHUTDOWN_HTTP_TIMEOUT
 from data_hub_watcher.events import EventReporter
 from data_hub_watcher.heartbeat import HeartbeatLoop
+from data_hub_watcher.models import ApiErrorDetail
 
 
 def _make_loop(client: MagicMock, reporter: MagicMock) -> HeartbeatLoop:
@@ -498,3 +503,241 @@ class TestFinalHeartbeatReason:
         loop._send_heartbeat(status="watching", stop_reason=reason)
 
         assert "status_reason" not in client.send_heartbeat.call_args.args[1]
+
+
+def _not_found() -> ApiError:
+    """The server's reply to a heartbeat of a watcher whose registration was deleted."""
+    return ApiError(
+        "Watcher 'w-test' not found",
+        status_code=404,
+        detail=ApiErrorDetail(code="NOT_FOUND", message="Watcher 'w-test' not found"),
+    )
+
+
+def _html_404() -> ApiError:
+    """A 404 page from a proxy or a deploy that is gone: no JSON error, so no `detail`."""
+    return ApiError("<html>404 Not Found</html>", status_code=404)
+
+
+def _other_error_code_404() -> ApiError:
+    return ApiError(
+        "no such route",
+        status_code=404,
+        detail=ApiErrorDetail(code="ROUTE_NOT_FOUND", message="no such route"),
+    )
+
+
+def _server_error() -> ApiError:
+    return ApiError(
+        "boom",
+        status_code=503,
+        detail=ApiErrorDetail(code="NOT_FOUND", message="boom"),
+    )
+
+
+def _network_error() -> ApiError:
+    return ApiError("Connection error: refused", status_code=0)
+
+
+# A success, as `send_heartbeat` returns it.
+_OK = object()
+
+
+class TestDeregistered:
+    """The watcher stops after `DEREGISTERED_HEARTBEAT_THRESHOLD` (3) not-found replies in a row.
+
+    One such reply could come from a broken deploy, so any other result, a success or any other
+    error, starts the count again. A reply counts only when it is the server's own: a 404 with
+    the JSON error code `NOT_FOUND`.
+    """
+
+    @staticmethod
+    def _loop(
+        replies: list[object], on_deregistered: MagicMock | None = None, **kwargs: object
+    ) -> tuple[HeartbeatLoop, MagicMock, MagicMock]:
+        client = MagicMock()
+        # An exception in the list is raised and anything else is returned, as a success.
+        client.send_heartbeat.side_effect = replies
+        reporter = MagicMock(spec=EventReporter)
+        on_deregistered = on_deregistered if on_deregistered is not None else MagicMock()
+        loop = HeartbeatLoop(
+            client=client,
+            watcher_id="w-test",
+            interval_seconds=60,
+            event_reporter=reporter,
+            instrument_id="inst-1",
+            watch_directory="/tmp/watch",
+            upload_mode="auto",
+            on_deregistered=on_deregistered,
+            **kwargs,  # type: ignore[arg-type]
+        )
+        return loop, on_deregistered, reporter
+
+    def test_three_not_found_replies_in_a_row_stop_the_watcher(self) -> None:
+        loop, on_deregistered, _reporter = self._loop([_not_found(), _not_found(), _not_found()])
+
+        loop._send_heartbeat()
+        loop._send_heartbeat()
+        on_deregistered.assert_not_called()
+        loop._send_heartbeat()
+
+        on_deregistered.assert_called_once_with()
+
+    def test_two_not_found_replies_then_a_success_do_not_stop_it(self) -> None:
+        loop, on_deregistered, _reporter = self._loop(
+            [_not_found(), _not_found(), _OK, _not_found(), _not_found()]
+        )
+
+        for _ in range(5):
+            loop._send_heartbeat()
+
+        # The success started the count again: two after it are not three.
+        on_deregistered.assert_not_called()
+        assert not loop._stop_event.is_set()
+
+    def test_the_count_after_a_success_starts_from_zero(self) -> None:
+        loop, on_deregistered, _reporter = self._loop(
+            [_not_found(), _not_found(), _OK, _not_found(), _not_found(), _not_found()]
+        )
+
+        for _ in range(5):
+            loop._send_heartbeat()
+        on_deregistered.assert_not_called()
+        loop._send_heartbeat()
+
+        on_deregistered.assert_called_once_with()
+
+    @pytest.mark.parametrize(
+        "other",
+        [_html_404, _other_error_code_404, _server_error, _network_error],
+        ids=["html-404", "other-code-404", "5xx", "network"],
+    )
+    def test_another_failure_starts_the_count_again(self, other: object) -> None:
+        loop, on_deregistered, _reporter = self._loop(
+            [_not_found(), _not_found(), other(), _not_found(), _not_found()]  # type: ignore[operator]
+        )
+
+        for _ in range(5):
+            loop._send_heartbeat()
+
+        on_deregistered.assert_not_called()
+        assert not loop._stop_event.is_set()
+
+    @pytest.mark.parametrize(
+        "other",
+        [_html_404, _other_error_code_404, _server_error, _network_error],
+        ids=["html-404", "other-code-404", "5xx", "network"],
+    )
+    def test_failures_that_are_not_the_servers_not_found_reply_never_stop_it(
+        self, other: object
+    ) -> None:
+        loop, on_deregistered, _reporter = self._loop([other() for _ in range(10)])  # type: ignore[operator]
+
+        for _ in range(10):
+            loop._send_heartbeat()
+
+        on_deregistered.assert_not_called()
+        assert not loop._stop_event.is_set()
+
+    def test_the_loop_ends_itself_and_calls_the_callback_once(self) -> None:
+        loop, on_deregistered, _reporter = self._loop([_not_found()] * 5)
+
+        for _ in range(5):
+            loop._send_heartbeat()
+
+        on_deregistered.assert_called_once_with()
+        assert loop._stop_event.is_set()
+
+    def test_a_callback_that_raises_does_not_break_the_heartbeat(self) -> None:
+        on_deregistered = MagicMock(side_effect=RuntimeError("boom"))
+        loop, _unused, _reporter = self._loop([_not_found()] * 3, on_deregistered)
+
+        for _ in range(3):
+            loop._send_heartbeat()
+
+        on_deregistered.assert_called_once_with()
+        assert loop._stop_event.is_set()
+
+    def test_without_a_callback_nothing_breaks(self) -> None:
+        client = MagicMock()
+        client.send_heartbeat.side_effect = _not_found()
+        loop = _make_loop(client, MagicMock(spec=EventReporter))
+
+        for _ in range(4):
+            loop._send_heartbeat()
+
+        assert loop._stop_event.is_set()
+
+    def test_a_waiting_watcher_counts_too(self) -> None:
+        loop, on_deregistered, _reporter = self._loop(
+            [_not_found()] * 3, status="waiting", status_reason="watch_directory not found: X"
+        )
+
+        for _ in range(3):
+            loop._send_heartbeat("waiting")
+
+        on_deregistered.assert_called_once_with()
+
+    def test_the_tick_that_sees_the_third_reply_flushes_no_events_and_runs_no_updater(
+        self,
+    ) -> None:
+        on_tick = MagicMock()
+        loop, on_deregistered, reporter = self._loop(
+            [_not_found(), _not_found(), _not_found()], on_tick=on_tick
+        )
+
+        loop._tick()
+        loop._tick()
+        # The first two ticks are ordinary ones: events are flushed, the updater runs.
+        assert reporter.flush.call_count == 2
+        assert on_tick.call_count == 2
+        on_deregistered.assert_not_called()
+        loop._tick()
+
+        # The third would get the same 404 for its flush, and the updater must not start an
+        # update for a watcher that can't report it.
+        assert reporter.flush.call_count == 2
+        assert on_tick.call_count == 2
+        on_deregistered.assert_called_once_with()
+
+    def test_the_final_heartbeat_does_not_count_and_does_not_reset(self) -> None:
+        loop, on_deregistered, _reporter = self._loop(
+            [_not_found(), _not_found(), _not_found(), _not_found()]
+        )
+
+        loop._send_heartbeat()
+        loop._send_heartbeat()
+        # A final "stopped" heartbeat that gets the same 404 is not the third in a row.
+        loop.send_final_heartbeat()
+        on_deregistered.assert_not_called()
+        loop._send_heartbeat()
+
+        on_deregistered.assert_called_once_with()
+
+    def test_the_running_loop_stops_after_the_third_reply_and_sends_no_more(self) -> None:
+        client = MagicMock()
+        client.send_heartbeat.side_effect = _not_found()
+        reporter = MagicMock(spec=EventReporter)
+        called = threading.Event()
+        loop = HeartbeatLoop(
+            client=client,
+            watcher_id="w-test",
+            interval_seconds=0.01,  # type: ignore[arg-type]
+            event_reporter=reporter,
+            instrument_id="inst-1",
+            watch_directory="/tmp/watch",
+            upload_mode="auto",
+            on_deregistered=called.set,
+        )
+
+        loop.start()
+        assert called.wait(10), "the loop never reported that the watcher was deregistered"
+        assert loop._thread is not None
+        loop._thread.join(10)
+        sent = client.send_heartbeat.call_count
+
+        assert not loop._thread.is_alive()
+        # The startup beat and two ticks. A loop that went on would have sent more by now.
+        assert sent == 3
+        time.sleep(0.1)
+        assert client.send_heartbeat.call_count == sent

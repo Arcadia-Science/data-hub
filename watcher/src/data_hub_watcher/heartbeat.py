@@ -14,6 +14,7 @@ from data_hub_watcher.api_client import (
     timeout_until,
 )
 from data_hub_watcher.constants import (
+    DEREGISTERED_HEARTBEAT_THRESHOLD,
     HEARTBEAT_INTERVAL_SECONDS,
     WATCHER_VERSION,
 )
@@ -59,6 +60,7 @@ class HeartbeatLoop:
         status_reason: str | None = None,
         config_revision: Callable[[], int | None] | None = None,
         on_config_revision: Callable[[int | None], None] | None = None,
+        on_deregistered: Callable[[], None] | None = None,
     ) -> None:
         self._client = client
         self._watcher_id = watcher_id
@@ -79,6 +81,10 @@ class HeartbeatLoop:
         # Called with the reply's `config_revision` (the server's latest) after
         # every successful heartbeat, so the runtime can fetch a new revision.
         self._on_config_revision = on_config_revision
+        # Called once, from the loop's thread, when the server has answered
+        # `DEREGISTERED_HEARTBEAT_THRESHOLD` heartbeats in a row with "watcher not found".
+        # The loop ends itself first (see `_note_heartbeat_failure`).
+        self._on_deregistered = on_deregistered
 
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
@@ -90,6 +96,10 @@ class HeartbeatLoop:
         # event is the only reliable signal.
         self._consecutive_heartbeat_failures = 0
         self._first_failure_at: float | None = None
+        # Heartbeats in a row that the server answered with its own "watcher not found"
+        # reply, which means the registration was deleted. See `_note_heartbeat_failure`.
+        self._not_found_in_a_row = 0
+        self._deregistered = False
 
     def start(self) -> None:
         """Send an immediate heartbeat, then run periodic heartbeats in a thread.
@@ -231,7 +241,10 @@ class HeartbeatLoop:
             if self._consecutive_heartbeat_failures == 0:
                 self._first_failure_at = time.monotonic()
             self._consecutive_heartbeat_failures += 1
+            if status != "stopped":
+                self._note_heartbeat_failure(exc)
         else:
+            self._not_found_in_a_row = 0
             if self._consecutive_heartbeat_failures > 0:
                 # Recovery — emit a single event covering the full
                 # outage so the dashboard can correlate the gap with
@@ -271,6 +284,34 @@ class HeartbeatLoop:
         self.counters.files_uploaded = 0
         self.counters.runs_reported = 0
         self.counters.errors = 0
+
+    def _note_heartbeat_failure(self, exc: Exception) -> None:
+        """Count a failed heartbeat towards the watcher having been deregistered.
+
+        Only the server's own "watcher not found" reply counts (`ApiError.is_not_found_reply`):
+        a 404 whose JSON body has the code `NOT_FOUND`. An HTML 404, any other status and a
+        network error say nothing about the registration, and any of them, like a success,
+        starts the count again, so a broken deploy or a bad proxy can't stop a watcher for
+        good by answering a few heartbeats wrong.
+
+        On the `DEREGISTERED_HEARTBEAT_THRESHOLD`-th reply in a row the loop ends itself, so
+        that this tick flushes no events and runs no updater (both would get the same 404),
+        and calls `on_deregistered` once. The final "stopped" heartbeat is the caller's to
+        skip (`WatcherSupervisor.stop` does), and a failed one is not counted here.
+        """
+        if not (isinstance(exc, ApiError) and exc.is_not_found_reply):
+            self._not_found_in_a_row = 0
+            return
+        self._not_found_in_a_row += 1
+        if self._deregistered or self._not_found_in_a_row < DEREGISTERED_HEARTBEAT_THRESHOLD:
+            return
+        self._deregistered = True
+        self._stop_event.set()
+        if self._on_deregistered is not None:
+            try:
+                self._on_deregistered()
+            except Exception:
+                logger.exception("Deregistered callback failed")
 
     def _build_payload(self, status: str, *, stop_reason: str | None = None) -> dict[str, Any]:
         payload: dict[str, Any] = {
