@@ -68,7 +68,7 @@ Which Data Hub deployment a watcher talks to: `staging`, `production`, or `previ
 
 ### Run [#run]
 
-A logical grouping of files produced by one acquisition. The watcher assigns each file a **run ID** using its configured [run detection](#run-detection) method, then reports the run to the API. The first file for a run creates it; later files are added incrementally to the same run’s manifest.
+A logical grouping of files produced by one acquisition. The watcher assigns each file a **run ID** using its configured [run detection](#run-detection) method, then reports the run to the API. The first file for a run creates it; later files are added incrementally to the same run’s manifest. Spaces at the start or end of a run ID are ignored, so `RUN001` and ` RUN001 ` are the same run.
 
 ### Run status [#run-status]
 

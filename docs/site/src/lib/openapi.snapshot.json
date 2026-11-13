@@ -2563,9 +2563,11 @@
           {
             "schema": {
               "type": "string",
+              "description": "The run ID. Spaces at the start or end are ignored.",
               "example": "run-2026-001"
             },
             "required": true,
+            "description": "The run ID. Spaces at the start or end are ignored.",
             "name": "runId",
             "in": "path"
           }
@@ -2658,9 +2660,11 @@
           {
             "schema": {
               "type": "string",
+              "description": "The run ID. Spaces at the start or end are ignored.",
               "example": "run-2026-001"
             },
             "required": true,
+            "description": "The run ID. Spaces at the start or end are ignored.",
             "name": "runId",
             "in": "path"
           }
@@ -2800,9 +2804,11 @@
           {
             "schema": {
               "type": "string",
+              "description": "The run ID. Spaces at the start or end are ignored.",
               "example": "run-2026-001"
             },
             "required": true,
+            "description": "The run ID. Spaces at the start or end are ignored.",
             "name": "runId",
             "in": "path"
           }
@@ -2932,9 +2938,11 @@
           {
             "schema": {
               "type": "string",
+              "description": "The run ID. Spaces at the start or end are ignored.",
               "example": "run-2026-001"
             },
             "required": true,
+            "description": "The run ID. Spaces at the start or end are ignored.",
             "name": "runId",
             "in": "path"
           }
@@ -3058,9 +3066,11 @@
           {
             "schema": {
               "type": "string",
+              "description": "The run ID. Spaces at the start or end are ignored.",
               "example": "run-2026-001"
             },
             "required": true,
+            "description": "The run ID. Spaces at the start or end are ignored.",
             "name": "runId",
             "in": "path"
           }
@@ -3175,9 +3185,11 @@
           {
             "schema": {
               "type": "string",
+              "description": "The run ID. Spaces at the start or end are ignored.",
               "example": "run-2026-001"
             },
             "required": true,
+            "description": "The run ID. Spaces at the start or end are ignored.",
             "name": "runId",
             "in": "path"
           }
@@ -3288,9 +3300,11 @@
           {
             "schema": {
               "type": "string",
+              "description": "The run ID. Spaces at the start or end are ignored.",
               "example": "run-2026-001"
             },
             "required": true,
+            "description": "The run ID. Spaces at the start or end are ignored.",
             "name": "runId",
             "in": "path"
           },
@@ -3629,9 +3643,11 @@
           {
             "schema": {
               "type": "string",
+              "description": "The run ID. Spaces at the start or end are ignored.",
               "example": "run-2026-001"
             },
             "required": true,
+            "description": "The run ID. Spaces at the start or end are ignored.",
             "name": "runId",
             "in": "path"
           }
@@ -3796,9 +3812,11 @@
           {
             "schema": {
               "type": "string",
+              "description": "The run ID. Spaces at the start or end are ignored.",
               "example": "run-2026-001"
             },
             "required": true,
+            "description": "The run ID. Spaces at the start or end are ignored.",
             "name": "runId",
             "in": "path"
           }
@@ -3909,9 +3927,11 @@
           {
             "schema": {
               "type": "string",
+              "description": "The run ID. Spaces at the start or end are ignored.",
               "example": "run-2026-001"
             },
             "required": true,
+            "description": "The run ID. Spaces at the start or end are ignored.",
             "name": "runId",
             "in": "path"
           }
@@ -4038,9 +4058,11 @@
           {
             "schema": {
               "type": "string",
+              "description": "The run ID. Spaces at the start or end are ignored.",
               "example": "run-2026-001"
             },
             "required": true,
+            "description": "The run ID. Spaces at the start or end are ignored.",
             "name": "runId",
             "in": "path"
           }
@@ -4144,9 +4166,11 @@
           {
             "schema": {
               "type": "string",
+              "description": "The run ID. Spaces at the start or end are ignored.",
               "example": "run-2026-001"
             },
             "required": true,
+            "description": "The run ID. Spaces at the start or end are ignored.",
             "name": "runId",
             "in": "path"
           }
@@ -4260,9 +4284,11 @@
           {
             "schema": {
               "type": "string",
+              "description": "The run ID. Spaces at the start or end are ignored.",
               "example": "run-2026-001"
             },
             "required": true,
+            "description": "The run ID. Spaces at the start or end are ignored.",
             "name": "runId",
             "in": "path"
           },
@@ -4384,9 +4410,11 @@
           {
             "schema": {
               "type": "string",
+              "description": "The run ID. Spaces at the start or end are ignored.",
               "example": "run-2026-001"
             },
             "required": true,
+            "description": "The run ID. Spaces at the start or end are ignored.",
             "name": "runId",
             "in": "path"
           },
@@ -4506,9 +4534,11 @@
           {
             "schema": {
               "type": "string",
+              "description": "The run ID. Spaces at the start or end are ignored.",
               "example": "run-2026-001"
             },
             "required": true,
+            "description": "The run ID. Spaces at the start or end are ignored.",
             "name": "runId",
             "in": "path"
           }
@@ -5500,9 +5530,11 @@
           {
             "schema": {
               "type": "string",
+              "description": "The run ID. Spaces at the start or end are ignored.",
               "example": "run-2026-001"
             },
             "required": true,
+            "description": "The run ID. Spaces at the start or end are ignored.",
             "name": "runId",
             "in": "path"
           }

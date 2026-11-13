@@ -31,7 +31,10 @@ registry.register("ErrorResponse", ErrorBody);
 export const instrumentIdParam = z
   .string()
   .openapi({ example: "plate-reader" });
-export const runIdParam = z.string().openapi({ example: "run-2026-001" });
+export const runIdParam = z.string().openapi({
+  description: "The run ID. Spaces at the start or end are ignored.",
+  example: "run-2026-001",
+});
 export const watcherIdParam = z.string().uuid();
 // Path params are always present; avoid z.coerce.number() which Zod 4 treats
 // as nullable and which zod-to-openapi then emits as required: false.
