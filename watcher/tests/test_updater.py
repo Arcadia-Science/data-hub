@@ -29,7 +29,7 @@ from data_hub_watcher.constants import (
     UPGRADE_HANDOFF_TIMEOUT_SECONDS,
 )
 from data_hub_watcher.events import EventReporter, EventType
-from data_hub_watcher.heartbeat import WatcherCounters
+from data_hub_watcher.heartbeat import HeartbeatLoop, WatcherCounters
 from data_hub_watcher.models import (
     InstrumentConfig,
     RunDetectionConfig,
@@ -2031,3 +2031,84 @@ class TestInProcessUpgradeIndexUrl:
                 "data-hub-watcher==9.9.9",
             ]
         ]
+
+
+class TestIdleCheckAfterAnOutage:
+    """The idle check looks at the uploads of the interval that just ended, not at carried counts.
+
+    A heartbeat that fails gives its counts back so that the next one reports them, and the tick
+    runs the updater after that failed heartbeat too. The counts are carried, but the uploads
+    that made them were seen by the tick of their own interval, so they must not make the next
+    intervals look busy as well, or an outage would hold off an update for as long as it lasts.
+    """
+
+    @staticmethod
+    def _heartbeat(client: MagicMock, counters: WatcherCounters) -> HeartbeatLoop:
+        return HeartbeatLoop(
+            client=client,
+            watcher_id="w-test",
+            interval_seconds=60,
+            event_reporter=MagicMock(spec=EventReporter),
+            instrument_id="inst-1",
+            watch_directory="/tmp/watch",
+            upload_mode="auto",
+            counters=counters,
+        )
+
+    @staticmethod
+    def _updater(tmp_path: Path) -> _UpdaterHarness:
+        h = _make_updater(
+            tmp_path,
+            updater_cfg=UpdaterConfig(
+                idle_ticks_required=2,
+                check_interval_ticks=1,
+                min_run_age_seconds=1.0,
+                check_on_start=False,
+            ),
+        )
+        h.client.get_update_info.return_value = _info(latest="9.9.9")
+        return h
+
+    def test_counts_that_a_failed_heartbeat_gave_back_do_not_make_later_intervals_busy(
+        self, tmp_path: Path
+    ) -> None:
+        h = self._updater(tmp_path)
+        beats = MagicMock()
+        beats.send_heartbeat.side_effect = [ApiError("down", status_code=503), None, None, None]
+        heartbeat = self._heartbeat(beats, h.counters)
+
+        # Three files are uploaded, and the heartbeat that is due to report them fails.
+        h.counters.add_files_uploaded(3)
+        heartbeat._send_heartbeat()
+        busy = h.updater.on_tick()
+        assert busy is not None and "idle ticks" in busy.reason
+        assert h.updater._idle_ticks == 0
+
+        # The next heartbeat reports the 3 that were carried. Nothing was uploaded in its own
+        # interval, so it is the first idle one.
+        heartbeat._send_heartbeat()
+        assert beats.send_heartbeat.call_args.args[1]["files_uploaded_since_last_heartbeat"] == 3
+        h.updater.on_tick()
+        assert h.updater._idle_ticks == 1
+
+        heartbeat._send_heartbeat()
+        h.updater.on_tick()
+        assert h.updater._idle_ticks == 2
+
+    def test_uploads_in_a_later_interval_still_make_it_busy(self, tmp_path: Path) -> None:
+        h = self._updater(tmp_path)
+        beats = MagicMock()
+        beats.send_heartbeat.side_effect = [ApiError("down", status_code=503), None, None]
+        heartbeat = self._heartbeat(beats, h.counters)
+
+        heartbeat._send_heartbeat()
+        h.updater.on_tick()
+        heartbeat._send_heartbeat()
+        h.updater.on_tick()
+        assert h.updater._idle_ticks == 2
+
+        h.counters.add_files_uploaded()
+        heartbeat._send_heartbeat()
+        h.updater.on_tick()
+
+        assert h.updater._idle_ticks == 0

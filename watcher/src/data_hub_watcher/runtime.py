@@ -254,6 +254,7 @@ def build_runtime(
     shutdown_event: threading.Event | None = None,
     upgrade_restart_event: threading.Event | None = None,
     upgrade_handoff: UpgradeHandoff | None = None,
+    counters: WatcherCounters | None = None,
     report_only: Callable[[str, float], bool] | None = None,
     config_revision: Callable[[], int | None] | None = None,
     on_config_revision: Callable[[int | None], None] | None = None,
@@ -273,11 +274,12 @@ def build_runtime(
     :class:`WatcherRuntime` for why.
 
     The remaining keyword arguments let :class:`WatcherSupervisor` rebuild the
-    runtime in place: *reporter*, the two events and *upgrade_handoff* (what the
-    updater remembers of an upgrade it handed to the Windows worker) are shared
-    across rebuilds, *report_only* marks files for the first scan to report without
-    uploading (see :class:`FileMonitor`), and *config_revision* /
-    *on_config_revision* connect the heartbeat to the config-revision check.
+    runtime in place: *reporter*, *counters* (the heartbeat counts not yet sent), the
+    two events and *upgrade_handoff* (what the updater remembers of an upgrade it
+    handed to the Windows worker) are shared across rebuilds, *report_only* marks
+    files for the first scan to report without uploading (see :class:`FileMonitor`),
+    and *config_revision* / *on_config_revision* connect the heartbeat to the
+    config-revision check.
     """
     if not cfg.watcher_id:
         raise ValueError("cfg.watcher_id must be set before building the runtime")
@@ -296,7 +298,8 @@ def build_runtime(
     # never re-baselined; the gate is read once here, before the scan runs.
     seed_baseline = cfg.resolve_initial_scan() == "new-only" and not state_db.baseline_established()
 
-    counters = WatcherCounters()
+    if counters is None:
+        counters = WatcherCounters()
     if reporter is None:
         reporter = EventReporter(client, watcher_id)
 
@@ -970,6 +973,9 @@ class WatcherSupervisor:
         # Shared by every runtime this supervisor builds, so events queued just
         # before a rebuild are flushed by the next heartbeat.
         self.reporter = EventReporter(client, self.watcher_id)
+        # Shared the same way: the counts that the heartbeat hasn't sent yet, which a
+        # rebuild or the waiting state would otherwise drop with the old loop.
+        self.counters = WatcherCounters()
         self.shutdown_event = threading.Event()
         self.upgrade_restart_event = threading.Event()
         # What the updater remembers of an upgrade it handed to the Windows worker.
@@ -1624,6 +1630,7 @@ class WatcherSupervisor:
             shutdown_event=self.shutdown_event,
             upgrade_restart_event=self.upgrade_restart_event,
             upgrade_handoff=self._handoff,
+            counters=self.counters,
             report_only=_any_rule(rules),
             config_revision=lambda: self._applied,
             on_config_revision=self._on_heartbeat_revision,
@@ -1667,11 +1674,10 @@ class WatcherSupervisor:
                 reason,
             )
         assert self._state is not None
-        counters = WatcherCounters()
         updater = Updater(
             client=self.client,
             reporter=self.reporter,
-            counters=counters,
+            counters=self.counters,
             state_db=self._state,
             cfg=self.cfg,
             config_dir=self.config_dir,
@@ -1699,7 +1705,7 @@ class WatcherSupervisor:
             instrument_id=inst.id,
             watch_directory=str(inst.watch_directory),
             upload_mode=inst.upload_mode,
-            counters=counters,
+            counters=self.counters,
             on_tick=on_tick,
             status="waiting",
             status_reason=reason,

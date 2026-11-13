@@ -689,13 +689,6 @@ class Uploader:
         )
         self._s3_session.mount("https://", adapter)
         self._s3_session.mount("http://", adapter)
-        # Counter mutations from upload worker threads are protected
-        # by the GIL on the underlying ``int`` increment, but use an
-        # explicit lock anyway so we can later move to ``threading.
-        # Lock``-free atomics or ``itertools.count`` without a behaviour
-        # change. Cheap enough at the per-file cadence that the
-        # serialisation cost is negligible.
-        self._counters_lock = threading.Lock()
         # Files with an upload in progress, keyed by resolved path. The auto
         # path and the queue worker can reach the same file, and a second
         # multipart start makes the server abort the first one.
@@ -1293,19 +1286,16 @@ class Uploader:
     # ------------------------------------------------------------------
 
     def _bump_errors(self) -> None:
-        """Increment the shared error counter under ``_counters_lock``.
+        """Count an error for the next heartbeat.
 
-        Centralised so the parallel upload threads
-        never race the heartbeat thread reading these values for its
-        per-tick payload.
+        `WatcherCounters` takes its own lock, so the parallel upload threads never race the
+        heartbeat thread, which takes the counts out for its payload.
         """
-        with self._counters_lock:
-            self._counters.errors += 1
+        self._counters.add_errors()
 
     def _bump_files_uploaded(self) -> None:
-        """Increment the shared success counter under ``_counters_lock``."""
-        with self._counters_lock:
-            self._counters.files_uploaded += 1
+        """Count an uploaded file for the next heartbeat."""
+        self._counters.add_files_uploaded()
 
     def _backoff(self, attempt: int) -> None:
         self._wait(UPLOAD_RETRY_BASE_DELAY * (2**attempt))

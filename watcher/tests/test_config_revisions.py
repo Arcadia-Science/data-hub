@@ -1740,3 +1740,112 @@ class TestHeartbeatRevisionFields:
         loop._send_heartbeat("watching")
 
         assert seen == []
+
+
+def _heartbeat_counts(env: _Env) -> list[tuple[str, int, int, int]]:
+    """`(status, files uploaded, runs reported, errors)` of every heartbeat sent so far."""
+    return [
+        (
+            call.args[1]["status"],
+            call.args[1]["files_uploaded_since_last_heartbeat"],
+            call.args[1]["runs_reported_since_last_heartbeat"],
+            call.args[1]["errors_since_last_heartbeat"],
+        )
+        for call in env.client.send_heartbeat.call_args_list
+    ]
+
+
+class TestCountsAcrossRebuilds:
+    """The supervisor owns the heartbeat counts, as it owns the event reporter.
+
+    A rebuild stops the old heartbeat loop without a final heartbeat, and the waiting state
+    runs a loop of its own. Counts the old loop hadn't sent yet are sent by the next one.
+    """
+
+    def test_every_part_of_the_runtime_counts_into_the_supervisors_counters(
+        self, env: _Env
+    ) -> None:
+        sup = env.supervisor()
+        sup.start()
+        rt = sup.rt
+        assert rt is not None
+
+        assert rt.counters is sup.counters
+        assert rt.heartbeat.counters is sup.counters
+        assert rt.uploader._counters is sup.counters
+        assert rt.detector._counters is sup.counters
+        assert rt.updater._counters is sup.counters
+
+    def test_counts_not_yet_sent_survive_a_rebuild(self, env: _Env) -> None:
+        sup = env.supervisor()
+        sup.start()
+        old_rt = sup.rt
+        assert old_rt is not None
+        # Counted since the start-up heartbeat, so the old loop never sent them.
+        sup.counters.add_files_uploaded(2)
+        sup.counters.add_runs_reported()
+        sup.counters.add_errors(3)
+        env.client.get_latest_config_revision.return_value = _revision(
+            2, _settings(env.watch_dir, file_patterns=["*.csv", "*.txt"])
+        )
+
+        sup._on_heartbeat_revision(2)
+        assert sup.poll(timeout=0) is False
+
+        new_rt = sup.rt
+        assert new_rt is not None and new_rt is not old_rt
+        assert new_rt.counters is sup.counters
+        # The new loop's start-up heartbeat is the first one after the rebuild.
+        assert _heartbeat_counts(env)[-1] == ("watching", 2, 1, 3)
+
+    def test_counts_not_yet_sent_survive_the_switch_from_waiting_to_watching(
+        self, env: _Env
+    ) -> None:
+        sup = env.supervisor(env.write_config(_cfg(env.tmp_path / "later")))
+        sup.start()
+        waiting = sup._waiting
+        assert waiting is not None
+        assert waiting.heartbeat.counters is sup.counters
+        assert waiting.updater._counters is sup.counters
+        sup.counters.add_errors(2)
+
+        (env.tmp_path / "later").mkdir()
+        waiting.heartbeat._on_tick()  # type: ignore[misc]
+        sup.poll(timeout=0)
+
+        assert sup.rt is not None
+        assert sup.rt.counters is sup.counters
+        assert _heartbeat_counts(env)[-1] == ("watching", 0, 0, 2)
+
+    def test_counts_not_yet_sent_survive_the_fall_back_to_waiting(self, env: _Env) -> None:
+        sup = env.supervisor()
+        sup.start()
+        assert sup.rt is not None
+        sup.counters.add_files_uploaded(4)
+
+        sup._teardown_for_rebuild()
+        sup._enter_waiting("could not start watching: test", started_message="Watcher restarted")
+
+        assert sup._waiting is not None
+        assert sup._waiting.heartbeat.counters is sup.counters
+        assert _heartbeat_counts(env)[-1] == ("waiting", 4, 0, 0)
+
+    def test_the_counts_of_a_heartbeat_that_failed_reach_the_server_after_a_rebuild(
+        self, env: _Env
+    ) -> None:
+        sup = env.supervisor()
+        sup.start()
+        sup.counters.add_files_uploaded(2)
+        env.client.send_heartbeat.side_effect = ApiError("down", status_code=503)
+        assert sup.rt is not None
+        sup.rt.heartbeat._send_heartbeat()  # Refused: the 2 are given back.
+        env.client.send_heartbeat.side_effect = None
+        env.client.get_latest_config_revision.return_value = _revision(
+            2, _settings(env.watch_dir, file_patterns=["*.csv", "*.txt"])
+        )
+
+        sup._on_heartbeat_revision(2)
+        sup.poll(timeout=0)
+
+        assert _heartbeat_counts(env)[-1] == ("watching", 2, 0, 0)
+

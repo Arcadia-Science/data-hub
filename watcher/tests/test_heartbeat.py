@@ -23,8 +23,11 @@ Two behaviours are exercised here:
 """
 
 from __future__ import annotations
+import itertools
+import sys
 import threading
 import time
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -32,7 +35,7 @@ import pytest
 from data_hub_watcher.api_client import DEFAULT_TIMEOUT, ApiError
 from data_hub_watcher.constants import SYSTEM_SHUTDOWN_HTTP_TIMEOUT
 from data_hub_watcher.events import EventReporter
-from data_hub_watcher.heartbeat import HeartbeatLoop
+from data_hub_watcher.heartbeat import HeartbeatLoop, WatcherCounters
 
 
 def _make_loop(client: MagicMock, reporter: MagicMock) -> HeartbeatLoop:
@@ -498,3 +501,310 @@ class TestFinalHeartbeatReason:
         loop._send_heartbeat(status="watching", stop_reason=reason)
 
         assert "status_reason" not in client.send_heartbeat.call_args.args[1]
+
+
+class TestHeartbeatCounts:
+    """The counts a heartbeat reports are never lost and never reported twice.
+
+    A heartbeat takes the counts it sends out of `WatcherCounters`, and gives them back if
+    the request fails. So a failed heartbeat's counts go out with the next one, a count added
+    while a request is in flight goes out with the one after it, and two heartbeats that
+    overlap can't both report the same count.
+    """
+
+    @staticmethod
+    def _loop(client: MagicMock, counters: WatcherCounters) -> HeartbeatLoop:
+        return HeartbeatLoop(
+            client=client,
+            watcher_id="w-test",
+            interval_seconds=60,
+            event_reporter=MagicMock(spec=EventReporter),
+            instrument_id="inst-1",
+            watch_directory="/tmp/watch",
+            upload_mode="auto",
+            counters=counters,
+        )
+
+    @staticmethod
+    def _counts(call: Any) -> tuple[int, int, int]:
+        payload = call.args[1]
+        return (
+            payload["files_uploaded_since_last_heartbeat"],
+            payload["runs_reported_since_last_heartbeat"],
+            payload["errors_since_last_heartbeat"],
+        )
+
+    def test_the_counts_are_reported_once_and_the_next_heartbeat_starts_from_zero(self) -> None:
+        client = MagicMock()
+        counters = WatcherCounters()
+        loop = self._loop(client, counters)
+        counters.add_files_uploaded(2)
+        counters.add_runs_reported()
+        counters.add_errors(3)
+
+        loop._send_heartbeat()
+        loop._send_heartbeat()
+
+        assert [self._counts(c) for c in client.send_heartbeat.call_args_list] == [
+            (2, 1, 3),
+            (0, 0, 0),
+        ]
+
+    def test_the_counts_of_a_heartbeat_that_failed_go_out_with_the_next_one(self) -> None:
+        client = MagicMock()
+        counters = WatcherCounters()
+        loop = self._loop(client, counters)
+        counters.add_files_uploaded(2)
+        counters.add_runs_reported()
+        counters.add_errors()
+        client.send_heartbeat.side_effect = [
+            ApiError("down", status_code=503),
+            ApiError("offline", status_code=0),
+            None,
+            None,
+        ]
+
+        loop._send_heartbeat()
+        counters.add_files_uploaded()  # More work while the server is unreachable.
+        loop._send_heartbeat()
+        loop._send_heartbeat()
+        loop._send_heartbeat()
+
+        counts = [self._counts(c) for c in client.send_heartbeat.call_args_list]
+        # The first two were refused. The third is the first that got through, and it carries
+        # everything that was counted since the first one. The fourth has nothing left.
+        assert counts == [(2, 1, 1), (3, 1, 1), (3, 1, 1), (0, 0, 0)]
+
+    @pytest.mark.parametrize(
+        "failure",
+        [
+            ApiError("down", status_code=503),
+            ApiError("refused", status_code=400),
+            ApiError("slow", status_code=0, read_timed_out=True),
+            ValueError("a reply that is not JSON"),
+        ],
+        ids=["503", "400", "read-timeout", "unreadable-reply"],
+    )
+    def test_whatever_makes_a_heartbeat_fail_gives_its_counts_back(
+        self, failure: Exception
+    ) -> None:
+        client = MagicMock()
+        counters = WatcherCounters()
+        loop = self._loop(client, counters)
+        counters.add_files_uploaded(4)
+        client.send_heartbeat.side_effect = failure
+
+        loop._send_heartbeat()
+
+        assert (counters.files_uploaded, counters.runs_reported, counters.errors) == (4, 0, 0)
+
+    def test_a_count_added_while_a_heartbeat_is_in_flight_goes_out_with_the_next_one(self) -> None:
+        client = MagicMock()
+        counters = WatcherCounters()
+        loop = self._loop(client, counters)
+        counters.add_runs_reported()
+        requests = 0
+
+        def send_heartbeat(*_args: object, **_kwargs: object) -> None:
+            nonlocal requests
+            requests += 1
+            if requests == 1:
+                # The first payload was built before this. These are counted while the
+                # request is in flight, and the old code reset them when it returned.
+                counters.add_files_uploaded()
+                counters.add_runs_reported()
+                counters.add_errors()
+
+        client.send_heartbeat.side_effect = send_heartbeat
+
+        loop._send_heartbeat()
+        loop._send_heartbeat()
+
+        assert [self._counts(c) for c in client.send_heartbeat.call_args_list] == [
+            (0, 1, 0),
+            (1, 1, 1),
+        ]
+
+    def test_a_count_added_while_a_heartbeat_is_in_flight_survives_when_that_one_fails(
+        self,
+    ) -> None:
+        client = MagicMock()
+        counters = WatcherCounters()
+        loop = self._loop(client, counters)
+        counters.add_files_uploaded()
+
+        def fails_after_a_count_arrives(*_args: object, **_kwargs: object) -> None:
+            counters.add_files_uploaded()
+            raise ApiError("down", status_code=503)
+
+        client.send_heartbeat.side_effect = fails_after_a_count_arrives
+        loop._send_heartbeat()
+
+        assert counters.files_uploaded == 2
+
+    def test_a_tick_that_a_stop_left_running_and_the_final_heartbeat_do_not_report_a_count_twice(
+        self,
+    ) -> None:
+        client = MagicMock()
+        counters = WatcherCounters()
+        loop = self._loop(client, counters)
+        counters.add_files_uploaded(5)
+        in_flight = threading.Event()
+        release = threading.Event()
+        sent: list[tuple[str, int]] = []
+
+        def send_heartbeat(_watcher_id: str, payload: dict[str, Any], **_kw: object) -> None:
+            sent.append((payload["status"], payload["files_uploaded_since_last_heartbeat"]))
+            if payload["status"] == "watching":
+                in_flight.set()
+                assert release.wait(10)
+
+        client.send_heartbeat.side_effect = send_heartbeat
+        tick = threading.Thread(target=loop._send_heartbeat)
+        tick.start()
+        try:
+            assert in_flight.wait(10), "the tick never sent its heartbeat"
+            # The stop gave up on the tick and sends the final heartbeat while it is running.
+            loop.send_final_heartbeat()
+        finally:
+            release.set()
+        tick.join(10)
+
+        assert sorted(sent) == [("stopped", 0), ("watching", 5)]
+
+    def test_the_final_heartbeat_reports_what_was_counted_since_the_last_one(self) -> None:
+        client = MagicMock()
+        counters = WatcherCounters()
+        loop = self._loop(client, counters)
+        counters.add_files_uploaded(2)
+
+        loop.stop()
+
+        assert self._counts(client.send_heartbeat.call_args) == (2, 0, 0)
+
+    def test_counts_added_from_many_threads_while_heartbeats_fail_and_succeed_are_reported_once(
+        self,
+    ) -> None:
+        client = MagicMock()
+        counters = WatcherCounters()
+        loop = self._loop(client, counters)
+        delivered = [0, 0, 0]
+        requests = itertools.count(1)
+
+        def send_heartbeat(_watcher_id: str, payload: dict[str, Any], **_kw: object) -> None:
+            # Every third request fails, so counts are given back and taken again.
+            if next(requests) % 3 == 0:
+                raise ApiError("down", status_code=503)
+            delivered[0] += payload["files_uploaded_since_last_heartbeat"]
+            delivered[1] += payload["runs_reported_since_last_heartbeat"]
+            delivered[2] += payload["errors_since_last_heartbeat"]
+
+        client.send_heartbeat.side_effect = send_heartbeat
+        stop = threading.Event()
+
+        def work() -> None:
+            for _ in range(2000):
+                counters.add_files_uploaded()
+                counters.add_runs_reported()
+                counters.add_errors()
+
+        def beat() -> None:
+            while not stop.is_set():
+                loop._send_heartbeat()
+
+        workers = [threading.Thread(target=work) for _ in range(8)]
+        beater = threading.Thread(target=beat)
+        beater.start()
+        for worker in workers:
+            worker.start()
+        for worker in workers:
+            worker.join()
+        stop.set()
+        beater.join()
+        # What a request that failed last gave back goes out with one that gets through.
+        for _ in range(3):
+            loop._send_heartbeat()
+
+        assert delivered == [16000, 16000, 16000]
+        assert (counters.files_uploaded, counters.runs_reported, counters.errors) == (0, 0, 0)
+
+    def test_the_last_fields_count_only_what_was_added_since_the_previous_heartbeat(self) -> None:
+        # The updater reads `last_files_uploaded` after a tick to see whether the interval was
+        # idle. Counts a failed heartbeat gave back and that are sent again are not activity
+        # of the new interval.
+        client = MagicMock()
+        counters = WatcherCounters()
+        loop = self._loop(client, counters)
+        counters.add_files_uploaded(3)
+        counters.add_errors()
+        client.send_heartbeat.side_effect = [ApiError("down", status_code=503), None, None]
+
+        loop._send_heartbeat()
+        assert (counters.last_files_uploaded, counters.last_errors) == (3, 1)
+
+        loop._send_heartbeat()  # Reports the 3 and the 1 that were given back.
+        assert self._counts(client.send_heartbeat.call_args) == (3, 0, 1)
+        assert (counters.last_files_uploaded, counters.last_errors) == (0, 0)
+
+        counters.add_files_uploaded()
+        loop._send_heartbeat()
+        assert counters.last_files_uploaded == 1
+
+    def test_counts_added_while_others_are_taken_are_never_lost_or_taken_twice(self) -> None:
+        # Switch threads far more often than usual, so that a count added between the two
+        # halves of an unlocked take would be lost within a few thousand tries.
+        counters = WatcherCounters()
+        taken = [0, 0, 0]
+        stop = threading.Event()
+
+        def work() -> None:
+            for _ in range(20000):
+                counters.add_files_uploaded()
+                counters.add_runs_reported()
+                counters.add_errors()
+
+        def take_and_sometimes_give_back() -> None:
+            n = 0
+            while not stop.is_set():
+                n += 1
+                counts = counters.take()
+                if n % 4 == 0:
+                    counters.restore(counts)
+                else:
+                    taken[0] += counts.files_uploaded
+                    taken[1] += counts.runs_reported
+                    taken[2] += counts.errors
+
+        previous = sys.getswitchinterval()
+        sys.setswitchinterval(1e-6)
+        try:
+            workers = [threading.Thread(target=work) for _ in range(4)]
+            taker = threading.Thread(target=take_and_sometimes_give_back)
+            taker.start()
+            for worker in workers:
+                worker.start()
+            for worker in workers:
+                worker.join()
+            stop.set()
+            taker.join()
+        finally:
+            sys.setswitchinterval(previous)
+
+        left = counters.take()
+        assert taken[0] + left.files_uploaded == 80000
+        assert taken[1] + left.runs_reported == 80000
+        assert taken[2] + left.errors == 80000
+
+    def test_taking_and_restoring_counts_is_the_only_way_a_heartbeat_changes_them(self) -> None:
+        counters = WatcherCounters()
+        counters.add_files_uploaded(2)
+        counters.add_runs_reported(3)
+        counters.add_errors(4)
+
+        taken = counters.take()
+        assert (taken.files_uploaded, taken.runs_reported, taken.errors) == (2, 3, 4)
+        assert (counters.files_uploaded, counters.runs_reported, counters.errors) == (0, 0, 0)
+
+        counters.add_files_uploaded()
+        counters.restore(taken)
+        assert (counters.files_uploaded, counters.runs_reported, counters.errors) == (3, 3, 4)

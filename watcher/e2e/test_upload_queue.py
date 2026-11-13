@@ -793,8 +793,8 @@ def test_queue_entry_with_a_path_outside_the_watch_folder_is_rejected_and_cancel
     watch_dir: Path,
 ) -> None:
     # A 6-second tick, so that the one error this scenario counts is counted well inside an
-    # interval and not while a heartbeat is in flight (ENG-2125). The
-    # queue is not held: a held queue fails every poll, and each failed poll counts an error too.
+    # interval. The queue is not held: a held queue fails every poll, and each failed poll
+    # counts an error too.
     pc = manual_watcher(
         watcher, server, overrides={testing_overrides.HEARTBEAT_INTERVAL_ENV_VAR: "6"}
     )

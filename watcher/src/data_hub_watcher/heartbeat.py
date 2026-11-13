@@ -3,7 +3,7 @@ import logging
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
@@ -22,15 +22,37 @@ from data_hub_watcher.events import EventReporter
 logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True)
+class CountsTaken:
+    """The counts one heartbeat is sending, as `WatcherCounters.take` moved them out."""
+
+    files_uploaded: int = 0
+    runs_reported: int = 0
+    errors: int = 0
+
+
 @dataclass
 class WatcherCounters:
-    """Mutable counters reset after each heartbeat.
+    """The activity counts the next heartbeat reports, shared by the threads that do the work.
 
-    The ``last_*`` snapshots persist across resets so consumers that run
-    *after* a heartbeat (e.g. the updater on the post-heartbeat tick
-    callback) can still observe the activity from the just-elapsed
-    interval. Without these the post-reset value is always zero, which
-    would falsely look like an idle window.
+    The uploader, the run detector and the heartbeat all touch these from different threads,
+    so every change goes through `_lock`: the `add_*` methods count, `take` moves the counts
+    out for a heartbeat, and `restore` puts them back when that heartbeat failed. A heartbeat
+    never reads or resets the fields itself, so a count added while its request is in flight
+    stays for the next heartbeat, and two sends that overlap (a tick that outlived
+    `HeartbeatLoop.stop_loop` and the final heartbeat) can't report the same count twice.
+
+    The supervisor owns one instance and gives it to every runtime and to the waiting state,
+    so counts that a rebuild or a pause for the watch folder caught between two heartbeats are
+    reported by the next one.
+
+    `files_uploaded`, `runs_reported` and `errors` are the counts not yet sent, which include
+    counts carried over from a heartbeat that failed.
+
+    The ``last_*`` fields are for consumers that run *after* a heartbeat (the updater, on the
+    post-heartbeat tick callback). They are what was counted since the previous heartbeat
+    began to send, and nothing that was carried over, so an outage doesn't make the next
+    interval look busy. `take` sets them, and `restore` leaves them alone.
     """
 
     files_uploaded: int = 0
@@ -39,6 +61,53 @@ class WatcherCounters:
     last_files_uploaded: int = 0
     last_runs_reported: int = 0
     last_errors: int = 0
+    _lock: threading.Lock = field(
+        default_factory=threading.Lock, init=False, repr=False, compare=False
+    )
+    # Counted since the last `take`, whether or not that heartbeat was delivered.
+    _new_files_uploaded: int = field(default=0, init=False, repr=False)
+    _new_runs_reported: int = field(default=0, init=False, repr=False)
+    _new_errors: int = field(default=0, init=False, repr=False)
+
+    def add_files_uploaded(self, count: int = 1) -> None:
+        with self._lock:
+            self.files_uploaded += count
+            self._new_files_uploaded += count
+
+    def add_runs_reported(self, count: int = 1) -> None:
+        with self._lock:
+            self.runs_reported += count
+            self._new_runs_reported += count
+
+    def add_errors(self, count: int = 1) -> None:
+        with self._lock:
+            self.errors += count
+            self._new_errors += count
+
+    def take(self) -> CountsTaken:
+        """Move the counts out for a heartbeat: return them and start again from zero.
+
+        A heartbeat that fails gives them back with `restore`.
+        """
+        with self._lock:
+            taken = CountsTaken(self.files_uploaded, self.runs_reported, self.errors)
+            self.files_uploaded = 0
+            self.runs_reported = 0
+            self.errors = 0
+            self.last_files_uploaded = self._new_files_uploaded
+            self.last_runs_reported = self._new_runs_reported
+            self.last_errors = self._new_errors
+            self._new_files_uploaded = 0
+            self._new_runs_reported = 0
+            self._new_errors = 0
+            return taken
+
+    def restore(self, taken: CountsTaken) -> None:
+        """Add the counts of a heartbeat that failed back, for the next one to send."""
+        with self._lock:
+            self.files_uploaded += taken.files_uploaded
+            self.runs_reported += taken.runs_reported
+            self.errors += taken.errors
 
 
 class HeartbeatLoop:
@@ -155,7 +224,8 @@ class HeartbeatLoop:
         running after it is left behind: it is a daemon thread, and it ends with the
         process. If its request is slow, its "watching" heartbeat can reach the server
         after the "stopped" one, which is no worse than a watcher that was killed: the
-        server marks the PC offline when no heartbeat follows.
+        server marks the PC offline when no heartbeat follows. The two never report the same
+        counts: each heartbeat takes the counts it sends out of `WatcherCounters`.
         """
         self._stop_event.set()
         if self._thread and self._thread.is_alive():
@@ -223,56 +293,65 @@ class HeartbeatLoop:
         stop_reason: str | None = None,
         timeout: tuple[float, float] | None = None,
     ) -> None:
-        payload = self._build_payload(status, stop_reason=stop_reason)
+        # The counts leave the shared counters before the request is made and come back
+        # if it fails, so a count added while the request is in flight is never wiped, a
+        # count from a failed heartbeat goes out with the next one, and a heartbeat that
+        # overlaps this one (see `stop_loop`) takes only what this one left.
+        taken = self.counters.take()
+        delivered = False
         try:
-            response = self._client.send_heartbeat(self._watcher_id, payload, timeout=timeout)
-        except (ApiError, Exception) as exc:
-            logger.warning("Heartbeat failed: %s", exc)
-            if self._consecutive_heartbeat_failures == 0:
-                self._first_failure_at = time.monotonic()
-            self._consecutive_heartbeat_failures += 1
-        else:
-            if self._consecutive_heartbeat_failures > 0:
-                # Recovery — emit a single event covering the full
-                # outage so the dashboard can correlate the gap with
-                # whatever was happening on the network at the time.
-                gap_seconds = (
-                    int(time.monotonic() - self._first_failure_at)
-                    if self._first_failure_at is not None
-                    else 0
-                )
-                self._event_reporter.report_error(
-                    "heartbeat_recovered",
-                    (
-                        f"Heartbeat recovered after "
-                        f"{self._consecutive_heartbeat_failures} consecutive failure(s)"
-                    ),
-                    consecutive_failures=self._consecutive_heartbeat_failures,
-                    gap_seconds=gap_seconds,
-                )
-                self._consecutive_heartbeat_failures = 0
-                self._first_failure_at = None
-            if self._on_config_revision is not None and status != "stopped":
-                # Older servers leave `config_revision` out of the reply, so
-                # anything but an int means "no revision".
-                latest = getattr(response, "config_revision", None)
-                try:
-                    self._on_config_revision(latest if isinstance(latest, int) else None)
-                except Exception:
-                    logger.exception("Config revision callback failed")
+            payload = self._build_payload(status, counts=taken, stop_reason=stop_reason)
+            try:
+                response = self._client.send_heartbeat(self._watcher_id, payload, timeout=timeout)
+            except (ApiError, Exception) as exc:
+                logger.warning("Heartbeat failed: %s", exc)
+                if self._consecutive_heartbeat_failures == 0:
+                    self._first_failure_at = time.monotonic()
+                self._consecutive_heartbeat_failures += 1
+                return
+            delivered = True
+        finally:
+            if not delivered:
+                self.counters.restore(taken)
 
-        # Snapshot the just-sent values into the `last_*` fields so post-reset
-        # consumers (e.g. the updater) can still see the most recent interval's
-        # activity. Then reset the live counters so the next heartbeat only
-        # reports activity since the previous one, not cumulative.
-        self.counters.last_files_uploaded = self.counters.files_uploaded
-        self.counters.last_runs_reported = self.counters.runs_reported
-        self.counters.last_errors = self.counters.errors
-        self.counters.files_uploaded = 0
-        self.counters.runs_reported = 0
-        self.counters.errors = 0
+        if self._consecutive_heartbeat_failures > 0:
+            # Recovery — emit a single event covering the full
+            # outage so the dashboard can correlate the gap with
+            # whatever was happening on the network at the time.
+            gap_seconds = (
+                int(time.monotonic() - self._first_failure_at)
+                if self._first_failure_at is not None
+                else 0
+            )
+            self._event_reporter.report_error(
+                "heartbeat_recovered",
+                (
+                    f"Heartbeat recovered after "
+                    f"{self._consecutive_heartbeat_failures} consecutive failure(s)"
+                ),
+                consecutive_failures=self._consecutive_heartbeat_failures,
+                gap_seconds=gap_seconds,
+            )
+            self._consecutive_heartbeat_failures = 0
+            self._first_failure_at = None
+        if self._on_config_revision is not None and status != "stopped":
+            # Older servers leave `config_revision` out of the reply, so
+            # anything but an int means "no revision".
+            latest = getattr(response, "config_revision", None)
+            try:
+                self._on_config_revision(latest if isinstance(latest, int) else None)
+            except Exception:
+                logger.exception("Config revision callback failed")
 
-    def _build_payload(self, status: str, *, stop_reason: str | None = None) -> dict[str, Any]:
+    def _build_payload(
+        self,
+        status: str,
+        *,
+        counts: CountsTaken | None = None,
+        stop_reason: str | None = None,
+    ) -> dict[str, Any]:
+        if counts is None:
+            counts = CountsTaken()
         payload: dict[str, Any] = {
             "status": status,
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -280,9 +359,9 @@ class HeartbeatLoop:
             "watch_directory": self._watch_directory,
             "upload_mode": self._upload_mode,
             "watcher_version": WATCHER_VERSION,
-            "files_uploaded_since_last_heartbeat": self.counters.files_uploaded,
-            "runs_reported_since_last_heartbeat": self.counters.runs_reported,
-            "errors_since_last_heartbeat": self.counters.errors,
+            "files_uploaded_since_last_heartbeat": counts.files_uploaded,
+            "runs_reported_since_last_heartbeat": counts.runs_reported,
+            "errors_since_last_heartbeat": counts.errors,
             "uptime_seconds": int(time.monotonic() - self._start_time),
         }
         if status == "waiting" and self._status_reason:
