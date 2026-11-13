@@ -12,6 +12,7 @@ import {
   RunContentSkeleton,
 } from "@/components/runs/run-detail-skeleton";
 import { RunNav } from "@/components/runs/run-nav";
+import { RunNotebookLinksSection } from "@/components/runs/run-notebook-links-section";
 import { RunDetailVariant } from "@/components/runs/variants";
 import { WatcherStatusProvider } from "@/components/runs/watcher-status-provider";
 import {
@@ -29,6 +30,8 @@ import { getInstrumentById } from "@/lib/api/instruments";
 import { getReportItemsPage } from "@/lib/api/report-items";
 import { listCommentsForRun } from "@/lib/api/run-comments";
 import { readRunIdParam } from "@/lib/api/run-id-param";
+import { notebookLinkToWire } from "@/lib/api/run-notebook-link-wire";
+import { listNotebookLinksForRun } from "@/lib/api/run-notebook-links";
 import { auth } from "@/lib/auth";
 import { formatDateLong } from "@/lib/date";
 import { decodePageParam } from "@/lib/runs/page-param";
@@ -189,6 +192,7 @@ async function RunDetailContentBody({
     wellData,
     auntyPlate,
     qpcrMeltingPlate,
+    notebookLinks,
   ] = await Promise.all([
     buildRunFilesQuery(run.id, {
       page: filters.files_page,
@@ -221,6 +225,7 @@ async function RunDetailContentBody({
     reportFilesPromise.then((rf) =>
       isQpcr ? getQpcrMeltingPlateData(rf) : Promise.resolve(null)
     ),
+    listNotebookLinksForRun(run.id),
   ]);
 
   // Gate client-side upload actions on watcher availability — a queued
@@ -252,6 +257,16 @@ async function RunDetailContentBody({
             filesDownloadableCount={filesPage.downloadableCount}
             filesPagination={filesPage.pagination}
             instrumentId={instrumentId}
+            notebookLinksSlot={
+              <RunNotebookLinksSection
+                attributions={run.attributions}
+                instrumentId={run.instrumentId}
+                isDeleted={run.deletedAt !== null}
+                key={`${run.instrumentId}:${run.runId}`}
+                links={notebookLinks.map(notebookLinkToWire)}
+                runId={run.runId}
+              />
+            }
             qpcrMeltingPlate={qpcrMeltingPlate}
             reportFiles={reportFiles}
             reportItems={reportItems}

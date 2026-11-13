@@ -1,10 +1,21 @@
 "use client";
 
-import { ArrowDownToLine, ArrowUpToLine, RotateCw, Trash2 } from "lucide-react";
+import {
+  ArrowDownToLine,
+  ArrowUpToLine,
+  NotebookPen,
+  RotateCw,
+  Trash2,
+} from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
+import { DisabledReasonButton } from "@/components/disabled-reason-button";
 import { DeleteRunsDialog } from "@/components/runs/delete-runs-dialog";
+import {
+  AddNotebookLinkDialog,
+  RemoveNotebookLinksDialog,
+} from "@/components/runs/notebook-link-bulk-dialogs";
 import { ReprocessRunsDialog } from "@/components/runs/reprocess-runs-dialog";
 import { Button } from "@/components/ui/button";
 import { useSidebar } from "@/components/ui/sidebar";
@@ -15,6 +26,7 @@ import {
 } from "@/components/ui/tooltip";
 import { useArchiveDownload } from "@/hooks/use-archive-download";
 import { useClaimPrompt } from "@/hooks/use-claim-prompt";
+import { NOTEBOOK_LINK_BULK_RUNS_MAX } from "@/lib/notebook-links/url";
 import { buildArchiveHref } from "@/lib/runs/archive-href";
 import {
   type AttributionMethod,
@@ -77,12 +89,18 @@ export function RunBulkActionBar() {
   const [isPending, startTransition] = useTransition();
   const [reprocessOpen, setReprocessOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [addLinkOpen, setAddLinkOpen] = useState(false);
+  const [removeLinksOpen, setRemoveLinksOpen] = useState(false);
 
   if (meta.count === 0) {
     return null;
   }
 
   const refs = Array.from(state.selected.values());
+  const anyLinked = refs.some((ref) => ref.notebookLinks.length > 0);
+  // The bulk endpoints take at most this many runs per request.
+  const tooManyToLink = refs.length > NOTEBOOK_LINK_BULK_RUNS_MAX;
+  const tooManyReason = `Select at most ${NOTEBOOK_LINK_BULK_RUNS_MAX} runs to change notebook links at once.`;
 
   function runAttribution(method: AttributionMethod, label: string) {
     startTransition(async () => {
@@ -208,6 +226,53 @@ export function RunBulkActionBar() {
             Remove my attribution
           </Button>
 
+          {meta.allCanLink &&
+            (tooManyToLink ? (
+              <DisabledReasonButton
+                className="gap-1.5"
+                reason={tooManyReason}
+                size="sm"
+                variant="outline"
+              >
+                <NotebookPen className="size-3.5" />
+                Add notebook link
+              </DisabledReasonButton>
+            ) : (
+              <Button
+                className="gap-1.5"
+                disabled={isPending}
+                onClick={() => setAddLinkOpen(true)}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                <NotebookPen className="size-3.5" />
+                Add notebook link
+              </Button>
+            ))}
+
+          {meta.allCanLink &&
+            anyLinked &&
+            (tooManyToLink ? (
+              <DisabledReasonButton
+                reason={tooManyReason}
+                size="sm"
+                variant="outline"
+              >
+                Remove notebook link
+              </DisabledReasonButton>
+            ) : (
+              <Button
+                disabled={isPending}
+                onClick={() => setRemoveLinksOpen(true)}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                Remove notebook link
+              </Button>
+            ))}
+
           {meta.allCanUpload && (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -296,6 +361,18 @@ export function RunBulkActionBar() {
         onOpenChange={setDeleteOpen}
         open={deleteOpen}
         runs={deleteTargets}
+      />
+      <AddNotebookLinkDialog
+        onComplete={() => actions.clear()}
+        onOpenChange={setAddLinkOpen}
+        open={addLinkOpen}
+        runRefs={refs}
+      />
+      <RemoveNotebookLinksDialog
+        onComplete={() => actions.clear()}
+        onOpenChange={setRemoveLinksOpen}
+        open={removeLinksOpen}
+        runRefs={refs}
       />
     </>
   );

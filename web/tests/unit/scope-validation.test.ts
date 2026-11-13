@@ -156,6 +156,15 @@ describe("hasScope", () => {
     // other resources.
     expect(hasScope({ scopes: ["runs:write"] }, "runs:read")).toBe(false);
     expect(hasScope({ scopes: ["runs:write"] }, "files:create")).toBe(false);
+    // `runs:link` came after the split, so old tokens don't pick it up.
+    expect(hasScope({ scopes: ["runs:write"] }, "runs:link")).toBe(false);
+  });
+
+  it("offers runs:link on new tokens without implying comments", () => {
+    const result = validateRequestedScopes(["runs:read", "runs:link"]);
+    expect(result.ok).toBe(true);
+    expect(hasScope({ scopes: ["runs:link"] }, "runs:comment")).toBe(false);
+    expect(hasScope({ scopes: ["runs:comment"] }, "runs:link")).toBe(false);
   });
 
   it("expands legacy 'files:write' and 'watchers:write'", () => {

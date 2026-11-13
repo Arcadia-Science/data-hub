@@ -5,6 +5,7 @@ import { DOCS_TOOL_DEFS } from "@/lib/mcp/tools/docs.defs";
 import { FEEDBACK_TOOL_DEFS } from "@/lib/mcp/tools/feedback.defs";
 import { FILE_TOOL_DEFS } from "@/lib/mcp/tools/files.defs";
 import { INSTRUMENT_TOOL_DEFS } from "@/lib/mcp/tools/instruments.defs";
+import { NOTEBOOK_LINK_TOOL_DEFS } from "@/lib/mcp/tools/notebook-links.defs";
 import { REPORT_VIEW_TOOL_DEFS } from "@/lib/mcp/tools/report-views.defs";
 import { RUN_TOOL_DEFS } from "@/lib/mcp/tools/runs.defs";
 import { WATCHER_TOOL_DEFS } from "@/lib/mcp/tools/watchers.defs";
@@ -13,6 +14,7 @@ import { WATCHER_TOOL_DEFS } from "@/lib/mcp/tools/watchers.defs";
 export const MCP_TOOL_DEFS: readonly McpToolDef[] = [
   ...INSTRUMENT_TOOL_DEFS,
   ...RUN_TOOL_DEFS,
+  ...NOTEBOOK_LINK_TOOL_DEFS,
   ...REPORT_VIEW_TOOL_DEFS,
   ...FILE_TOOL_DEFS,
   ...WATCHER_TOOL_DEFS,

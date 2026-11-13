@@ -41,7 +41,7 @@ Your client stores the access token it receives and renews it without asking aga
 MCP uses two scopes rather than the `<resource>:<action>` scopes that gate REST requests:
 
 - **`read`**: required to connect at all, and covers every read-only tool, resource, and prompt
-- **`write`**: additionally required by tools that change something, including claiming runs, commenting, requesting uploads, reprocessing, and deleting
+- **`write`**: additionally required by tools that change something, including claiming runs, commenting, adding lab notebook links, requesting uploads, reprocessing, and deleting
 
 Most clients ask for both, because the server advertises both. A client granted only `read` still connects and still reads; its first mutating tool call fails with a message naming the missing scope.
 

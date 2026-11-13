@@ -61,6 +61,10 @@ export interface AnalyticsEvents {
     outcome: "ok" | "tool_error" | "exception";
     duration_bucket: "under_1s" | "1_to_5s" | "5_to_30s" | "over_30s";
   };
+  // `runs` counts the runs that gained or lost a link.
+  notebook_link_added: SurfaceEvent & { runs: number };
+  notebook_link_edited: SurfaceEvent;
+  notebook_link_removed: SurfaceEvent & { runs: number };
   run_claimed: SurfaceEvent;
   run_deleted: SurfaceEvent;
   run_queue_cancelled: SurfaceEvent;
