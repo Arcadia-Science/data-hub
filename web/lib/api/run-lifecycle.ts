@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq, isNull, TransactionRollbackError } from "drizzle-orm";
 import {
   type ActorRef,
   actorColumns,
@@ -36,6 +36,23 @@ export type RunLifecycleResult =
       message: string;
     };
 
+// Idempotent delete: the run is already soft-deleted, so report success with
+// the existing deletion metadata instead of a 409 conflict.
+function alreadyDeleted(
+  run: NonNullable<Awaited<ReturnType<typeof lookupRunByNaturalKey>>>
+): RunLifecycleResult {
+  return {
+    ok: true,
+    id: run.id,
+    instrumentId: run.instrumentId,
+    runId: run.runId,
+    deletedAt: run.deletedAt,
+    deletedBy: actorUser(run.deletedBy)?.userId ?? null,
+    deletedByToken: actorToken(run.deletedBy),
+    alreadyApplied: true,
+  };
+}
+
 // Shared by REST DELETE and MCP `delete_run` so soft-delete semantics stay identical.
 export async function softDeleteRun(input: {
   instrumentId: string;
@@ -53,18 +70,7 @@ export async function softDeleteRun(input: {
   }
 
   if (run.deletedAt) {
-    // Idempotent: the run is already soft-deleted, so report success with the
-    // existing deletion metadata instead of a 409 conflict.
-    return {
-      ok: true,
-      id: run.id,
-      instrumentId: run.instrumentId,
-      runId: run.runId,
-      deletedAt: run.deletedAt,
-      deletedBy: actorUser(run.deletedBy)?.userId ?? null,
-      deletedByToken: actorToken(run.deletedBy),
-      alreadyApplied: true,
-    };
+    return alreadyDeleted(run);
   }
 
   const now = new Date();
@@ -72,16 +78,53 @@ export async function softDeleteRun(input: {
   // A deleted run refuses uploads, so cancel the ones already requested in the
   // same transaction. Otherwise they would stay in the watcher's queue. A
   // restore does not bring them back: someone has to request them again.
-  await db.transaction(async (tx) => {
-    await tx
-      .update(instrumentRuns)
-      .set({ deletedAt: now, deletedBy: userId, deletedByToken: tokenId })
-      .where(eq(instrumentRuns.id, run.id));
-    await cancelRunUploadRequests(
-      { id: run.id, instrumentId: run.instrumentId, runId: run.runId },
-      tx
+  //
+  // The cancel comes before the run update on purpose. It locks the files and
+  // then the run, the same order as the other paths that revert requests, so
+  // the two can't wait for each other. The update only changes a run that is
+  // still live. If another delete got there first it changes nothing, and
+  // rolling back undoes the cancel, so the second delete records nothing.
+  let deleted = true;
+  try {
+    await db.transaction(async (tx) => {
+      await cancelRunUploadRequests(
+        { id: run.id, instrumentId: run.instrumentId, runId: run.runId },
+        tx
+      );
+      const changed = await tx
+        .update(instrumentRuns)
+        .set({ deletedAt: now, deletedBy: userId, deletedByToken: tokenId })
+        .where(
+          and(eq(instrumentRuns.id, run.id), isNull(instrumentRuns.deletedAt))
+        )
+        .returning({ id: instrumentRuns.id });
+      if (changed.length === 0) {
+        tx.rollback();
+      }
+    });
+  } catch (error) {
+    if (!(error instanceof TransactionRollbackError)) {
+      throw error;
+    }
+    deleted = false;
+  }
+
+  if (!deleted) {
+    const current = await lookupRunByNaturalKey(
+      input.instrumentId,
+      input.runId
     );
-  });
+    if (current?.deletedAt) {
+      return alreadyDeleted(current);
+    }
+    // Someone restored the run right after deleting it.
+    return {
+      ok: false,
+      status: 409,
+      code: "CONFLICT",
+      message: `Run '${input.runId}' changed while it was being deleted. Try again.`,
+    };
+  }
 
   return {
     ok: true,

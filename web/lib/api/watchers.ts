@@ -171,7 +171,10 @@ export async function revertPendingUploadRequests(
  * the server turns away. Records no event when nothing was queued or when the
  * instrument has no active watcher. Returns the number of files reverted.
  *
- * Call it in the same transaction as the delete.
+ * Call it in the same transaction as the delete, and before the run row is
+ * updated. It locks the files first and then the run, which is the order of
+ * the other paths that revert requests. Updating the run first can deadlock
+ * with one of them.
  */
 export async function cancelRunUploadRequests(
   run: { id: string; instrumentId: string; runId: string },
