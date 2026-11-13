@@ -16,6 +16,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from data_hub_watcher import uploader as uploader_module
 from data_hub_watcher.constants import MAX_PENDING_UPLOAD_ATTEMPTS, MAX_QUEUE_FILE_ATTEMPTS
 from data_hub_watcher.events import EventReporter
 from data_hub_watcher.heartbeat import WatcherCounters
@@ -249,6 +250,117 @@ class TestRequestedFiles:
             uploader.poll_upload_queue()
 
         assert folder.asked == 0
+
+
+class TestAStopIsNotAMissingFile:
+    """A stop answers "not missing" without a look at the folder.
+
+    The look has a limit of its own (10 s), and `Uploader.abort` can't cut it short. An upload
+    thread that is in it during a stop holds the stop up, so the uploader doesn't look.
+
+    Every caller checks for a stop before it gets to a file that can't be found, so the stop
+    that matters arrives in between: these tests have it arrive as the file is looked for.
+    """
+
+    @staticmethod
+    def _stop_as_the_file_is_looked_for(
+        uploader: Uploader, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def missing_and_stopping(_path: Path) -> bool:
+            uploader.abort()
+            return False
+
+        # A pending upload and a waiting file ask `_is_file`, a requested one `_exists`.
+        monkeypatch.setattr(uploader_module, "_is_file", missing_and_stopping)
+        monkeypatch.setattr(uploader_module, "_exists", missing_and_stopping)
+
+    def test_a_pending_upload_is_neither_dropped_nor_looked_at_during_a_stop(
+        self,
+        uploader: Uploader,
+        state_db: StateDB,
+        folder: _Folder,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        state_db.record_report("RUN-1", [], new_run=False, pending_relative_paths=["RUN-1/a.csv"])
+        self._stop_as_the_file_is_looked_for(uploader, monkeypatch)
+
+        uploader.retry_pending_uploads()
+
+        # The file is missing and the folder is there, so without the stop the row would be
+        # dropped. It is left for the next start, which retries it, or drops it then.
+        assert [p.relative_path for p in state_db.pending_uploads()] == ["RUN-1/a.csv"]
+        _reporter(uploader).report_error.assert_not_called()
+        assert folder.asked == 0
+
+    def test_a_requested_file_stays_queued_and_counts_nothing_during_a_stop(
+        self, uploader: Uploader, folder: _Folder, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _queue(uploader, "ghost.csv")
+        self._stop_as_the_file_is_looked_for(uploader, monkeypatch)
+
+        uploader.poll_upload_queue()
+
+        client = cast(MagicMock, uploader._client)
+        client.cancel_upload_request.assert_not_called()
+        assert uploader._queue_attempts == {}
+        _reporter(uploader).queue_event.assert_not_called()
+        assert folder.asked == 0
+
+    def test_a_waiting_file_keeps_waiting_during_a_stop(
+        self,
+        uploader: Uploader,
+        state_db: StateDB,
+        folder: _Folder,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        locked = uploader._watch_dir / "locked.csv"
+        locked.write_text("x")
+        state_db.record_report("RUN-1", [], new_run=False, pending_relative_paths=["locked.csv"])
+        waiting = _wait_for(uploader, locked)
+        self._stop_as_the_file_is_looked_for(uploader, monkeypatch)
+
+        uploader.retry_waiting_files()
+
+        assert uploader._waiting == {"locked.csv": waiting}
+        assert [p.relative_path for p in state_db.pending_uploads()] == ["locked.csv"]
+        assert folder.asked == 0
+
+    def test_the_answer_during_a_stop_is_yes_without_asking(
+        self, uploader: Uploader, folder: _Folder
+    ) -> None:
+        uploader.abort()
+
+        assert uploader._folder_is_gone() is True
+        assert folder.asked == 0
+
+    def test_without_a_stop_the_folder_is_asked_about(
+        self, uploader: Uploader, state_db: StateDB, folder: _Folder
+    ) -> None:
+        state_db.record_report("RUN-1", [], new_run=False, pending_relative_paths=["RUN-1/a.csv"])
+
+        uploader.retry_pending_uploads()
+
+        assert folder.asked == 1
+
+    def test_even_without_a_callback_a_stop_keeps_a_file_that_cannot_be_found(
+        self, state_db: StateDB, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        up = Uploader(
+            client=MagicMock(),
+            state_db=state_db,
+            event_reporter=MagicMock(spec=EventReporter),
+            counters=WatcherCounters(),
+            instrument_id="test-instrument",
+            watcher_id="watcher-123",
+            watch_directory=tmp_path,
+            stop_event=threading.Event(),
+        )
+        state_db.record_report("RUN-1", [], new_run=False, pending_relative_paths=["gone.csv"])
+        self._stop_as_the_file_is_looked_for(up, monkeypatch)
+
+        up.retry_pending_uploads()
+
+        assert [p.relative_path for p in state_db.pending_uploads()] == ["gone.csv"]
 
 
 def _wait_for(uploader: Uploader, path: Path) -> object:

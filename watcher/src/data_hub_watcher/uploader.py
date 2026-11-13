@@ -598,7 +598,8 @@ class Uploader:
         answering (and asks the supervisor to check it), in which case the file isn't
         missing, the folder is: the file's `pending_uploads` row or place in the
         server's queue stays, and nothing is counted. `None` (unit tests) means
-        the folder is never gone.
+        the folder is never gone. It is not called once a stop was requested: a stop
+        isn't a missing file either, and the same applies without a look.
     """
 
     def __init__(
@@ -937,13 +938,19 @@ class Uploader:
         self._stop_waiting(waiting)
 
     def _folder_is_gone(self) -> bool:
-        """Whether the watch folder itself is gone or not answering, so a file isn't missing.
+        """Whether a file that can't be found is not missing, because of the folder or a stop.
 
         Asked before a file that can't be found is dropped, or counts against its attempts:
         in the time between the folder disappearing and the supervisor moving to the
-        waiting state, every file in it looks missing. The supervisor is asked to check
-        the folder at once.
+        waiting state, every file in it looks missing. The callback says whether the
+        folder itself is gone or not answering, and asks the supervisor to check it at once.
+
+        A stop is not a missing file either. It answers `True` at once, without a look at
+        the folder: the look has a limit of its own, which `abort` can't cut short, and
+        this thread is wanted back before the stop's limit.
         """
+        if self._stop_requested():
+            return True
         return self._watch_folder_unavailable is not None and self._watch_folder_unavailable()
 
     def _drop_missing_pending(self, relative_path: str, run_id: str, path: Path) -> None:
@@ -2045,6 +2052,13 @@ class UploadQueueWorker:
         self._stop_event.clear()
         self._thread = threading.Thread(target=self._run, daemon=True, name="upload-worker")
         self._thread.start()
+
+    def has_exited(self) -> bool:
+        """Whether the thread is gone: it never started, or it ended after a stop.
+
+        Signals nothing, unlike `stop`, so it can be asked again and again.
+        """
+        return self._thread is None or not self._thread.is_alive()
 
     def stop(self, timeout: float | None = None) -> bool:
         """Signal the loop and join it. Returns whether the thread exited.
