@@ -16,6 +16,7 @@ import {
 } from "@/lib/api/instrument-runs";
 import { patchRunBody, readJsonBody } from "@/lib/api/openapi";
 import { recordDetectedFiles } from "@/lib/api/run-file-identity";
+import { readRunIdParam } from "@/lib/api/run-id-param";
 import { softDeleteRun } from "@/lib/api/run-lifecycle";
 import { watcherClientFrom } from "@/lib/api/watcher-compat";
 import { db } from "@/lib/db";
@@ -39,7 +40,8 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
     return authResult;
   }
 
-  const { instrumentId, runId } = await params;
+  const { instrumentId, runId: runIdParam } = await params;
+  const runId = readRunIdParam(request.headers, runIdParam);
   const run = await lookupRunByNaturalKey(instrumentId, runId);
 
   if (!run) {
@@ -122,7 +124,8 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
     return authResult;
   }
 
-  const { instrumentId, runId } = await params;
+  const { instrumentId, runId: runIdParam } = await params;
+  const runId = readRunIdParam(request.headers, runIdParam);
   const run = await lookupRunByNaturalKey(instrumentId, runId);
 
   if (!run) {
@@ -198,7 +201,8 @@ export async function DELETE(request: NextRequest, { params }: RouteContext) {
     return authResult;
   }
 
-  const { instrumentId, runId } = await params;
+  const { instrumentId, runId: runIdParam } = await params;
+  const runId = readRunIdParam(request.headers, runIdParam);
   const result = await softDeleteRun({
     instrumentId,
     runId,

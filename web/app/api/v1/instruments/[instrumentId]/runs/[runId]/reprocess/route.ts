@@ -3,6 +3,7 @@ import { surfaceEvent, trackEvent } from "@/lib/analytics/track";
 import { authorize } from "@/lib/api/auth";
 import { apiErrorFromResult } from "@/lib/api/errors";
 import { reprocessRun } from "@/lib/api/file-reprocessing";
+import { readRunIdParam } from "@/lib/api/run-id-param";
 
 interface RouteContext {
   params: Promise<{ instrumentId: string; runId: string }>;
@@ -24,7 +25,8 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     return authResult;
   }
 
-  const { instrumentId, runId } = await params;
+  const { instrumentId, runId: runIdParam } = await params;
+  const runId = readRunIdParam(request.headers, runIdParam);
   const result = await reprocessRun(instrumentId, runId);
 
   if (!result.ok) {

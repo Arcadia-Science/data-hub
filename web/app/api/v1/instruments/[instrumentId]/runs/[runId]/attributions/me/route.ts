@@ -7,6 +7,7 @@ import {
   lookupRunByNaturalKey,
 } from "@/lib/api/instrument-runs";
 import { claimRuns, unclaimRuns } from "@/lib/api/run-attributions";
+import { readRunIdParam } from "@/lib/api/run-id-param";
 
 interface RouteContext {
   params: Promise<{ instrumentId: string; runId: string }>;
@@ -22,13 +23,14 @@ interface RouteContext {
 // it, and API tokens are not people.
 // ---------------------------------------------------------------------------
 
-export async function PUT(_request: NextRequest, { params }: RouteContext) {
+export async function PUT(request: NextRequest, { params }: RouteContext) {
   const authResult = await requireSession();
   if (!authResult) {
     return apiError(401, UNAUTHORIZED, "Authentication required");
   }
 
-  const { instrumentId, runId } = await params;
+  const { instrumentId, runId: runIdParam } = await params;
+  const runId = readRunIdParam(request.headers, runIdParam);
   const run = await lookupRunByNaturalKey(instrumentId, runId);
   if (!run) {
     return apiError(
@@ -58,13 +60,14 @@ export async function PUT(_request: NextRequest, { params }: RouteContext) {
 // "self only" — the query always uses session.user.id.
 // ---------------------------------------------------------------------------
 
-export async function DELETE(_request: NextRequest, { params }: RouteContext) {
+export async function DELETE(request: NextRequest, { params }: RouteContext) {
   const authResult = await requireSession();
   if (!authResult) {
     return apiError(401, UNAUTHORIZED, "Authentication required");
   }
 
-  const { instrumentId, runId } = await params;
+  const { instrumentId, runId: runIdParam } = await params;
+  const runId = readRunIdParam(request.headers, runIdParam);
   const run = await lookupRunByNaturalKey(instrumentId, runId);
   if (!run) {
     return apiError(

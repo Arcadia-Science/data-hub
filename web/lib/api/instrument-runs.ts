@@ -127,8 +127,8 @@ export async function getAttributionsByRunIds(
 // the head and once for the body). Mirrors the same treatment applied to
 // `getInstrumentById`.
 //
-// `runId` is the real run ID. Route handlers already receive it decoded, and
-// pages decode it first with `decodePageParam`.
+// `runId` is the real run ID. Route handlers and the run page get it from
+// `readRunIdParam`.
 export const lookupRunByNaturalKey = cache(async function lookupRunByNaturalKey(
   instrumentId: string,
   runId: string

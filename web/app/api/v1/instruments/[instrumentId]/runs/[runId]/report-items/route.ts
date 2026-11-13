@@ -3,6 +3,7 @@ import { authorize } from "@/lib/api/auth";
 import { apiError, NOT_FOUND, VALIDATION_ERROR } from "@/lib/api/errors";
 import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
 import { getReportItemsPage } from "@/lib/api/report-items";
+import { readRunIdParam } from "@/lib/api/run-id-param";
 import { parseIntParam } from "@/lib/api/validators";
 import {
   isReportItemKind,
@@ -23,7 +24,8 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
     return authResult;
   }
 
-  const { instrumentId, runId } = await params;
+  const { instrumentId, runId: runIdParam } = await params;
+  const runId = readRunIdParam(request.headers, runIdParam);
   const run = await lookupRunByNaturalKey(instrumentId, runId);
   if (!run) {
     return apiError(

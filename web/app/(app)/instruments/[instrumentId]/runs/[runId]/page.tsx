@@ -1,3 +1,4 @@
+import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next/types";
 import { Suspense } from "react";
@@ -26,6 +27,7 @@ import {
 import { getInstrumentById } from "@/lib/api/instruments";
 import { getReportItemsPage } from "@/lib/api/report-items";
 import { listCommentsForRun } from "@/lib/api/run-comments";
+import { readRunIdParam } from "@/lib/api/run-id-param";
 import { auth } from "@/lib/auth";
 import { formatDateLong } from "@/lib/date";
 import { decodePageParam } from "@/lib/runs/page-param";
@@ -46,9 +48,16 @@ interface Props {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }
 
+// The run ID as the client sent it. On Vercel, Next.js decodes a page's route
+// parameter twice, so the parameter is only the fallback for when the proxy
+// header is missing. See `readRunIdParam`.
+async function readRunId(runIdParam: string) {
+  return readRunIdParam(await headers(), decodePageParam(runIdParam));
+}
+
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { instrumentId, runId: runIdParam } = await params;
-  const runId = decodePageParam(runIdParam);
+  const runId = await readRunId(runIdParam);
   const run = await lookupRunByNaturalKey(instrumentId, runId);
   if (!run) {
     return { title: "Run not found" };
@@ -87,7 +96,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 export default async function RunDetailPage({ params, searchParams }: Props) {
   const session = await auth();
   const { instrumentId, runId: runIdParam } = await params;
-  const runId = decodePageParam(runIdParam);
+  const runId = await readRunId(runIdParam);
   const filters = runDetailParamsCache.parse(await searchParams);
 
   // The route is publicly reachable so Slack/Notion unfurlers can read the
