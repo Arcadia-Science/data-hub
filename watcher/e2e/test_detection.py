@@ -718,12 +718,6 @@ def test_a_deleted_run_refuses_updates_and_catches_up_after_it_is_restored(
     assert len(error_events(server, pc.watcher_id, "run_report_failed")) == 1
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=KnownBugStillPresent,
-    reason="ENG-2114: the POST of a deleted run returns 200 "
-    "and attaches the files instead of a 409",
-)
 @pytest.mark.covers("run.deleted->rereport_conflict")
 def test_reporting_a_deleted_run_again_is_refused_and_attaches_no_files(
     watcher: WatcherFactory,
@@ -764,9 +758,8 @@ def test_reporting_a_deleted_run_again_is_refused_and_attaches_no_files(
         lambda: server.dump(pc.watcher_id, instrument_id),
         what="the server's answer to the run report",
     )
-    with known_bug():
-        assert status == 409, "the server accepted a report of a deleted run"
-        assert server.file(instrument_id, "RUN001", "RUN001/second.csv") is None
+    assert status == 409, "the server accepted a report of a deleted run"
+    assert server.file(instrument_id, "RUN001", "RUN001/second.csv") is None
 
 
 # The test server is `next start`, which decodes a route parameter once. On Vercel, Next.js decodes

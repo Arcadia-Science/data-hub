@@ -1,3 +1,4 @@
+import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   runCreated,
@@ -6,7 +7,7 @@ import {
   runListResponse,
   runUpdated,
 } from "@/lib/api/openapi";
-import { instruments } from "@/lib/db/schema";
+import { files, instruments } from "@/lib/db/schema";
 import {
   api,
   clearCapturedSlackMessages,
@@ -461,6 +462,80 @@ describe("Instrument Runs API", () => {
       body: { metadata: { should: "fail" } },
     });
     expect(res.status).toBe(409);
+  });
+
+  // A watcher that forgot a deleted run reports it again as a new run. The
+  // server refuses that report, so the new file is not attached to the run.
+  it("POST from a watcher is refused for a soft-deleted run and attaches no files", async () => {
+    const runId = "run-deleted-then-reported";
+    const created = await api(`/api/v1/instruments/${instrumentId}/runs`, {
+      method: "POST",
+      token,
+      body: {
+        run_id: runId,
+        source: "watcher",
+        detected_files: [
+          { relative_path: "first.csv", filename: "first.csv", size_bytes: 1 },
+        ],
+      },
+    });
+    expect(created.status).toBe(201);
+    const { id: runRowId } = await created.json();
+
+    const deleted = await api(
+      `/api/v1/instruments/${instrumentId}/runs/${runId}`,
+      { method: "DELETE", token }
+    );
+    expect(deleted.status).toBe(200);
+
+    const refused = await api(`/api/v1/instruments/${instrumentId}/runs`, {
+      method: "POST",
+      token,
+      body: {
+        run_id: runId,
+        source: "watcher",
+        detected_files: [
+          {
+            relative_path: "second.csv",
+            filename: "second.csv",
+            size_bytes: 2,
+          },
+        ],
+      },
+    });
+    expect(refused.status).toBe(409);
+    expect((await refused.json()).error.code).toBe("CONFLICT");
+
+    const rows = await getTestDb()
+      .select({ id: files.id })
+      .from(files)
+      .where(
+        and(
+          eq(files.instrumentRunId, runRowId),
+          eq(files.filename, "second.csv")
+        )
+      );
+    expect(rows).toEqual([]);
+  });
+
+  // The same report with the Lambda's source is still accepted, as before.
+  it("POST from the Lambda for a soft-deleted run still returns 200", async () => {
+    const res = await api(`/api/v1/instruments/${instrumentId}/runs`, {
+      method: "POST",
+      token,
+      body: {
+        run_id: "run-deleted-then-reported",
+        source: "lambda",
+        detected_files: [
+          {
+            relative_path: "second.csv",
+            filename: "second.csv",
+            size_bytes: 2,
+          },
+        ],
+      },
+    });
+    expect(res.status).toBe(200);
   });
 });
 

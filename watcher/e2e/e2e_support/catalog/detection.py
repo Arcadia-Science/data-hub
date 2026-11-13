@@ -143,13 +143,12 @@ TRANSITIONS: tuple[Transition, ...] = (
         "After an admin restores a deleted run, the next file of that run is reported "
         "again, with the update the earlier refusal left behind.",
     ),
-    xfail_bug(
+    covered(
         MACHINE,
         "run.deleted->rereport_conflict",
-        "Reporting a run that an admin soft-deleted (a watcher that starts without that run in "
-        "its state database, for example after `state forget`) is refused with a 409, as "
-        "updating it is, and attaches no files to it.",
-        "ENG-2114",
+        "A watcher whose state database has no record of a run an admin deleted (for example "
+        "after `state forget`) reports that run again. The server refuses the report with a 409, "
+        "as it refuses an update to the run, and attaches none of the report's files.",
     ),
     xfail_bug(
         MACHINE,
