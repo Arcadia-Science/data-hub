@@ -502,9 +502,10 @@ def test_the_log_level_in_the_env_file_is_honored_by_the_service(
         overrides={**CHECK_EVERY_HEARTBEAT, "DATA_HUB_WATCHER_LOG_LEVEL": "DEBUG"},
     )
     start_watching(pc, server)
-    # The watcher checks for an update on every heartbeat and finds none, which it says at
-    # DEBUG level ("Skipping update attempt"). Wait for the checks, which are the reason a
-    # DEBUG line would be there.
+    # The watcher checks for an update on every heartbeat. The suite advertises the version
+    # it runs, so the check finds nothing to install, and the updater says so at DEBUG level
+    # ("Skipping update attempt"). Wait for the checks, which are the reason that line would
+    # be there.
     wait_until(
         lambda: (
             len([r for r in proxy.requests if r.path.split("?")[0].endswith("/update-check")]) >= 3
@@ -515,7 +516,9 @@ def test_the_log_level_in_the_env_file_is_honored_by_the_service(
     )
     server.wait_for_heartbeats(pc.watcher_id, count=2)
 
-    pc.wait_for_log(r"\[DEBUG\]", timeout=10)
+    # The watcher's own DEBUG line, not any `[DEBUG]` line: the logging setup keeps urllib3 at
+    # INFO, but another library's DEBUG line would say nothing about the watcher's loggers.
+    pc.wait_for_log(r"\[DEBUG\] data_hub_watcher\.updater: Skipping update attempt", timeout=10)
 
 
 @pytest.mark.covers("service.config_revision->applied_without_restart")
