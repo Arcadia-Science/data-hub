@@ -237,8 +237,7 @@ class RunDetector:
 
         if run_id in self._deleted_runs:
             # Data Hub refused this run as deleted. Nothing is sent, recorded or reported
-            # for its files, so the next start, or an admin's restore and a restart, finds
-            # them still unreported.
+            # for its files, so the next start finds them still unreported.
             logger.debug("Skipping %s: run %s was deleted on Data Hub", path, run_id)
             return
 
@@ -363,8 +362,8 @@ class RunDetector:
             return
         verb = "report" if operation == "create" else "update"
         logger.warning(
-            "Failed to %s run %s: %s. The run was deleted on Data Hub, so its files are not "
-            "reported again until the watcher restarts",
+            "Failed to %s run %s: %s (the run was deleted on Data Hub, so its files are not "
+            "reported again until the watcher restarts)",
             verb,
             run.run_id,
             exc.message,

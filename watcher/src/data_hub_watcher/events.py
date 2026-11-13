@@ -21,7 +21,9 @@ a database migration. Known ``kind`` values, with their per-kind
   ``details = {"kind", "run_id", "operation": "create"|"update",
   "status_code", "error", "file_count"}``. A 409 that says the run was deleted
   on Data Hub is emitted once per run per process, not for every file, and
-  also carries ``"reason": "run_deleted"``.
+  also carries ``"reason": "run_deleted"``. When the uploader meets that
+  refusal first, it queues an ``upload_failed`` event with the same reason
+  instead.
 * ``state_write_failed`` -- the server accepted a run report, but writing it
   to the state database failed (a full disk, say). The watcher retries the
   write on the backoff of a failed report, and uploads nothing and sends

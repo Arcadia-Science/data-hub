@@ -1429,10 +1429,10 @@ class Uploader:
             logger.debug("Run %s was already known to be deleted on Data Hub", run_id)
             return
         logger.warning(
-            "Run %s was deleted on Data Hub: %s. Its files are not uploaded until the "
-            "watcher restarts",
-            run_id,
+            "Upload refused: %s (run %s was deleted on Data Hub, so its files are not "
+            "uploaded until the watcher restarts)",
             exc.message,
+            run_id,
         )
         self._bump_errors()
         self._reporter.queue_event(
