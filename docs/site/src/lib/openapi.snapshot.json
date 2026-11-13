@@ -6223,7 +6223,7 @@
       "post": {
         "operationId": "createWatcherEvent",
         "summary": "Report a watcher event",
-        "description": "Requires scope `watchers:report`. PAT only; browser sessions are rejected.",
+        "description": "Requires scope `watchers:report`. PAT only; browser sessions are rejected. Event types that only Data Hub writes, such as `upload_requests_cancelled`, are rejected with a 400 error. The event list still returns them.",
         "tags": [
           "Watchers"
         ],
@@ -6266,8 +6266,7 @@
                             "error",
                             "update_started",
                             "update_succeeded",
-                            "update_failed",
-                            "upload_requests_cancelled"
+                            "update_failed"
                           ]
                         },
                         "timestamp": {

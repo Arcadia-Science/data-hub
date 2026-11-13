@@ -3,6 +3,7 @@ import { watcherConfigSettingsSchema } from "@/lib/api/watcher-config/settings";
 import {
   isoDateTime,
   uploadModeSchema,
+  watcherEventInputTypeSchema,
   watcherEventTypeSchema,
   watcherStatusSchema,
 } from "./common";
@@ -25,7 +26,9 @@ export const watcherConfigBody = z.object({
 });
 
 const watcherEventItem = z.object({
-  event_type: watcherEventTypeSchema,
+  // Types that only Data Hub writes, such as `upload_requests_cancelled`, are
+  // not accepted here.
+  event_type: watcherEventInputTypeSchema,
   timestamp: z.string().min(1),
   message: z.string().min(1),
   details: z.record(z.string(), z.unknown()).optional(),
