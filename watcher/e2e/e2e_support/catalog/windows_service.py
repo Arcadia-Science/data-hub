@@ -265,20 +265,19 @@ TRANSITIONS: tuple[Transition, ...] = (
         "queues `update_failed` with the worker's error text.",
         platforms=SERVICE,
     ),
-    xfail_bug(
+    covered(
         MACHINE,
         "service.upgrade->worker_dispatch_once",
-        "One upgrade is dispatched to the worker once: the server sees one `update_started` "
-        "for it. `_apply_via_worker` doesn't set `_upgrade_in_progress`, as the in-process "
-        "path does, so with a check on every heartbeat the next tick can dispatch it again "
-        "before the worker has stopped the service (it queues another event, and writes the "
-        "request and triggers the task again). The test checks on every heartbeat (1 s) and "
-        "holds an upload in flight across the worker's `Stop-Service`: the stop waits up to "
-        "5 s for it, and the heartbeat keeps checking until then. The test first checks "
-        "that a heartbeat tick ran between the dispatch and the old service's final "
-        "heartbeat, so a check did run in that window. The scenarios of the "
-        "upgrade itself compare the events with a repeat counted once.",
-        "ENG-2131",
+        "One upgrade is dispatched to the worker once: the server sees one `update_started` for "
+        "it. After `_apply_via_worker` has triggered the task, the watcher remembers "
+        "the hand-off for 10 minutes and its update checks dispatch nothing, so with a check on "
+        "every heartbeat no tick dispatches the upgrade again before the worker has stopped the "
+        "service. The test checks on every heartbeat (1 s) and holds an upload in flight across "
+        "the worker's `Stop-Service`: the stop waits for it until about 15 s in and then cuts it "
+        "off, and the heartbeat keeps ticking until then. The test first checks that a "
+        "heartbeat tick ran between the dispatch and the old service's final heartbeat, so a "
+        "check did run in that window. The scenarios of the upgrade itself compare the events "
+        "with a repeat counted once.",
         platforms=SERVICE,
     ),
     xfail_bug(

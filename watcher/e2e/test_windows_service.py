@@ -38,6 +38,7 @@ from data_hub_watcher.upgrade_worker import UPGRADE_REQUEST_FILENAME, UPGRADE_RE
 from e2e_support.admin import Admin
 from e2e_support.factory import WatcherFactory
 from e2e_support.files import SMALL, ExclusiveWriter, payload, write_run
+from e2e_support.proxy_helpers import stopped_heartbeats
 from e2e_support.server import HeartbeatRow, ServerView
 from e2e_support.service_driver import READY_LINE, START_LINE, WindowsServiceDriver
 from e2e_support.waiting import KnownBugStillPresent, known_bug, stays_true, wait_until
@@ -89,10 +90,9 @@ def update_events(server: ServerView, pc: WindowsServiceDriver) -> list[str]:
 
 
 def update_event_sequence(server: ServerView, pc: WindowsServiceDriver) -> list[str]:
-    """The update events in order, a repeat of the same event counted once: the scenarios about
-    the upgrade compare this, and ``service.upgrade->worker_dispatch_once`` is the one that
-    counts the repeats (the updater doesn't mark an upgrade it hands to the worker as in
-    progress, so a check on the next heartbeat can dispatch it again)."""
+    """The update events in order, a repeat of the same event counted once, so a scenario about the
+    upgrade doesn't depend on how many times an event was announced.
+    ``service.upgrade->worker_dispatch_once`` is the one that counts the repeats."""
     kinds = update_events(server, pc)
     return [kind for index, kind in enumerate(kinds) if index == 0 or kinds[index - 1] != kind]
 
@@ -1079,16 +1079,9 @@ def test_a_deregistered_service_stops_and_the_scm_does_not_bring_it_back(
         )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=KnownBugStillPresent,
-    reason=(
-        "ENG-2131: the updater doesn't mark an upgrade it hands to the "
-        "worker as in progress (the in-process path does), so a check on the next heartbeat "
-        "dispatches it again before the worker has stopped the service"
-    ),
+@pytest.mark.covers(
+    "service.upgrade->worker_dispatch_once", "selfupdate.stopped->auto_update_reason_sent"
 )
-@pytest.mark.covers("service.upgrade->worker_dispatch_once")
 def test_an_upgrade_is_dispatched_to_the_worker_once(
     watcher: WatcherFactory,
     server: ServerView,
@@ -1110,10 +1103,11 @@ def test_an_upgrade_is_dispatched_to_the_worker_once(
     start_watching(pc, server)
 
     # An upload that is still under way when the worker's `Stop-Service` arrives. The stop waits
-    # up to 5 seconds for it (`FileMonitor.stop`), and the heartbeat, with its update check every
-    # second, keeps going until the stop gets past that wait. So checks come after the dispatch
-    # however fast the worker is (on a runner it stops the service about a second after it is
-    # triggered). The precondition below checks that this window opened.
+    # for it until about 15 seconds in (`STOP_BUDGET_SECONDS` less `STOP_RESERVE_SECONDS`) and
+    # then cuts it off, and the heartbeat, with its update check every second, keeps going until
+    # the stop gets past that wait. So checks come after the dispatch however fast the worker is
+    # (on a runner it stops the service about a second after it is triggered). The precondition
+    # below checks that this window opened.
     proxy.add_fault("delay", path=r"/api/local-s3/", method="PUT", delay_seconds=20, count=1)
     write_run(watch_dir, "RUN001", {"held.csv": SMALL})
     proxy.wait_for_request(
@@ -1132,8 +1126,8 @@ def test_an_upgrade_is_dispatched_to_the_worker_once(
     # tick's check, after that tick's heartbeat, and every later tick sends a `watching`
     # heartbeat before its check. So a `watching` heartbeat between the first `update_started`
     # and the old service's final `stopped` heartbeat shows that a check ran in the window,
-    # with the bug or without it. Without one, a single `update_started` would prove nothing:
-    # the strict xfail would report the bug fixed although no check had a chance to repeat it.
+    # with the fix or without it. Without one, a single `update_started` would prove nothing:
+    # the test would pass although no check had a chance to repeat the dispatch.
     dispatches = server.events(pc.watcher_id, event_type="update_started")
     first_dispatch = min(dispatches, key=lambda e: e.created_at).created_at
     beats = server.heartbeats(pc.watcher_id)
@@ -1153,11 +1147,16 @@ def test_an_upgrade_is_dispatched_to_the_worker_once(
     )
 
     # One upgrade, one `update_started`.
-    with known_bug():
-        assert len(dispatches) == 1, (
-            f"the upgrade was dispatched {len(dispatches)} times, at "
-            + ", ".join(str(e.timestamp) for e in dispatches)
-        )
+    assert len(dispatches) == 1, (
+        f"the upgrade was dispatched {len(dispatches)} times, at "
+        + ", ".join(str(e.timestamp) for e in dispatches)
+    )
+
+    # The worker's `Stop-Service` is an ordinary stop for the service loop, so the mark comes
+    # from the supervisor's memory of the hand-off: the old service's final heartbeat says the
+    # stop is for an update. It is read from the request, because the new service's first
+    # heartbeat has cleared the reason on the watcher's row.
+    assert [b.get("status_reason") for b in stopped_heartbeats(proxy)] == ["auto_update"]
 
 
 @pytest.mark.covers("service.config_invalid->logged_in_watcher_log")

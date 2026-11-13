@@ -6,16 +6,22 @@ is the one the test then reads.
 
 ``wait_for_answer`` is how a test reads ``upstream_status`` of a request after it has waited for
 the server to hold the result of that request.
+
+``stopped_heartbeats`` is how a test reads the ``status_reason`` a watcher sent on its final
+heartbeat, which the server keeps only on the watcher's row, and clears when the watcher
+heartbeats again.
 """
 
 from __future__ import annotations
+import json
 import time
 from collections.abc import Callable
+from typing import Any
 
 from data_hub_shared.testing_proxy import FaultProxy, FaultRule, RecordedRequest
 from e2e_support.waiting import wait_until
 
-__all__ = ["silence_heartbeats", "wait_for_answer"]
+__all__ = ["silence_heartbeats", "stopped_heartbeats", "wait_for_answer"]
 
 
 def silence_heartbeats(
@@ -85,3 +91,25 @@ def wait_for_answer(
         ),
         what=f"the proxy to note {what}",
     )
+
+
+def stopped_heartbeats(proxy: FaultProxy) -> list[dict[str, Any]]:
+    """The bodies of the ``stopped`` heartbeats the watcher sent, oldest first.
+
+    The server stores no ``status_reason`` with a heartbeat. It keeps one on the watcher's row,
+    and clears it when the watcher heartbeats again, so a test that wants to know what the old
+    process said on its final heartbeat, after the watcher was started again, reads it here. The
+    proxy logs a body before it forwards the request, so a heartbeat the server has stored is
+    already here.
+    """
+    bodies = []
+    for request in proxy.requests:
+        if (
+            request.method == "POST"
+            and request.path.split("?")[0].endswith("/heartbeat")
+            and request.body is not None
+        ):
+            body = json.loads(request.body)
+            if body.get("status") == "stopped":
+                bodies.append(body)
+    return bodies
