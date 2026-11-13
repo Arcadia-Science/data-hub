@@ -36,6 +36,9 @@ logger = logging.getLogger(__name__)
 # by ``StateDB.has_stat_match`` -- keep the two in sync.
 _STAT_MTIME_TOLERANCE = 1.0
 
+# How often the wait for the observer's stop checks whether it was told to give up.
+_CANCEL_POLL_SECONDS = 0.1
+
 
 def _compile_pattern_matcher(file_patterns: list[str]) -> Callable[[str], bool]:
     """Return a fast ``filename -> bool`` matcher for *file_patterns*.
@@ -292,16 +295,23 @@ class FileMonitor:
             self._recursive,
         )
 
-    def stop(self, timeout: float = 5.0, *, observer_timeout: float = 5.0) -> bool:
+    def stop(
+        self,
+        timeout: float = 5.0,
+        *,
+        observer_timeout: float = 5.0,
+        should_cancel: Callable[[], bool] | None = None,
+    ) -> bool:
         """Stop the observer and stability-checker thread.
 
         *timeout* bounds the wait for the stability checker, which may be in
         the middle of an auto-mode upload, and *observer_timeout* the wait for
         the observer's stop and its thread together (see `_stop_observer`).
+        *should_cancel* ends the wait for the observer early, when it returns `True`.
         Returns whether the stability checker exited in time.
         """
         self._checker_stop.set()
-        self._stop_observer(observer_timeout)
+        self._stop_observer(observer_timeout, should_cancel)
         stopped = self._wait_for_checker(timeout)
         if stopped:
             logger.info("FileMonitor stopped")
@@ -309,14 +319,16 @@ class FileMonitor:
             logger.info("FileMonitor stopping: its stability checker is still running")
         return stopped
 
-    def _stop_observer(self, timeout: float) -> None:
+    def _stop_observer(
+        self, timeout: float, should_cancel: Callable[[], bool] | None = None
+    ) -> None:
         """Stop the observer and wait for its thread, together for at most *timeout*.
 
         watchdog's `Observer.stop` joins its emitter threads with no timeout, and an
         emitter that is blocked on a hung network share doesn't end, so the stop runs on
-        its own thread. A stop that is still running when *timeout* is up is left to
-        finish: the observer's threads are daemon threads, and the watcher goes on
-        without them.
+        its own thread. A stop that is still running when *timeout* is up, or when
+        *should_cancel* returns `True` first, is left to finish: the observer's threads
+        are daemon threads, and the watcher goes on without them.
         """
         deadline = time.monotonic() + timeout
 
@@ -328,13 +340,31 @@ class FileMonitor:
 
         stopper = threading.Thread(target=stop, daemon=True, name="observer-stop")
         stopper.start()
-        stopper.join(timeout=timeout)
+        cancelled = False
+        while stopper.is_alive():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            if should_cancel is None:
+                stopper.join(timeout=remaining)
+            else:
+                stopper.join(timeout=min(remaining, _CANCEL_POLL_SECONDS))
+                if stopper.is_alive() and should_cancel():
+                    cancelled = True
+                    break
         if stopper.is_alive():
-            logger.warning(
-                "The file observer did not stop within %ss (is the watch folder's share "
-                "hung?); going on without waiting for it",
-                timeout,
-            )
+            if cancelled:
+                logger.warning(
+                    "Not waiting any longer for the file observer to stop, because the "
+                    "watcher is stopping; going on without it"
+                )
+            else:
+                logger.warning(
+                    "The file observer did not stop within %ss (is the watch folder's share "
+                    "hung?); going on without waiting for it",
+                    timeout,
+                )
+            return
         # Not started when `start()` failed partway, e.g. in a rebuild that is
         # being rolled back, and joining an unstarted thread raises.
         if self._observer.is_alive():
@@ -360,6 +390,13 @@ class FileMonitor:
         if stopped:
             logger.info("FileMonitor stopped")
         return stopped
+
+    def has_exited(self) -> bool:
+        """Whether the stability checker has exited, or never ran. Unlike `join`, logs nothing.
+
+        For an owner that asks again and again while it waits for the checker.
+        """
+        return self._checker_thread is None or not self._checker_thread.is_alive()
 
     def _wait_for_checker(self, timeout: float) -> bool:
         if self._checker_thread and self._checker_thread.is_alive():
