@@ -50,6 +50,19 @@ TRANSITIONS: tuple[Transition, ...] = (
     ),
     covered(
         MACHINE,
+        "selfupdate.stopped->auto_update_reason_sent",
+        "The final `stopped` heartbeat of a watcher that stops to install an update carries "
+        "`status_reason: auto_update`, which is what makes the server keep the instrument's "
+        "requested uploads queued for the restarted watcher (the web app's integration tests "
+        "cover what the server does with it). Under the CLI it is the stop after the in-process "
+        "install, and the test also reads the reason on the watcher's row while the watcher is "
+        "down. Under the Windows service it is the stop by the upgrade worker's `Stop-Service`, "
+        "which the service loop can't tell from any other stop except by the updater's memory of "
+        "the hand-off; the test reads the heartbeat's request, because the new service's first "
+        "heartbeat clears the reason on the row.",
+    ),
+    covered(
+        MACHINE,
         "selfupdate.restart->succeeded",
         "The restarted process runs the new version: its heartbeats report it, it queues "
         "`update_succeeded` with the previous and target versions, and the upgrade marker "
