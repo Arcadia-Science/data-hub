@@ -16,9 +16,10 @@ Two behaviours are exercised here:
    ``FileMonitor.start()`` call that runs the (potentially multi-minute)
    initial directory scan on the same thread.
 
-3. The stop path: ``stop()`` must wait for a tick that is still running
-   before it sends the final ``stopped`` heartbeat, however short the
-   heartbeat interval is.
+3. The stop path: ``stop_loop()`` must wait for a tick that is still running
+   before the final ``stopped`` heartbeat is sent, however short the
+   heartbeat interval is. ``send_final_heartbeat()`` sends it, with a short
+   timeout when the stop has a deadline.
 """
 
 from __future__ import annotations
@@ -28,8 +29,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from data_hub_watcher.api_client import ApiError
-from data_hub_watcher.constants import SYSTEM_SHUTDOWN_JOIN_SECONDS
+from data_hub_watcher.api_client import DEFAULT_TIMEOUT, ApiError
+from data_hub_watcher.constants import SYSTEM_SHUTDOWN_HTTP_TIMEOUT
 from data_hub_watcher.events import EventReporter
 from data_hub_watcher.heartbeat import HeartbeatLoop
 
@@ -227,14 +228,31 @@ class TestHeartbeatStartupBeat:
 
 
 class TestHeartbeatStop:
-    """``stop()`` joins the loop thread before it sends ``status=stopped``.
+    """``stop_loop()`` joins the loop thread, and ``stop()`` does it before ``status=stopped``.
 
-    One tick is a heartbeat request (which can run for tens of seconds), an
-    event flush and an update check. If ``stop()`` gave up on the thread early,
-    that tick's ``watching`` heartbeat could land after the ``stopped`` one and
-    the server would end on ``watching``. A test can shorten the interval to a
-    second, so the wait must not be derived from the interval alone.
+    One tick is a heartbeat request (which can run for tens of seconds), an event flush and an
+    update check. If a stop gave up on the thread early, that tick's ``watching`` heartbeat
+    could land after the ``stopped`` one and the server would end on ``watching``. A test can
+    shorten the interval to a second, so the wait must not be derived from the interval alone.
     """
+
+    @staticmethod
+    def _loop_with_a_tick_in_progress(
+        client: MagicMock, interval: int = 60
+    ) -> tuple[HeartbeatLoop, MagicMock]:
+        loop = HeartbeatLoop(
+            client=client,
+            watcher_id="w-test",
+            interval_seconds=interval,
+            event_reporter=MagicMock(spec=EventReporter),
+            instrument_id="inst-1",
+            watch_directory="/tmp/watch",
+            upload_mode="auto",
+        )
+        thread = MagicMock(spec=threading.Thread)
+        thread.is_alive.return_value = True
+        loop._thread = thread
+        return loop, thread
 
     @pytest.mark.parametrize(
         ("interval", "expected_wait"),
@@ -245,61 +263,158 @@ class TestHeartbeatStop:
         ],
     )
     def test_waits_for_a_tick_in_progress(self, interval: int, expected_wait: int) -> None:
-        client = MagicMock()
-        reporter = MagicMock(spec=EventReporter)
-        loop = HeartbeatLoop(
-            client=client,
-            watcher_id="w-test",
-            interval_seconds=interval,
-            event_reporter=reporter,
-            instrument_id="inst-1",
-            watch_directory="/tmp/watch",
-            upload_mode="auto",
-        )
-        thread = MagicMock(spec=threading.Thread)
-        thread.is_alive.return_value = True
-        loop._thread = thread
+        loop, thread = self._loop_with_a_tick_in_progress(MagicMock(), interval)
 
         loop.stop()
 
         thread.join.assert_called_once_with(timeout=expected_wait)
 
+    def test_stop_loop_waits_as_long_as_it_is_told(self) -> None:
+        loop, thread = self._loop_with_a_tick_in_progress(MagicMock())
 
-class TestHeartbeatStopWithADeadline:
-    """A stop with a deadline, as when Windows is shutting down, can't wait for a tick.
+        loop.stop_loop(join_timeout=12.5)
 
-    The 65 s wait for a tick in progress and the client's 30 s read timeout are far past the
-    time Windows gives the service. With a deadline the wait is short and the final heartbeat
-    uses a short HTTP timeout. A stop without one is as it always was (see `TestHeartbeatStop`).
-    """
+        thread.join.assert_called_once_with(timeout=12.5)
+        assert loop._stop_event.is_set()
 
-    @staticmethod
-    def _loop_with_a_tick_in_progress(client: MagicMock) -> tuple[HeartbeatLoop, MagicMock]:
-        loop = _make_loop(client, MagicMock(spec=EventReporter))
-        thread = MagicMock(spec=threading.Thread)
-        thread.is_alive.return_value = True
-        loop._thread = thread
-        return loop, thread
-
-    def test_the_wait_for_a_tick_is_short_and_the_final_heartbeat_has_a_short_timeout(
-        self,
-    ) -> None:
-        client = MagicMock()
-        loop, thread = self._loop_with_a_tick_in_progress(client)
-
-        loop.stop(system_shutdown=True, deadline=time.monotonic() + 7)
-
-        thread.join.assert_called_once_with(timeout=SYSTEM_SHUTDOWN_JOIN_SECONDS)
-        connect, read = client.send_heartbeat.call_args.kwargs["timeout"]
-        assert 0 < connect <= 2
-        assert 0 < read <= 3
-        assert client.send_heartbeat.call_args.args[1]["status"] == "stopped"
-
-    def test_the_timeout_shrinks_to_fit_what_is_left_of_the_deadline(self) -> None:
+    def test_stop_loop_sends_nothing(self) -> None:
         client = MagicMock()
         loop, _thread = self._loop_with_a_tick_in_progress(client)
 
-        loop.stop(deadline=time.monotonic() + 1)
+        loop.stop_loop(join_timeout=1)
+
+        client.send_heartbeat.assert_not_called()
+
+    def test_stop_loop_without_a_running_thread_does_not_wait(self) -> None:
+        client = MagicMock()
+        loop = _make_loop(client, MagicMock(spec=EventReporter))
+
+        loop.stop_loop(join_timeout=1)
+
+        assert loop._stop_event.is_set()
+
+    def test_stop_without_the_final_heartbeat_is_for_a_rebuild(self) -> None:
+        # The config rebuild stops the loop and starts a new one: the watcher never stops.
+        client = MagicMock()
+        loop, thread = self._loop_with_a_tick_in_progress(client)
+
+        loop.stop(send_stopped=False)
+
+        thread.join.assert_called_once_with(timeout=65)
+        client.send_heartbeat.assert_not_called()
+
+
+class TestTickDuringAStop:
+    """A tick whose heartbeat is still in flight when a stop gives up on it ends there.
+
+    The stop sends the events and the final heartbeat itself. If the tick went on to flush,
+    it could send `watcher_stopped` out of order with no deadline, or lose it when the process
+    exits, and it would run the updater against a state database the stop may have closed, or
+    start an update in the middle of a stop.
+    """
+
+    @staticmethod
+    def _loop(client: MagicMock, reporter: MagicMock, on_tick: MagicMock) -> HeartbeatLoop:
+        return HeartbeatLoop(
+            client=client,
+            watcher_id="w-test",
+            interval_seconds=0.02,  # type: ignore[arg-type]
+            event_reporter=reporter,
+            instrument_id="inst-1",
+            watch_directory="/tmp/watch",
+            upload_mode="auto",
+            on_tick=on_tick,
+        )
+
+    def test_a_tick_without_a_stop_flushes_and_runs_the_updater(self) -> None:
+        reporter = MagicMock(spec=EventReporter)
+        on_tick = MagicMock()
+        loop = self._loop(MagicMock(), reporter, on_tick)
+
+        loop._tick()
+
+        reporter.flush.assert_called_once_with()
+        on_tick.assert_called_once_with()
+
+    def test_a_tick_that_a_stop_left_behind_sends_and_runs_nothing_after_its_heartbeat(
+        self,
+    ) -> None:
+        client = MagicMock()
+        reporter = MagicMock(spec=EventReporter)
+        on_tick = MagicMock()
+        in_flight = threading.Event()
+        release = threading.Event()
+        statuses: list[str] = []
+
+        def send_heartbeat(_watcher_id: str, payload: dict[str, object], **_kw: object) -> None:
+            statuses.append(str(payload["status"]))
+            # The first is the startup beat. The second is the tick's, held in flight.
+            if len(statuses) == 2:
+                in_flight.set()
+                assert release.wait(10)
+
+        client.send_heartbeat.side_effect = send_heartbeat
+        loop = self._loop(client, reporter, on_tick)
+        loop.start()
+        try:
+            assert in_flight.wait(10), "the tick never sent its heartbeat"
+            reporter.flush.reset_mock()  # The startup beat flushed too.
+
+            # The stop gives up on the tick, which is still waiting for its answer.
+            loop.stop_loop(join_timeout=0.05)
+            assert loop._thread is not None and loop._thread.is_alive()
+        finally:
+            release.set()
+        loop._thread.join(10)
+
+        assert not loop._thread.is_alive()
+        reporter.flush.assert_not_called()
+        on_tick.assert_not_called()
+
+
+class TestSendFinalHeartbeat:
+    """A stop with a deadline can't wait for the client's 30 s read timeout.
+
+    The final heartbeat has a short HTTP timeout that fits before the deadline. Without a
+    deadline the client's own timeout applies.
+    """
+
+    def test_the_timeout_is_the_clients_usual_one_when_there_is_time(self) -> None:
+        client = MagicMock()
+        loop = _make_loop(client, MagicMock(spec=EventReporter))
+
+        loop.send_final_heartbeat(deadline=time.monotonic() + 60)
+
+        assert client.send_heartbeat.call_args.kwargs["timeout"] == DEFAULT_TIMEOUT
+        assert client.send_heartbeat.call_args.args[1]["status"] == "stopped"
+
+    def test_a_server_that_answers_in_six_seconds_is_waited_for(self) -> None:
+        client = MagicMock()
+        loop = _make_loop(client, MagicMock(spec=EventReporter))
+
+        loop.send_final_heartbeat(deadline=time.monotonic() + 20)
+
+        connect, read = client.send_heartbeat.call_args.kwargs["timeout"]
+        assert read > 6
+        assert connect + read <= 20
+
+    def test_the_cap_can_be_the_shorter_one_for_a_windows_shutdown(self) -> None:
+        client = MagicMock()
+        loop = _make_loop(client, MagicMock(spec=EventReporter))
+
+        loop.send_final_heartbeat(
+            stop_reason="system_shutdown",
+            deadline=time.monotonic() + 20,
+            timeout_cap=SYSTEM_SHUTDOWN_HTTP_TIMEOUT,
+        )
+
+        assert client.send_heartbeat.call_args.kwargs["timeout"] == SYSTEM_SHUTDOWN_HTTP_TIMEOUT
+
+    def test_the_timeout_shrinks_to_fit_what_is_left_of_the_deadline(self) -> None:
+        client = MagicMock()
+        loop = _make_loop(client, MagicMock(spec=EventReporter))
+
+        loop.send_final_heartbeat(deadline=time.monotonic() + 1)
 
         connect, read = client.send_heartbeat.call_args.kwargs["timeout"]
         assert connect + read <= 1
@@ -308,48 +423,54 @@ class TestHeartbeatStopWithADeadline:
         # It is the one request that matters, so a deadline that has gone by only makes it
         # short, not skipped.
         client = MagicMock()
-        loop, _thread = self._loop_with_a_tick_in_progress(client)
+        loop = _make_loop(client, MagicMock(spec=EventReporter))
 
-        loop.stop(deadline=time.monotonic() - 5)
+        loop.send_final_heartbeat(deadline=time.monotonic() - 5)
 
         client.send_heartbeat.assert_called_once()
         connect, read = client.send_heartbeat.call_args.kwargs["timeout"]
         assert 0 < connect + read <= 1
 
-    def test_a_stop_without_a_deadline_keeps_the_clients_timeout(self) -> None:
+    def test_without_a_deadline_the_clients_timeout_applies(self) -> None:
         client = MagicMock()
-        loop, thread = self._loop_with_a_tick_in_progress(client)
+        loop = _make_loop(client, MagicMock(spec=EventReporter))
 
-        loop.stop()
+        loop.send_final_heartbeat()
 
-        thread.join.assert_called_once_with(timeout=65)
         assert client.send_heartbeat.call_args.kwargs["timeout"] is None
 
 
 class TestFinalHeartbeatReason:
-    """The final ``stopped`` heartbeat says when Windows shutting down caused the stop.
+    """The final ``stopped`` heartbeat says when the watcher stops to come back.
 
     The server keeps the instrument's requested uploads queued for a ``stopped``
-    heartbeat with ``status_reason: system_shutdown``, and cancels them for any
-    other ``stopped`` heartbeat. The value is the contract with the server, so the
-    tests spell it out.
+    heartbeat with ``status_reason: system_shutdown`` (Windows shutting down) or
+    ``auto_update`` (an update being installed), and cancels them for any other
+    ``stopped`` heartbeat. The values are the contract with the server, so the
+    tests spell them out.
     """
 
     @staticmethod
-    def _final_payload(**stop_kwargs: bool) -> dict[str, object]:
+    def _final_payload(stop_reason: str | None = None) -> dict[str, object]:
         client = MagicMock()
         loop = _make_loop(client, MagicMock(spec=EventReporter))
 
-        loop.stop(**stop_kwargs)
+        loop.send_final_heartbeat(stop_reason=stop_reason)
 
         client.send_heartbeat.assert_called_once()
         return client.send_heartbeat.call_args.args[1]
 
     def test_a_stop_caused_by_a_system_shutdown_carries_the_reason(self) -> None:
-        payload = self._final_payload(system_shutdown=True)
+        payload = self._final_payload("system_shutdown")
 
         assert payload["status"] == "stopped"
         assert payload["status_reason"] == "system_shutdown"
+
+    def test_a_stop_for_an_update_carries_the_reason(self) -> None:
+        payload = self._final_payload("auto_update")
+
+        assert payload["status"] == "stopped"
+        assert payload["status_reason"] == "auto_update"
 
     def test_any_other_stop_carries_no_reason(self) -> None:
         payload = self._final_payload()
@@ -357,10 +478,23 @@ class TestFinalHeartbeatReason:
         assert payload["status"] == "stopped"
         assert "status_reason" not in payload
 
-    def test_a_heartbeat_that_is_not_the_final_one_never_carries_it(self) -> None:
+    @pytest.mark.parametrize("reason", ["system_shutdown", "auto_update"])
+    def test_stop_sends_the_reason_with_the_final_heartbeat(self, reason: str) -> None:
         client = MagicMock()
         loop = _make_loop(client, MagicMock(spec=EventReporter))
 
-        loop._send_heartbeat(status="watching", system_shutdown=True)
+        loop.stop(stop_reason=reason)
+
+        client.send_heartbeat.assert_called_once()
+        payload = client.send_heartbeat.call_args.args[1]
+        assert payload["status"] == "stopped"
+        assert payload["status_reason"] == reason
+
+    @pytest.mark.parametrize("reason", ["system_shutdown", "auto_update"])
+    def test_a_heartbeat_that_is_not_the_final_one_never_carries_it(self, reason: str) -> None:
+        client = MagicMock()
+        loop = _make_loop(client, MagicMock(spec=EventReporter))
+
+        loop._send_heartbeat(status="watching", stop_reason=reason)
 
         assert "status_reason" not in client.send_heartbeat.call_args.args[1]

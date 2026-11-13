@@ -25,6 +25,7 @@ import json
 import logging
 import sys
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -37,6 +38,7 @@ from data_hub_watcher.constants import (
     DEFAULT_CHECK_INTERVAL_TICKS,
     DEFAULT_IDLE_TICKS_REQUIRED,
     HEARTBEAT_INTERVAL_SECONDS,
+    UPGRADE_HANDOFF_TIMEOUT_SECONDS,
     WATCHER_VERSION,
 )
 from data_hub_watcher.events import EventReporter, EventType, WatcherEvent
@@ -53,8 +55,12 @@ from data_hub_watcher.self_update import (
 )
 from data_hub_watcher.state import StateDB
 from data_hub_watcher.upgrade_worker import (
+    UPGRADE_WORKER_LOG_FILENAME,
     build_pkg_spec,
+    clear_upgrade_request,
+    clear_upgrade_result,
     detect_installed_extras,
+    read_upgrade_result,
     write_upgrade_request,
 )
 
@@ -311,13 +317,94 @@ def _default_upgrade_executor(fn: Callable[[], None]) -> None:
     threading.Thread(target=fn, daemon=True, name="upgrade-worker").start()
 
 
+class UpgradeHandoff:
+    """The upgrade the watcher handed to the Windows upgrade worker, if any.
+
+    On Windows with a uv-tool install the updater doesn't install in process: it
+    writes the request, triggers the worker's scheduled task, and the worker stops
+    the service from outside. Nothing in the process says the upgrade is under way,
+    so this remembers it. For `UPGRADE_HANDOFF_TIMEOUT_SECONDS` the updater
+    dispatches nothing else, and a stop that arrives meanwhile is taken to be the
+    worker's.
+
+    `WatcherSupervisor` owns the one object and gives it to every `Updater` it
+    builds. The runtime, and the updater with it, is built again in the same
+    process for a config revision, when the watch folder comes back, and when a
+    start fails, and none of those may make the watcher forget the hand-off. The
+    heartbeat thread (through `Updater.on_tick`) and the thread that stops the
+    watcher both use it, so every method takes the object's own lock.
+    """
+
+    def __init__(self, *, clock: Callable[[], float] = time.monotonic) -> None:
+        # The clock is a parameter so tests can move it past the window.
+        self._clock = clock
+        self._lock = threading.Lock()
+        self._handed_off_at: float | None = None
+        self._target: str | None = None
+        self._stopping = False
+
+    @property
+    def stopping(self) -> bool:
+        """Whether the watcher has begun to stop (see `begin_stop`)."""
+        with self._lock:
+            return self._stopping
+
+    def record(self, target: str) -> None:
+        """Remember that an upgrade to *target* was just handed to the worker."""
+        with self._lock:
+            self._handed_off_at = self._clock()
+            self._target = target
+
+    def window_open(self) -> bool:
+        """Whether an upgrade was handed to the worker less than the window ago."""
+        with self._lock:
+            return self._handed_off_at is not None and not self._window_over()
+
+    def take_expired(self) -> str | None:
+        """End a hand-off whose window is over, and return the target it was for.
+
+        This is the only way a hand-off ends. It returns `None`, and leaves the
+        hand-off as it is, when there is none, when its window is still open, or
+        when a stop has begun: a stop that began already counts it as the
+        worker's, and must not find it ended in the middle of the stop.
+        """
+        with self._lock:
+            if self._stopping or self._handed_off_at is None or not self._window_over():
+                return None
+            target = self._target
+            self._handed_off_at = None
+            self._target = None
+            return target
+
+    def begin_stop(self) -> bool:
+        """Freeze the hand-off because the watcher is stopping, and say whether one is held.
+
+        From here `take_expired` ends nothing, and `Updater.on_tick` does nothing, so
+        what the stop chooses now is what the rest of it sees. A hand-off counts
+        until `take_expired` ends it, not until the window by the clock is over: the
+        worker may stop the service just before the window ends, the service loop
+        takes up to a second to notice the stop, and the heartbeat tick that ends
+        the window can come in that time. A stop that begins after that tick has
+        ended the hand-off is not the worker's.
+        """
+        with self._lock:
+            self._stopping = True
+            return self._handed_off_at is not None
+
+    def _window_over(self) -> bool:
+        """Hold `_lock`, with a hand-off recorded."""
+        assert self._handed_off_at is not None
+        return self._clock() - self._handed_off_at >= UPGRADE_HANDOFF_TIMEOUT_SECONDS
+
+
 class Updater:
     """Heartbeat-tick callback that polls for and applies updates.
 
     Construction is intentionally side-effect-free — wiring happens in
     :mod:`data_hub_watcher.runtime`. State held: two counters (idle
     ticks observed, ticks-since-last-check), an ``_upgrade_in_progress``
-    flag that gates concurrent dispatches, and references to the
+    flag that gates concurrent dispatches, the ``UpgradeHandoff`` shared
+    with the other updaters of the same process, and references to the
     collaborators.
     """
 
@@ -334,6 +421,7 @@ class Updater:
         updater_cfg: UpdaterConfig | None = None,
         upgrade_runner: Callable[..., Any] | None = None,
         upgrade_executor: Callable[[Callable[[], None]], None] | None = None,
+        handoff: UpgradeHandoff | None = None,
     ) -> None:
         self._client = client
         self._reporter = reporter
@@ -378,6 +466,13 @@ class Updater:
         # safety.
         self._ticks_since_check = c.check_interval_ticks if c.check_on_start else 0
         self._upgrade_in_progress = False
+        # Set by `_apply_via_worker`, once `schtasks` has accepted the hand-off,
+        # and ended by `on_tick` when the window is over. The worker stops the
+        # service from outside, so no in-process flag says the upgrade is under
+        # way: this is what keeps every later tick from dispatching the same
+        # upgrade again. The supervisor passes in the one it owns, so it outlives
+        # this updater when the runtime is rebuilt; an updater built alone has its own.
+        self._handoff = handoff if handoff is not None else UpgradeHandoff()
         # Per-target memo for the "ineligible install method" refusal
         # path: we want one ``UPDATE_FAILED`` event per *new* server
         # target so admins can spot lab PCs stuck on a dev install
@@ -406,10 +501,17 @@ class Updater:
         on ticks where we did call ``/update-check``, which lets tests
         assert on the decision without monkeypatching logging.
         """
+        expired_target: str | None = None
         with self._lock:
             if self._cfg.environment == "preview":
                 # Preview deployments are short-lived URL-suffixed builds
                 # and must never push code to production lab PCs.
+                return None
+
+            if self._handoff.stopping:
+                # The watcher has begun to stop. A tick that was already running when
+                # the stop began, or that runs after it, must neither dispatch an
+                # update nor end the hand-off that the stop has counted.
                 return None
 
             if self._upgrade_in_progress:
@@ -424,17 +526,70 @@ class Updater:
                     reason="upgrade subprocess already in progress",
                 )
 
+            if self._handoff.window_open():
+                # The Windows upgrade worker has the upgrade and is about
+                # to stop this service. Skip the check, as above, so the
+                # same upgrade isn't dispatched again meanwhile.
+                return UpdateAttemptResult(
+                    attempted=False,
+                    succeeded=None,
+                    reason="upgrade handed to the worker",
+                )
+            # With a hand-off whose window is over, this service is still
+            # running: the worker never stopped it. The hand-off ends here,
+            # it is reported below, and this tick goes on as if there had been none.
+            expired_target = self._handoff.take_expired()
+
             if self._counters.last_files_uploaded == 0:
                 self._idle_ticks += 1
             else:
                 self._idle_ticks = 0
 
             self._ticks_since_check += 1
-            if self._ticks_since_check < self._check_interval_ticks:
-                return None
-            self._ticks_since_check = 0
+            check_due = self._ticks_since_check >= self._check_interval_ticks
+            if check_due:
+                self._ticks_since_check = 0
 
+        if expired_target is not None:
+            # Outside the lock: it sends the event.
+            self._report_handoff_expired(expired_target)
+        if not check_due:
+            return None
         return self._check_and_apply()
+
+    def _report_handoff_expired(self, target: str) -> None:
+        """The worker didn't stop the service: report it, and clear what the hand-off left."""
+        logger.warning(
+            "The upgrade worker did not stop the service within %d s of the hand-off "
+            "for %s; allowing a new attempt",
+            UPGRADE_HANDOFF_TIMEOUT_SECONDS,
+            target,
+        )
+        # A worker that ran but couldn't stop the service (`Stop-Service` failed, or
+        # `uv` failed on the files the running service holds) left its result, which
+        # has the real error. Report it, and clear it so that a later upgrade is not
+        # blamed for it.
+        worker_result = read_upgrade_result(self._config_dir)
+        clear_upgrade_result(self._config_dir)
+        # As in the `schtasks` failure branch: the next attempt starts from a clean
+        # slate. A worker that hasn't started yet finds no request and does nothing;
+        # one that is already running has read it and carries on regardless. The
+        # marker goes with `_emit_failure`.
+        clear_upgrade_request(self._config_dir)
+        # Only a uv-tool install on Windows hands an upgrade to the worker.
+        extra: dict[str, Any] = {"install_method": InstallMethod.UV_TOOL.value, "via_worker": True}
+        if worker_result is not None:
+            extra.update(worker_result.event_details())
+        self._emit_failure(
+            target,
+            "worker_did_not_stop_service",
+            message=(
+                f"Watcher upgrade to {target} failed: the upgrade worker did not stop "
+                f"the service within {UPGRADE_HANDOFF_TIMEOUT_SECONDS // 60} minutes; "
+                f"check {UPGRADE_WORKER_LOG_FILENAME} in the watcher's config folder"
+            ),
+            extra=extra,
+        )
 
     # ------------------------------------------------------------------
     # Internals
@@ -479,6 +634,10 @@ class Updater:
                 info.latest_version,
             )
             return UpdateAttemptResult(False, False, reason, info.latest_version)
+
+        if self._handoff.stopping:
+            # The watcher began to stop while the update check ran.
+            return UpdateAttemptResult(False, None, "watcher is stopping", info.latest_version)
 
         return self._apply(info)
 
@@ -806,8 +965,6 @@ class Updater:
             # specific reason that points at the recovery command.
             logger.warning("schtasks /Run failed: %s", exc)
             clear_upgrade_marker(self._config_dir)
-            from data_hub_watcher.upgrade_worker import clear_upgrade_request
-
             clear_upgrade_request(self._config_dir)
             self._emit_failure(
                 target,
@@ -831,6 +988,12 @@ class Updater:
                 {"method": method.value, "via_worker": True},
             )
 
+        # Remember the hand-off, so no tick dispatches this upgrade again while
+        # the worker gets to stopping the service (see `on_tick`), and so a stop
+        # in that time is reported as an update stop. Only here: a refusal or a
+        # failed ``schtasks`` above hands nothing over.
+        self._handoff.record(target)
+
         # The worker stops the service before invoking ``uv``, so we
         # don't expect to be alive much longer. The success /
         # final-failure event is emitted from the next process's
@@ -852,6 +1015,7 @@ class Updater:
         target: str,
         reason: str,
         *,
+        message: str | None = None,
         extra: dict[str, Any] | None = None,
     ) -> None:
         details: dict[str, Any] = {
@@ -864,7 +1028,7 @@ class Updater:
         self._reporter.queue_event(
             WatcherEvent(
                 event_type=EventType.UPDATE_FAILED,
-                message=f"Watcher upgrade to {target} failed: {reason}",
+                message=message or f"Watcher upgrade to {target} failed: {reason}",
                 details=details,
             )
         )
@@ -919,6 +1083,7 @@ __all__ = [
     "UpdateAttemptResult",
     "Updater",
     "UpdaterConfig",
+    "UpgradeHandoff",
     "UpgradeMarkerOutcome",
     "clear_upgrade_marker",
     "evaluate_upgrade_marker",

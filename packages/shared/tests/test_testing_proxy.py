@@ -20,7 +20,12 @@ import pytest
 import requests
 
 from data_hub_shared import testing_proxy
-from data_hub_shared.testing_proxy import FaultMode, FaultProxy, RecordedRequest
+from data_hub_shared.testing_proxy import (
+    MAX_RECORDED_BODY_BYTES,
+    FaultMode,
+    FaultProxy,
+    RecordedRequest,
+)
 
 # ---------------------------------------------------------------------------
 # A small upstream server that records what it receives
@@ -895,12 +900,48 @@ def test_recorded_request_keeps_its_original_fields_first() -> None:
         "upstream_status",
         "headers",
         "client_gone",
+        "body",
     ]
     # The new fields have defaults, so a request can still be made from the first five.
     request = RecordedRequest(1.0, "GET", "/x", None, None)
     assert request.headers == ()
     assert request.client_gone is False
+    assert request.body is None
     assert request.header("anything") is None
+
+
+def test_log_records_a_small_request_body(proxy: FaultProxy, http: requests.Session) -> None:
+    body = b'{"status": "stopped"}'
+
+    http.post(proxy.base_url + "/echo", data=body, timeout=10)
+    _get(http, proxy, "/echo")
+
+    with_body, without = proxy.requests
+    assert with_body.body == body
+    assert without.body is None
+
+
+def test_log_records_the_body_of_a_request_that_gets_a_fault(
+    proxy: FaultProxy, http: requests.Session
+) -> None:
+    # The proxy reads the whole body before it answers, so the log has it too.
+    proxy.add_fault("status", path="/heartbeat")
+
+    http.post(proxy.base_url + "/heartbeat", data=b"beat", timeout=10)
+
+    (entry,) = proxy.requests
+    assert (entry.fault_mode, entry.body) == ("status", b"beat")
+
+
+def test_log_leaves_out_a_body_over_the_limit(proxy: FaultProxy, http: requests.Session) -> None:
+    # The upload of a large file goes through the proxy and must not be kept in memory.
+    http.post(proxy.base_url + "/echo", data=b"x" * (MAX_RECORDED_BODY_BYTES + 1), timeout=10)
+    http.post(proxy.base_url + "/echo", data=b"x" * MAX_RECORDED_BODY_BYTES, timeout=10)
+
+    too_large, at_the_limit = proxy.requests
+    assert too_large.body is None
+    assert too_large.upstream_status == 200  # It still went through.
+    assert at_the_limit.body == b"x" * MAX_RECORDED_BODY_BYTES
 
 
 def test_log_records_fault_mode_without_an_upstream_status(

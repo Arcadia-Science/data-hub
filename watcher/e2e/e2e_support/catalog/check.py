@@ -21,7 +21,7 @@ The rules (``check_catalog``):
 * a known-bug test follows the pattern: ``xfail(strict=True, raises=KnownBugStillPresent,
   reason="<bug>: ...")``, a ``with known_bug():`` block around the intended-behavior
   assertion, and only ``xfail_bug`` transitions in ``covers``. The reason starts with the bug
-  of one of those transitions (its Linear issue, such as ``ENG-2116``, or a short slug until
+  of one of those transitions (its Linear issue, such as ``ENG-2118``, or a short slug until
   the issue is filed). A test that isn't an xfail never names an ``xfail_bug`` transition.
 
 What counts as a marker: ``@pytest.mark.covers("id", ...)``, ``@pytest.mark.platforms("cli")``

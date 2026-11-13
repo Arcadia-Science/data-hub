@@ -9,7 +9,7 @@ and ``app/api/cron/upload-queue-sweep``.
 
 from __future__ import annotations
 
-from e2e_support.catalog.model import Transition, covered, excluded, xfail_bug
+from e2e_support.catalog.model import CLI, Transition, covered, excluded, xfail_bug
 
 MACHINE = "upload_queue"
 
@@ -100,6 +100,15 @@ TRANSITIONS: tuple[Transition, ...] = (
         "queue.upload_failing->cancelled_after_three_polls",
         "A queued file whose upload keeps failing is cancelled the same way after three "
         "polls, with reason `upload_failed`.",
+    ),
+    covered(
+        MACHINE,
+        "queue.unreadable_file->stays_queued_until_readable",
+        "A queued file that is on disk but can't be opened is not a failed attempt: it stays "
+        "requested for more than three polls, with one `upload_failed` event that says it "
+        "will be retried, no cancellation and no request to the server, and it uploads on "
+        "the poll after it can be read.",
+        platforms=CLI,
     ),
     covered(
         MACHINE,

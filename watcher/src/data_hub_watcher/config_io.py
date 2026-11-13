@@ -23,6 +23,13 @@ def load_config(path: Path) -> WatcherConfig:
 
     try:
         raw = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        # Windows PowerShell 5.1 writes UTF-16 for `>` and `Out-File`, and some editors save in
+        # a Windows code page, so a hand-edited config may not be UTF-8.
+        raise click.ClickException(
+            f"Cannot read config file {path}: it is not valid UTF-8 ({exc.reason} at byte "
+            f"{exc.start}). Save it as UTF-8, not UTF-16 or a Windows code page."
+        ) from exc
     except OSError as exc:
         raise click.ClickException(f"Cannot read config file: {exc}") from exc
 
@@ -35,7 +42,9 @@ def load_config(path: Path) -> WatcherConfig:
         raise click.ClickException(f"Expected a YAML mapping in {path}, got {type(data).__name__}")
 
     try:
-        return WatcherConfig(**data)
+        # `model_validate`, not `WatcherConfig(**data)`: a top-level key that isn't a string
+        # (`1:`, `on:` and `yes:` are not strings in YAML) would make the call raise TypeError.
+        return WatcherConfig.model_validate(data)
     except ValidationError as exc:
         errors = exc.errors()
         lines = [f"Config validation failed ({len(errors)} error(s)):"]

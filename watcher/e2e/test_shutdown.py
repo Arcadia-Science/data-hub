@@ -343,19 +343,10 @@ def test_a_watcher_started_again_after_a_kill_resumes_without_reporting_twice(
 
 
 # ---------------------------------------------------------------------------
-# Known bugs: the intended behavior, until they are fixed
+# A stop in a hurry: no new uploads, the event first, a bounded time
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=KnownBugStillPresent,
-    reason=(
-        "ENG-2126: `stop_runtime` joins the file monitor for up to "
-        "5 s before it stops the upload worker, so an auto upload on the monitor's thread "
-        "keeps starting parts, and the next file, after a stop"
-    ),
-)
 @pytest.mark.covers("process.stop->no_new_uploads_after_stop")
 def test_a_stop_starts_no_new_part_or_file_of_an_auto_upload(
     watcher: WatcherFactory,
@@ -366,9 +357,9 @@ def test_a_stop_starts_no_new_part_or_file_of_an_auto_upload(
 ) -> None:
     pc = watcher(upload_parallelism=1)
     start_watching(pc, server)
-    # Each part takes a second to arrive. A file of three parts is short enough that the second
-    # file would start well inside the five seconds the stop spends waiting for the monitor, yet
-    # long enough that the stop arrives while the first is on its way.
+    # Each part takes a second to arrive. A file of three parts is long enough that the stop
+    # arrives while the first is on its way, and the second file would start soon after if the
+    # stop didn't prevent it.
     proxy.add_fault("delay", path=r"/api/local-s3/", method="PUT", delay_seconds=1)
     write_run(
         watch_dir,
@@ -393,21 +384,12 @@ def test_a_stop_starts_no_new_part_or_file_of_an_auto_upload(
     started_after_stop = [
         r.path for r in proxy.requests if r.method == "PUT" and r.timestamp > stopped_at + 0.5
     ]
-    with known_bug():
-        assert started_after_stop == [], (
-            f"{len(started_after_stop)} part(s) were started more than half a second after "
-            "the stop was requested"
-        )
+    assert started_after_stop == [], (
+        f"{len(started_after_stop)} part(s) were started more than half a second after "
+        "the stop was requested"
+    )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=KnownBugStillPresent,
-    reason=(
-        "ENG-2116: the final `stopped` heartbeat reaches the "
-        "server before the `watcher_stopped` event"
-    ),
-)
 @pytest.mark.covers("process.stop->event_before_stopped_heartbeat")
 def test_the_stop_event_reaches_the_server_before_the_stopped_heartbeat(
     watcher: WatcherFactory, server: ServerView
@@ -424,22 +406,12 @@ def test_the_stop_event_reaches_the_server_before_the_stopped_heartbeat(
     event = own_stop_event(server, pc.watcher_id)
     final = server.heartbeats(pc.watcher_id)[-1]
     assert final.status == "stopped"
-    with known_bug():
-        assert event.created_at <= final.created_at, (
-            f"the watcher_stopped event was stored at {event.created_at}, after the stopped "
-            f"heartbeat at {final.created_at}"
-        )
+    assert event.created_at <= final.created_at, (
+        f"the watcher_stopped event was stored at {event.created_at}, after the stopped "
+        f"heartbeat at {final.created_at}"
+    )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=KnownBugStillPresent,
-    reason=(
-        "ENG-2127: a stop against a server that has stopped "
-        "answering waits for the stuck heartbeat, the final heartbeat and the event flush, "
-        "each up to the client's read timeout, and takes up to about 95 s"
-    ),
-)
 @pytest.mark.covers("process.stop->bounded_when_server_hangs")
 def test_a_stop_completes_within_thirty_seconds_even_if_the_server_stops_answering(
     watcher: WatcherFactory, server: ServerView, proxy: FaultProxy
@@ -459,10 +431,14 @@ def test_a_stop_completes_within_thirty_seconds_even_if_the_server_stops_answeri
 
     pc.request_stop()
 
-    # PROPOSED bound: the process is gone within about 30 s. A test that outlasts it leaves the
-    # watcher to the driver, which stops it for good when the test ends.
-    with known_bug():
-        pc.wait_exit(30)
+    # The stop is limited to 25 s, so the process is gone within 30 s of the request. A test that
+    # outlasts that leaves the watcher to the driver, which stops it for good when the test ends.
+    pc.wait_exit(30)
+
+
+# ---------------------------------------------------------------------------
+# Known bugs: the intended behavior, until they are fixed
+# ---------------------------------------------------------------------------
 
 
 @pytest.mark.xfail(

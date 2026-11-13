@@ -35,6 +35,7 @@ from data_hub_watcher.constants import (
 )
 from data_hub_watcher.events import EventReporter, EventType, WatcherEvent
 from data_hub_watcher.heartbeat import WatcherCounters
+from data_hub_watcher.logging_setup import keep_urllib3_at_info
 from data_hub_watcher.models import (
     FILE_PATTERN_MAX_LENGTH,
     FILE_PATTERNS_MAX,
@@ -54,7 +55,7 @@ from data_hub_watcher.self_update import (
     run_upgrade,
 )
 from data_hub_watcher.state import StateDB, clean_forget_prefix
-from data_hub_watcher.uploader import Uploader
+from data_hub_watcher.uploader import CantReadYet, Uploader
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +84,8 @@ def cli(ctx: click.Context, config_path: str | None, verbose: bool) -> None:
         level=logging.DEBUG if verbose else logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
+    # `--verbose` is DEBUG for everything, and at DEBUG urllib3 logs the pre-signed upload URLs.
+    keep_urllib3_at_info()
     ctx.ensure_object(dict)
     ctx.obj["config_path"] = config_path
 
@@ -1257,7 +1260,9 @@ def watch(ctx: click.Context, dry_run: bool) -> None:
     run_supervisor(supervisor, stop_requested)
 
     if stop_requested.is_set():
-        supervisor.stop(stopped_message="Watcher stopped by user")
+        # The operator asked for this stop, so it is never marked as an update stop,
+        # even if an update was installed or handed off while they pressed Ctrl+C.
+        supervisor.stop(stopped_message="Watcher stopped by user", operator_stop=True)
         raise SystemExit(0)
 
     # Distinguish an upgrade-driven shutdown from a generic one by
@@ -1354,6 +1359,12 @@ def upload(ctx: click.Context, file_path: str | None, run_id: str | None, dry_ru
         click.echo(f"Uploading {fp.name}…")
         try:
             ok = uploader._upload_single(fp, run_id)
+        except CantReadYet as exc:
+            # Nothing waits and retries in a one-shot upload, so say why it stopped.
+            state_db.close()
+            raise click.ClickException(
+                f"Can't read {fp.name} yet: {exc.error}. Try again once it can be read."
+            ) from exc
         except KeyboardInterrupt:
             stop_event.set()
             raise

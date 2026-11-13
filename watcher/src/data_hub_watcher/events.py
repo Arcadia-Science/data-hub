@@ -82,7 +82,12 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
-from data_hub_watcher.api_client import ApiError, DataHubClient, timeout_until
+from data_hub_watcher.api_client import (
+    DEFAULT_TIMEOUT,
+    ApiError,
+    DataHubClient,
+    timeout_until,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +102,21 @@ MAX_QUEUE_SIZE = 500
 # interval, so an inline retry doesn't risk wedging the heartbeat thread.
 FLUSH_RETRY_MAX = 3
 FLUSH_RETRY_BASE_DELAY = 1.0
+# A flush with a deadline retries only if the retry would still have this long to run
+# once it has waited its delay.
+FLUSH_RETRY_MIN_SECONDS = 1.0
+
+
+def _safe_to_replay(exc: Exception | None) -> bool:
+    """Whether a failed events request can be sent again without the server storing it twice.
+
+    The events route inserts every batch as it comes, with nothing to recognise a repeat.
+    A connection error (nothing reached the server) and a 5xx (it failed) are safe to
+    replay. A read timeout is not: the server may have stored the batch and only been
+    slow to answer. Neither is a 4xx, which would fail again, or an error raised after a
+    2xx answer, which means the server did store it.
+    """
+    return isinstance(exc, ApiError) and not exc.read_timed_out and exc.is_transient
 
 
 class EventType(str, Enum):
@@ -199,13 +219,22 @@ class EventReporter:
             self._dropped_since = datetime.now(timezone.utc).isoformat()
         self._dropped_count += n
 
-    def flush(self, *, deadline: float | None = None) -> None:
+    def flush(
+        self,
+        *,
+        deadline: float | None = None,
+        timeout_cap: tuple[float, float] = DEFAULT_TIMEOUT,
+    ) -> None:
         """Send the queued events.
 
-        *deadline* (a `time.monotonic()` value) is for a flush that has little time, as
-        when Windows is shutting down. It makes one attempt, with an HTTP timeout that
-        fits before the deadline, and none once the deadline has passed. The events
-        that couldn't be sent are dropped as after any failed flush.
+        *deadline* (a `time.monotonic()` value) is for a flush that has a limited time, as
+        when the watcher is stopping. Each attempt has an HTTP timeout of *timeout_cap*, the
+        client's usual one unless told otherwise, cut down to fit before the deadline, so a
+        server that answers slowly is still waited for. It retries as the usual flush does,
+        but only after a failure that can't have left the batch stored (see
+        `_safe_to_replay`: not after a read timeout), and only while the deadline still
+        leaves a retry time to run. It makes no attempt once the deadline has passed. The
+        events that couldn't be sent are dropped as after any failed flush.
         """
         if deadline is not None and time.monotonic() >= deadline:
             return
@@ -247,13 +276,14 @@ class EventReporter:
         # simplicity. Switch to a worker thread if this ever needs to
         # exceed half the heartbeat period.
         last_exc: Exception | None = None
-        max_attempts = FLUSH_RETRY_MAX if deadline is None else 1
-        for attempt in range(max_attempts):
+        attempts = 0
+        while True:
+            attempts += 1
             try:
                 self._client.send_events(
                     self._watcher_id,
                     [e.to_dict() for e in events_to_send],
-                    timeout=None if deadline is None else timeout_until(deadline),
+                    timeout=None if deadline is None else timeout_until(deadline, timeout_cap),
                 )
                 # Success — clear the pending-drop counter we just
                 # surfaced. New drops may have accumulated concurrently
@@ -267,16 +297,22 @@ class EventReporter:
                 return
             except (ApiError, Exception) as exc:
                 last_exc = exc
-                if attempt < max_attempts - 1:
-                    delay = FLUSH_RETRY_BASE_DELAY * (2**attempt)
-                    logger.warning(
-                        "Event flush attempt %d/%d failed: %s (retry in %.1fs)",
-                        attempt + 1,
-                        max_attempts,
-                        exc,
-                        delay,
-                    )
-                    time.sleep(delay)
+            if attempts >= FLUSH_RETRY_MAX:
+                break
+            if deadline is not None and not _safe_to_replay(last_exc):
+                break
+            delay = FLUSH_RETRY_BASE_DELAY * (2 ** (attempts - 1))
+            retry_ends_by = time.monotonic() + delay + FLUSH_RETRY_MIN_SECONDS
+            if deadline is not None and retry_ends_by > deadline:
+                break
+            logger.warning(
+                "Event flush attempt %d/%d failed: %s (retry in %.1fs)",
+                attempts,
+                FLUSH_RETRY_MAX,
+                last_exc,
+                delay,
+            )
+            time.sleep(delay)
 
         # All retries exhausted. Drop the real events (the synthetic
         # prefix isn't counted — the prior drops it represents are
@@ -285,8 +321,8 @@ class EventReporter:
         with self._lock:
             self._note_drop(len(queue_snapshot))
         logger.warning(
-            "Failed to flush %d event(s) after %d attempts: %s",
+            "Failed to flush %d event(s) after %d attempt(s): %s",
             len(events_to_send),
-            max_attempts,
+            attempts,
             last_exc,
         )
