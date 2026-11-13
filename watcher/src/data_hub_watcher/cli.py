@@ -35,6 +35,7 @@ from data_hub_watcher.constants import (
 )
 from data_hub_watcher.events import EventReporter, EventType, WatcherEvent
 from data_hub_watcher.heartbeat import WatcherCounters
+from data_hub_watcher.logging_setup import keep_urllib3_at_info
 from data_hub_watcher.models import (
     FILE_PATTERN_MAX_LENGTH,
     FILE_PATTERNS_MAX,
@@ -83,6 +84,8 @@ def cli(ctx: click.Context, config_path: str | None, verbose: bool) -> None:
         level=logging.DEBUG if verbose else logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
+    # `--verbose` is DEBUG for everything, and at DEBUG urllib3 logs the pre-signed upload URLs.
+    keep_urllib3_at_info()
     ctx.ensure_object(dict)
     ctx.obj["config_path"] = config_path
 
@@ -1257,7 +1260,9 @@ def watch(ctx: click.Context, dry_run: bool) -> None:
     run_supervisor(supervisor, stop_requested)
 
     if stop_requested.is_set():
-        supervisor.stop(stopped_message="Watcher stopped by user")
+        # The operator asked for this stop, so it is never marked as an update stop,
+        # even if an update was installed or handed off while they pressed Ctrl+C.
+        supervisor.stop(stopped_message="Watcher stopped by user", operator_stop=True)
         raise SystemExit(0)
 
     # Distinguish an upgrade-driven shutdown from a generic one by

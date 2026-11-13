@@ -104,12 +104,11 @@ TRANSITIONS: tuple[Transition, ...] = (
         "restarted.",
         platforms=SERVICE,
     ),
-    xfail_bug(
+    covered(
         MACHINE,
         "service.env_file->log_level_honored",
         "`DATA_HUB_WATCHER_LOG_LEVEL` in the registered env file sets the service's log "
         "level, as it does for `watch`.",
-        "ENG-2119",
         platforms=SERVICE,
     ),
     covered(
@@ -215,19 +214,13 @@ TRANSITIONS: tuple[Transition, ...] = (
         "take longer than the 120 s of the second one).",
         platforms=SERVICE,
     ),
-    xfail_bug(
+    covered(
         MACHINE,
         "service.config_invalid->logged_in_watcher_log",
-        "PROPOSED — confirm intent: a config that doesn't load (missing, malformed, "
-        "invalid) is logged in `watcher.log` and ends the service through the "
-        "`SystemExit(1)` path, like the other start-up refusals. Today `_run_service_loop` "
-        "calls `load_config` outside any `try`, so the `ClickException` is raised out of "
-        "`SvcRun`: pywin32 still stops the service with the same failure code, but nothing "
-        "reaches `watcher.log`, only the Event Log (a traceback in a `SvcRun() method "
-        "failed` entry, which the driver copies into the log text). The shared "
-        "`startup.config_invalid->refused` is covered under the service as well, because it "
-        "reads that text.",
-        "ENG-2130",
+        "A config that doesn't load (missing, not UTF-8, malformed or invalid) is logged in "
+        "`watcher.log`, and the service ends through the `SystemExit(1)` path, like the other "
+        "start-up refusals. The shared `startup.config_invalid->refused` is covered under the "
+        "service as well, because it reads that text.",
         platforms=SERVICE,
     ),
     covered(
@@ -273,20 +266,19 @@ TRANSITIONS: tuple[Transition, ...] = (
         "queues `update_failed` with the worker's error text.",
         platforms=SERVICE,
     ),
-    xfail_bug(
+    covered(
         MACHINE,
         "service.upgrade->worker_dispatch_once",
-        "One upgrade is dispatched to the worker once: the server sees one `update_started` "
-        "for it. `_apply_via_worker` doesn't set `_upgrade_in_progress`, as the in-process "
-        "path does, so with a check on every heartbeat the next tick can dispatch it again "
-        "before the worker has stopped the service (it queues another event, and writes the "
-        "request and triggers the task again). The test checks on every heartbeat (1 s) and "
-        "holds an upload in flight across the worker's `Stop-Service`: the stop waits up to "
-        "5 s for it, and the heartbeat keeps checking until then. The test first checks "
-        "that a heartbeat tick ran between the dispatch and the old service's final "
-        "heartbeat, so a check did run in that window. The scenarios of the "
-        "upgrade itself compare the events with a repeat counted once.",
-        "ENG-2131",
+        "One upgrade is dispatched to the worker once: the server sees one `update_started` for "
+        "it. After `_apply_via_worker` has triggered the task, the watcher remembers "
+        "the hand-off for 10 minutes and its update checks dispatch nothing, so with a check on "
+        "every heartbeat no tick dispatches the upgrade again before the worker has stopped the "
+        "service. The test checks on every heartbeat (1 s) and holds an upload in flight across "
+        "the worker's `Stop-Service`: the stop waits for it until about 15 s in and then cuts it "
+        "off, and the heartbeat keeps ticking until then. The test first checks that a "
+        "heartbeat tick ran between the dispatch and the old service's final heartbeat, so a "
+        "check did run in that window. The scenarios of the upgrade itself compare the events "
+        "with a repeat counted once.",
         platforms=SERVICE,
     ),
     xfail_bug(

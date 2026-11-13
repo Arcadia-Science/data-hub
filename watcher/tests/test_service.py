@@ -26,15 +26,18 @@ import logging
 import sys
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from types import ModuleType
 from typing import Any
 from unittest.mock import MagicMock
 
+import click
 import pytest
 
 from data_hub_watcher.api_client import ApiError
+from data_hub_watcher.config_io import load_config as real_load_config
+from data_hub_watcher.constants import STOP_BUDGET_SECONDS
 from data_hub_watcher.models import (
     ConfigChecksumResponse,
     InstrumentConfig,
@@ -1071,10 +1074,16 @@ class _LoopHarness:
         # than always seeing truthy MagicMock attributes.
         self.runtime.shutdown_event = threading.Event()
         self.runtime.upgrade_restart_event = threading.Event()
+        # What the supervisor gave `build_runtime` as `upgrade_handoff`. A test that wants
+        # an upgrade handed to the Windows worker sets `on_build` to record one on it.
+        self.handoff: Any = None
+        self.on_build: Callable[[Any], None] | None = None
         self.start_calls: list[Any] = []
         self.stop_calls: list[Any] = []
         # The `system_shutdown` argument of each `stop_runtime` call, in step with `stop_calls`.
         self.stop_system_shutdown: list[bool] = []
+        # The `stop_reason` of each `stop_runtime` call: the `status_reason` of the final heartbeat.
+        self.stop_reason: list[str | None] = []
         self.sm = MagicMock(name="servicemanager")
 
         # Patch the registry read at the service-module level so the
@@ -1110,20 +1119,29 @@ class _LoopHarness:
             "env_file_path",
             lambda environment=None: tmp_path / ".env.nonexistent",
         )
-        monkeypatch.setattr(
-            runtime,
-            "build_runtime",
-            lambda **_kw: self.runtime,
-        )
+
+        def _build_runtime(**kw: Any) -> Any:
+            self.handoff = kw["upgrade_handoff"]
+            if self.on_build is not None:
+                self.on_build(self.handoff)
+            return self.runtime
+
+        monkeypatch.setattr(runtime, "build_runtime", _build_runtime)
         monkeypatch.setattr(
             runtime,
             "start_runtime",
             lambda rt, started_message="", **_kw: self.start_calls.append((rt, started_message)),
         )
 
-        def _record_stop(rt: Any, stopped_message: str = "", system_shutdown: bool = False) -> None:
+        def _record_stop(
+            rt: Any,
+            stopped_message: str = "",
+            system_shutdown: bool = False,
+            stop_reason: str | None = None,
+        ) -> None:
             self.stop_calls.append((rt, stopped_message))
             self.stop_system_shutdown.append(system_shutdown)
+            self.stop_reason.append(stop_reason)
 
         monkeypatch.setattr(runtime, "stop_runtime", _record_stop)
 
@@ -1146,6 +1164,8 @@ class _LoopHarness:
         # SCM-routing handler is the thing under test.
         from data_hub_watcher import logging_setup
 
+        # For the tests that need the real file handler (a log file in tmp_path).
+        self.real_setup_file_logging = logging_setup.setup_file_logging
         self.setup_file_logging_calls: list[None] = []
 
         def _fake_setup_file_logging() -> Path:
@@ -1277,6 +1297,89 @@ class TestRunServiceLoopHappyPath:
         assert not any("Test-only overrides" in w for w in warnings)
 
 
+class TestRunServiceLoopStop:
+    """The loop sees the SCM's stop at once, not when `poll` next times out.
+
+    `poll` waits up to a second for work. Without a wake-up, the loop would see a stop up to a
+    second late, and the uploader would go on starting parts and files until then.
+    """
+
+    @staticmethod
+    def _run_loop_in_a_poll_that_only_a_wake_ends(
+        harness: _LoopHarness, stop_event: threading.Event, system_shutdown: threading.Event
+    ) -> tuple[threading.Thread, list[Any], list[BaseException]]:
+        from data_hub_watcher import runtime
+
+        supervisors: list[Any] = []
+        real_poll = runtime.WatcherSupervisor.poll
+
+        def long_poll(self_: Any, timeout: float = 1.0) -> bool:
+            supervisors.append(self_)
+            # Far longer than the test waits: only a wake-up can end this poll in time.
+            return real_poll(self_, timeout=60.0)
+
+        harness.monkeypatch.setattr(runtime.WatcherSupervisor, "poll", long_poll)
+        errors: list[BaseException] = []
+
+        def run() -> None:
+            try:
+                harness.svc._run_service_loop(stop_event, harness.sm, system_shutdown)
+            except BaseException as exc:
+                errors.append(exc)
+
+        thread = threading.Thread(target=run, daemon=True, name="test-service-loop")
+        thread.start()
+        deadline = time.monotonic() + 10
+        while not supervisors and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert supervisors, "the loop never reached its poll"
+        return thread, supervisors, errors
+
+    def test_setting_the_stop_event_wakes_the_poll(self, harness: _LoopHarness) -> None:
+        stop_event = threading.Event()
+        thread, supervisors, errors = self._run_loop_in_a_poll_that_only_a_wake_ends(
+            harness, stop_event, threading.Event()
+        )
+        try:
+            stop_event.set()
+            thread.join(5)
+            assert not thread.is_alive(), "the loop stayed in its poll after the stop was set"
+        finally:
+            # Frees the loop if the test failed, so it doesn't wait out its 60 s poll.
+            stop_event.set()
+            for supervisor in supervisors:
+                supervisor.wake()
+            thread.join(5)
+
+        assert errors == []
+        assert len(harness.stop_calls) == 1
+        assert harness.stop_calls[0][1] == "Service stopped"
+        assert harness.stop_system_shutdown == [False]
+
+    def test_a_preshutdown_is_still_read_by_the_woken_loop(self, harness: _LoopHarness) -> None:
+        # The service class sets the shutdown mark before the stop event, so the loop that the
+        # stop event wakes reads it.
+        stop_event = threading.Event()
+        system_shutdown = threading.Event()
+        thread, supervisors, errors = self._run_loop_in_a_poll_that_only_a_wake_ends(
+            harness, stop_event, system_shutdown
+        )
+        try:
+            system_shutdown.set()
+            stop_event.set()
+            thread.join(5)
+            assert not thread.is_alive(), "the loop stayed in its poll after the stop was set"
+        finally:
+            stop_event.set()
+            for supervisor in supervisors:
+                supervisor.wake()
+            thread.join(5)
+
+        assert errors == []
+        assert harness.stop_system_shutdown == [True]
+        assert harness.stop_calls[0][1] == "Service stopped: Windows is shutting down"
+
+
 class TestRunServiceLoopFailures:
     def test_registry_read_failure_exits_with_error_log(self, harness: _LoopHarness) -> None:
         def boom() -> tuple[Path, Path]:
@@ -1338,6 +1441,156 @@ class TestRunServiceLoopFailures:
         assert "watcher_id" in harness.sm.LogErrorMsg.call_args.args[0]
         assert harness.start_calls == []
 
+    def test_a_config_that_is_malformed_is_logged_once_and_exits(
+        self, harness: _LoopHarness
+    ) -> None:
+        # ``load_config`` raises ClickException for a config that is missing, malformed or
+        # invalid. It is logged like the other refusals, instead of escaping as an unhandled
+        # exception: one line that names the file and how to check it, then the details.
+        from data_hub_watcher import config_io
+
+        def malformed(_path: Path) -> None:
+            raise click.ClickException("Malformed YAML in config.yaml:\nunclosed bracket")
+
+        harness.monkeypatch.setattr(config_io, "load_config", malformed)
+
+        with pytest.raises(SystemExit) as excinfo:
+            harness.svc._run_service_loop(threading.Event(), harness.sm)
+
+        assert excinfo.value.code == 1
+        harness.sm.LogErrorMsg.assert_called_once()
+        lines = harness.sm.LogErrorMsg.call_args.args[0].splitlines()
+        assert "Cannot load config" in lines[0]
+        # The hint names the service's own config file: a bare `config validate` would check
+        # the one in the profile of whoever runs it.
+        assert f'data-hub-watcher --config "{harness.config_path}" config validate' in lines[0]
+        assert lines[1:] == ["Malformed YAML in config.yaml:", "unclosed bracket"]
+        assert harness.start_calls == []
+
+    def test_a_config_that_cannot_be_checked_is_logged_once_and_exits(
+        self, harness: _LoopHarness
+    ) -> None:
+        # ``load_config`` turns a read error into a ClickException. The OSError it lets through
+        # is ``Path.exists()`` failing, for a network share that can't be reached, say. It is
+        # logged the same way.
+        from data_hub_watcher import config_io
+
+        def unreachable(_path: Path) -> None:
+            raise PermissionError(13, "Permission denied")
+
+        harness.monkeypatch.setattr(config_io, "load_config", unreachable)
+
+        with pytest.raises(SystemExit) as excinfo:
+            harness.svc._run_service_loop(threading.Event(), harness.sm)
+
+        assert excinfo.value.code == 1
+        harness.sm.LogErrorMsg.assert_called_once()
+        msg = harness.sm.LogErrorMsg.call_args.args[0]
+        assert "Cannot load config" in msg
+        assert "Permission denied" in msg
+        assert harness.start_calls == []
+
+    def test_a_utf16_config_is_logged_once_and_exits(self, harness: _LoopHarness) -> None:
+        # What `>` and `Out-File` write in Windows PowerShell 5.1. This keeps the real
+        # ``load_config`` (the harness replaces it), because the failure is in its read.
+        from data_hub_watcher import config_io
+
+        harness.monkeypatch.setattr(config_io, "load_config", real_load_config)
+        harness.config_path.write_bytes("version: 1\n".encode("utf-16"))
+
+        with pytest.raises(SystemExit) as excinfo:
+            harness.svc._run_service_loop(threading.Event(), harness.sm)
+
+        assert excinfo.value.code == 1
+        harness.sm.LogErrorMsg.assert_called_once()
+        lines = harness.sm.LogErrorMsg.call_args.args[0].splitlines()
+        assert "Cannot load config" in lines[0]
+        assert f'--config "{harness.config_path}" config validate' in lines[0]
+        assert "UTF-8" in " ".join(lines[1:])
+        assert harness.start_calls == []
+
+    def test_an_unexpected_error_loading_the_config_is_logged_with_its_traceback(
+        self, harness: _LoopHarness
+    ) -> None:
+        # Whatever else goes wrong in the load must not escape ``SvcRun`` either. It is a bug,
+        # so the traceback goes in the same log entry.
+        from data_hub_watcher import config_io
+
+        def broken(_path: Path) -> None:
+            raise RuntimeError("something nobody expected")
+
+        harness.monkeypatch.setattr(config_io, "load_config", broken)
+
+        with pytest.raises(SystemExit) as excinfo:
+            harness.svc._run_service_loop(threading.Event(), harness.sm)
+
+        assert excinfo.value.code == 1
+        harness.sm.LogErrorMsg.assert_called_once()
+        msg = harness.sm.LogErrorMsg.call_args.args[0]
+        assert "Cannot load config" in msg
+        assert "RuntimeError: something nobody expected" in msg
+        assert "Traceback (most recent call last)" in msg
+        assert harness.start_calls == []
+
+    @pytest.mark.parametrize(
+        ("which", "raw"),
+        [
+            ("registered", "A=1\r\n".encode("utf-16")),
+            # `>>` in Windows PowerShell 5.1 onto a file that is UTF-8: no byte order mark, and
+            # a null byte after each character.
+            ("registered", b"# Data Hub\n" + "A=1\r\n".encode("utf-16-le")),
+            ("base", "A=1\r\n".encode("utf-16")),
+        ],
+        ids=["utf16-file", "utf16-appended", "base-file"],
+    )
+    def test_an_env_file_that_is_not_utf8_is_logged_once_and_exits(
+        self, harness: _LoopHarness, which: str, raw: bytes
+    ) -> None:
+        # python-dotenv raises ValueError for it (a decode error, or "embedded null byte"),
+        # and the real ``load_dotenv`` is what raises here: the harness replaces it.
+        import dotenv
+
+        from data_hub_watcher import constants
+
+        harness.monkeypatch.setattr(dotenv, "load_dotenv", dotenv.main.load_dotenv)
+        bad = harness.env_path
+        if which == "base":
+            # The registered file stays the harness's empty one, so only the base one is at fault.
+            bad = harness.tmp_path / ".env.base"
+            harness.monkeypatch.setattr(constants, "env_file_path", lambda environment=None: bad)
+        bad.write_bytes(raw)
+
+        with pytest.raises(SystemExit) as excinfo:
+            harness.svc._run_service_loop(threading.Event(), harness.sm)
+
+        assert excinfo.value.code == 1
+        harness.sm.LogErrorMsg.assert_called_once()
+        msg = harness.sm.LogErrorMsg.call_args.args[0]
+        assert "Cannot load env file" in msg
+        assert str(bad) in msg
+        assert "UTF-8" in msg
+        assert harness.start_calls == []
+
+    def test_an_env_file_that_cannot_be_read_is_logged_once_and_exits(
+        self, harness: _LoopHarness
+    ) -> None:
+        import dotenv
+
+        def denied(*_args: Any, **_kwargs: Any) -> None:
+            raise PermissionError(13, "Permission denied")
+
+        harness.monkeypatch.setattr(dotenv, "load_dotenv", denied)
+
+        with pytest.raises(SystemExit) as excinfo:
+            harness.svc._run_service_loop(threading.Event(), harness.sm)
+
+        assert excinfo.value.code == 1
+        harness.sm.LogErrorMsg.assert_called_once()
+        msg = harness.sm.LogErrorMsg.call_args.args[0]
+        assert "Cannot read env file" in msg
+        assert "Permission denied" in msg
+        assert harness.start_calls == []
+
 
 class TestRunServiceLoopUpgradeRestart:
     """The in-process auto-updater asks the runtime to exit non-zero on
@@ -1366,6 +1619,9 @@ class TestRunServiceLoopUpgradeRestart:
         # produced by `classify_shutdown` and shared with the CLI watch
         # path so the two entrypoints can't drift.
         assert harness.stop_calls[0][1] == "Service restarting for auto-update"
+        # And the final heartbeat says the same to the server, which then keeps the
+        # instrument's requested uploads queued for the restarted service.
+        assert harness.stop_reason == ["auto_update"]
         # And the operator-facing log line must distinguish this from a
         # normal stop so the Windows event log shows what happened.
         log_messages = [c.args[0] for c in harness.sm.LogInfoMsg.call_args_list]
@@ -1390,8 +1646,38 @@ class TestRunServiceLoopUpgradeRestart:
             "Service stopped: Windows is shutting down"
         ]
         assert harness.stop_system_shutdown == [True]
+        assert harness.stop_reason == ["system_shutdown"]
         log_messages = [c.args[0] for c in harness.sm.LogInfoMsg.call_args_list]
         assert not any("upgraded" in m.lower() for m in log_messages)
+
+
+class TestRunServiceLoopStopReason:
+    """The final `stopped` heartbeat's `status_reason` for a stop that isn't a shutdown."""
+
+    def test_a_stop_while_an_upgrade_is_handed_to_the_worker_is_an_update_stop(
+        self, harness: _LoopHarness
+    ) -> None:
+        # The Windows upgrade worker stops the service from outside, with `Stop-Service`:
+        # an ordinary stop for the service loop, which then exits with code 0. The
+        # updater's memory of the hand-off is what tells it from an operator's stop.
+        harness.on_build = lambda handoff: handoff.record("9.9.9")
+        stop_event = threading.Event()
+        stop_event.set()
+
+        harness.svc._run_service_loop(stop_event, harness.sm)
+
+        # The stop message keeps its ordinary wording.
+        assert [message for _rt, message in harness.stop_calls] == ["Service stopped"]
+        assert harness.stop_system_shutdown == [False]
+        assert harness.stop_reason == ["auto_update"]
+
+    def test_an_ordinary_stop_sends_no_reason(self, harness: _LoopHarness) -> None:
+        stop_event = threading.Event()
+        stop_event.set()
+
+        harness.svc._run_service_loop(stop_event, harness.sm)
+
+        assert harness.stop_reason == [None]
 
 
 class TestRunServiceLoopChecksumSync:
@@ -1559,6 +1845,92 @@ class TestRunServiceLoopLogging:
         harness.sm.LogWarningMsg.assert_called_once()
         assert "Upload is slow" in harness.sm.LogWarningMsg.call_args.args[0]
 
+    def test_a_log_level_set_in_the_registered_env_file_is_applied(
+        self,
+        harness: _LoopHarness,
+    ) -> None:
+        # The service sets up logging before it loads its env file, so a level set in that file
+        # has to be applied after the load. The fake load_dotenv sets the variable on the override
+        # load, which is the one for the registered file.
+        def load_env_file(*args: Any, **kwargs: Any) -> None:
+            harness.dotenv_calls.append((args, kwargs))
+            if kwargs.get("override"):
+                harness.monkeypatch.setenv("DATA_HUB_WATCHER_LOG_LEVEL", "DEBUG")
+
+        import dotenv
+
+        harness.monkeypatch.setattr(dotenv, "load_dotenv", load_env_file)
+        stop_event = threading.Event()
+        stop_event.set()
+
+        harness.svc._run_service_loop(stop_event, harness.sm)
+
+        assert len(harness.start_calls) == 1
+        assert logging.getLogger().level == logging.DEBUG
+        assert harness.svc.logger.isEnabledFor(logging.DEBUG)
+
+        # DEBUG and INFO lines from another module now reach the logger, and they still stay out
+        # of the Event Log, as INFO lines do.
+        harness.sm.reset_mock()
+        monitor_logger = logging.getLogger("data_hub_watcher.monitor")
+        assert monitor_logger.isEnabledFor(logging.DEBUG)
+        monitor_logger.debug("Polling: a.csv")
+        monitor_logger.info("File stable: a.csv")
+
+        harness.sm.LogInfoMsg.assert_not_called()
+        harness.sm.LogWarningMsg.assert_not_called()
+
+    @pytest.mark.parametrize("level", ["WARNING", "ERROR"])
+    @pytest.mark.parametrize("source", ["env file", "process environment"])
+    def test_the_service_keeps_its_own_lifecycle_lines_when_the_level_is_raised(
+        self, harness: _LoopHarness, level: str, source: str
+    ) -> None:
+        # A level above INFO quiets the other modules. The service's own lines ("starting", "is
+        # running", "stopped") are the ones an operator and the end-to-end suite look for, so
+        # they stay in watcher.log and the Event Log. This uses the real file handler.
+        from data_hub_watcher import logging_setup
+
+        log_dir = harness.tmp_path / "logs"
+        harness.monkeypatch.setattr(logging_setup, "WATCHER_LOG_DIR", log_dir)
+        harness.monkeypatch.setattr(
+            logging_setup, "setup_file_logging", harness.real_setup_file_logging
+        )
+        if source == "process environment":
+            harness.monkeypatch.setenv("DATA_HUB_WATCHER_LOG_LEVEL", level)
+        else:
+
+            def load_env_file(*args: Any, **kwargs: Any) -> None:
+                harness.dotenv_calls.append((args, kwargs))
+                if kwargs.get("override"):
+                    harness.monkeypatch.setenv("DATA_HUB_WATCHER_LOG_LEVEL", level)
+
+            import dotenv
+
+            harness.monkeypatch.setattr(dotenv, "load_dotenv", load_env_file)
+        stop_event = threading.Event()
+        stop_event.set()
+
+        harness.svc._run_service_loop(stop_event, harness.sm)
+        # Another module logs after the service has started, as the watcher does for each file.
+        monitor_logger = logging.getLogger("data_hub_watcher.monitor")
+        monitor_logger.info("File stable: a.csv")
+        monitor_logger.error("Upload failed: a.csv")
+
+        assert logging.getLogger().level == getattr(logging, level)
+        watcher_log = (log_dir / logging_setup.LOG_FILENAME).read_text(encoding="utf-8")
+        assert "starting" in watcher_log
+        assert "is running" in watcher_log
+        assert "stopped" in watcher_log
+        assert "File stable" not in watcher_log
+        assert "Upload failed" in watcher_log
+        info_messages = [c.args[0] for c in harness.sm.LogInfoMsg.call_args_list]
+        assert any("starting" in m for m in info_messages)
+        assert any("is running" in m for m in info_messages)
+        assert any(m.endswith("stopped") for m in info_messages)
+        assert not any("File stable" in m for m in info_messages)
+        harness.sm.LogErrorMsg.assert_called_once()
+        assert "Upload failed" in harness.sm.LogErrorMsg.call_args.args[0]
+
     def test_service_lifecycle_lines_reach_the_event_log(
         self,
         harness: _LoopHarness,
@@ -1684,6 +2056,31 @@ class TestServiceClass:
         state, accepted, _wait_hint = svc.reported[-1]
         assert state == ws.SERVICE_STOP_PENDING
         assert accepted & ws.SERVICE_ACCEPT_PRESHUTDOWN
+
+    def test_a_stop_asks_the_scm_to_wait_for_a_stop_that_can_take_25_seconds(
+        self, service_class: type
+    ) -> None:
+        # pywin32 reports 5 s unless told otherwise, and a stop is limited to 25 s plus the
+        # up to 1 s the service loop takes to notice it.
+        ws = sys.modules["win32service"]
+        svc = service_class(["DataHubWatcher"])
+
+        svc.ServiceCtrlHandlerEx(ws.SERVICE_CONTROL_STOP, 0, None)
+
+        _state, _accepted, wait_hint = svc.reported[-1]
+        assert wait_hint == 30_000
+        assert wait_hint / 1000 > STOP_BUDGET_SECONDS + 1
+
+    def test_a_preshutdown_keeps_pywins_wait_hint(self, service_class: type) -> None:
+        # Windows waits for the preshutdown timeout whatever the hint says, and this stop is
+        # limited to 7 s, so it has no use for the longer hint.
+        ws = sys.modules["win32service"]
+        svc = service_class(["DataHubWatcher"])
+
+        svc.ServiceCtrlHandlerEx(ws.SERVICE_CONTROL_PRESHUTDOWN, 0, None)
+
+        _state, _accepted, wait_hint = svc.reported[-1]
+        assert wait_hint == 5000
 
     def test_a_control_the_service_does_not_handle_changes_nothing(
         self, service_class: type

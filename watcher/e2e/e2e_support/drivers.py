@@ -154,14 +154,14 @@ failed or killed service after 60 s and then 120 s.
   it stays down, ``wait_exit`` returns the win32 exit code of the killed process (1067), and
   ``restart()`` is the only supervisor. ``stall_writes`` and ``fail_writes`` below may call
   ``kill()`` when a watcher is stuck inside a trigger.
-* **The service's** ``config_invalid`` **path.** ``_run_service_loop`` calls ``load_config``
-  outside of any ``try``, so a missing or malformed config raises an unhandled
-  ``ClickException`` where every other refusal logs an error and exits through
-  ``SystemExit(1)``. The message is not in ``watcher.log``: it reaches the Event Log (the
-  traceback the service host reports, which the driver copies into the log text), and
-  ``service-bootstrap.log`` if the exception reaches the dispatcher. The shared test reads it
-  from the log text, so it holds either way. Whether the unhandled exception should be a
-  logged ``SystemExit(1)`` like the others is a product question the catalog doesn't decide.
+* **The service's** ``config_invalid`` **path.** ``_run_service_loop`` catches any exception
+  from ``load_config``. ``load_config`` turns a missing, unreadable, not-UTF-8, malformed or
+  invalid file into a ``ClickException``, and the ``OSError`` the service also expects is
+  ``Path.exists()`` raising (for example an unreachable network share). The service logs one
+  error, to ``watcher.log`` and the Event Log: a first line that names the file and the
+  ``--config "<path>" config validate`` command that checks it, then the reason on the lines
+  after. It exits through ``SystemExit(1)`` like the other refusals. The shared test reads the
+  message from the log text.
 * **start() arguments.** ``args`` and ``global_args`` are command-line arguments of ``watch``
   (``args=("--dry-run",)``) and of the group before it (``global_args=("--verbose",)``). A
   service takes neither: ``start`` raises ``NotImplementedError``.

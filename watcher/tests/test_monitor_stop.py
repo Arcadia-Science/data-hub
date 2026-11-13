@@ -5,6 +5,7 @@ service when its preshutdown timeout passes. Any other stop keeps the defaults.
 """
 
 from __future__ import annotations
+import logging
 import threading
 from collections.abc import Generator
 from pathlib import Path
@@ -69,3 +70,45 @@ class TestStopTimeouts:
         # The thread mock still says it is alive after the join: an upload that it is
         # running outlasts the wait.
         assert monitor.stop(timeout=1, observer_timeout=1) is False
+
+
+class TestStoppedIsLoggedOnlyOnceItIsTrue:
+    """`stop(timeout=0.0)` returns at once, and the stability checker can be uploading a file."""
+
+    def test_a_checker_still_running_is_not_logged_as_stopped(
+        self, tmp_path: Path, state_db: StateDB, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        monitor, _observer, _checker = _monitor_with_running_threads(tmp_path, state_db)
+
+        with caplog.at_level(logging.INFO, logger="data_hub_watcher.monitor"):
+            assert monitor.stop(timeout=0.0) is False
+
+        messages = [r.getMessage() for r in caplog.records]
+        assert "FileMonitor stopped" not in messages
+        assert any("still running" in m for m in messages)
+
+    def test_the_wait_that_follows_logs_it_when_the_checker_has_exited(
+        self, tmp_path: Path, state_db: StateDB, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        monitor, _observer, checker = _monitor_with_running_threads(tmp_path, state_db)
+        monitor.stop(timeout=0.0)
+        caplog.clear()
+        # The upload ended while the stop waited for it.
+        checker.is_alive.return_value = False
+
+        with caplog.at_level(logging.INFO, logger="data_hub_watcher.monitor"):
+            assert monitor.join(5.0) is True
+
+        assert [r.getMessage() for r in caplog.records] == ["FileMonitor stopped"]
+
+    def test_a_checker_that_exits_in_time_is_logged_as_stopped_by_the_stop(
+        self, tmp_path: Path, state_db: StateDB, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        monitor, _observer, checker = _monitor_with_running_threads(tmp_path, state_db)
+        # Alive when the stop looks, gone after the join.
+        checker.is_alive.side_effect = [True, False]
+
+        with caplog.at_level(logging.INFO, logger="data_hub_watcher.monitor"):
+            assert monitor.stop() is True
+
+        assert [r.getMessage() for r in caplog.records] == ["FileMonitor stopped"]

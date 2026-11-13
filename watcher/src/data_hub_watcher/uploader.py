@@ -15,12 +15,11 @@ import re
 import threading
 import time
 from collections.abc import Callable, Iterator, Sequence
-from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
-from typing import TypeVar, cast
+from typing import Any, Generic, TypeVar, cast
 
 import requests as http_requests
 from requests.adapters import HTTPAdapter
@@ -418,6 +417,70 @@ def _run_workers(
         raise
     if errors:
         raise errors[0]
+
+
+class _DaemonFuture(Generic[_T]):
+    """The result of one call run on its own daemon thread, read like a `Future`'s."""
+
+    def __init__(
+        self, fn: Callable[..., _T], args: tuple[Any, ...], kwargs: dict[str, Any], name: str
+    ) -> None:
+        self._fn = fn
+        self._args = args
+        self._kwargs = kwargs
+        self._done = threading.Event()
+        self._value: _T | None = None
+        self._error: BaseException | None = None
+        self._thread = threading.Thread(target=self._run, name=name, daemon=True)
+        self._thread.start()
+
+    def _run(self) -> None:
+        try:
+            self._value = self._fn(*self._args, **self._kwargs)
+        except BaseException as exc:
+            self._error = exc
+        finally:
+            self._done.set()
+
+    def wait(self) -> None:
+        """Wait for the call to finish, in short timed steps (see `_WAIT_STEP_SECONDS`)."""
+        while not self._done.wait(_WAIT_STEP_SECONDS):
+            pass
+
+    def result(self) -> _T:
+        """Wait for the call, then return its value or raise the error it raised."""
+        self.wait()
+        if self._error is not None:
+            raise self._error
+        return cast(_T, self._value)
+
+
+class _DaemonCalls:
+    """A stand-in for a small `ThreadPoolExecutor` whose threads are daemon threads.
+
+    Each `submit` runs its call on a new thread, and leaving the ``with`` block waits for
+    every call started in it, as an executor's shutdown does. The difference is the
+    daemon threads. Python joins a `ThreadPoolExecutor`'s threads when the process
+    exits, so a request still waiting for the server (up to 35 s) would hold a stopping
+    watcher open past its deadline, and a stopped service could keep `python.exe` alive
+    after the SCM reports it stopped. A daemon thread is dropped at exit instead.
+    """
+
+    def __init__(self, name_prefix: str) -> None:
+        self._name_prefix = name_prefix
+        self._futures: list[_DaemonFuture[Any]] = []
+
+    def __enter__(self) -> _DaemonCalls:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        for future in self._futures:
+            future.wait()
+
+    def submit(self, fn: Callable[..., _T], /, *args: Any, **kwargs: Any) -> _DaemonFuture[_T]:
+        future = _DaemonFuture(fn, args, kwargs, f"{self._name_prefix}-{len(self._futures) + 1}")
+        self._futures.append(future)
+        return future
 
 
 def _xml_tag(body: str, tag: str) -> str | None:
@@ -937,6 +1000,16 @@ class Uploader:
         """Set the stop event, if there is one, for a wait that Ctrl-C interrupted."""
         if self._stop_event is not None:
             self._stop_event.set()
+
+    def request_stop(self) -> None:
+        """Start no new file or part from now on, on any thread. Those already sending finish.
+
+        For a stop that begins with the uploader, before it waits for the file monitor and
+        the upload worker: an auto-mode upload runs on the monitor's own thread, which a
+        wait for the monitor would otherwise leave free to start parts and the next file.
+        `abort` also cuts off what is sending.
+        """
+        self._request_stop()
 
     def abort(self) -> None:
         """Stop, and cut off the PUTs and hashing still in progress.
@@ -1708,13 +1781,16 @@ class Uploader:
         Concurrency note
         ----------------
         ``file_digests(path)`` and ``client.request_upload_url(...)``
-        run on a tiny 2-thread pool so the (CPU+IO bound) hash and the
+        run on two threads so the (CPU+IO bound) hash and the
         (network bound) presigned-URL request fully overlap. On a
         multi-GiB instrument file with a slow API, this halves the
         critical-path latency before the actual S3 PUT can start. The
-        pool is created per call -- short-lived overhead is dwarfed by
-        the time savings on any non-trivial file. A file that was found
-        unreadable before is the exception: it is hashed first, and the
+        threads are started per call -- short-lived overhead is dwarfed by
+        the time savings on any non-trivial file. They are daemon threads
+        (see `_DaemonCalls`): a presigned-URL request still waiting for a
+        server that stopped answering must not hold the process open when
+        a stop gives up on this thread. A file that was found unreadable
+        before is the exception: it is hashed first, on this thread, and the
         URL is requested only once the hash has read all of it.
         """
         content_type = _guess_content_type(path)
@@ -1763,22 +1839,21 @@ class Uploader:
                 return False
         else:
             # Kick off both the SHA-256 and the presigned-URL request in
-            # parallel. ``ThreadPoolExecutor(2)`` is plenty: hashing is
+            # parallel, each on its own daemon thread: hashing is
             # CPU/IO with mostly-released GIL via hashlib's C
             # implementation, and the request thread blocks on the
             # network. Resolve both before branching so the rest of the
             # method behaves exactly as the old serial version.
-            with ThreadPoolExecutor(max_workers=2, thread_name_prefix="upload-prep") as prep:
+            with _DaemonCalls("upload-prep") as prep:
                 sha_future = prep.submit(file_digests, path, self._abort)
                 presign_future = prep.submit(request_url)
 
                 try:
                     presigned = presign_future.result()
                 except ApiError as exc:
-                    # Wait for the hash to finish (cancellation is best-effort
-                    # for already-running futures) before exiting the
-                    # ``with`` block, otherwise the pool blocks on shutdown.
-                    sha_future.cancel()
+                    # The hash is still running. Wait for it before reporting the
+                    # failure, as the ``with`` block would on its way out, so a
+                    # retry doesn't hash the file a second time beside this one.
                     try:
                         sha_future.result()
                     except Exception:

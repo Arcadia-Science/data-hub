@@ -7,6 +7,9 @@ import hashlib
 import itertools
 import logging
 import signal
+import subprocess
+import sys
+import textwrap
 import threading
 import time
 from collections.abc import Callable, Generator, Iterator
@@ -41,6 +44,7 @@ from data_hub_watcher.uploader import (
     Uploader,
     UploadQueueWorker,
     _cant_read_yet,
+    _DaemonCalls,
     _exists,
     _FileSlice,
     _guess_content_type,
@@ -1058,6 +1062,89 @@ class TestStopDuringPrep:
         assert [p.relative_path for p in state_db.pending_uploads()] == ["big.bin"]
         run = state_db.get_run("RUN-001")
         assert run is None or run.uploaded_at is None
+
+
+class TestRequestStop:
+    """`request_stop` starts no new part or file, and lets the parts in flight finish.
+
+    A stop calls it first, before it waits for the file monitor: an auto-mode upload runs on
+    the monitor's own thread, and it must stop starting parts and files as soon as the stop
+    is requested, not when the upload worker is stopped a few seconds later.
+    """
+
+    def test_it_sets_the_stop_signal_but_does_not_abort(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path
+    ) -> None:
+        stop = threading.Event()
+        up = _make_uploader(mock_client, state_db, tmp_path, parallelism=1, stop_event=stop)
+
+        up.request_stop()
+
+        assert stop.is_set()
+        assert up._stop_requested()
+        assert not up._abort.is_set()
+
+    def test_without_a_stop_event_it_does_nothing(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path
+    ) -> None:
+        up = _make_uploader(mock_client, state_db, tmp_path, parallelism=1)
+
+        up.request_stop()
+
+        assert not up._stop_requested()
+
+    def test_a_part_in_flight_finishes_and_no_further_part_starts(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path
+    ) -> None:
+        _write_parts_file(tmp_path, "big.bin", part_count=4, part_size=4)
+        mock_client.request_upload_url.return_value = _multipart_presigned(
+            part_size=4, part_count=4
+        )
+        mock_client.get_part_urls.side_effect = _part_urls
+        up = _make_uploader(
+            mock_client, state_db, tmp_path, parallelism=1, stop_event=threading.Event()
+        )
+        sent: list[tuple[int, int]] = []
+
+        def put(url: str, *, data: _FileSlice, **kwargs: object) -> MagicMock:
+            number = _part_number(url)
+            up.request_stop()
+            # The part is not cut off: its whole body is still read.
+            sent.append((number, len(data.read())))
+            return _etag_response(number)
+
+        with patch.object(up._s3_session, "put", side_effect=put):
+            assert up._upload_single(tmp_path / "big.bin", "RUN-001") is False
+
+        assert sent == [(1, 4)]
+        mock_client.complete_multipart_upload.assert_not_called()
+        mock_client.abort_multipart_upload.assert_not_called()
+        assert up._counters.errors == 0
+        cast(MagicMock, up._reporter).queue_event.assert_not_called()
+
+    def test_no_further_file_starts(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path
+    ) -> None:
+        run_dir = tmp_path / "RUN-1"
+        run_dir.mkdir()
+        up = _make_uploader(
+            mock_client, state_db, tmp_path, parallelism=1, stop_event=threading.Event()
+        )
+        files = []
+        for name in ("a.csv", "b.csv"):
+            (run_dir / name).write_text("x")
+            files.append(_file_info(run_dir / name))
+        attempted: list[str] = []
+
+        def upload(path: Path, run_id: str) -> bool:
+            attempted.append(path.name)
+            up.request_stop()
+            return False
+
+        with patch.object(up, "_upload_single", side_effect=upload):
+            assert up.upload_files("RUN-1", files) == 0
+
+        assert attempted == ["a.csv"]
 
 
 class TestAbort:
@@ -3983,6 +4070,119 @@ class TestRunWorkers:
         assert not any(t.name.startswith("test-errors") for t in threading.enumerate())
 
 
+class TestDaemonCalls:
+    """The hash and the upload-URL request of a file run on daemon threads.
+
+    A `ThreadPoolExecutor` does neither: Python joins its threads at exit, so a URL request
+    that is waiting for a server that stopped answering (5 s to connect and 30 s to read)
+    would keep a stopping watcher's process alive for up to 35 s. A stop gives up on the
+    thread that waits for that request after its limit, so the exit must not wait for it.
+    """
+
+    def test_a_call_runs_on_a_named_daemon_thread_and_its_value_comes_back(self) -> None:
+        threads: list[threading.Thread] = []
+
+        def add(a: int, b: int, *, extra: int) -> int:
+            threads.append(threading.current_thread())
+            return a + b + extra
+
+        with _DaemonCalls("test-prep") as calls:
+            future = calls.submit(add, 1, 2, extra=3)
+            assert future.result() == 6
+
+        (thread,) = threads
+        assert thread is not threading.current_thread()
+        assert thread.daemon
+        assert thread.name == "test-prep-1"
+
+    def test_the_calls_run_at_the_same_time(self) -> None:
+        both_started = threading.Barrier(2, timeout=5)
+
+        with _DaemonCalls("test-prep") as calls:
+            first = calls.submit(both_started.wait)
+            second = calls.submit(both_started.wait)
+            # Each waits for the other, so neither would return if they ran one after the other.
+            first.result()
+            second.result()
+
+    def test_an_error_is_raised_by_result_as_it_was_raised(self) -> None:
+        boom = ApiError("boom", status_code=503)
+
+        def fail() -> None:
+            raise boom
+
+        with _DaemonCalls("test-prep") as calls:
+            future = calls.submit(fail)
+            with pytest.raises(ApiError) as raised:
+                future.result()
+
+        assert raised.value is boom
+
+    def test_leaving_the_block_waits_for_every_call(self) -> None:
+        finished = threading.Event()
+
+        def slow() -> None:
+            time.sleep(0.3)
+            finished.set()
+
+        with _DaemonCalls("test-prep") as calls:
+            calls.submit(slow)
+
+        assert finished.is_set()
+
+    def test_the_caller_waits_in_timed_steps(self) -> None:
+        # A wait with no timeout cannot be interrupted by Ctrl-C on Windows.
+        timeouts: list[float | None] = []
+        watched: list[threading.Event] = []
+        real_wait = threading.Event.wait
+
+        def wait(self_: threading.Event, timeout: float | None = None) -> bool:
+            if any(self_ is event for event in watched):
+                timeouts.append(timeout)
+            return real_wait(self_, timeout)
+
+        with (
+            patch("data_hub_watcher.uploader._WAIT_STEP_SECONDS", 0.02),
+            patch.object(threading.Event, "wait", wait),
+            _DaemonCalls("test-prep") as calls,
+        ):
+            future = calls.submit(time.sleep, 0.15)
+            watched.append(future._done)
+            future.result()
+
+        assert len(timeouts) >= 3
+        assert set(timeouts) == {0.02}
+
+    def test_a_call_that_never_returns_does_not_hold_the_process_open_at_exit(self) -> None:
+        # The same thing in a process of its own, because it is about how Python exits: a
+        # call is left waiting forever, as a request to a server that never answers is.
+        script = textwrap.dedent(
+            """
+            import threading
+            from data_hub_watcher.uploader import _DaemonCalls
+
+            calls = _DaemonCalls("hung-prep")
+            started = threading.Event()
+            calls.submit(lambda: (started.set(), threading.Event().wait()))
+            assert started.wait(10)
+            print("leaving")
+            """
+        )
+
+        try:
+            done = subprocess.run(
+                [sys.executable, "-I", "-c", script],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+        except subprocess.TimeoutExpired:
+            pytest.fail("the process did not exit while a call was still waiting")
+
+        assert done.returncode == 0, done.stderr
+        assert "leaving" in done.stdout
+
+
 class TestWorkerThreads:
     """Each call site runs its workers on daemon threads that are named for it."""
 
@@ -4011,6 +4211,33 @@ class TestWorkerThreads:
             assert up._upload_single(tmp_path / "big.bin", "RUN-001") is True
 
         self._check(threads, "upload-part-", 4)
+
+    def test_the_hash_and_the_upload_url_request(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "f.csv"
+        path.write_text("x")
+        up = _make_uploader(mock_client, state_db, tmp_path, parallelism=1)
+        threads: list[threading.Thread] = []
+
+        def digests(file_path: Path, cancel: threading.Event) -> tuple[str, str]:
+            threads.append(threading.current_thread())
+            return file_digests(file_path, cancel)
+
+        def request_url(*args: object, **kwargs: object) -> PresignedUploadResponse:
+            threads.append(threading.current_thread())
+            return _single_presigned("f.csv")
+
+        mock_client.request_upload_url.side_effect = request_url
+
+        with (
+            patch("data_hub_watcher.uploader.file_digests", side_effect=digests),
+            patch.object(Uploader, "_put_to_presigned_url"),
+        ):
+            assert up._upload_single(path, "RUN-001") is True
+
+        self._check(threads, "upload-prep-", 2)
+        assert threading.current_thread() not in threads
 
     def test_auto_mode_file_workers(
         self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path

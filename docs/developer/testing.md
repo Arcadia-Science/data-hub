@@ -195,7 +195,8 @@ program and break things around it.
   watcher and the test server, passes requests through, and lets a test switch
   on faults such as error responses, delays, dropped connections and an outage,
   so the test can check how the watcher copes. It forwards requests unchanged
-  and keeps a log of them, including their headers, for the test to read.
+  and keeps a log of them, including their headers and any body up to 64 KiB
+  (`MAX_RECORDED_BODY_BYTES`), for the test to read.
 - **`testing_index`:** `LocalPackageIndex` is a small package index that lists
   the watcher wheels in a folder and sends every other package to the real PyPI,
   so a test can offer the watcher a newer version to update to without
@@ -385,7 +386,7 @@ shared code is the package `watcher/e2e/e2e_support/`, which pytest finds throug
 | `server` | `ServerView`: the watcher row, the status the web app shows (`stale` included) and the watcher list route's rows (`list_watchers`), events, heartbeats, files, runs and their derived status, helpers that make a timestamp old, and the S3 stand-in's objects. It has `wait_for_*` methods that fail with a dump of the server's state |
 | `admin` | `Admin`: the actions of a person in the web app, through the real routes. Request upload, delete and restore a run, dismiss a file, change an instrument's status, deregister a watcher, save a config revision, set the release, revoke a token, run the cron sweep |
 | `waiting` | `wait_until`, the deadline poll behind every wait, and `stays_true` for "this must not happen". Tests never sleep for a fixed time. A timeout shows the last value seen. `known_bug()` and `KnownBugStillPresent` are for [tests of known bugs](#the-transition-catalog) |
-| `proxy_helpers` | What several scenario files do with the fault proxy. `silence_heartbeats` keeps a watcher's heartbeats from reaching the server, so a killed watcher's last heartbeat can be aged without one still on its way refreshing it. `wait_for_answer` waits until the proxy has noted the server's answer to a request. A test needs it before it reads `upstream_status` right after waiting for the server's state, because the server stores a file before it answers |
+| `proxy_helpers` | What several scenario files do with the fault proxy. `silence_heartbeats` keeps a watcher's heartbeats from reaching the server, so a killed watcher's last heartbeat can be aged without one still on its way refreshing it. `wait_for_answer` waits until the proxy has noted the server's answer to a request. A test needs it before it reads `upstream_status` right after waiting for the server's state, because the server stores a file before it answers. `stopped_heartbeats` returns the bodies of the `stopped` heartbeats the watcher sent. A test reads the `status_reason` of an old process's final heartbeat there, because the server clears the reason on the watcher's row when the watcher heartbeats again |
 | `platforms` | Which kind of driver a `@pytest.mark.platforms(...)` test is for, and when a run skips it |
 | `files` | Write run folders, files of an exact size on each side of the 1 KB multipart threshold, and a file that keeps growing |
 | `factory`, `artifacts` | The `watcher` fixture's factory and the failure artifacts |
@@ -438,8 +439,9 @@ What a driver offers:
   the exit code or the "restarting for auto-update" event is marked `platforms("cli")`. A scenario
   that waits for an install reads how long from `driver.install_timeout_seconds` (180 s, 300 s under
   the service, whose worker runs `uv` as `LocalSystem` with a cold cache) and keeps no constant of
-  its own. Under the service the updater can dispatch the same upgrade to the worker twice, so a
-  scenario about the upgrade compares its events with a repeat counted once.
+  its own. A scenario about the upgrade compares its events with a repeat counted once, so it
+  doesn't depend on how many times an event was announced. `service.upgrade->worker_dispatch_once`
+  is the one that counts them.
   `install_wheel(wheel)` puts another version in place of the installed one while the watcher is
   stopped (the PC must have an install of its own), for the scenario of an update that did not
   take effect: the new version was installed, and the old one is back at the next start.
@@ -566,13 +568,13 @@ bug:
 @pytest.mark.xfail(
     strict=True,
     raises=KnownBugStillPresent,
-    reason="ENG-2116: the final heartbeat arrives first",
+    reason="ENG-2118: a stop during start-up ends with no stopped heartbeat",
 )
-@pytest.mark.covers("process.stop->event_before_stopped_heartbeat")
-def test_the_stop_event_reaches_the_server_first(...):
-    ...  # The precondition: the watcher runs, it was stopped, the rows exist.
+@pytest.mark.covers("process.stop->clean_stop_during_scan")
+def test_a_stop_during_start_up_still_ends_with_a_clean_stop(...):
+    ...  # The precondition: the watcher is held up in its first heartbeat, and a stop was requested.
     with known_bug():
-        assert event.created_at <= final.created_at
+        assert pc.wait_exit(30) == 0
 ```
 
 `known_bug()` turns an `AssertionError` raised inside it (a `WaitTimeout` too) into
@@ -581,7 +583,7 @@ block is a different failure, so the test fails and doesn't count as the bug. Pu
 assertion that shows the intended behavior inside. The check enforces the pattern: the xfail is
 strict and has `raises=KnownBugStillPresent`, the test has a `with known_bug():` block and names
 only `xfail_bug` transitions, its reason starts with the bug of one of them (its Linear issue, such
-as `ENG-2116:`, or a short slug until the issue is filed), and
+as `ENG-2118:`, or a short slug until the issue is filed), and
 no other test names an `xfail_bug` transition. To see that a test fails inside the block, run it
 with `--runxfail`.
 

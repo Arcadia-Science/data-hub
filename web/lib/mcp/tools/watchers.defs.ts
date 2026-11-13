@@ -39,7 +39,7 @@ export const listWatchersTool = {
       .enum(["registered", "watching", "stopped", "waiting", "stale"])
       .optional()
       .describe(
-        "Filter by effective status. stale is computed, never stored: a watching or waiting watcher with no heartbeat for 5 minutes, or one that stopped for a restart or an update and has sent none for 15 minutes. A stopped watcher otherwise stays stopped, and a deregistered watcher is always stopped."
+        "Filter by effective status. stale is computed, never stored: a watching or waiting watcher with no heartbeat for 5 minutes, or one that stopped for a restart or an automatic update and has sent none for 15 minutes. A stopped watcher otherwise stays stopped, and a deregistered watcher is always stopped."
       ),
   },
   outputSchema: listWatchersOutputSchema,
@@ -50,7 +50,7 @@ export const getWatcherTool = {
   name: "get_watcher",
   title: "Get Watcher",
   description:
-    "Get watcher detail including config YAML, OS info, effective status (with statusReason when waiting for a missing folder, when stopped for a Windows restart or shutdown (system_shutdown), or when stopped to install an update (auto_update, which watcher 1.4.2 will send); the reason stays while the status reads stale), config revision numbers, any pending config change, and deregistration actor when applicable. appliedConfigRevision is the revision the watcher reports running. configYaml is its config file, which can be newer: when pcEditAwaitingRestart is true, the file was edited on the PC while the watcher ran, and that edit takes effect when the watcher restarts.",
+    "Get watcher detail including config YAML, OS info, effective status (with statusReason when waiting for a missing folder, when stopped for a Windows restart or shutdown (system_shutdown), or when stopped to install an automatic update (auto_update, which watcher 1.4.2 and later send); the reason stays while the status reads stale), config revision numbers, any pending config change, and deregistration actor when applicable. appliedConfigRevision is the revision the watcher reports running. configYaml is its config file, which can be newer: when pcEditAwaitingRestart is true, the file was edited on the PC while the watcher ran, and that edit takes effect when the watcher restarts.",
   group: "watchers",
   scope: "watchers:read",
   inputSchema: { watcherId: z.string().describe("Watcher UUID") },
