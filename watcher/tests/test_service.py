@@ -36,6 +36,7 @@ import click
 import pytest
 
 from data_hub_watcher.api_client import ApiError
+from data_hub_watcher.config_io import load_config as real_load_config
 from data_hub_watcher.models import (
     ConfigChecksumResponse,
     InstrumentConfig,
@@ -1344,7 +1345,7 @@ class TestRunServiceLoopFailures:
     ) -> None:
         # ``load_config`` raises ClickException for a config that is missing, malformed or
         # invalid. It is logged like the other refusals, instead of escaping as an unhandled
-        # exception.
+        # exception: one line that names the file and how to check it, then the details.
         from data_hub_watcher import config_io
 
         def malformed(_path: Path) -> None:
@@ -1357,22 +1358,26 @@ class TestRunServiceLoopFailures:
 
         assert excinfo.value.code == 1
         harness.sm.LogErrorMsg.assert_called_once()
-        msg = harness.sm.LogErrorMsg.call_args.args[0]
-        assert "Cannot load config" in msg
-        assert "Malformed YAML" in msg
-        assert "config validate" in msg
+        lines = harness.sm.LogErrorMsg.call_args.args[0].splitlines()
+        assert "Cannot load config" in lines[0]
+        # The hint names the service's own config file: a bare `config validate` would check
+        # the one in the profile of whoever runs it.
+        assert f'data-hub-watcher --config "{harness.config_path}" config validate' in lines[0]
+        assert lines[1:] == ["Malformed YAML in config.yaml:", "unclosed bracket"]
         assert harness.start_calls == []
 
-    def test_a_config_that_cannot_be_read_is_logged_once_and_exits(
+    def test_a_config_that_cannot_be_checked_is_logged_once_and_exits(
         self, harness: _LoopHarness
     ) -> None:
-        # An OSError from reading the file is logged the same way.
+        # ``load_config`` turns a read error into a ClickException. The OSError it lets through
+        # is ``Path.exists()`` failing, for a network share that can't be reached, say. It is
+        # logged the same way.
         from data_hub_watcher import config_io
 
-        def unreadable(_path: Path) -> None:
+        def unreachable(_path: Path) -> None:
             raise PermissionError(13, "Permission denied")
 
-        harness.monkeypatch.setattr(config_io, "load_config", unreadable)
+        harness.monkeypatch.setattr(config_io, "load_config", unreachable)
 
         with pytest.raises(SystemExit) as excinfo:
             harness.svc._run_service_loop(threading.Event(), harness.sm)
@@ -1381,6 +1386,107 @@ class TestRunServiceLoopFailures:
         harness.sm.LogErrorMsg.assert_called_once()
         msg = harness.sm.LogErrorMsg.call_args.args[0]
         assert "Cannot load config" in msg
+        assert "Permission denied" in msg
+        assert harness.start_calls == []
+
+    def test_a_utf16_config_is_logged_once_and_exits(self, harness: _LoopHarness) -> None:
+        # What `>` and `Out-File` write in Windows PowerShell 5.1. This keeps the real
+        # ``load_config`` (the harness replaces it), because the failure is in its read.
+        from data_hub_watcher import config_io
+
+        harness.monkeypatch.setattr(config_io, "load_config", real_load_config)
+        harness.config_path.write_bytes("version: 1\n".encode("utf-16"))
+
+        with pytest.raises(SystemExit) as excinfo:
+            harness.svc._run_service_loop(threading.Event(), harness.sm)
+
+        assert excinfo.value.code == 1
+        harness.sm.LogErrorMsg.assert_called_once()
+        lines = harness.sm.LogErrorMsg.call_args.args[0].splitlines()
+        assert "Cannot load config" in lines[0]
+        assert f'--config "{harness.config_path}" config validate' in lines[0]
+        assert "UTF-8" in " ".join(lines[1:])
+        assert harness.start_calls == []
+
+    def test_an_unexpected_error_loading_the_config_is_logged_with_its_traceback(
+        self, harness: _LoopHarness
+    ) -> None:
+        # Whatever else goes wrong in the load must not escape ``SvcRun`` either. It is a bug,
+        # so the traceback goes in the same line.
+        from data_hub_watcher import config_io
+
+        def broken(_path: Path) -> None:
+            raise RuntimeError("something nobody expected")
+
+        harness.monkeypatch.setattr(config_io, "load_config", broken)
+
+        with pytest.raises(SystemExit) as excinfo:
+            harness.svc._run_service_loop(threading.Event(), harness.sm)
+
+        assert excinfo.value.code == 1
+        harness.sm.LogErrorMsg.assert_called_once()
+        msg = harness.sm.LogErrorMsg.call_args.args[0]
+        assert "Cannot load config" in msg
+        assert "RuntimeError: something nobody expected" in msg
+        assert "Traceback (most recent call last)" in msg
+        assert harness.start_calls == []
+
+    @pytest.mark.parametrize(
+        ("which", "raw"),
+        [
+            ("registered", "A=1\r\n".encode("utf-16")),
+            # `>>` in Windows PowerShell 5.1 onto a file that is UTF-8: no byte order mark, and
+            # a null byte after each character.
+            ("registered", b"# Data Hub\n" + "A=1\r\n".encode("utf-16-le")),
+            ("base", "A=1\r\n".encode("utf-16")),
+        ],
+        ids=["utf16-file", "utf16-appended", "base-file"],
+    )
+    def test_an_env_file_that_is_not_utf8_is_logged_once_and_exits(
+        self, harness: _LoopHarness, which: str, raw: bytes
+    ) -> None:
+        # python-dotenv raises ValueError for it (a decode error, or "embedded null byte"),
+        # and the real ``load_dotenv`` is what raises here: the harness replaces it.
+        import dotenv
+
+        from data_hub_watcher import constants
+
+        harness.monkeypatch.setattr(dotenv, "load_dotenv", dotenv.main.load_dotenv)
+        bad = harness.env_path
+        if which == "base":
+            # The registered file stays the harness's empty one, so only the base one is at fault.
+            bad = harness.tmp_path / ".env.base"
+            harness.monkeypatch.setattr(constants, "env_file_path", lambda environment=None: bad)
+        bad.write_bytes(raw)
+
+        with pytest.raises(SystemExit) as excinfo:
+            harness.svc._run_service_loop(threading.Event(), harness.sm)
+
+        assert excinfo.value.code == 1
+        harness.sm.LogErrorMsg.assert_called_once()
+        msg = harness.sm.LogErrorMsg.call_args.args[0]
+        assert "Cannot load env file" in msg
+        assert str(bad) in msg
+        assert "UTF-8" in msg
+        assert harness.start_calls == []
+
+    def test_an_env_file_that_cannot_be_read_is_logged_once_and_exits(
+        self, harness: _LoopHarness
+    ) -> None:
+        import dotenv
+
+        def denied(*_args: Any, **_kwargs: Any) -> None:
+            raise PermissionError(13, "Permission denied")
+
+        harness.monkeypatch.setattr(dotenv, "load_dotenv", denied)
+
+        with pytest.raises(SystemExit) as excinfo:
+            harness.svc._run_service_loop(threading.Event(), harness.sm)
+
+        assert excinfo.value.code == 1
+        harness.sm.LogErrorMsg.assert_called_once()
+        msg = harness.sm.LogErrorMsg.call_args.args[0]
+        assert "Cannot read env file" in msg
         assert "Permission denied" in msg
         assert harness.start_calls == []
 

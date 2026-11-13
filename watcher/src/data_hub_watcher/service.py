@@ -567,6 +567,32 @@ def _repair_upgrade_worker_if_missing(config_dir: Path) -> None:
         )
 
 
+def _load_env_file(path: Path, *, override: bool) -> None:
+    """Load the env file at *path* into the environment, or end the service.
+
+    A file python-dotenv can't read is refused like the other start-up errors: one error line
+    that names the file, in ``watcher.log`` and the Event Log, then ``SystemExit(1)``.
+    Otherwise the exception would escape ``SvcRun``. Windows PowerShell 5.1 writes UTF-16 for
+    ``>`` and ``>>``, so a file made or appended to that way fails with a decode error or an
+    "embedded null byte" (both are ``ValueError``).
+    """
+    from dotenv import load_dotenv
+
+    try:
+        load_dotenv(path, override=override)
+    except OSError as exc:
+        logger.error("Cannot read env file %s: %s.", path, exc)
+        raise SystemExit(1) from exc
+    except ValueError as exc:
+        logger.error(
+            "Cannot load env file %s: %s. Save it as UTF-8 text, "
+            "not UTF-16 or a Windows code page.",
+            path,
+            exc,
+        )
+        raise SystemExit(1) from exc
+
+
 def _run_service_loop(
     stop_event: threading.Event,
     sm: Any,
@@ -601,7 +627,6 @@ def _run_service_loop(
     import platform
 
     import click
-    from dotenv import load_dotenv
 
     from data_hub_watcher.api_client import ApiError, DataHubClient
     from data_hub_watcher.config_io import load_config
@@ -672,19 +697,33 @@ def _run_service_loop(
     # silently miss the shared half.
     base_env = env_file_path()
     if base_env != env_path and base_env.exists():
-        load_dotenv(base_env)
-    load_dotenv(env_path, override=True)
+        _load_env_file(base_env, override=False)
+    _load_env_file(env_path, override=True)
     apply_log_level_from_env()
     try:
         cfg = load_config(path)
-    except (click.ClickException, OSError) as exc:
-        # Log the reason the way the other start-up refusals do, so it reaches watcher.log
-        # and the Event Log, not only the SCM's traceback.
-        message = exc.format_message() if isinstance(exc, click.ClickException) else str(exc)
+    except Exception as exc:
+        # Every way the config can fail to load ends the service like the other start-up
+        # refusals: one error line in watcher.log and the Event Log, not only the traceback
+        # that pywin32 reports when an exception escapes ``SvcRun``. ``load_config`` turns a
+        # missing, unreadable, undecodable, malformed or invalid file into a ClickException.
+        # An OSError is what it doesn't convert, such as ``Path.exists()`` failing (an
+        # unreachable network share, say). Any other exception is a bug in the load, so it
+        # is logged with its traceback.
+        expected = isinstance(exc, (click.ClickException, OSError))
+        if isinstance(exc, click.ClickException):
+            detail = exc.format_message()
+        elif isinstance(exc, OSError):
+            detail = str(exc)
+        else:
+            detail = f"Unexpected {type(exc).__name__}: {exc}"
         logger.error(
-            "Cannot load config %s: %s. Check it with 'data-hub-watcher config validate'.",
+            "Cannot load config %s. Check it with "
+            "'data-hub-watcher --config \"%s\" config validate'.\n%s",
             path,
-            message,
+            path,
+            detail,
+            exc_info=not expected,
         )
         raise SystemExit(1) from exc
     inst = cfg.instrument

@@ -216,10 +216,10 @@ TRANSITIONS: tuple[Transition, ...] = (
     covered(
         MACHINE,
         "service.config_invalid->logged_in_watcher_log",
-        "A config that doesn't load (missing, malformed or invalid) is logged in `watcher.log`, "
-        "and the service ends through the `SystemExit(1)` path, like the other start-up "
-        "refusals. The shared `startup.config_invalid->refused` is covered under the service as "
-        "well, because it reads that text.",
+        "A config that doesn't load (missing, not UTF-8, malformed or invalid) is logged in "
+        "`watcher.log`, and the service ends through the `SystemExit(1)` path, like the other "
+        "start-up refusals. The shared `startup.config_invalid->refused` is covered under the "
+        "service as well, because it reads that text.",
         platforms=SERVICE,
     ),
     covered(

@@ -181,7 +181,9 @@ Upgrade failure modes (`update_started` → `update_failed`, editable installs, 
 
 ### The service exits immediately
 
-A config file that doesn't load (missing, unreadable, malformed, or with a value the watcher doesn't accept) stops the service, and `watcher.log` says why on a line that contains `Cannot load config`. Watchers before 1.4.2 wrote only a traceback to the Application event log. To check the file, run `data-hub-watcher config validate`, fix what it reports, and start the service again.
+A config file that doesn't load (missing, unreadable, not saved as UTF-8, malformed, or with a value the watcher doesn't accept) stops the service. `watcher.log` has an error that starts with `Cannot load config`, followed by the reason. The error also gives the command that checks the file, in the form `data-hub-watcher --config "C:\path\to\config.yaml" config validate`. Run it as written, because without `--config` it checks the config file of whoever runs it, not the one the service uses. Fix what it reports and start the service again.
+
+An env file that isn't saved as UTF-8 stops the service the same way, with an error that starts with `Cannot load env file`. Windows PowerShell 5.1 writes UTF-16 for `>` and `>>`, so `echo X=Y >> .env.production` breaks a UTF-8 env file. Watchers before 1.4.2 wrote only a traceback to the Application event log for either problem.
 
 If it stops before writing to `watcher.log`:
 
