@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { authorize } from "@/lib/api/auth";
 import { apiErrorFromResult } from "@/lib/api/errors";
+import { readRunIdParam } from "@/lib/api/run-id-param";
 import { requestAllRunUploads } from "@/lib/api/run-uploads";
 
 interface RouteContext {
@@ -20,7 +21,8 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     return authResult;
   }
 
-  const { instrumentId, runId } = await params;
+  const { instrumentId, runId: runIdParam } = await params;
+  const runId = readRunIdParam(request.headers, runIdParam);
   const result = await requestAllRunUploads(instrumentId, runId);
 
   if (!result.ok) {

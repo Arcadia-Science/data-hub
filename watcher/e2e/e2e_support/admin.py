@@ -24,6 +24,7 @@ import hashlib
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Literal, cast
+from urllib.parse import quote
 
 from data_hub_shared.testing import AdminSession, IntegrationEnv, db_query, seed_auth
 from e2e_support._http import ApiResult, call, new_session
@@ -49,6 +50,12 @@ WATCHER_SCOPES = [
 
 # Config revisions need these two listed explicitly (see `requireExplicitTokenScope`).
 ADMIN_REVISION_SCOPES = ["watchers:read", "watchers:admin"]
+
+
+def _run_path(instrument_id: str, run_id: str) -> str:
+    """The API path of a run. A run ID can hold ``#``, ``?`` or ``%``, so each part is
+    percent-encoded into one path segment, as the web app does."""
+    return f"/api/v1/instruments/{quote(instrument_id, safe='')}/runs/{quote(run_id, safe='')}"
 
 
 def revision_settings(
@@ -119,7 +126,7 @@ class Admin:
         """
         return self._call(
             "POST",
-            f"/api/v1/instruments/{instrument_id}/runs/{run_id}/request-upload",
+            f"{_run_path(instrument_id, run_id)}/request-upload",
             headers=self._bearer(),
             json={"file_ids": list(file_ids)},
         )
@@ -128,15 +135,16 @@ class Admin:
         """Queue every ``detected`` file of the run for upload."""
         return self._call(
             "POST",
-            f"/api/v1/instruments/{instrument_id}/runs/{run_id}/request-upload-all",
+            f"{_run_path(instrument_id, run_id)}/request-upload-all",
             headers=self._bearer(),
         )
 
     def delete_run(self, instrument_id: str, run_id: str) -> ApiResult:
-        """Soft-delete a run. Its files stay, and the watcher's updates to it get a 409."""
+        """Soft-delete a run. Its files stay but their requested uploads are cancelled, and the
+        watcher's updates to it get a 409."""
         return self._call(
             "DELETE",
-            f"/api/v1/instruments/{instrument_id}/runs/{run_id}",
+            _run_path(instrument_id, run_id),
             headers=self._bearer(),
         )
 
@@ -144,7 +152,7 @@ class Admin:
         """Undo :meth:`delete_run`."""
         return self._call(
             "POST",
-            f"/api/v1/instruments/{instrument_id}/runs/{run_id}/restore",
+            f"{_run_path(instrument_id, run_id)}/restore",
             headers=self._bearer(),
         )
 

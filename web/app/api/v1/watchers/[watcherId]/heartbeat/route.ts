@@ -9,12 +9,12 @@ import {
 } from "@/lib/api/errors";
 import { heartbeatBody, readJsonBody } from "@/lib/api/openapi";
 import { isValidUUID } from "@/lib/api/validators";
+import { isRestartStopReason } from "@/lib/api/watcher-status";
 import { isBelowFloor } from "@/lib/api/watcher-versions";
 import {
   enforceWatcherBinding,
   findActiveWatcher,
   revertUploadQueueIfWatcherOffline,
-  SYSTEM_SHUTDOWN_STATUS_REASON,
 } from "@/lib/api/watchers";
 import { db } from "@/lib/db";
 import {
@@ -92,6 +92,16 @@ export async function POST(
     );
   }
 
+  // A reason is kept for a `waiting` watcher (why it waits) and for a watcher
+  // that stopped for a restart (see `RESTART_STOP_REASONS`), because a watcher
+  // like that reads Unresponsive if it isn't back in time. Every other status
+  // and every other reason is dropped.
+  const reportedReason = body.status_reason?.trim() || null;
+  const stoppedForRestart =
+    status === "stopped" && isRestartStopReason(reportedReason);
+  const statusReason =
+    status === "waiting" || stoppedForRestart ? reportedReason : null;
+
   // Two parallel writes: (1) append to the heartbeat history log, and
   // (2) update the watcher's denormalized last_heartbeat_at + status so
   // staleness checks don't need to scan the heartbeats table.
@@ -115,9 +125,7 @@ export async function POST(
       .set({
         lastHeartbeatAt: new Date(),
         status,
-        // Only a waiting watcher has a reason; any other status clears it.
-        statusReason:
-          status === "waiting" ? body.status_reason?.trim() || null : null,
+        statusReason,
         // Watchers older than 1.4.0 don't send this, so leave it alone.
         ...(body.config_revision === undefined
           ? {}
@@ -137,19 +145,17 @@ export async function POST(
   // watcher is about to come back and drain it. The cron sweep backstops a
   // watcher that registers and then dies. The helper re-checks online status.
   //
-  // The exception is a watcher that stopped because Windows is shutting down or
-  // restarting (watcher 1.4.1 and later mark that heartbeat). Its PC is coming
-  // back, so the queue stays for the watcher to drain after the restart, and
-  // the cron sweep cancels it if no heartbeat follows within its grace window.
-  // Older watchers never send the mark, and for them nothing changes.
+  // The exception is a watcher that stopped for a restart: Windows shutting
+  // down or restarting (watcher 1.4.1 and later mark that heartbeat), or an
+  // update (a later watcher marks that one). It is coming back, so the queue
+  // stays for the watcher to drain after the restart, and the cron sweep
+  // cancels it if no heartbeat follows within its grace window. Older watchers
+  // never send a mark, and for them nothing changes.
   //
   // Best-effort: the heartbeat itself is already committed above, so a failure
   // here must not fail the response (the watcher would treat a 500 as a missed
   // heartbeat).
-  const stoppedForSystemShutdown =
-    status === "stopped" &&
-    body.status_reason === SYSTEM_SHUTDOWN_STATUS_REASON;
-  if (status === "stopped" && !stoppedForSystemShutdown) {
+  if (status === "stopped" && !stoppedForRestart) {
     try {
       await revertUploadQueueIfWatcherOffline({
         instrumentId: watcher.instrumentId,

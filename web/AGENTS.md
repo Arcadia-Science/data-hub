@@ -12,7 +12,7 @@ With `make dev` running, use the `next-dev-loop` skill. It reads errors, logs, a
 
 - Upgrade `better-auth` and every `@better-auth/*` package together, to the same version. Releases 1.7.0 through 1.7.7 break MCP client registration.
 - Read and write `localStorage` only through `parseVersioned` and `serializeVersioned` in `web/lib/versioned-storage.ts`, and keep data written by the previous release readable. Tabs still open on the old release share the same storage.
-- Instrument and run IDs can contain `%`, `#`, `?`, and spaces. Encode them once with `encodeURIComponent` when you build a URL, and decode them once when you read one.
+- Run IDs can contain `%`, `#`, `?`, and spaces. Instrument IDs are slugs. Encode IDs once with `encodeURIComponent` when you build a URL, and decode them once when you read one. In a route handler or page that has a run ID in its path, get it from `readRunIdParam` (`web/lib/api/run-id-param.ts`) and not from `params` alone, because on Vercel Next.js decodes a route parameter twice. `web/proxy.ts` sets the header it reads. `web/tests/unit/run-id-readers.test.ts` fails when a file under a `[runId]` folder skips it.
 - S3 returns 416 for a byte-range request on an empty object, and `Content-Type` can carry parameters such as `; charset=utf-8`. Handle both.
 - `web/microfrontends.json` is the only routing config for both the web app and the docs site. Change routing, fallbacks, or `packageName` there.
 

@@ -42,8 +42,8 @@ __all__ = [
     "WatcherRow",
 ]
 
-# The server's own timers, from `STALE_THRESHOLD_MS` and `UPLOAD_REQUEST_REVERT_GRACE_MS` in
-# web/lib/api/watchers.ts.
+# The server's own timers: `STALE_THRESHOLD_MS` in web/lib/api/watchers.ts and
+# `UPLOAD_REQUEST_REVERT_GRACE_MS` in web/lib/api/watcher-status.ts.
 STALE_AFTER_MINUTES = 5
 SWEEP_GRACE_MINUTES = 15
 
@@ -217,7 +217,9 @@ class ServerView:
 
     def effective_status(self, watcher_id: str) -> str | None:
         """The status the web app shows: the stored one, or ``stale`` once the last heartbeat
-        is more than five minutes old. ``registered`` is exempt. ``None`` if deregistered."""
+        is more than five minutes old. ``registered`` is exempt, and so is a watcher that
+        stopped cleanly, unless it stopped for a restart or an update: that one turns ``stale``
+        after 15 minutes. ``None`` if deregistered."""
         body = self.watcher_api(watcher_id)
         return None if body is None else str(body["status"])
 
@@ -227,9 +229,10 @@ class ServerView:
         """``GET /api/v1/watchers``, the list route, as the ``*`` token reads it: the rows of
         its ``data``, each with the effective status (``stale`` included) in ``status``.
 
-        ``status`` is the route's filter (``stale`` is computed from the heartbeat, any other
-        value is compared with the stored status), and ``instrument_id`` limits the list to one
-        instrument's watchers, which keeps a test away from rows it didn't make.
+        ``status`` is the route's filter, which returns the watchers whose status shows as that
+        value (the one :meth:`effective_status` gives, ``stale`` included), and
+        ``instrument_id`` limits the list to one instrument's watchers, which keeps a test away
+        from rows it didn't make.
         """
         query = urlencode(
             {

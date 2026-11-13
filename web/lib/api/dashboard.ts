@@ -42,7 +42,7 @@ export const getInstrumentSummaries = cache(
         status: instruments.status,
         runCount: sql<number>`cast(count(distinct ${instrumentRuns.id}) filter (where ${instrumentRuns.deletedAt} is null) as int)`,
         lastRunAt: sql<Date | null>`max(coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt})) filter (where ${instrumentRuns.deletedAt} is null)`,
-        filesPendingUpload: sql<number>`cast(count(distinct ${files.id}) filter (where ${files.status} in ('detected', 'upload_requested') and ${files.deletedAt} is null) as int)`,
+        filesPendingUpload: sql<number>`cast(count(distinct ${files.id}) filter (where ${files.status} in ('detected', 'upload_requested') and ${files.deletedAt} is null and ${instrumentRuns.deletedAt} is null) as int)`,
       })
       .from(instruments)
       .leftJoin(instrumentRuns, eq(instrumentRuns.instrumentId, instruments.id))
@@ -208,6 +208,7 @@ export const getDashboardStats = cache(
           and(
             eq(instruments.status, "active"),
             isNull(files.deletedAt),
+            isNull(instrumentRuns.deletedAt),
             sql`${files.status} in ('detected', 'upload_requested')`
           )
         ),

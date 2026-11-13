@@ -357,7 +357,7 @@ export const deleteRunTool = {
   scope: "runs:delete",
   title: "Delete Run",
   description:
-    "Soft-delete a run (sets deleted_at). Does not remove files or S3 objects. Use restore_run to undo. Idempotent: deleting an already-deleted run succeeds as a no-op.",
+    "Soft-delete a run (sets deleted_at). Does not remove files or S3 objects. Also cancels the uploads requested for the run's files: they go back to 'detected' and leave the watcher's queue. Use restore_run to undo the delete; it does not bring the upload requests back. Idempotent: deleting an already-deleted run succeeds as a no-op.",
   inputSchema: {
     instrumentId: z.string().describe("Instrument identifier"),
     runId: z.string().describe("Run identifier within the instrument"),
@@ -376,7 +376,7 @@ export const restoreRunTool = {
   scope: "runs:delete",
   title: "Restore Run",
   description:
-    "Restore a soft-deleted run by clearing deleted_at. Idempotent: restoring a run that is not deleted succeeds as a no-op.",
+    "Restore a soft-deleted run by clearing deleted_at. Does not bring back upload requests that the delete cancelled; request them again. Idempotent: restoring a run that is not deleted succeeds as a no-op.",
   inputSchema: {
     instrumentId: z.string().describe("Instrument identifier"),
     runId: z.string().describe("Run identifier within the instrument"),

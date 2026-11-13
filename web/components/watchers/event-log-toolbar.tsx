@@ -23,6 +23,7 @@ const EVENT_TYPES = [
   { value: "upload_failed", label: "Upload Failed" },
   { value: "run_reported", label: "Run Reported" },
   { value: "config_synced", label: "Config Synced" },
+  { value: "upload_requests_cancelled", label: "Uploads Cancelled" },
   { value: "error", label: "Error" },
 ] as const;
 

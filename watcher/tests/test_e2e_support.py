@@ -57,7 +57,7 @@ from e2e_support.files import (
     write_run,
 )
 from e2e_support.platforms import platforms_skip_reason
-from e2e_support.proxy_helpers import silence_heartbeats
+from e2e_support.proxy_helpers import silence_heartbeats, wait_for_answer
 from e2e_support.server import FileRow, ServerView
 from e2e_support.waiting import (
     KnownBugStillPresent,
@@ -1352,6 +1352,65 @@ class TestSilenceHeartbeats:
 
             with pytest.raises(TimeoutError):
                 silence_heartbeats(proxy, "w1", timeout=0.5)
+
+
+class TestWaitForAnswer:
+    @contextlib.contextmanager
+    def proxy_to_upstream_that_answers_after(self, seconds: float) -> Iterator[FaultProxy]:
+        class Handler(BaseHTTPRequestHandler):
+            def do_PATCH(self) -> None:
+                self.rfile.read(int(self.headers.get("Content-Length", 0)))
+                time.sleep(seconds)
+                self.send_response(200)
+                self.send_header("Content-Length", "2")
+                self.end_headers()
+                self.wfile.write(b"{}")
+
+            def log_message(self, format: str, *args: object) -> None:
+                pass
+
+        upstream = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=upstream.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with FaultProxy(f"http://127.0.0.1:{upstream.server_address[1]}") as proxy:
+                yield proxy
+        finally:
+            upstream.shutdown()
+            upstream.server_close()
+
+    @staticmethod
+    def patch(proxy: FaultProxy) -> int:
+        request = urllib.request.Request(
+            f"{proxy.base_url}/runs/RUN001", data=b"{}", method="PATCH"
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=5) as response:
+                return response.status
+        except urllib.error.HTTPError as exc:
+            return exc.code
+
+    def test_it_waits_for_the_status_of_a_request_the_server_has_not_answered_yet(self) -> None:
+        with self.proxy_to_upstream_that_answers_after(0.5) as proxy:
+            sender = threading.Thread(target=self.patch, args=(proxy,), daemon=True)
+            sender.start()
+            proxy.wait_for_request(lambda r: r.method == "PATCH", timeout=5)
+            # The request is in the log, and the server has not answered it.
+            assert [r.upstream_status for r in proxy.requests] == [None]
+
+            answered = wait_for_answer(proxy, lambda: proxy.requests, what="the answer")
+
+            assert [r.upstream_status for r in answered] == [200]
+            sender.join(5)
+
+    def test_it_runs_out_when_the_newest_request_is_one_a_fault_answered(self) -> None:
+        with self.proxy_to_upstream_that_answers_after(0) as proxy:
+            with proxy.fault("status", status=503):
+                assert self.patch(proxy) == 503
+
+            message = r"(?s)note the answer.*fault=status upstream=None"
+            with pytest.raises(WaitTimeout, match=message):
+                wait_for_answer(proxy, lambda: proxy.requests, what="the answer", timeout=0.3)
 
 
 class TestInstallWheel:

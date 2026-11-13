@@ -29,6 +29,7 @@ const eventTypeMeta: Record<
   watcher_started: { variant: "outline", label: "Started" },
   watcher_stopped: { variant: "outline", label: "Stopped" },
   run_reported: { variant: "outline", label: "Run Reported" },
+  upload_requests_cancelled: { variant: "outline", label: "Uploads Cancelled" },
 };
 
 function EventEntry({ event }: { event: WatcherEventRow }) {

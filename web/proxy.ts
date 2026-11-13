@@ -1,5 +1,6 @@
 import { getSessionCookie } from "better-auth/cookies";
 import { type NextRequest, NextResponse } from "next/server";
+import { RAW_PATH_HEADER } from "@/lib/api/run-id-param";
 import {
   loginHref,
   REQUEST_PATH_HEADER,
@@ -54,12 +55,17 @@ function matchesRoute(pathname: string, route: string) {
   return pathname === route || pathname.startsWith(`${route}/`);
 }
 
-// Pages can't see the query string from a layout or a shared component, so the
-// proxy hands them the full address. `set` replaces any value the client sent,
-// so a visitor can't plant their own.
-function nextWithRequestPath(request: NextRequest, requestPath: string) {
+// Every request the proxy lets through carries the path as it was sent, still
+// percent-encoded, because on Vercel Next.js decodes a route parameter twice
+// (see `readRunIdParam`). Pages can't see the query string from a layout or a
+// shared component, so they also get the full address. `set` replaces any value
+// the client sent, so a visitor can't plant their own.
+function passThrough(request: NextRequest, requestPath?: string) {
   const requestHeaders = new Headers(request.headers);
-  requestHeaders.set(REQUEST_PATH_HEADER, requestPath);
+  requestHeaders.set(RAW_PATH_HEADER, request.nextUrl.pathname);
+  if (requestPath !== undefined) {
+    requestHeaders.set(REQUEST_PATH_HEADER, requestPath);
+  }
   return NextResponse.next({ request: { headers: requestHeaders } });
 }
 
@@ -72,8 +78,8 @@ export function proxy(request: NextRequest) {
     publicPrefixes.some((route) => matchesRoute(pathname, route));
   if (isPublic) {
     return routeHandlerPrefixes.some((route) => matchesRoute(pathname, route))
-      ? NextResponse.next()
-      : nextWithRequestPath(request, requestPath);
+      ? passThrough(request)
+      : passThrough(request, requestPath);
   }
 
   // Cookie presence only — optimistic redirect. Pages still call `auth()`
@@ -83,7 +89,7 @@ export function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL(loginHref(requestPath), request.url));
   }
 
-  return nextWithRequestPath(request, requestPath);
+  return passThrough(request, requestPath);
 }
 
 export const config = {

@@ -1,6 +1,7 @@
 import { unstable_doesMiddlewareMatch } from "next/experimental/testing/server";
 import { NextRequest } from "next/server";
 import { describe, expect, it } from "vitest";
+import { RAW_PATH_HEADER } from "@/lib/api/run-id-param";
 import { REQUEST_PATH_HEADER } from "@/lib/callback-url";
 import { config, proxy } from "@/proxy";
 
@@ -8,7 +9,7 @@ const SESSION_COOKIE = "better-auth.session_token=abc.def";
 
 function request(
   path: string,
-  init: { cookie?: string; header?: string } = {}
+  init: { cookie?: string; header?: string; rawPathHeader?: string } = {}
 ) {
   const headers = new Headers();
   if (init.cookie) {
@@ -17,6 +18,9 @@ function request(
   if (init.header) {
     headers.set(REQUEST_PATH_HEADER, init.header);
   }
+  if (init.rawPathHeader) {
+    headers.set(RAW_PATH_HEADER, init.rawPathHeader);
+  }
   return new NextRequest(`http://localhost:3000${path}`, { headers });
 }
 
@@ -24,6 +28,10 @@ function request(
 // headers on the response as `x-middleware-request-*` entries.
 function forwardedPath(response: Response): string | null {
   return response.headers.get(`x-middleware-request-${REQUEST_PATH_HEADER}`);
+}
+
+function forwardedRawPath(response: Response): string | null {
+  return response.headers.get(`x-middleware-request-${RAW_PATH_HEADER}`);
 }
 
 describe("proxy", () => {
@@ -80,6 +88,67 @@ describe("proxy", () => {
     expect(forwardedPath(response)).toBe("/instruments?x=1");
   });
 
+  describe("raw path header", () => {
+    it.each([
+      "/api/v1/instruments/x/runs/Q%2541/request-upload-url",
+      "/api/v1/runs",
+      "/api/auth/callback/google",
+      "/mcp/v1",
+      "/.well-known/oauth-authorization-server",
+      "/api/cron/reprocess-queue",
+      "/instruments/x/runs/Q%2541",
+      "/settings/tokens",
+      "/watchers",
+      "/",
+    ])("is set on the public path %s without its query", (path) => {
+      const response = proxy(request(`${path}?tab=files&q=%2541`));
+      expect(response.status).toBe(200);
+      expect(forwardedRawPath(response)).toBe(path);
+    });
+
+    it("is set for a signed-in visitor on a gated page", () => {
+      const response = proxy(
+        request("/users/u%2541?tab=x", { cookie: SESSION_COOKIE })
+      );
+      expect(response.status).toBe(200);
+      expect(forwardedRawPath(response)).toBe("/users/u%2541");
+    });
+
+    it("keeps each escape exactly as it was sent", () => {
+      const path = "/api/v1/instruments/x/runs/a%23b%3Fc%2Fd%20e%25/files";
+      expect(forwardedRawPath(proxy(request(path)))).toBe(path);
+    });
+
+    it.each([
+      "/api/v1/instruments/x/runs/Q%2541/restore",
+      "/instruments/x/runs/Q%2541",
+      "/settings",
+    ])("replaces a value planted by the client on %s", (path) => {
+      const response = proxy(
+        request(path, {
+          rawPathHeader: "/api/v1/instruments/x/runs/someone-else/restore",
+        })
+      );
+      expect(forwardedRawPath(response)).toBe(path);
+    });
+
+    it("is not set on a redirect to the sign-in page", () => {
+      const response = proxy(request("/comments?from=x"));
+      expect(response.status).toBe(307);
+      expect(forwardedRawPath(response)).toBeNull();
+    });
+
+    it("leaves the other forwarded headers as they were", () => {
+      const response = proxy(
+        request("/instruments/x/runs/Q%2541", { cookie: SESSION_COOKIE })
+      );
+      expect(forwardedPath(response)).toBe("/instruments/x/runs/Q%2541");
+      expect(response.headers.get("x-middleware-request-cookie")).toBe(
+        SESSION_COOKIE
+      );
+    });
+  });
+
   it.each([
     "/login",
     "/api/v1/runs",
@@ -118,7 +187,12 @@ describe("proxy matcher", () => {
     "/",
     "/comments",
     "/instruments/a/runs/b",
+    "/instruments/x/runs/Q%2541",
     "/api/v1/runs",
+    "/api/v1/instruments/x/runs/y",
+    "/api/v1/instruments/x/runs/y/request-upload-url",
+    "/api/v1/instruments/x/runs/y/comments",
+    "/api/v1/instruments/x/runs/Q%2541/restore",
     "/api/local-s3",
     "/api/local-s3x/b/k",
   ])("runs on %s", (path) => {

@@ -168,8 +168,19 @@ TRANSITIONS: tuple[Transition, ...] = (
         "The test runs in both upload modes against `next start` and asserts that each file "
         "lands in its own run and, in auto mode, under `<instrument>/<run id>/`, and that the "
         "run an unencoded ID would reach (`Q%41` reads as `QA`) gets nothing. On Vercel, "
-        "Next.js decodes route parameters a second time, so an ID with `%` followed by two hex "
-        "digits is still misread there. That is a server issue, tracked separately.",
+        "Next.js decodes route parameters a second time (ENG-2166). The server undoes that by "
+        "reading the run ID from the path as sent, which this test can't show.",
+    ),
+    covered(
+        MACHINE,
+        "run.id_with_outer_spaces->update_reaches_run",
+        "A run whose ID starts or ends with a space, such as `RUN1 ` from a file named "
+        "`RUN1 _a.csv`, gets its files. The server saves the run as `RUN1` and finds it again "
+        "when the watcher names it with the space, in the run update (`PATCH /runs/<id>`) and "
+        "the upload URL request (`POST /runs/<id>/request-upload-url`). The test runs in both "
+        "upload modes. It writes two files, then a third after the run exists, and asserts that "
+        "all three are in the one run `RUN1` and, in auto mode, stored under "
+        "`<instrument>/RUN1/`, with no error event.",
     ),
     # --- the initial scan and restarts ------------------------------------------------------
     covered(

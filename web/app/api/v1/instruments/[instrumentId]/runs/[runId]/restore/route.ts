@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { surfaceEvent, trackEvent } from "@/lib/analytics/track";
 import { authorize } from "@/lib/api/auth";
 import { apiErrorFromResult } from "@/lib/api/errors";
+import { readRunIdParam } from "@/lib/api/run-id-param";
 import { restoreRun } from "@/lib/api/run-lifecycle";
 
 interface RouteContext {
@@ -23,7 +24,8 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     return authResult;
   }
 
-  const { instrumentId, runId } = await params;
+  const { instrumentId, runId: runIdParam } = await params;
+  const runId = readRunIdParam(request.headers, runIdParam);
   const result = await restoreRun(instrumentId, runId);
 
   if (!result.ok) {
