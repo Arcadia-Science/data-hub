@@ -1414,7 +1414,7 @@ class TestRunServiceLoopFailures:
         self, harness: _LoopHarness
     ) -> None:
         # Whatever else goes wrong in the load must not escape ``SvcRun`` either. It is a bug,
-        # so the traceback goes in the same line.
+        # so the traceback goes in the same log entry.
         from data_hub_watcher import config_io
 
         def broken(_path: Path) -> None:

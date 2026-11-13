@@ -73,8 +73,8 @@ def keep_urllib3_at_info() -> None:
     """Keep urllib3's DEBUG lines out of the logs, whatever the root level is.
 
     At DEBUG, urllib3 logs the full URL of every request. An upload goes to a
-    pre-signed S3 URL whose query string holds temporary AWS credentials, so
-    those lines would put them in ``watcher.log`` and on the console. The
+    pre-signed S3 URL, whose query string holds temporary AWS credentials, so
+    at DEBUG they would end up in ``watcher.log`` and on the console. The
     urllib3 logger gets the root level, or INFO if that is lower. Call it again
     after the root level changes, since it copies the level it finds.
     """
