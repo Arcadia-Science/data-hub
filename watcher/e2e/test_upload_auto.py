@@ -41,7 +41,7 @@ from e2e_support.files import (
 )
 from e2e_support.proxy_helpers import wait_for_answer
 from e2e_support.server import ServerView
-from e2e_support.waiting import KnownBugStillPresent, known_bug, stays_true, wait_until
+from e2e_support.waiting import stays_true, wait_until
 
 pytestmark = pytest.mark.e2e
 
@@ -689,8 +689,9 @@ def test_file_that_changed_after_hashing_restarts_the_upload_once(
         proxy, watch_dir / RUN / "large.csv", payload(LARGE, seed=99), restore=original
     )
 
-    # The second upload read the original bytes, the ones that were hashed (the restart sends the
-    # first hash again, so only those bytes can match it), and succeeded.
+    # The file got its original bytes back while the abort was held, which is before the restart
+    # hashes it again. So the second hash and the second upload both see the original bytes, and
+    # the upload succeeds.
     row = server.wait_for_uploaded(instrument_id, RUN, LARGE_PATH, content=original)
     # The server marks the file uploaded before it answers, so wait until the proxy has the answer.
     completes = wait_for_answer(
@@ -747,12 +748,6 @@ def test_second_checksum_rejection_aborts_the_upload_and_reports_the_failure(
     assert recorded_uploads(pc) == []
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=KnownBugStillPresent,
-    reason="ENG-2122: the restart after a rejected checksum sends the "
-    "first hash again, so a file that stays changed fails twice",
-)
 @pytest.mark.covers("upload.multipart->bad_digest_rehashed")
 def test_file_that_changed_after_hashing_is_hashed_again_and_uploaded_as_it_is_now(
     watcher: WatcherFactory,
@@ -782,13 +777,11 @@ def test_file_that_changed_after_hashing_is_hashed_again_and_uploaded_as_it_is_n
     )
     assert calls(proxy, "POST", "/multipart-upload/complete")[0].upstream_status == 400
 
-    # Intended (proposed: confirm with the owners): the restart hashes the file as it is now, so
-    # the file ends up uploaded with its current bytes, and `file_uploaded` says what they hash to.
-    # Today the restart sends the first hash again, which the changed bytes can't match.
-    with known_bug():
-        server.wait_for_uploaded(instrument_id, RUN, LARGE_PATH, content=changed, timeout=5)
-        uploaded = server.wait_for_event(pc.watcher_id, event_type="file_uploaded", timeout=15)
-        assert uploaded.details["sha256"] == hashlib.sha256(changed).hexdigest()
+    # The restart hashes the file as it is now, so the file ends up uploaded with its current
+    # bytes, and `file_uploaded` says what they hash to.
+    server.wait_for_uploaded(instrument_id, RUN, LARGE_PATH, content=changed, timeout=5)
+    uploaded = server.wait_for_event(pc.watcher_id, event_type="file_uploaded", timeout=15)
+    assert uploaded.details["sha256"] == hashlib.sha256(changed).hexdigest()
 
 
 # ---------------------------------------------------------------------------

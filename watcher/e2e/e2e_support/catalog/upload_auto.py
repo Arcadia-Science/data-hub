@@ -16,7 +16,7 @@ the file is left for the next start.
 
 from __future__ import annotations
 
-from e2e_support.catalog.model import CLI, Transition, covered, excluded, xfail_bug
+from e2e_support.catalog.model import CLI, Transition, covered, excluded
 
 MACHINE = "upload_auto"
 
@@ -120,9 +120,8 @@ TRANSITIONS: tuple[Transition, ...] = (
         MACHINE,
         "upload.multipart->bad_digest_restarted",
         "When the server rejects the assembled file's checksum because the file changed "
-        "after it was hashed, the upload starts over once with a new multipart upload. The "
-        "restart sends the first hash and size again, so it succeeds only if the file's bytes "
-        "are the original ones once more.",
+        "after it was hashed, the upload starts over once with a new multipart upload: the old "
+        "one is aborted, the file is hashed again, and the upload ends `uploaded`.",
     ),
     covered(
         MACHINE,
@@ -131,15 +130,13 @@ TRANSITIONS: tuple[Transition, ...] = (
         "and `upload_failed` is queued. (The file changes again during the restart, so the "
         "scenario holds whatever the restart hashes.)",
     ),
-    xfail_bug(
+    covered(
         MACHINE,
         "upload.multipart->bad_digest_rehashed",
-        "PROPOSED, confirm the intent: the restart after a rejected checksum hashes the file "
-        "again and uploads its current bytes, so a file that changed while it was uploaded "
-        "ends `uploaded` with its current bytes and `file_uploaded` carries their `sha256`. "
-        "Today the restart reuses the first hash, so a file that stays changed fails the "
-        "second attempt too.",
-        "ENG-2122",
+        "When the server rejects the checksum of the first attempt because the file changed "
+        "after it was hashed, the restart hashes the file again and uploads its current bytes. "
+        "A file that changed and stays changed ends `uploaded` with those bytes, and "
+        "`file_uploaded` carries their `sha256`.",
     ),
     covered(
         MACHINE,
