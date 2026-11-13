@@ -43,7 +43,7 @@ The watcher checks for the folder again once a minute and starts watching as soo
 - Create or reconnect the folder on the PC, or
 - Point the watcher at the right folder from the web app; see [Change a watcher’s config](/docs/manage-watchers#change-a-watchers-config)
 
-Watcher 1.4.3 and later also go back to this state when the folder disappears while they run, for example when a network drive drops or the folder is deleted. The watcher notices within a minute, stops watching, and shows **Waiting: folder not found**. It gives a file that was uploading at that moment up to 10 seconds to finish, cuts it off if it isn’t done, and uploads it again once the folder is back. When the folder returns, the watcher starts watching it again without a restart, and queues a `watcher_started` event that says it resumed.
+Watcher 1.4.3 and later also go back to this state when the folder disappears while they run, for example when a network drive drops or the folder is deleted. The watcher notices within a minute, looks again a few seconds later so that a drop of a moment doesn’t count, stops watching, and shows **Waiting: folder not found**. It gives a file that was uploading at that moment up to 10 seconds to finish, cuts it off if it isn’t done, and uploads it again once the folder is back. When the folder returns, the watcher starts watching it again without a restart, and queues a `watcher_started` event that says it resumed.
 
 Older watchers exit at startup instead, with an error that the watch directory doesn’t exist.
 

@@ -568,7 +568,7 @@ bug:
 @pytest.mark.xfail(
     strict=True,
     raises=KnownBugStillPresent,
-    reason="ENG-1234: what goes wrong today",
+    reason="bug-example: what goes wrong today",
 )
 @pytest.mark.covers("machine.thing->intended_outcome")
 def test_the_intended_behavior(...):
@@ -583,7 +583,7 @@ block is a different failure, so the test fails and doesn't count as the bug. Pu
 assertion that shows the intended behavior inside. The check enforces the pattern: the xfail is
 strict and has `raises=KnownBugStillPresent`, the test has a `with known_bug():` block and names
 only `xfail_bug` transitions, its reason starts with the bug of one of them (its Linear issue, such
-as `ENG-1234:`, or a short slug until the issue is filed), and
+as `ENG-0000:`, or a short slug until the issue is filed), and
 no other test names an `xfail_bug` transition. To see that a test fails inside the block, run it
 with `--runxfail`.
 
