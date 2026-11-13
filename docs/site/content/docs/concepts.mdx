@@ -138,7 +138,7 @@ What the watcher does with files already sitting in the watch directory the firs
 
 ### Dismiss [#dismiss]
 
-For instruments in [manual upload mode](#upload-mode), dismissing a detected file tells the watcher not to upload it. Dismissing differs from deleting: the file never reached Data Hub storage, so there’s nothing to restore. See [Manage the watcher fleet](/docs/manage-watchers#approving-manual-uploads).
+For instruments in [manual upload mode](#upload-mode), dismissing a detected file tells the watcher not to upload it. Dismissing differs from deleting: the file never reached Data Hub storage, so there’s nothing to restore. A dismissed file stays dismissed, even if the watcher reports it again. If the instrument later writes a different file at the same path, with another size or creation time (the modification time on a system that doesn’t record creation time), Data Hub detects it as a new file and the dismissed file stays dismissed. See [Manage the watcher fleet](/docs/manage-watchers#approving-manual-uploads).
 
 ### Soft delete [#soft-delete]
 
