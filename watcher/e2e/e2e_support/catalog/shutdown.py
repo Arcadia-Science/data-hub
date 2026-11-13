@@ -8,7 +8,7 @@ Code: ``cli.py`` (``watch``: the signal handlers, ``run_supervisor``),
 
 from __future__ import annotations
 
-from e2e_support.catalog.model import CLI, Transition, covered, xfail_bug
+from e2e_support.catalog.model import CLI, Transition, covered
 
 MACHINE = "shutdown"
 
@@ -82,18 +82,17 @@ TRANSITIONS: tuple[Transition, ...] = (
         "every heartbeat and event request for longer than the client waits and asserts that "
         "the process exits within 30 seconds of the stop request.",
     ),
-    xfail_bug(
+    covered(
         MACHINE,
         "process.stop->clean_stop_during_scan",
-        "CLI only. A graceful stop that arrives while the watcher is still starting (the "
-        "config sync, the first heartbeat and the startup scan all run before `watch` "
-        "installs its signal handlers) still sends a `stopped` heartbeat and a "
-        "`watcher_stopped` event. The test holds up the first heartbeat to keep the process "
-        "in that window, because the scan itself is too quick to hit from outside. The "
-        "Windows service has no such window: `SvcStop` sets an event that its loop reads "
-        "when the start has finished, so the stop is not lost. The service counterpart is "
+        "CLI only. A graceful stop that arrives while the watcher is still starting (during the "
+        "config sync, the first heartbeat or the start-up scan) is not lost: `watch` installs "
+        "its signal handlers before it starts the supervisor, the start finishes, and the "
+        "watcher then stops with a `stopped` heartbeat and a `watcher_stopped` event. The test "
+        "holds up the first heartbeat to keep the process in that window, because the scan "
+        "itself is too quick to hit from outside. The Windows service reads its stop event once "
+        "the start has finished, so its stop is not lost either; its counterpart is "
         "`service.stop->clean_stop_during_start` in `test_windows_service.py`.",
-        "ENG-2118",
         platforms=CLI,
     ),
 )

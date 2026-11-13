@@ -1901,7 +1901,12 @@ def _stop_upload_threads(rt: WatcherRuntime, *, drain_timeout: float | None = No
 
 
 def run_supervisor(supervisor: WatcherSupervisor, stop_event: threading.Event) -> None:
-    """Poll *supervisor* until *stop_event* is set or the runtime asks to shut down."""
+    """Poll *supervisor* until *stop_event* is set or the runtime asks to shut down.
+
+    If *stop_event* is already set when this is called (a stop that arrived during
+    `supervisor.start()`), it returns at once without polling. The caller then stops the
+    supervisor, as it does for any other stop.
+    """
     while not stop_event.is_set():
         if supervisor.poll(timeout=1.0):
             return

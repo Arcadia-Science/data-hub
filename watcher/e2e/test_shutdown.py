@@ -20,7 +20,7 @@ from e2e_support.drivers import WatcherDriver
 from e2e_support.factory import WatcherFactory
 from e2e_support.files import SMALL, write_file, write_run
 from e2e_support.server import EventRow, ServerView
-from e2e_support.waiting import KnownBugStillPresent, known_bug, stays_true, wait_until
+from e2e_support.waiting import stays_true, wait_until
 
 pytestmark = pytest.mark.e2e
 
@@ -437,18 +437,10 @@ def test_a_stop_completes_within_thirty_seconds_even_if_the_server_stops_answeri
 
 
 # ---------------------------------------------------------------------------
-# Known bugs: the intended behavior, until they are fixed
+# A stop while the watcher is still starting
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=KnownBugStillPresent,
-    reason=(
-        "ENG-2118: a stop that arrives while the watcher is still starting "
-        "(before its start-up scan ends) kills it with no stopped heartbeat and no stop event"
-    ),
-)
 @pytest.mark.platforms("cli")  # The Windows service already stops cleanly while it starts.
 @pytest.mark.covers("process.stop->clean_stop_during_scan")
 def test_a_stop_during_start_up_still_ends_with_a_clean_stop(
@@ -468,7 +460,6 @@ def test_a_stop_during_start_up_still_ends_with_a_clean_stop(
     assert pc.is_running()
     pc.request_stop()
 
-    with known_bug():
-        assert pc.wait_exit(30) == 0
-        server.wait_for_watcher_status(pc.watcher_id, "stopped")
-        own_stop_event(server, pc.watcher_id)
+    assert pc.wait_exit(30) == 0
+    server.wait_for_watcher_status(pc.watcher_id, "stopped")
+    own_stop_event(server, pc.watcher_id)
