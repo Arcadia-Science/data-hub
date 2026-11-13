@@ -82,8 +82,9 @@ SYSTEM_SHUTDOWN_STATUS_REASON = "system_shutdown"
 # (`Uploader.abort`) and a heartbeat in progress is left behind. The reserve is for the
 # `watcher_stopped` event, and then the final heartbeat, which gets the last
 # `STOP_FINAL_HEARTBEAT_SECONDS` so a slow flush can't starve it. Each of those two
-# requests has an HTTP timeout of at most `STOP_HTTP_TIMEOUT`, cut down to fit the time it
-# has. In auto mode an upload that was cut off is uploaded again at
+# requests has the client's usual HTTP timeout (`DEFAULT_TIMEOUT` in `api_client`, 5 s to
+# connect and 30 s to read), cut down to fit the time it has, so a server that answers
+# slowly still gets them. In auto mode an upload that was cut off is uploaded again at
 # the next start, from its `pending_uploads` row. A file that someone requested is not:
 # a plain `stopped` heartbeat makes the server cancel the instrument's requested
 # uploads, so it has to be requested again. Only a final heartbeat marked as a restart
@@ -94,7 +95,6 @@ SYSTEM_SHUTDOWN_STATUS_REASON = "system_shutdown"
 STOP_BUDGET_SECONDS = 25
 STOP_RESERVE_SECONDS = 10
 STOP_FINAL_HEARTBEAT_SECONDS = 5
-STOP_HTTP_TIMEOUT: tuple[float, float] = (3, 5)  # (connect, read) seconds
 # The least a join gets in a stop that has run out of time: after the uploads are cut off,
 # and for a heartbeat in progress.
 STOP_MIN_WAIT_SECONDS = 1

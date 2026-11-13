@@ -26,14 +26,13 @@ from typing import Any
 import yaml
 
 from data_hub_watcher import config_io, testing_overrides
-from data_hub_watcher.api_client import ApiError, DataHubClient
+from data_hub_watcher.api_client import DEFAULT_TIMEOUT, ApiError, DataHubClient
 from data_hub_watcher.constants import (
     CONFIG_APPLY_DRAIN_TIMEOUT_SECONDS,
     DEFAULT_CONFIG_DIR,
     PRUNE_DAYS,
     STOP_BUDGET_SECONDS,
     STOP_FINAL_HEARTBEAT_SECONDS,
-    STOP_HTTP_TIMEOUT,
     STOP_MIN_WAIT_SECONDS,
     STOP_RESERVE_SECONDS,
     SYSTEM_SHUTDOWN_HTTP_TIMEOUT,
@@ -754,15 +753,17 @@ def _stop_heartbeat_and_report(
       half of what is left when that is less, so a slow flush can't starve it.
     * The final heartbeat takes what remains.
 
-    For a Windows shutdown the wait for a heartbeat is `SYSTEM_SHUTDOWN_JOIN_SECONDS` and
-    each request has a shorter HTTP timeout (`SYSTEM_SHUTDOWN_HTTP_TIMEOUT`).
+    Each of the two requests has the client's usual HTTP timeout (`DEFAULT_TIMEOUT`), cut
+    down to fit its time, so a server that answers slowly still gets them. For a Windows
+    shutdown the wait for a heartbeat is `SYSTEM_SHUTDOWN_JOIN_SECONDS` and each request
+    has a shorter HTTP timeout (`SYSTEM_SHUTDOWN_HTTP_TIMEOUT`).
     """
     if system_shutdown:
         join_timeout = SYSTEM_SHUTDOWN_JOIN_SECONDS
         http_timeout = SYSTEM_SHUTDOWN_HTTP_TIMEOUT
     else:
         join_timeout = max(_left(deadline - STOP_RESERVE_SECONDS), STOP_MIN_WAIT_SECONDS)
-        http_timeout = STOP_HTTP_TIMEOUT
+        http_timeout = DEFAULT_TIMEOUT
     heartbeat.stop_loop(join_timeout=join_timeout)
     reporter.queue_event(
         WatcherEvent(event_type=EventType.WATCHER_STOPPED, message=stopped_message)

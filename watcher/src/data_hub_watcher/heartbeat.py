@@ -7,10 +7,14 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from data_hub_watcher.api_client import ApiError, DataHubClient, timeout_until
+from data_hub_watcher.api_client import (
+    DEFAULT_TIMEOUT,
+    ApiError,
+    DataHubClient,
+    timeout_until,
+)
 from data_hub_watcher.constants import (
     HEARTBEAT_INTERVAL_SECONDS,
-    STOP_HTTP_TIMEOUT,
     SYSTEM_SHUTDOWN_STATUS_REASON,
     WATCHER_VERSION,
 )
@@ -163,7 +167,7 @@ class HeartbeatLoop:
         *,
         system_shutdown: bool = False,
         deadline: float | None = None,
-        timeout_cap: tuple[float, float] = STOP_HTTP_TIMEOUT,
+        timeout_cap: tuple[float, float] = DEFAULT_TIMEOUT,
     ) -> None:
         """Send the final "stopped" heartbeat, so the server knows the watcher shut down
         gracefully rather than silently disappearing.
@@ -177,9 +181,10 @@ class HeartbeatLoop:
         other stop.
 
         *deadline* (a `time.monotonic()` value) is when the request should be done. Its HTTP
-        timeout is *timeout_cap*, cut down to fit before the deadline. A deadline that has
-        passed only makes the request short: it is the one request that matters, so it is
-        still sent. Without a *deadline* the client's usual timeout applies.
+        timeout is *timeout_cap*, the client's usual one unless told otherwise, cut down to
+        fit before the deadline. A deadline that has passed only makes the request short: it
+        is the one request that matters, so it is still sent. Without a *deadline* the
+        client's usual timeout applies.
         """
         self._send_heartbeat(
             status="stopped",

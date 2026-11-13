@@ -19,8 +19,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from data_hub_watcher.api_client import ApiError
-from data_hub_watcher.constants import STOP_HTTP_TIMEOUT, SYSTEM_SHUTDOWN_HTTP_TIMEOUT
+from data_hub_watcher.api_client import DEFAULT_TIMEOUT, ApiError
+from data_hub_watcher.constants import SYSTEM_SHUTDOWN_HTTP_TIMEOUT
 from data_hub_watcher.events import (
     FLUSH_RETRY_MAX,
     EventReporter,
@@ -182,23 +182,40 @@ class TestFlushWithADeadline:
     """A flush with a deadline, as when the watcher is stopping, retries only while it can.
 
     The usual flush retries up to three times, sleeping 1 s and 2 s between attempts and
-    waiting up to 30 s for each answer. With a deadline each attempt has a short HTTP timeout
-    that fits before it, a retry is made only if it would still have time to run, and none is
-    made once the deadline has passed.
+    waiting up to 30 s for each answer. With a deadline each attempt has the client's usual
+    HTTP timeout cut down to fit before it, a retry is made only if it would still have time
+    to run and only after a failure that can't have left the batch stored, and none is made
+    once the deadline has passed. The events route stores every batch it gets, so a retry
+    after a request that was only slow would store the batch twice.
     """
 
     @staticmethod
     def _queue(reporter: EventReporter) -> None:
         reporter.queue_event(WatcherEvent(event_type=EventType.WATCHER_STOPPED, message="bye"))
 
-    def test_sends_with_a_short_timeout(self, reporter: EventReporter, client: MagicMock) -> None:
+    def test_sends_with_the_clients_usual_timeout_when_there_is_time(
+        self, reporter: EventReporter, client: MagicMock
+    ) -> None:
+        self._queue(reporter)
+
+        reporter.flush(deadline=time.monotonic() + 60)
+
+        client.send_events.assert_called_once()
+        assert client.send_events.call_args.kwargs["timeout"] == DEFAULT_TIMEOUT
+        assert len(reporter._queue) == 0
+
+    def test_a_server_that_answers_in_six_seconds_is_waited_for(
+        self, reporter: EventReporter, client: MagicMock
+    ) -> None:
+        # With 20 s to the deadline the read timeout is far past the 5 s a stop used to cap
+        # it at, so a slow server that does answer still gets the batch stored once.
         self._queue(reporter)
 
         reporter.flush(deadline=time.monotonic() + 20)
 
-        client.send_events.assert_called_once()
-        assert client.send_events.call_args.kwargs["timeout"] == STOP_HTTP_TIMEOUT
-        assert len(reporter._queue) == 0
+        connect, read = client.send_events.call_args.kwargs["timeout"]
+        assert read > 6
+        assert connect + read <= 20
 
     def test_the_timeout_is_capped_as_asked(
         self, reporter: EventReporter, client: MagicMock
@@ -219,11 +236,20 @@ class TestFlushWithADeadline:
         connect, read = client.send_events.call_args.kwargs["timeout"]
         assert 0 < connect + read <= 2
 
-    def test_retries_after_a_failure_while_the_deadline_allows(
-        self, reporter: EventReporter, client: MagicMock
+    @pytest.mark.parametrize(
+        "failure",
+        [
+            ApiError("Connection error: refused", status_code=0),
+            ApiError("blip", status_code=503),
+            ApiError("bad gateway", status_code=502),
+        ],
+        ids=["connection-error", "503", "502"],
+    )
+    def test_retries_after_a_failure_that_stored_nothing_while_the_deadline_allows(
+        self, reporter: EventReporter, client: MagicMock, failure: ApiError
     ) -> None:
         self._queue(reporter)
-        client.send_events.side_effect = [ApiError("blip", status_code=503), None]
+        client.send_events.side_effect = [failure, None]
 
         with patch("data_hub_watcher.events.time.sleep") as sleep:
             reporter.flush(deadline=time.monotonic() + 20)
@@ -232,6 +258,33 @@ class TestFlushWithADeadline:
         sleep.assert_called_once_with(1.0)
         assert len(reporter._queue) == 0
         assert reporter._dropped_count == 0
+
+    @pytest.mark.parametrize(
+        "failure",
+        [
+            ApiError("Request timed out: slow", status_code=0, read_timed_out=True),
+            ApiError("bad request", status_code=400),
+            ApiError("too large", status_code=413),
+            ValueError("the reply was not JSON"),
+        ],
+        ids=["read-timeout", "400", "413", "unreadable-reply"],
+    )
+    def test_does_not_retry_when_the_server_may_have_stored_the_batch_or_would_refuse_it(
+        self, reporter: EventReporter, client: MagicMock, failure: Exception
+    ) -> None:
+        # A read timeout may be a server that stored the batch and is slow to say so, and an
+        # error after a 2xx answer means it did store it: sending again would store it twice.
+        # A 4xx fails the same way each time.
+        self._queue(reporter)
+        client.send_events.side_effect = failure
+
+        with patch("data_hub_watcher.events.time.sleep") as sleep:
+            reporter.flush(deadline=time.monotonic() + 60)
+
+        assert client.send_events.call_count == 1
+        sleep.assert_not_called()
+        # The batch is dropped and counted, as after any failed flush.
+        assert reporter._dropped_count == 1
 
     def test_gives_up_after_the_usual_number_of_attempts(
         self, reporter: EventReporter, client: MagicMock

@@ -39,11 +39,16 @@ class ApiError(Exception):
         message: str,
         status_code: int = 0,
         detail: ApiErrorDetail | None = None,
+        *,
+        read_timed_out: bool = False,
     ) -> None:
         super().__init__(message)
         self.message = message
         self.status_code = status_code
         self.detail = detail
+        # True when the request was sent and no answer came back in time. The server may
+        # have acted on it, so replaying a request that isn't safe to repeat can do it twice.
+        self.read_timed_out = read_timed_out
 
     @property
     def is_transient(self) -> bool:
@@ -65,7 +70,7 @@ def timeout_until(deadline: float, cap: tuple[float, float]) -> tuple[float, flo
     """The HTTP timeout for a last request that should be done by *deadline*.
 
     *deadline* is a `time.monotonic()` value and *cap* is the `(connect, read)` timeout the
-    request gets when there is plenty of time (`STOP_HTTP_TIMEOUT`, or
+    request gets when there is plenty of time (`DEFAULT_TIMEOUT`, the client's usual one, or
     `SYSTEM_SHUTDOWN_HTTP_TIMEOUT` for a Windows shutdown). It is cut down so that the
     connect and the read together fit in the time left.
     """
@@ -158,9 +163,11 @@ class DataHubClient:
                 timeout=timeout or self._timeout,
             )
         except requests.ConnectionError as exc:
+            # Includes a connect timeout, which is both a connection error and a timeout.
             raise ApiError(f"Connection error: {exc}") from exc
         except requests.Timeout as exc:
-            raise ApiError(f"Request timed out: {exc}") from exc
+            # Only a read timeout is left: the request was sent.
+            raise ApiError(f"Request timed out: {exc}", read_timed_out=True) from exc
 
         if not resp.ok:
             self._handle_error(resp)

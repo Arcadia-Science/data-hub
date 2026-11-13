@@ -26,13 +26,14 @@ import requests
 import yaml
 
 from data_hub_watcher import runtime
-from data_hub_watcher.api_client import ApiError, DataHubClient
+from data_hub_watcher.api_client import DEFAULT_TIMEOUT, ApiError, DataHubClient
 from data_hub_watcher.config_io import save_config
 from data_hub_watcher.constants import (
     DEFAULT_CHECK_INTERVAL_TICKS,
     DEFAULT_IDLE_TICKS_REQUIRED,
     HEARTBEAT_INTERVAL_SECONDS,
-    STOP_HTTP_TIMEOUT,
+    STOP_BUDGET_SECONDS,
+    SYSTEM_SHUTDOWN_HTTP_TIMEOUT,
 )
 from data_hub_watcher.events import EventType
 from data_hub_watcher.heartbeat import HeartbeatLoop
@@ -1306,19 +1307,23 @@ class TestStopMarksASystemShutdown:
         assert [e["message"] for e in stopped] == ["Service stopped: Windows is shutting down"]
 
     @pytest.mark.parametrize("waiting", [False, True], ids=["running", "waiting"])
-    def test_any_other_stop_sends_the_last_requests_with_the_stop_timeout(
+    def test_any_other_stop_sends_the_last_requests_with_what_the_stop_can_spare(
         self, env: _Env, waiting: bool
     ) -> None:
-        # Every stop is limited to 25 s, so the last two requests can't wait for the
-        # client's 30 s read timeout either, but they get longer than at a shutdown.
+        # Every stop is limited to 25 s, so the last two requests get the client's usual
+        # timeout cut down to fit, which is longer than at a shutdown.
         sup = env.supervisor(env.write_config(_cfg(env.tmp_path / "later")) if waiting else None)
         sup.start()
         assert (sup.waiting_reason is not None) is waiting
 
         sup.stop(stopped_message="Service stopped")
 
-        assert env.client.send_heartbeat.call_args.kwargs["timeout"] == STOP_HTTP_TIMEOUT
-        assert env.client.send_events.call_args.kwargs["timeout"] == STOP_HTTP_TIMEOUT
+        for send in (env.client.send_heartbeat, env.client.send_events):
+            connect, read = send.call_args.kwargs["timeout"]
+            assert SYSTEM_SHUTDOWN_HTTP_TIMEOUT[0] < connect <= DEFAULT_TIMEOUT[0]
+            # Long enough for a server that takes 6 s to answer.
+            assert max(SYSTEM_SHUTDOWN_HTTP_TIMEOUT[1], 6) < read <= DEFAULT_TIMEOUT[1]
+            assert connect + read <= STOP_BUDGET_SECONDS
 
     @pytest.mark.parametrize("system_shutdown", [False, True], ids=["stop", "shutdown"])
     @pytest.mark.parametrize("waiting", [False, True], ids=["running", "waiting"])

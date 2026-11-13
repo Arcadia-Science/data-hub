@@ -26,14 +26,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from data_hub_watcher.api_client import ApiError
+from data_hub_watcher.api_client import DEFAULT_TIMEOUT, ApiError
 from data_hub_watcher.constants import (
     DEFAULT_CHECK_INTERVAL_TICKS,
     DEFAULT_IDLE_TICKS_REQUIRED,
     HEARTBEAT_INTERVAL_SECONDS,
     STOP_BUDGET_SECONDS,
     STOP_FINAL_HEARTBEAT_SECONDS,
-    STOP_HTTP_TIMEOUT,
     STOP_MIN_WAIT_SECONDS,
     STOP_RESERVE_SECONDS,
     SYSTEM_SHUTDOWN_HTTP_TIMEOUT,
@@ -321,14 +320,56 @@ class TestStopRuntimeOrder:
 
         final = parts.heartbeat.send_final_heartbeat.call_args.kwargs
         assert before + STOP_BUDGET_SECONDS <= final["deadline"] <= after + STOP_BUDGET_SECONDS
-        assert final["timeout_cap"] == STOP_HTTP_TIMEOUT
+        assert final["timeout_cap"] == DEFAULT_TIMEOUT
         assert final["system_shutdown"] is False
         # The event is done in time to leave the final heartbeat its share.
         flush = parts.reporter.flush.call_args.kwargs
-        assert flush["timeout_cap"] == STOP_HTTP_TIMEOUT
+        assert flush["timeout_cap"] == DEFAULT_TIMEOUT
         assert final["deadline"] - flush["deadline"] == pytest.approx(
             STOP_FINAL_HEARTBEAT_SECONDS, abs=1
         )
+
+    def test_the_event_and_the_final_heartbeat_can_wait_for_a_slow_server(self) -> None:
+        # A server that takes 6 s to answer is slow, not hung. With the whole budget ahead
+        # of them, the two requests wait longer than that, as they did with the client's own
+        # timeout before 1.4.2, and neither is cut short at 5 s (the event would be sent
+        # again after that and stored twice, and the heartbeat would count as failed while
+        # the server stores it).
+        from data_hub_watcher.events import EventReporter
+
+        client = MagicMock()
+        reporter = EventReporter(client, "w-test")
+        loop = HeartbeatLoop(
+            client=client,
+            watcher_id="w-test",
+            interval_seconds=60,
+            event_reporter=reporter,
+            instrument_id="inst-1",
+            watch_directory="/tmp/watch",
+            upload_mode="auto",
+        )
+        rt, _parts = _runtime_of_mocks()
+        rt.heartbeat = loop
+        rt.reporter = reporter
+
+        stop_runtime(rt, stopped_message="Service stopped")
+
+        client.send_events.assert_called_once()
+        client.send_heartbeat.assert_called_once()
+        events_connect, events_read = client.send_events.call_args.kwargs["timeout"]
+        final_connect, final_read = client.send_heartbeat.call_args.kwargs["timeout"]
+        assert events_read > 6
+        assert final_read > 6
+        # The events must be done before the final heartbeat's share of the budget begins,
+        # and the heartbeat by the deadline.
+        events_share = STOP_BUDGET_SECONDS - STOP_FINAL_HEARTBEAT_SECONDS
+        assert events_connect + events_read <= events_share
+        assert final_connect + final_read <= STOP_BUDGET_SECONDS
+        # Neither is longer than the client's usual timeout.
+        assert events_connect <= DEFAULT_TIMEOUT[0]
+        assert events_read <= DEFAULT_TIMEOUT[1]
+        assert final_connect <= DEFAULT_TIMEOUT[0]
+        assert final_read <= DEFAULT_TIMEOUT[1]
 
     def test_the_heartbeat_loop_keeps_ticking_until_the_uploads_have_stopped(self) -> None:
         # A long upload mustn't leave a gap in the heartbeats: the server would show the
@@ -451,7 +492,7 @@ class _HungServer:
             self.release.wait(timeout=60)
         else:
             time.sleep(sum(timeout))
-        raise ApiError("Request timed out")
+        raise ApiError("Request timed out", read_timed_out=True)
 
     def send_heartbeat(
         self, watcher_id: str, payload: dict[str, Any], timeout: tuple[float, float] | None = None
@@ -479,7 +520,6 @@ class TestStopRuntimeAgainstAServerThatStopsAnswering:
         monkeypatch.setattr(runtime_module, "STOP_BUDGET_SECONDS", budget)
         monkeypatch.setattr(runtime_module, "STOP_RESERVE_SECONDS", reserve)
         monkeypatch.setattr(runtime_module, "STOP_FINAL_HEARTBEAT_SECONDS", final_share)
-        monkeypatch.setattr(runtime_module, "STOP_HTTP_TIMEOUT", (2, 2))
         server = _HungServer()
         reporter = EventReporter(server, "w-test")  # type: ignore[arg-type]
         loop = HeartbeatLoop(
@@ -514,6 +554,9 @@ class TestStopRuntimeAgainstAServerThatStopsAnswering:
         sent = server.calls[1:]
         assert sent[0] == ("events", "")
         assert sent[-1] == ("heartbeat", "stopped")
+        # The event request timed out after it was sent, so the server may have stored the
+        # batch: it is not sent again.
+        assert [call for call in sent if call[0] == "events"] == [("events", "")]
         parts.state_db.close.assert_called_once_with()
 
 

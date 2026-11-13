@@ -77,10 +77,10 @@ TRANSITIONS: tuple[Transition, ...] = (
         "process.stop->bounded_when_server_hangs",
         "A graceful stop completes within 25 seconds even if the server has stopped "
         "answering. Uploads and a heartbeat in progress get the first 15 seconds, and the "
-        "`watcher_stopped` event and the final heartbeat get the last 10, each with a short "
-        "timeout. Whatever doesn't fit is given up. The test holds every heartbeat and event "
-        "request for longer than the client waits and asserts that the process exits within "
-        "30 seconds of the stop request.",
+        "`watcher_stopped` event and the final heartbeat get the last 10, each with an HTTP "
+        "timeout cut down to fit its time. Whatever doesn't fit is given up. The test holds "
+        "every heartbeat and event request for longer than the client waits and asserts that "
+        "the process exits within 30 seconds of the stop request.",
     ),
     xfail_bug(
         MACHINE,

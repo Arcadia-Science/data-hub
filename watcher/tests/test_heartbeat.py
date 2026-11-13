@@ -29,8 +29,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from data_hub_watcher.api_client import ApiError
-from data_hub_watcher.constants import STOP_HTTP_TIMEOUT, SYSTEM_SHUTDOWN_HTTP_TIMEOUT
+from data_hub_watcher.api_client import DEFAULT_TIMEOUT, ApiError
+from data_hub_watcher.constants import SYSTEM_SHUTDOWN_HTTP_TIMEOUT
 from data_hub_watcher.events import EventReporter
 from data_hub_watcher.heartbeat import HeartbeatLoop
 
@@ -311,14 +311,24 @@ class TestSendFinalHeartbeat:
     deadline the client's own timeout applies.
     """
 
-    def test_the_timeout_is_the_cap_and_the_heartbeat_says_stopped(self) -> None:
+    def test_the_timeout_is_the_clients_usual_one_when_there_is_time(self) -> None:
+        client = MagicMock()
+        loop = _make_loop(client, MagicMock(spec=EventReporter))
+
+        loop.send_final_heartbeat(deadline=time.monotonic() + 60)
+
+        assert client.send_heartbeat.call_args.kwargs["timeout"] == DEFAULT_TIMEOUT
+        assert client.send_heartbeat.call_args.args[1]["status"] == "stopped"
+
+    def test_a_server_that_answers_in_six_seconds_is_waited_for(self) -> None:
         client = MagicMock()
         loop = _make_loop(client, MagicMock(spec=EventReporter))
 
         loop.send_final_heartbeat(deadline=time.monotonic() + 20)
 
-        assert client.send_heartbeat.call_args.kwargs["timeout"] == STOP_HTTP_TIMEOUT
-        assert client.send_heartbeat.call_args.args[1]["status"] == "stopped"
+        connect, read = client.send_heartbeat.call_args.kwargs["timeout"]
+        assert read > 6
+        assert connect + read <= 20
 
     def test_the_cap_can_be_the_shorter_one_for_a_windows_shutdown(self) -> None:
         client = MagicMock()

@@ -82,8 +82,12 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
-from data_hub_watcher.api_client import ApiError, DataHubClient, timeout_until
-from data_hub_watcher.constants import STOP_HTTP_TIMEOUT
+from data_hub_watcher.api_client import (
+    DEFAULT_TIMEOUT,
+    ApiError,
+    DataHubClient,
+    timeout_until,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +105,18 @@ FLUSH_RETRY_BASE_DELAY = 1.0
 # A flush with a deadline retries only if the retry would still have this long to run
 # once it has waited its delay.
 FLUSH_RETRY_MIN_SECONDS = 1.0
+
+
+def _safe_to_replay(exc: Exception | None) -> bool:
+    """Whether a failed events request can be sent again without the server storing it twice.
+
+    The events route inserts every batch as it comes, with nothing to recognise a repeat.
+    A connection error (nothing reached the server) and a 5xx (it failed) are safe to
+    replay. A read timeout is not: the server may have stored the batch and only been
+    slow to answer. Neither is a 4xx, which would fail again, or an error raised after a
+    2xx answer, which means the server did store it.
+    """
+    return isinstance(exc, ApiError) and not exc.read_timed_out and exc.is_transient
 
 
 class EventType(str, Enum):
@@ -207,16 +223,18 @@ class EventReporter:
         self,
         *,
         deadline: float | None = None,
-        timeout_cap: tuple[float, float] = STOP_HTTP_TIMEOUT,
+        timeout_cap: tuple[float, float] = DEFAULT_TIMEOUT,
     ) -> None:
         """Send the queued events.
 
         *deadline* (a `time.monotonic()` value) is for a flush that has a limited time, as
-        when the watcher is stopping. Each attempt has an HTTP timeout of *timeout_cap*, cut
-        down to fit before the deadline. It retries as the usual flush does, but only while
-        the deadline still leaves a retry time to run, and it makes no attempt once the
-        deadline has passed. The events that couldn't be sent are dropped as after any
-        failed flush.
+        when the watcher is stopping. Each attempt has an HTTP timeout of *timeout_cap*, the
+        client's usual one unless told otherwise, cut down to fit before the deadline, so a
+        server that answers slowly is still waited for. It retries as the usual flush does,
+        but only after a failure that can't have left the batch stored (see
+        `_safe_to_replay`: not after a read timeout), and only while the deadline still
+        leaves a retry time to run. It makes no attempt once the deadline has passed. The
+        events that couldn't be sent are dropped as after any failed flush.
         """
         if deadline is not None and time.monotonic() >= deadline:
             return
@@ -280,6 +298,8 @@ class EventReporter:
             except (ApiError, Exception) as exc:
                 last_exc = exc
             if attempts >= FLUSH_RETRY_MAX:
+                break
+            if deadline is not None and not _safe_to_replay(last_exc):
                 break
             delay = FLUSH_RETRY_BASE_DELAY * (2 ** (attempts - 1))
             retry_ends_by = time.monotonic() + delay + FLUSH_RETRY_MIN_SECONDS
