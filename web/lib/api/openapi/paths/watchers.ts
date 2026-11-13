@@ -180,7 +180,7 @@ operation(
   watcherHeartbeatAck,
   { params: watcherParams, body: body(heartbeatBody) },
   true,
-  `${DEREGISTERED_NOTE} Only a token that may act for the watcher (the one that registered it, or one that could take over its registration) gets \`WATCHER_DEREGISTERED\`; any other token gets \`NOT_FOUND\`. Watcher 1.4.3 and later stop after three \`WATCHER_DEREGISTERED\` replies in a row.`
+  `${DEREGISTERED_NOTE} Only a token that may act for the watcher (the token it is bound to, or one that could take it over) gets \`WATCHER_DEREGISTERED\`; any other token gets \`NOT_FOUND\`. Watcher 1.4.3 and later stop after three \`WATCHER_DEREGISTERED\` replies in a row.`
 );
 operation(
   "get",

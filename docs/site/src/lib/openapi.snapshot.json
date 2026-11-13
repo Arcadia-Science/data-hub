@@ -6553,7 +6553,7 @@
       "post": {
         "operationId": "recordWatcherHeartbeat",
         "summary": "Record a watcher heartbeat",
-        "description": "Requires scope `watchers:report`. PAT only; browser sessions are rejected. A watcher that was deregistered gets a 404 with the error code `WATCHER_DEREGISTERED`; a watcher ID that does not exist gets `NOT_FOUND`. Only a token that may act for the watcher (the one that registered it, or one that could take over its registration) gets `WATCHER_DEREGISTERED`; any other token gets `NOT_FOUND`. Watcher 1.4.3 and later stop after three `WATCHER_DEREGISTERED` replies in a row.",
+        "description": "Requires scope `watchers:report`. PAT only; browser sessions are rejected. A watcher that was deregistered gets a 404 with the error code `WATCHER_DEREGISTERED`; a watcher ID that does not exist gets `NOT_FOUND`. Only a token that may act for the watcher (the token it is bound to, or one that could take it over) gets `WATCHER_DEREGISTERED`; any other token gets `NOT_FOUND`. Watcher 1.4.3 and later stop after three `WATCHER_DEREGISTERED` replies in a row.",
         "tags": [
           "Watchers"
         ],

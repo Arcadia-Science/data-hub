@@ -106,6 +106,10 @@ export function watcherDeregisteredResponse(watcherId: string): Response {
  * tell the caller that a deregistered watcher is deregistered, since a
  * deregistered row must not be claimed, and anyone else gets the same reply as
  * for a watcher that does not exist.
+ *
+ * The rule that a binding to a revoked token counts as no binding is also in
+ * `enforceWatcherBinding`, as the `inArray` subquery of its claim. Change them
+ * together.
  */
 export async function callerMayActForWatcher(
   authResult: AuthResult,
@@ -157,7 +161,9 @@ export async function enforceWatcherBinding(
   }
 
   // TOFU: first token to check in claims the row. The `where` clause makes
-  // concurrent claims atomic: the loser re-reads and is denied.
+  // concurrent claims atomic: the loser re-reads and is denied. Its "bound to a
+  // revoked token" subquery is the rule that `callerMayActForWatcher` repeats
+  // in a read-only form. Change them together.
   const claimed = await db
     .update(watchers)
     .set({ registeredByToken: tokenId })
