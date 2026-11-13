@@ -667,6 +667,16 @@ class Uploader:
         if self._stop_event is not None:
             self._stop_event.set()
 
+    def request_stop(self) -> None:
+        """Start no new file or part from now on, on any thread. Those already sending finish.
+
+        For a stop that begins with the uploader, before it waits for the file monitor and
+        the upload worker: an auto-mode upload runs on the monitor's own thread, which a
+        wait for the monitor would otherwise leave free to start parts and the next file.
+        `abort` also cuts off what is sending.
+        """
+        self._request_stop()
+
     def abort(self) -> None:
         """Stop, and cut off the PUTs and hashing still in progress.
 

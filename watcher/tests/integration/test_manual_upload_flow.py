@@ -16,6 +16,10 @@ import pytest
 
 from data_hub_shared.testing import IntegrationEnv, db_query, db_update
 from data_hub_watcher.api_client import DataHubClient
+from data_hub_watcher.constants import (
+    SYSTEM_SHUTDOWN_HTTP_TIMEOUT,
+    SYSTEM_SHUTDOWN_STOP_BUDGET_SECONDS,
+)
 from data_hub_watcher.heartbeat import HeartbeatLoop
 
 pytestmark = pytest.mark.integration
@@ -181,7 +185,7 @@ class TestStopWithRequestedUploads:
     """
 
     @staticmethod
-    def _stop_the_watcher(client: DataHubClient, watcher_id: str, **stop_kwargs: Any) -> None:
+    def _stop_the_watcher(client: DataHubClient, watcher_id: str, **final_kwargs: Any) -> None:
         loop = HeartbeatLoop(
             client=client,
             watcher_id=watcher_id,
@@ -191,7 +195,8 @@ class TestStopWithRequestedUploads:
             watch_directory="/tmp/watch",
             upload_mode="manual",
         )
-        loop.stop(**stop_kwargs)
+        loop.stop_loop()
+        loop.send_final_heartbeat(**final_kwargs)
 
     @staticmethod
     def _request_the_upload(
@@ -222,7 +227,11 @@ class TestStopWithRequestedUploads:
         # With the deadline a stop for a system shutdown has, the heartbeat goes out with the
         # short HTTP timeout it gets there. This sends it through the real client.
         self._stop_the_watcher(
-            client, watcher_id, system_shutdown=True, deadline=time.monotonic() + 7
+            client,
+            watcher_id,
+            system_shutdown=True,
+            deadline=time.monotonic() + SYSTEM_SHUTDOWN_STOP_BUDGET_SECONDS,
+            timeout_cap=SYSTEM_SHUTDOWN_HTTP_TIMEOUT,
         )
 
         watchers = db_query(

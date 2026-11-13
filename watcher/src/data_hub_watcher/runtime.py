@@ -31,9 +31,14 @@ from data_hub_watcher.constants import (
     CONFIG_APPLY_DRAIN_TIMEOUT_SECONDS,
     DEFAULT_CONFIG_DIR,
     PRUNE_DAYS,
+    STOP_BUDGET_SECONDS,
+    STOP_FINAL_HEARTBEAT_SECONDS,
+    STOP_HTTP_TIMEOUT,
+    STOP_MIN_WAIT_SECONDS,
+    STOP_RESERVE_SECONDS,
+    SYSTEM_SHUTDOWN_HTTP_TIMEOUT,
     SYSTEM_SHUTDOWN_JOIN_SECONDS,
     SYSTEM_SHUTDOWN_STOP_BUDGET_SECONDS,
-    UPLOAD_WORKER_STOP_TIMEOUT_SECONDS,
     WAITING_START_RETRY_MAX_SECONDS,
 )
 from data_hub_watcher.events import EventReporter, EventType, WatcherEvent
@@ -673,15 +678,98 @@ def sync_config_to_api(
     )
 
 
-def _shutdown_deadline(system_shutdown: bool) -> float | None:
-    """When a stop must be done, as a `time.monotonic()` value, or `None` for no limit.
+def _stop_deadline(system_shutdown: bool) -> float:
+    """When a stop must be done, as a `time.monotonic()` value.
 
-    A stop for Windows shutting down is limited to `SYSTEM_SHUTDOWN_STOP_BUDGET_SECONDS`.
-    Any other stop waits as long as its steps need.
+    A stop for Windows shutting down is limited to `SYSTEM_SHUTDOWN_STOP_BUDGET_SECONDS`
+    and any other stop to `STOP_BUDGET_SECONDS`.
     """
-    if not system_shutdown:
-        return None
-    return time.monotonic() + SYSTEM_SHUTDOWN_STOP_BUDGET_SECONDS
+    budget = SYSTEM_SHUTDOWN_STOP_BUDGET_SECONDS if system_shutdown else STOP_BUDGET_SECONDS
+    return time.monotonic() + budget
+
+
+def _left(until: float) -> float:
+    """Seconds until *until* (a `time.monotonic()` value), or 0 once it has passed."""
+    return max(0.0, until - time.monotonic())
+
+
+def _stop_uploads_by(rt: WatcherRuntime, until: float) -> tuple[bool, bool]:
+    """Stop the file monitor and the upload worker, giving uploads until *until* to finish.
+
+    Returns whether each of the monitor's stability checker and the worker has exited.
+
+    The stop signal goes first, before any wait, so that no new part and no new file
+    starts, on the worker or on the monitor's own thread (an auto-mode upload runs
+    there). Parts already sending finish. The waits come after, all against the same
+    limit. A thread still running at *until* is cut off (`Uploader.abort` ends the PUTs
+    and hashing in progress) and gets `STOP_MIN_WAIT_SECONDS` more to unwind. A file
+    that was cut off is uploaded after the next start, from its `pending_uploads` row
+    or the server's queue.
+    """
+    rt.uploader.request_stop()
+    # Tells the stability checker to stop and waits for the observer only. The checker may
+    # be uploading a file, so it is waited for below, against the same limit as the worker.
+    monitor_stopped = rt.monitor.stop(timeout=0.0)
+    if not monitor_stopped:
+        monitor_stopped = rt.monitor.join(_left(until))
+    worker = rt.upload_worker
+    worker_stopped = True if worker is None else worker.stop(timeout=_left(until))
+    if monitor_stopped and worker_stopped:
+        return True, True
+    logger.warning(
+        "Uploads were still running when the stop ran out of time to wait for them; "
+        "cutting them off. They are uploaded again at the next start."
+    )
+    rt.uploader.abort()
+    cut_off_until = time.monotonic() + STOP_MIN_WAIT_SECONDS
+    if not monitor_stopped:
+        monitor_stopped = rt.monitor.join(_left(cut_off_until))
+    if not worker_stopped and worker is not None:
+        worker_stopped = worker.stop(timeout=_left(cut_off_until))
+    return monitor_stopped, worker_stopped
+
+
+def _stop_heartbeat_and_report(
+    heartbeat: HeartbeatLoop,
+    reporter: EventReporter,
+    *,
+    stopped_message: str,
+    system_shutdown: bool,
+    deadline: float,
+) -> None:
+    """Stop the heartbeat loop, then send the `watcher_stopped` event, then the final heartbeat.
+
+    The steps of every stop that come after the uploads have stopped or been cut off,
+    shared by a running watcher and one that is waiting for its folder. *deadline* (a
+    `time.monotonic()` value) is when the stop must be done.
+
+    * The wait for a heartbeat in progress ends `STOP_RESERVE_SECONDS` before the
+      deadline, but is never shorter than `STOP_MIN_WAIT_SECONDS`. A tick that is still
+      running is left behind (see `HeartbeatLoop.stop_loop`).
+    * The event goes out before the final heartbeat, so the server doesn't get the
+      watcher's stop event after it has already marked the watcher stopped. The flush
+      is done in time to leave the final heartbeat `STOP_FINAL_HEARTBEAT_SECONDS`, or
+      half of what is left when that is less, so a slow flush can't starve it.
+    * The final heartbeat takes what remains.
+
+    For a Windows shutdown the wait for a heartbeat is `SYSTEM_SHUTDOWN_JOIN_SECONDS` and
+    each request has a shorter HTTP timeout (`SYSTEM_SHUTDOWN_HTTP_TIMEOUT`).
+    """
+    if system_shutdown:
+        join_timeout = SYSTEM_SHUTDOWN_JOIN_SECONDS
+        http_timeout = SYSTEM_SHUTDOWN_HTTP_TIMEOUT
+    else:
+        join_timeout = max(_left(deadline - STOP_RESERVE_SECONDS), STOP_MIN_WAIT_SECONDS)
+        http_timeout = STOP_HTTP_TIMEOUT
+    heartbeat.stop_loop(join_timeout=join_timeout)
+    reporter.queue_event(
+        WatcherEvent(event_type=EventType.WATCHER_STOPPED, message=stopped_message)
+    )
+    final_heartbeat_share = min(STOP_FINAL_HEARTBEAT_SECONDS, _left(deadline) / 2)
+    reporter.flush(deadline=deadline - final_heartbeat_share, timeout_cap=http_timeout)
+    heartbeat.send_final_heartbeat(
+        system_shutdown=system_shutdown, deadline=deadline, timeout_cap=http_timeout
+    )
 
 
 def stop_runtime(
@@ -689,25 +777,29 @@ def stop_runtime(
 ) -> None:
     """Shut everything down in reverse order and flush pending events.
 
-    *system_shutdown* marks the final `stopped` heartbeat as caused by Windows
-    shutting down (see `HeartbeatLoop.stop`), and limits the stop to
-    `SYSTEM_SHUTDOWN_STOP_BUDGET_SECONDS`: Windows ends the process when its
-    preshutdown timeout passes, 10 s on current builds. Uploads are cut off
-    first (`Uploader.abort`), so the joins that follow are short, and the final
-    heartbeat and the event flush get an HTTP timeout that fits in what is left.
-    A file whose upload was cut off is uploaded after the next start, from its
-    `pending_uploads` row or the server's queue. Any other stop is as it always
-    was: it waits for the monitor, the upload worker and a heartbeat in progress
-    for as long as each is allowed.
+    Every stop finishes within `STOP_BUDGET_SECONDS`, even when the server stops
+    answering. A stop for Windows shutting down finishes within
+    `SYSTEM_SHUTDOWN_STOP_BUDGET_SECONDS`, because Windows ends the process when its
+    preshutdown timeout passes, 10 s on current builds. The steps, in order:
+
+    1. The uploader is told to stop (`Uploader.request_stop`), so no new part or file
+       starts. For a Windows shutdown it is `Uploader.abort`, which also cuts off the
+       parts and hashing in progress, so the joins that follow are short.
+    2. The file monitor stops.
+    3. The upload worker stops. Uploads in progress get until `STOP_RESERVE_SECONDS`
+       before the deadline to finish, and are cut off then (`_stop_uploads_by`).
+    4. The heartbeat loop stops. It keeps ticking until this step, so the server doesn't
+       see a gap in heartbeats while an upload finishes.
+    5. The `watcher_stopped` event is sent.
+    6. The final `stopped` heartbeat is sent. *system_shutdown* marks it as caused by
+       Windows shutting down (see `HeartbeatLoop.send_final_heartbeat`).
+    7. The state database is closed, unless a thread that uploads is still running.
+
+    Steps 4 to 6 are `_stop_heartbeat_and_report`. A file whose upload was cut off is
+    uploaded after the next start, from its `pending_uploads` row or the server's queue.
     """
-    deadline = _shutdown_deadline(system_shutdown)
-    if deadline is None:
-        rt.monitor.stop()
-        # The monitor's result isn't checked: only the upload worker decides
-        # whether the state DB is closed.
-        monitor_stopped = True
-        worker_timeout = UPLOAD_WORKER_STOP_TIMEOUT_SECONDS
-    else:
+    deadline = _stop_deadline(system_shutdown)
+    if system_shutdown:
         # The stability checker can be uploading a file on its own thread. Cut that
         # off, and the worker's uploads with it, before any join, so each join below
         # is short: with no time to wait for the parts in flight, they are cut off
@@ -716,34 +808,38 @@ def stop_runtime(
         monitor_stopped = rt.monitor.stop(
             timeout=SYSTEM_SHUTDOWN_JOIN_SECONDS, observer_timeout=SYSTEM_SHUTDOWN_JOIN_SECONDS
         )
-        worker_timeout = SYSTEM_SHUTDOWN_JOIN_SECONDS
+        upload_worker_stopped = (
+            True
+            if rt.upload_worker is None
+            else rt.upload_worker.stop(timeout=SYSTEM_SHUTDOWN_JOIN_SECONDS)
+        )
+    else:
+        monitor_stopped, upload_worker_stopped = _stop_uploads_by(
+            rt, deadline - STOP_RESERVE_SECONDS
+        )
     # ``StateDB.close`` assumes writer threads have joined; a large upload
-    # outliving the join once wrote post-close. Stop the worker first, and if
-    # it won't stop in time, skip the close rather than race it (the OS reaps).
-    # The worker's file and part threads are daemon threads, so a PUT still in
-    # flight does not hold the process open past this join. That file is
-    # retried at the next start, from ``pending_uploads`` or the server's queue.
-    upload_worker_stopped = True
-    if rt.upload_worker is not None:
-        upload_worker_stopped = rt.upload_worker.stop(timeout=worker_timeout)
-        if not upload_worker_stopped:
-            logger.warning(
-                "Upload worker still running at shutdown; leaving the state DB "
-                "open so the in-flight upload can finish without a closed-DB error"
-            )
+    # outliving the join once wrote post-close. If one won't stop in time, skip
+    # the close rather than race it (the OS reaps). The worker's file and part
+    # threads are daemon threads, so a PUT still in flight does not hold the
+    # process open past this point. That file is retried at the next start, from
+    # ``pending_uploads`` or the server's queue.
+    if not upload_worker_stopped:
+        logger.warning(
+            "Upload worker still running at shutdown; leaving the state DB "
+            "open so the in-flight upload can finish without a closed-DB error"
+        )
     if not monitor_stopped:
         logger.warning(
             "File monitor still running at shutdown; leaving the state DB open so "
             "the upload it is running can end without a closed-DB error"
         )
-    rt.reporter.queue_event(
-        WatcherEvent(
-            event_type=EventType.WATCHER_STOPPED,
-            message=stopped_message,
-        )
+    _stop_heartbeat_and_report(
+        rt.heartbeat,
+        rt.reporter,
+        stopped_message=stopped_message,
+        system_shutdown=system_shutdown,
+        deadline=deadline,
     )
-    rt.heartbeat.stop(system_shutdown=system_shutdown, deadline=deadline)
-    rt.reporter.flush(deadline=deadline)
     if upload_worker_stopped and monitor_stopped:
         rt.state_db.close()
 
@@ -983,21 +1079,24 @@ class WatcherSupervisor:
     def stop(self, *, stopped_message: str, system_shutdown: bool = False) -> None:
         """Stop whatever is running and flush events.
 
-        *system_shutdown* marks the final `stopped` heartbeat as caused by Windows
-        shutting down, and limits the stop to about 7 s (see `stop_runtime`).
+        Every stop finishes within `STOP_BUDGET_SECONDS`. *system_shutdown* marks the final
+        `stopped` heartbeat as caused by Windows shutting down, and limits the stop to
+        about 7 s (see `stop_runtime`).
         """
         if self.rt is not None:
             stop_runtime(self.rt, stopped_message=stopped_message, system_shutdown=system_shutdown)
             self.rt = None
         elif self._waiting is not None:
-            # Only the heartbeat loop runs while waiting: the same limit applies.
-            deadline = _shutdown_deadline(system_shutdown)
-            self.reporter.queue_event(
-                WatcherEvent(event_type=EventType.WATCHER_STOPPED, message=stopped_message)
+            # Only the heartbeat loop runs while waiting: the same limit and the same order
+            # apply, with no uploads to wait for.
+            _stop_heartbeat_and_report(
+                self._waiting.heartbeat,
+                self.reporter,
+                stopped_message=stopped_message,
+                system_shutdown=system_shutdown,
+                deadline=_stop_deadline(system_shutdown),
             )
-            self._waiting.heartbeat.stop(system_shutdown=system_shutdown, deadline=deadline)
             self._waiting = None
-            self.reporter.flush(deadline=deadline)
         if self._state is not None:
             self._state.close()
 

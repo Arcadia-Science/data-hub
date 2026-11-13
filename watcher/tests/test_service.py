@@ -35,6 +35,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from data_hub_watcher.api_client import ApiError
+from data_hub_watcher.constants import STOP_BUDGET_SECONDS
 from data_hub_watcher.models import (
     ConfigChecksumResponse,
     InstrumentConfig,
@@ -1684,6 +1685,31 @@ class TestServiceClass:
         state, accepted, _wait_hint = svc.reported[-1]
         assert state == ws.SERVICE_STOP_PENDING
         assert accepted & ws.SERVICE_ACCEPT_PRESHUTDOWN
+
+    def test_a_stop_asks_the_scm_to_wait_for_a_stop_that_can_take_25_seconds(
+        self, service_class: type
+    ) -> None:
+        # pywin32 reports 5 s unless told otherwise, and a stop is limited to 25 s plus the
+        # up to 1 s the service loop takes to notice it.
+        ws = sys.modules["win32service"]
+        svc = service_class(["DataHubWatcher"])
+
+        svc.ServiceCtrlHandlerEx(ws.SERVICE_CONTROL_STOP, 0, None)
+
+        _state, _accepted, wait_hint = svc.reported[-1]
+        assert wait_hint == 30_000
+        assert wait_hint / 1000 > STOP_BUDGET_SECONDS + 1
+
+    def test_a_preshutdown_keeps_pywins_wait_hint(self, service_class: type) -> None:
+        # Windows waits for the preshutdown timeout whatever the hint says, and this stop is
+        # limited to 7 s, so it has no use for the longer hint.
+        ws = sys.modules["win32service"]
+        svc = service_class(["DataHubWatcher"])
+
+        svc.ServiceCtrlHandlerEx(ws.SERVICE_CONTROL_PRESHUTDOWN, 0, None)
+
+        _state, _accepted, wait_hint = svc.reported[-1]
+        assert wait_hint == 5000
 
     def test_a_control_the_service_does_not_handle_changes_nothing(
         self, service_class: type

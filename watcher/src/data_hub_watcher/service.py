@@ -23,7 +23,12 @@ import time
 from pathlib import Path
 from typing import Any
 
-from data_hub_watcher.constants import DEFAULT_CONFIG_DIR, SERVICE_NAME, WATCHER_LOG_DIR
+from data_hub_watcher.constants import (
+    DEFAULT_CONFIG_DIR,
+    SERVICE_NAME,
+    SERVICE_STOP_WAIT_HINT_MILLISECONDS,
+    WATCHER_LOG_DIR,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -811,7 +816,15 @@ def _create_service_class() -> type | None:
             if system_shutdown:
                 # Before the stop event, so the loop reads it once it sees the stop.
                 self._system_shutdown.set()
-            self.ReportServiceStatus(ws.SERVICE_STOP_PENDING)
+                # Windows waits for the preshutdown timeout whatever the hint says.
+                self.ReportServiceStatus(ws.SERVICE_STOP_PENDING)
+            else:
+                # A normal stop can take up to `STOP_BUDGET_SECONDS`, and pywin32's
+                # default hint of 5 s would have `net stop` and the Services console
+                # report a hung service.
+                self.ReportServiceStatus(
+                    ws.SERVICE_STOP_PENDING, waitHint=SERVICE_STOP_WAIT_HINT_MILLISECONDS
+                )
             self._stop_event.set()
 
         def SvcStop(self) -> None:
@@ -838,10 +851,10 @@ def _create_service_class() -> type | None:
         # before that. So a stop for a system shutdown limits itself to about 8 s on
         # any build: the service loop notices the stop within a second unless it is
         # busy with config work, then ``stop_runtime`` has a budget of 7 s. It
-        # cuts uploads off first, joins for at most 1 s each, and sends the final
-        # heartbeat and the events with a short HTTP timeout (constants
+        # cuts uploads off first, joins for at most 1 s each, and sends the events
+        # and the final heartbeat with a short HTTP timeout (constants
         # ``SYSTEM_SHUTDOWN_*``). An upload cut off is retried at the next start.
-        # ``service stop`` has no such limit.
+        # ``service stop`` has a longer limit, ``STOP_BUDGET_SECONDS``.
         def GetAcceptedControls(self) -> int:
             return super().GetAcceptedControls() | ws.SERVICE_ACCEPT_PRESHUTDOWN
 

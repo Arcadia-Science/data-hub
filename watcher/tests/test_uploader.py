@@ -1045,6 +1045,89 @@ class TestStopDuringPrep:
         assert run is None or run.uploaded_at is None
 
 
+class TestRequestStop:
+    """`request_stop` starts no new part or file, and lets the parts in flight finish.
+
+    A stop calls it first, before it waits for the file monitor: an auto-mode upload runs on
+    the monitor's own thread, and it must stop starting parts and files as soon as the stop
+    is requested, not when the upload worker is stopped a few seconds later.
+    """
+
+    def test_it_sets_the_stop_signal_but_does_not_abort(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path
+    ) -> None:
+        stop = threading.Event()
+        up = _make_uploader(mock_client, state_db, tmp_path, parallelism=1, stop_event=stop)
+
+        up.request_stop()
+
+        assert stop.is_set()
+        assert up._stop_requested()
+        assert not up._abort.is_set()
+
+    def test_without_a_stop_event_it_does_nothing(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path
+    ) -> None:
+        up = _make_uploader(mock_client, state_db, tmp_path, parallelism=1)
+
+        up.request_stop()
+
+        assert not up._stop_requested()
+
+    def test_a_part_in_flight_finishes_and_no_further_part_starts(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path
+    ) -> None:
+        _write_parts_file(tmp_path, "big.bin", part_count=4, part_size=4)
+        mock_client.request_upload_url.return_value = _multipart_presigned(
+            part_size=4, part_count=4
+        )
+        mock_client.get_part_urls.side_effect = _part_urls
+        up = _make_uploader(
+            mock_client, state_db, tmp_path, parallelism=1, stop_event=threading.Event()
+        )
+        sent: list[tuple[int, int]] = []
+
+        def put(url: str, *, data: _FileSlice, **kwargs: object) -> MagicMock:
+            number = _part_number(url)
+            up.request_stop()
+            # The part is not cut off: its whole body is still read.
+            sent.append((number, len(data.read())))
+            return _etag_response(number)
+
+        with patch.object(up._s3_session, "put", side_effect=put):
+            assert up._upload_single(tmp_path / "big.bin", "RUN-001") is False
+
+        assert sent == [(1, 4)]
+        mock_client.complete_multipart_upload.assert_not_called()
+        mock_client.abort_multipart_upload.assert_not_called()
+        assert up._counters.errors == 0
+        cast(MagicMock, up._reporter).queue_event.assert_not_called()
+
+    def test_no_further_file_starts(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path
+    ) -> None:
+        run_dir = tmp_path / "RUN-1"
+        run_dir.mkdir()
+        up = _make_uploader(
+            mock_client, state_db, tmp_path, parallelism=1, stop_event=threading.Event()
+        )
+        files = []
+        for name in ("a.csv", "b.csv"):
+            (run_dir / name).write_text("x")
+            files.append(_file_info(run_dir / name))
+        attempted: list[str] = []
+
+        def upload(path: Path, run_id: str) -> bool:
+            attempted.append(path.name)
+            up.request_stop()
+            return False
+
+        with patch.object(up, "_upload_single", side_effect=upload):
+            assert up.upload_files("RUN-1", files) == 0
+
+        assert attempted == ["a.csv"]
+
+
 class TestAbort:
     """`abort` cuts off PUTs and hashing in progress, and defers the file."""
 

@@ -32,6 +32,7 @@ from data_hub_watcher.constants import (
     DEFAULT_CHECK_INTERVAL_TICKS,
     DEFAULT_IDLE_TICKS_REQUIRED,
     HEARTBEAT_INTERVAL_SECONDS,
+    STOP_HTTP_TIMEOUT,
 )
 from data_hub_watcher.events import EventType
 from data_hub_watcher.heartbeat import HeartbeatLoop
@@ -1305,15 +1306,40 @@ class TestStopMarksASystemShutdown:
         assert [e["message"] for e in stopped] == ["Service stopped: Windows is shutting down"]
 
     @pytest.mark.parametrize("waiting", [False, True], ids=["running", "waiting"])
-    def test_any_other_stop_keeps_the_clients_timeout(self, env: _Env, waiting: bool) -> None:
+    def test_any_other_stop_sends_the_last_requests_with_the_stop_timeout(
+        self, env: _Env, waiting: bool
+    ) -> None:
+        # Every stop is limited to 25 s, so the last two requests can't wait for the
+        # client's 30 s read timeout either, but they get longer than at a shutdown.
         sup = env.supervisor(env.write_config(_cfg(env.tmp_path / "later")) if waiting else None)
         sup.start()
         assert (sup.waiting_reason is not None) is waiting
 
         sup.stop(stopped_message="Service stopped")
 
-        assert env.client.send_heartbeat.call_args.kwargs["timeout"] is None
-        assert env.client.send_events.call_args.kwargs["timeout"] is None
+        assert env.client.send_heartbeat.call_args.kwargs["timeout"] == STOP_HTTP_TIMEOUT
+        assert env.client.send_events.call_args.kwargs["timeout"] == STOP_HTTP_TIMEOUT
+
+    @pytest.mark.parametrize("system_shutdown", [False, True], ids=["stop", "shutdown"])
+    @pytest.mark.parametrize("waiting", [False, True], ids=["running", "waiting"])
+    def test_the_stop_event_reaches_the_server_before_the_final_heartbeat(
+        self, env: _Env, waiting: bool, system_shutdown: bool
+    ) -> None:
+        sup = env.supervisor(env.write_config(_cfg(env.tmp_path / "later")) if waiting else None)
+        sup.start()
+        assert (sup.waiting_reason is not None) is waiting
+        sent: list[str] = []
+        env.client.send_heartbeat.side_effect = lambda _id, payload, **_kw: sent.append(
+            f"heartbeat {payload['status']}"
+        )
+        env.client.send_events.side_effect = lambda _id, events, **_kw: sent.extend(
+            f"event {e['event_type']}" for e in events
+        )
+
+        sup.stop(stopped_message="Service stopped", system_shutdown=system_shutdown)
+
+        assert sent.index("event watcher_stopped") < sent.index("heartbeat stopped")
+        assert sent[-1] == "heartbeat stopped"
 
 
 class TestHeartbeatRevisionFields:

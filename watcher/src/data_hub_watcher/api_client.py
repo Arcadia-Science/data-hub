@@ -8,11 +8,7 @@ from urllib.parse import quote, urlsplit
 
 import requests
 
-from data_hub_watcher.constants import (
-    SYSTEM_SHUTDOWN_HTTP_TIMEOUT,
-    WATCHER_VERSION,
-    WATCHER_VERSION_HEADER,
-)
+from data_hub_watcher.constants import WATCHER_VERSION, WATCHER_VERSION_HEADER
 from data_hub_watcher.models import (
     ApiErrorDetail,
     ConfigChecksumResponse,
@@ -65,15 +61,17 @@ DEFAULT_TIMEOUT: tuple[float, float] = (5, 30)  # (connect, read) seconds
 _MIN_REQUEST_SECONDS = 0.5
 
 
-def timeout_until(deadline: float) -> tuple[float, float]:
+def timeout_until(deadline: float, cap: tuple[float, float]) -> tuple[float, float]:
     """The HTTP timeout for a last request that should be done by *deadline*.
 
-    *deadline* is a `time.monotonic()` value. This is `SYSTEM_SHUTDOWN_HTTP_TIMEOUT`,
-    cut down so that the connect and the read together fit in the time left.
+    *deadline* is a `time.monotonic()` value and *cap* is the `(connect, read)` timeout the
+    request gets when there is plenty of time (`STOP_HTTP_TIMEOUT`, or
+    `SYSTEM_SHUTDOWN_HTTP_TIMEOUT` for a Windows shutdown). It is cut down so that the
+    connect and the read together fit in the time left.
     """
     left = max(deadline - time.monotonic(), _MIN_REQUEST_SECONDS)
-    connect = min(SYSTEM_SHUTDOWN_HTTP_TIMEOUT[0], left / 2)
-    read = min(SYSTEM_SHUTDOWN_HTTP_TIMEOUT[1], left - connect)
+    connect = min(cap[0], left / 2)
+    read = min(cap[1], left - connect)
     return (connect, read)
 
 
