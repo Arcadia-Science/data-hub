@@ -48,6 +48,8 @@ _EVENT_LOG_MAX_BYTES = 30 * 1024
 # so a typo in a lab PC's ``.env`` file doesn't silence everything.
 _LEVEL_ENV_VAR = "DATA_HUB_WATCHER_LOG_LEVEL"
 
+_URLLIB3_LOGGER = "urllib3"
+
 
 def _resolve_root_level(default: int = logging.INFO) -> int:
     """Resolve the root log level, honoring the ``DATA_HUB_WATCHER_LOG_LEVEL`` override.
@@ -67,19 +69,34 @@ def _resolve_root_level(default: int = logging.INFO) -> int:
     return default
 
 
+def keep_urllib3_at_info() -> None:
+    """Keep urllib3's DEBUG lines out of the logs, whatever the root level is.
+
+    At DEBUG, urllib3 logs the full URL of every request. An upload goes to a
+    pre-signed S3 URL whose query string holds temporary AWS credentials, so
+    those lines would put them in ``watcher.log`` and on the console. The
+    urllib3 logger gets the root level, or INFO if that is lower. Call it again
+    after the root level changes, since it copies the level it finds.
+    """
+    root_level = logging.getLogger().getEffectiveLevel()
+    logging.getLogger(_URLLIB3_LOGGER).setLevel(max(root_level, logging.INFO))
+
+
 def _apply_root_level() -> None:
     """Set the root logger level from the env var override if present.
 
-    The watcher's two entrypoints (CLI ``watch`` and the Windows
-    service) each call into this module once at startup. The level is
+    The watcher's entrypoints (CLI ``watch`` and the Windows service)
+    call into this module at startup, and the service again after it has
+    loaded its env file (:func:`apply_log_level_from_env`). The level is
     only *forced* when ``DATA_HUB_WATCHER_LOG_LEVEL`` is set; otherwise
     the caller's level stands. Python starts the root logger at
     WARNING, so each entrypoint sets its own default of INFO first: the
     CLI with ``logging.basicConfig`` and the service in
-    ``_run_service_loop``.
+    ``_run_service_loop``. Either way, urllib3 stays at INFO or above.
     """
     if os.environ.get(_LEVEL_ENV_VAR):
         logging.getLogger().setLevel(_resolve_root_level())
+    keep_urllib3_at_info()
 
 
 def apply_log_level_from_env() -> None:

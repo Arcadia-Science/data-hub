@@ -162,6 +162,75 @@ class TestApplyLogLevelFromEnv:
         assert logging.getLogger().level == logging.WARNING
 
 
+class TestUrllib3StaysAtInfo:
+    """At DEBUG, urllib3 logs each request's URL, which for an upload is a pre-signed S3 URL."""
+
+    SIGNED_REQUEST = (
+        'https://uploads.example.test:443 "PUT /bucket/RUN001/a.csv?X-Amz-Signature=abc123 '
+        'HTTP/1.1" 200 0'
+    )
+
+    def test_a_debug_root_level_from_the_env_var_leaves_urllib3_at_info(
+        self, patch_log_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("DATA_HUB_WATCHER_LOG_LEVEL", "DEBUG")
+
+        log_path = logging_setup.setup_file_logging()
+        logging.getLogger("data_hub_watcher.test").debug("a line of the watcher's own")
+        logging.getLogger("urllib3.connectionpool").debug(self.SIGNED_REQUEST)
+
+        for handler in logging.getLogger().handlers:
+            handler.flush()
+        contents = log_path.read_text(encoding="utf-8")
+        assert "a line of the watcher's own" in contents
+        assert "X-Amz-Signature" not in contents
+
+    def test_the_level_the_service_applies_after_loading_its_env_file_does_too(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The service starts at INFO, and the env file it loads later asks for DEBUG.
+        logging.getLogger().setLevel(logging.INFO)
+        monkeypatch.setenv("DATA_HUB_WATCHER_LOG_LEVEL", "DEBUG")
+
+        logging_setup.apply_log_level_from_env()
+
+        urllib3_logger = logging.getLogger("urllib3.connectionpool")
+        assert logging.getLogger().level == logging.DEBUG
+        assert not urllib3_logger.isEnabledFor(logging.DEBUG)
+        assert urllib3_logger.isEnabledFor(logging.INFO)
+
+    def test_a_root_level_above_info_applies_to_urllib3_too(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # urllib3 is at INFO while the root level is DEBUG, and follows it up to ERROR.
+        monkeypatch.setenv("DATA_HUB_WATCHER_LOG_LEVEL", "DEBUG")
+        logging_setup.apply_log_level_from_env()
+        monkeypatch.setenv("DATA_HUB_WATCHER_LOG_LEVEL", "ERROR")
+
+        logging_setup.apply_log_level_from_env()
+
+        urllib3_logger = logging.getLogger("urllib3.connectionpool")
+        assert not urllib3_logger.isEnabledFor(logging.WARNING)
+        assert urllib3_logger.isEnabledFor(logging.ERROR)
+
+    def test_verbose_leaves_urllib3_at_info(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from click.testing import CliRunner
+
+        from data_hub_watcher import cli as cli_module
+
+        monkeypatch.setattr(cli_module, "load_env", lambda *a, **k: None)
+        # `--verbose` makes `basicConfig` set the root logger to DEBUG, but `basicConfig`
+        # does nothing under pytest, where the root logger already has handlers.
+        logging.getLogger().setLevel(logging.DEBUG)
+
+        result = CliRunner().invoke(cli_module.cli, ["--verbose", "config", "path"])
+
+        assert result.exit_code == 0, result.output
+        urllib3_logger = logging.getLogger("urllib3.connectionpool")
+        assert not urllib3_logger.isEnabledFor(logging.DEBUG)
+        assert urllib3_logger.isEnabledFor(logging.INFO)
+
+
 class TestServiceManagerHandler:
     def test_error_routes_to_log_error_msg(self) -> None:
         sm = MagicMock(name="servicemanager")
