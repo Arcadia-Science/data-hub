@@ -3,7 +3,7 @@
 from __future__ import annotations
 import sqlite3
 import threading
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from pathlib import Path
 
 import pytest
@@ -55,6 +55,35 @@ def test_deletes_only_the_events_of_other_watchers(db: StateDB) -> None:
     assert db.pending_events("w-1") == [(mine, "mine")]
     assert db.pending_events("w-old") == []
     assert db.delete_pending_events_of_other_watchers("w-1") == 0
+
+
+@pytest.mark.parametrize(
+    ("statement", "write"),
+    [
+        ("INSERT", lambda db: db.add_pending_event("w-1", "new")),
+        ("DELETE", lambda db: db.delete_pending_events([1])),
+        ("DELETE", lambda db: db.delete_pending_events_of_other_watchers("w-other")),
+    ],
+    ids=["add", "delete", "delete-of-other-watchers"],
+)
+def test_a_write_that_fails_does_not_leave_a_transaction_open(
+    db: StateDB, statement: str, write: Callable[[StateDB], object]
+) -> None:
+    db.add_pending_event("w-1", "kept")
+    # `RAISE(ABORT)` ends only the statement, which is the case where a transaction the caller
+    # doesn't end stays open on the connection, holding the write lock and waiting for the
+    # next write on this thread to commit it.
+    db._conn.execute(
+        f"CREATE TRIGGER refuse BEFORE {statement} ON pending_events "
+        "BEGIN SELECT RAISE(ABORT, 'database or disk is full'); END"
+    )
+    db._conn.commit()
+
+    with pytest.raises(sqlite3.IntegrityError, match="database or disk is full"):
+        write(db)
+
+    assert not db._conn.in_transaction
+    assert db.pending_events("w-1") == [(1, "kept")]
 
 
 def test_events_survive_closing_and_reopening_the_database(tmp_path: Path) -> None:

@@ -785,10 +785,15 @@ class StateDB:
         the number of rows removed.
         """
         with self._write_lock:
-            cur = self._conn.execute(
-                "DELETE FROM pending_events WHERE watcher_id != ?", (watcher_id,)
-            )
-            self._conn.commit()
+            try:
+                cur = self._conn.execute(
+                    "DELETE FROM pending_events WHERE watcher_id != ?", (watcher_id,)
+                )
+                self._conn.commit()
+            except BaseException:
+                with contextlib.suppress(sqlite3.Error):
+                    self._conn.rollback()
+                raise
         return cur.rowcount
 
     # ------------------------------------------------------------------
