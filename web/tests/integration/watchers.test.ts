@@ -1,4 +1,4 @@
-import { like } from "drizzle-orm";
+import { eq, like } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   watcherChecksumResponse,
@@ -12,7 +12,7 @@ import {
   watcherRegistered,
   watcherUpdateCheckResponse,
 } from "@/lib/api/openapi";
-import { instruments, watcherEvents } from "@/lib/db/schema";
+import { instruments, watcherEvents, watchers } from "@/lib/db/schema";
 import {
   api,
   closeTestDb,
@@ -563,5 +563,525 @@ describe("Watchers API", () => {
     const data = await res.json();
     expect(data.watcher_id).toBeTruthy();
     expect(data.watcher_id).not.toBe(watcherId);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The status a watcher shows
+// ---------------------------------------------------------------------------
+
+type ShownStatus = "registered" | "watching" | "stopped" | "waiting" | "stale";
+
+const MINUTE_MS = 60 * 1000;
+const DAY_MS = 24 * 60 * MINUTE_MS;
+
+// One watcher per case, each on an instrument of its own. The case sends the
+// heartbeat (none for `registered`), and the test then sets `last_heartbeat_at`
+// to `ageMs` ago, or to NULL, the way a watcher that went quiet looks. The
+// ages keep a minute away from the 5-minute and 15-minute limits. A case that
+// is `deregistered` is deregistered last, through the DELETE route.
+interface StatusCase {
+  ageMs: number | null;
+  deregistered?: boolean;
+  expected: ShownStatus;
+  heartbeat: { status: string; status_reason?: string } | null;
+  name: string;
+  // What the heartbeat route stores in `status_reason`.
+  storedReason: string | null;
+}
+
+const WAITING_REASON = "watch_directory not found: /data";
+
+const STATUS_CASES: StatusCase[] = [
+  {
+    name: "registered, no heartbeat",
+    heartbeat: null,
+    ageMs: null,
+    expected: "registered",
+    storedReason: null,
+  },
+  {
+    name: "registered, a day-old timestamp",
+    heartbeat: null,
+    ageMs: DAY_MS,
+    expected: "registered",
+    storedReason: null,
+  },
+  {
+    name: "watching, fresh",
+    heartbeat: { status: "watching" },
+    ageMs: 4 * MINUTE_MS,
+    expected: "watching",
+    storedReason: null,
+  },
+  {
+    name: "watching, six minutes",
+    heartbeat: { status: "watching" },
+    ageMs: 6 * MINUTE_MS,
+    expected: "stale",
+    storedReason: null,
+  },
+  {
+    name: "watching, no heartbeat",
+    heartbeat: { status: "watching" },
+    ageMs: null,
+    expected: "stale",
+    storedReason: null,
+  },
+  {
+    name: "waiting, fresh",
+    heartbeat: { status: "waiting", status_reason: WAITING_REASON },
+    ageMs: 4 * MINUTE_MS,
+    expected: "waiting",
+    storedReason: WAITING_REASON,
+  },
+  {
+    name: "waiting, six minutes",
+    heartbeat: { status: "waiting", status_reason: WAITING_REASON },
+    ageMs: 6 * MINUTE_MS,
+    expected: "stale",
+    storedReason: WAITING_REASON,
+  },
+  {
+    name: "stopped, fresh",
+    heartbeat: { status: "stopped" },
+    ageMs: MINUTE_MS,
+    expected: "stopped",
+    storedReason: null,
+  },
+  {
+    name: "stopped, a day old",
+    heartbeat: { status: "stopped" },
+    ageMs: DAY_MS,
+    expected: "stopped",
+    storedReason: null,
+  },
+  {
+    name: "stopped, no heartbeat",
+    heartbeat: { status: "stopped" },
+    ageMs: null,
+    expected: "stopped",
+    storedReason: null,
+  },
+  {
+    name: "stopped with another reason, a day old",
+    heartbeat: { status: "stopped", status_reason: "shutdown" },
+    ageMs: DAY_MS,
+    expected: "stopped",
+    storedReason: null,
+  },
+  ...["system_shutdown", "auto_update"].flatMap((reason): StatusCase[] => [
+    {
+      name: `stopped for ${reason}, six minutes`,
+      heartbeat: { status: "stopped", status_reason: reason },
+      ageMs: 6 * MINUTE_MS,
+      expected: "stopped",
+      storedReason: reason,
+    },
+    {
+      name: `stopped for ${reason}, fourteen minutes`,
+      heartbeat: { status: "stopped", status_reason: reason },
+      ageMs: 14 * MINUTE_MS,
+      expected: "stopped",
+      storedReason: reason,
+    },
+    {
+      name: `stopped for ${reason}, sixteen minutes`,
+      heartbeat: { status: "stopped", status_reason: reason },
+      ageMs: 16 * MINUTE_MS,
+      expected: "stale",
+      storedReason: reason,
+    },
+    {
+      name: `stopped for ${reason}, a day old`,
+      heartbeat: { status: "stopped", status_reason: reason },
+      ageMs: DAY_MS,
+      expected: "stale",
+      storedReason: reason,
+    },
+    {
+      name: `stopped for ${reason}, no heartbeat`,
+      heartbeat: { status: "stopped", status_reason: reason },
+      ageMs: null,
+      expected: "stale",
+      storedReason: reason,
+    },
+  ]),
+];
+
+// A deregistered watcher can't send heartbeats, so it reads `stopped` whatever
+// it last said. The list route shows it when `include_deleted` is true.
+const DEREGISTERED_CASES: StatusCase[] = [
+  {
+    name: "deregistered, was registered",
+    heartbeat: null,
+    ageMs: null,
+    expected: "stopped",
+    storedReason: null,
+    deregistered: true,
+  },
+  {
+    name: "deregistered, was watching, fresh",
+    heartbeat: { status: "watching" },
+    ageMs: MINUTE_MS,
+    expected: "stopped",
+    storedReason: null,
+    deregistered: true,
+  },
+  {
+    name: "deregistered, was watching, six minutes",
+    heartbeat: { status: "watching" },
+    ageMs: 6 * MINUTE_MS,
+    expected: "stopped",
+    storedReason: null,
+    deregistered: true,
+  },
+  {
+    name: "deregistered, was watching, no heartbeat",
+    heartbeat: { status: "watching" },
+    ageMs: null,
+    expected: "stopped",
+    storedReason: null,
+    deregistered: true,
+  },
+  {
+    name: "deregistered, was waiting, six minutes",
+    heartbeat: { status: "waiting", status_reason: WAITING_REASON },
+    ageMs: 6 * MINUTE_MS,
+    expected: "stopped",
+    storedReason: WAITING_REASON,
+    deregistered: true,
+  },
+  {
+    name: "deregistered, stopped for a restart, a day old",
+    heartbeat: { status: "stopped", status_reason: "system_shutdown" },
+    ageMs: DAY_MS,
+    expected: "stopped",
+    storedReason: "system_shutdown",
+    deregistered: true,
+  },
+];
+
+const ALL_CASES: StatusCase[] = [...STATUS_CASES, ...DEREGISTERED_CASES];
+const ACTIVE_CASES = ALL_CASES.filter((testCase) => !testCase.deregistered);
+
+const ALL_STATUSES: ShownStatus[] = [
+  "registered",
+  "watching",
+  "stopped",
+  "waiting",
+  "stale",
+];
+
+describe("Watchers API: the status a watcher shows", () => {
+  let token: string;
+  const idByCase = new Map<string, string>();
+
+  async function registerWatcher(
+    instrumentId: string,
+    hostname: string
+  ): Promise<string> {
+    await getTestDb()
+      .insert(instruments)
+      .values({
+        id: instrumentId,
+        displayName: `Instrument ${instrumentId}`,
+        status: "active",
+      });
+    const res = await api("/api/v1/watchers/register", {
+      method: "POST",
+      token,
+      body: { instrument_id: instrumentId, hostname },
+    });
+    expect(res.status).toBe(201);
+    return (await res.json()).watcher_id;
+  }
+
+  function sendHeartbeat(
+    watcherId: string,
+    body: { status: string; status_reason?: string }
+  ): Promise<Response> {
+    return api(`/api/v1/watchers/${watcherId}/heartbeat`, {
+      method: "POST",
+      token,
+      body,
+    });
+  }
+
+  async function ageHeartbeat(watcherId: string, ageMs: number | null) {
+    await getTestDb()
+      .update(watchers)
+      .set({
+        lastHeartbeatAt: ageMs === null ? null : new Date(Date.now() - ageMs),
+      })
+      .where(eq(watchers.id, watcherId));
+  }
+
+  async function storedReason(watcherId: string): Promise<string | null> {
+    const [row] = await getTestDb()
+      .select({ statusReason: watchers.statusReason })
+      .from(watchers)
+      .where(eq(watchers.id, watcherId));
+    return row.statusReason;
+  }
+
+  async function listed(
+    status?: string,
+    includeDeleted = false
+  ): Promise<Map<string, string>> {
+    const params = new URLSearchParams();
+    if (status) {
+      params.set("status", status);
+    }
+    if (includeDeleted) {
+      params.set("include_deleted", "true");
+    }
+    const query = params.size > 0 ? `?${params}` : "";
+    const res = await api(`/api/v1/watchers${query}`, { token });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    watcherListResponse.parse(body);
+    return new Map(
+      body.data.map((w: { id: string; status: string }) => [w.id, w.status])
+    );
+  }
+
+  function idOf(name: string): string {
+    const id = idByCase.get(name);
+    if (!id) {
+      throw new Error(`No watcher for the case '${name}'`);
+    }
+    return id;
+  }
+
+  beforeAll(async () => {
+    await resetDb();
+    ({ token } = await seedTestUser());
+
+    for (const [index, testCase] of ALL_CASES.entries()) {
+      const id = await registerWatcher(
+        `shown-status-inst-${index}`,
+        `lab-pc-${index}`
+      );
+      idByCase.set(testCase.name, id);
+      if (testCase.heartbeat) {
+        const res = await sendHeartbeat(id, testCase.heartbeat);
+        expect(res.status).toBe(200);
+      }
+      // After the heartbeat, which sets the timestamp to now.
+      await ageHeartbeat(id, testCase.ageMs);
+      if (testCase.deregistered) {
+        const res = await api(`/api/v1/watchers/${id}`, {
+          method: "DELETE",
+          token,
+        });
+        expect(res.status).toBe(200);
+      }
+    }
+  });
+
+  afterAll(async () => {
+    await closeTestDb();
+  });
+
+  it.each(
+    ACTIVE_CASES
+  )("GET /api/v1/watchers/:id shows $expected for $name", async (testCase) => {
+    const res = await api(`/api/v1/watchers/${idOf(testCase.name)}`, {
+      token,
+    });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    watcherDetail.parse(data);
+    expect(data.status).toBe(testCase.expected);
+    expect(data.status_reason).toBe(testCase.storedReason);
+  });
+
+  it("GET /api/v1/watchers prints the same status for each watcher", async () => {
+    const shown = await listed();
+    expect(shown.size).toBe(ACTIVE_CASES.length);
+    for (const testCase of ACTIVE_CASES) {
+      expect({
+        name: testCase.name,
+        status: shown.get(idOf(testCase.name)),
+      }).toEqual({ name: testCase.name, status: testCase.expected });
+    }
+  });
+
+  it("GET /api/v1/watchers?include_deleted=true prints a deregistered watcher as stopped", async () => {
+    const shown = await listed(undefined, true);
+    expect(shown.size).toBe(ALL_CASES.length);
+    for (const testCase of ALL_CASES) {
+      expect({
+        name: testCase.name,
+        status: shown.get(idOf(testCase.name)),
+      }).toEqual({ name: testCase.name, status: testCase.expected });
+    }
+  });
+
+  it.each(
+    ALL_STATUSES
+  )("GET /api/v1/watchers?status=%s returns exactly the watchers that show it", async (status) => {
+    // With and without the deregistered watchers.
+    for (const includeDeleted of [false, true]) {
+      const cases = includeDeleted ? ALL_CASES : ACTIVE_CASES;
+      const expectedNames = cases
+        .filter((testCase) => testCase.expected === status)
+        .map((testCase) => testCase.name);
+      // A status with no case would pass trivially.
+      expect(expectedNames.length).toBeGreaterThan(0);
+
+      const shown = await listed(status, includeDeleted);
+      const shownNames = cases
+        .filter((testCase) => shown.has(idOf(testCase.name)))
+        .map((testCase) => testCase.name);
+      expect(shownNames.sort()).toEqual(expectedNames.sort());
+      expect(shown.size).toBe(expectedNames.length);
+      for (const printed of shown.values()) {
+        expect(printed).toBe(status);
+      }
+    }
+  });
+
+  it("lists every watcher under exactly one status filter", async () => {
+    for (const includeDeleted of [false, true]) {
+      const appearances = new Map<string, number>();
+      for (const status of ALL_STATUSES) {
+        for (const id of (await listed(status, includeDeleted)).keys()) {
+          appearances.set(id, (appearances.get(id) ?? 0) + 1);
+        }
+      }
+      const cases = includeDeleted ? ALL_CASES : ACTIVE_CASES;
+      expect(appearances.size).toBe(cases.length);
+      expect([...appearances.values()].every((n) => n === 1)).toBe(true);
+    }
+  });
+
+  it("never lists a deregistered watcher under stale", async () => {
+    const stale = await listed("stale", true);
+    for (const testCase of DEREGISTERED_CASES) {
+      expect(stale.has(idOf(testCase.name))).toBe(false);
+    }
+  });
+
+  it("GET /api/v1/watchers rejects a status it doesn't know", async () => {
+    const res = await api("/api/v1/watchers?status=online", { token });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error.code).toBe("VALIDATION_ERROR");
+  });
+
+  it("combines the status filter with instrument_id", async () => {
+    const id = idOf("stopped for auto_update, sixteen minutes");
+    const own = await api(`/api/v1/watchers/${id}`, { token });
+    const { instrument_id: instrumentId } = await own.json();
+
+    const res = await api(
+      `/api/v1/watchers?status=stale&instrument_id=${instrumentId}`,
+      { token }
+    );
+    const body = await res.json();
+    expect(body.data.map((w: { id: string }) => w.id)).toEqual([id]);
+
+    const none = await api(
+      `/api/v1/watchers?status=stopped&instrument_id=${instrumentId}`,
+      { token }
+    );
+    expect((await none.json()).data).toEqual([]);
+  });
+
+  // The heartbeat route keeps a reason for a waiting watcher and for a watcher
+  // that stopped for a restart, and clears it for everything else.
+  describe("the reason a heartbeat stores", () => {
+    let watcherId: string;
+
+    beforeAll(async () => {
+      watcherId = await registerWatcher(
+        "stored-reason-inst",
+        "lab-pc-stored-reason"
+      );
+    });
+
+    it.each<[string, string, string | undefined, string | null]>([
+      ["waiting keeps its reason", "waiting", WAITING_REASON, WAITING_REASON],
+      [
+        "a stop for a Windows restart keeps it",
+        "stopped",
+        "system_shutdown",
+        "system_shutdown",
+      ],
+      [
+        "a stop for an update keeps it",
+        "stopped",
+        "auto_update",
+        "auto_update",
+      ],
+      ["the reason is trimmed", "stopped", "  auto_update  ", "auto_update"],
+      ["a stop with no reason stores none", "stopped", undefined, null],
+      ["a stop with another reason stores none", "stopped", "shutdown", null],
+      [
+        "a stop with a waiting reason stores none",
+        "stopped",
+        WAITING_REASON,
+        null,
+      ],
+      [
+        "watching with a restart reason stores none",
+        "watching",
+        "system_shutdown",
+        null,
+      ],
+      [
+        "registered with a restart reason stores none",
+        "registered",
+        "auto_update",
+        null,
+      ],
+    ])("%s", async (_name, status, reason, expected) => {
+      // Set a reason first, so a null below is a reason cleared.
+      const set = await sendHeartbeat(watcherId, {
+        status: "stopped",
+        status_reason: "system_shutdown",
+      });
+      expect(set.status).toBe(200);
+      expect(await storedReason(watcherId)).toBe("system_shutdown");
+
+      const res = await sendHeartbeat(watcherId, {
+        status,
+        ...(reason === undefined ? {} : { status_reason: reason }),
+      });
+      expect(res.status).toBe(200);
+      expect(await storedReason(watcherId)).toBe(expected);
+    });
+
+    it("clears the reason when the watcher starts again", async () => {
+      for (const reason of ["system_shutdown", "auto_update"]) {
+        await sendHeartbeat(watcherId, {
+          status: "stopped",
+          status_reason: reason,
+        });
+        expect(await storedReason(watcherId)).toBe(reason);
+        // The watcher's first heartbeat after any start is `watching` or
+        // `waiting`.
+        await sendHeartbeat(watcherId, { status: "watching" });
+        expect(await storedReason(watcherId)).toBeNull();
+      }
+    });
+
+    it("moves a watcher that is back from Unresponsive to Online", async () => {
+      await sendHeartbeat(watcherId, {
+        status: "stopped",
+        status_reason: "system_shutdown",
+      });
+      await ageHeartbeat(watcherId, 16 * MINUTE_MS);
+      const before = await api(`/api/v1/watchers/${watcherId}`, { token });
+      expect((await before.json()).status).toBe("stale");
+
+      await sendHeartbeat(watcherId, { status: "watching" });
+      const after = await api(`/api/v1/watchers/${watcherId}`, { token });
+      const data = await after.json();
+      expect(data.status).toBe("watching");
+      expect(data.status_reason).toBeNull();
+    });
   });
 });

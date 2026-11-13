@@ -6,6 +6,7 @@
 export { buildOpenApiDocument } from "./document";
 export { readJsonBody } from "./parse";
 export { archiveJobDetail, patchArchiveJobBody } from "./schemas/archive";
+export { watcherStatusSchema } from "./schemas/common";
 export {
   createFileBody,
   fileDetail,

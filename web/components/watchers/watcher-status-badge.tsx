@@ -7,8 +7,17 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { useViewerTimeZone } from "@/components/viewer-time-zone-provider";
 import type { WatcherOnlineStatus } from "@/components/watchers/watcher-online-status";
+import {
+  AUTO_UPDATE_STATUS_REASON,
+  isRestartStopReason,
+  type RestartStopReason,
+  SYSTEM_SHUTDOWN_STATUS_REASON,
+  UPLOAD_REQUEST_REVERT_GRACE_MS,
+} from "@/lib/api/watcher-status";
 import type { EffectiveStatus } from "@/lib/api/watchers";
+import { formatTime } from "@/lib/date";
 import { cn, formatRelativeTime } from "@/lib/utils";
 
 /**
@@ -75,6 +84,8 @@ const STATUS_CONFIG: Record<
   },
   // Distinct from `stale`: someone (or the host) shut the watcher down
   // gracefully, so it's expected to be silent and shouldn't read as an alarm.
+  // A stop for a restart turns `stale` if the watcher isn't back in time, and
+  // its tooltip says when.
   stopped: { label: "Stopped", Icon: Power, className: MUTED_FILLED_CLASSNAME },
   // Running and heartbeating, but the watch folder is missing, so nothing is
   // being watched. The watcher keeps checking for the folder and for config
@@ -94,8 +105,16 @@ const STATUS_CONFIG: Record<
 
 // Statuses where the watcher *should* be reporting but isn't, so the tooltip
 // explains the check-in delay. Excludes `stopped` (intentional) and
-// `registered` (no heartbeat history yet).
+// `registered` (no heartbeat history yet). A `stopped` badge gets a tooltip
+// only for a stop after which the watcher is expected back (see
+// `RESTART_STOP_REASONS`). That tooltip says when the watcher starts to read
+// as unresponsive, and it is built separately below.
 const TOOLTIP_STATUSES = new Set<WatcherBadgeStatus>(["offline", "stale"]);
+
+const RESTART_STOP_LEAD: Record<RestartStopReason, string> = {
+  [SYSTEM_SHUTDOWN_STATUS_REASON]: "Stopped for a Windows restart or shutdown.",
+  [AUTO_UPDATE_STATUS_REASON]: "Stopped to install an update.",
+};
 
 export function WatcherStatusBadge({
   status,
@@ -105,13 +124,17 @@ export function WatcherStatusBadge({
   className,
 }: {
   status: WatcherBadgeStatus;
-  /** Why a `waiting` watcher is waiting, shown in its tooltip. */
+  /**
+   * Why a `waiting` watcher is waiting, or why a `stopped` watcher stopped
+   * for a restart. Shown in its tooltip.
+   */
   reason?: string | null;
   /**
    * Most recent watcher heartbeat. When the badge is in an "unexpected
    * silence" state (`offline` / `stale`) and this is provided, the tooltip
    * leads with it so users can tell at a glance how long the watcher has
-   * been silent.
+   * been silent. For a watcher that stopped for a restart, it sets the time
+   * the tooltip gives for when the watcher starts to read as unresponsive.
    */
   lastOnlineAt?: Date | null;
   /**
@@ -123,6 +146,7 @@ export function WatcherStatusBadge({
   verbose?: boolean;
   className?: string;
 }) {
+  const timeZone = useViewerTimeZone();
   const { label, Icon, className: variantClassName } = STATUS_CONFIG[status];
   const fullLabel =
     verbose && (status === "online" || status === "offline")
@@ -147,6 +171,21 @@ export function WatcherStatusBadge({
             folder on the PC, or change it from the watcher&apos;s Configuration
             tab.
           </p>
+        </TooltipContent>
+      </Tooltip>
+    );
+  }
+
+  if (status === "stopped" && isRestartStopReason(reason) && lastOnlineAt) {
+    const unresponsiveAt = new Date(
+      lastOnlineAt.getTime() + UPLOAD_REQUEST_REVERT_GRACE_MS
+    );
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>{badge}</TooltipTrigger>
+        <TooltipContent className="max-w-80">
+          {RESTART_STOP_LEAD[reason]} Shows as Unresponsive if it isn&apos;t
+          back by {formatTime(unresponsiveAt, timeZone)}.
         </TooltipContent>
       </Tooltip>
     );

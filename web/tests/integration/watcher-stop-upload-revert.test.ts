@@ -18,9 +18,10 @@ import {
 // A non-`watching` heartbeat (graceful `stopped` on shutdown) reverts the
 // instrument's still-queued upload requests to `detected` so they don't sit
 // stuck with no watcher to drain them. A `stopped` heartbeat marked
-// `status_reason: "system_shutdown"` (Windows is restarting the PC) is the
-// exception: the requests stay queued for the watcher to drain after the
-// restart, and the cron sweep cancels them if the PC doesn't come back.
+// `status_reason: "system_shutdown"` (Windows is restarting the PC) or
+// `"auto_update"` (the watcher stops to install an update) is the exception:
+// the requests stay queued for the watcher to drain after it starts again, and
+// the cron sweep cancels them if it doesn't come back.
 
 // Must match CRON_SECRET set on the test server in global-setup.ts.
 const CRON_SECRET = "test-cron-secret";
@@ -173,16 +174,79 @@ describe("Heartbeat — revert upload queue on watcher stop", () => {
     }
 
     // The heartbeat itself is recorded as for any stop, and no cancellation is.
+    // The reason stays on the watcher, which is how the web app knows that this
+    // stop is one it expects the watcher to return from.
     const [watcher] = await db
-      .select({ status: watchers.status })
+      .select({ status: watchers.status, statusReason: watchers.statusReason })
       .from(watchers)
       .where(eq(watchers.id, watcherId));
     expect(watcher.status).toBe("stopped");
+    expect(watcher.statusReason).toBe("system_shutdown");
     const events = await db
       .select()
       .from(watcherEvents)
       .where(eq(watcherEvents.watcherId, watcherId));
     expect(events).toHaveLength(0);
+  });
+
+  it("keeps queued files when the stopped heartbeat says the watcher is stopping to update", async () => {
+    const instrumentId = "stop-keep-auto-update-inst";
+    const ids = await seedQueuedRun(instrumentId, "run-1", token);
+    const watcherId = await insertWatcher(instrumentId, "lab-pc");
+
+    const res = await api(`/api/v1/watchers/${watcherId}/heartbeat`, {
+      method: "POST",
+      token,
+      body: { status: "stopped", status_reason: "auto_update" },
+    });
+    expect(res.status).toBe(200);
+
+    const db = getTestDb();
+    const rows = await db
+      .select({
+        status: files.status,
+        uploadRequestedAt: files.uploadRequestedAt,
+      })
+      .from(files)
+      .where(inArray(files.id, ids));
+    expect(rows).toHaveLength(2);
+    for (const r of rows) {
+      expect(r.status).toBe("upload_requested");
+      expect(r.uploadRequestedAt).not.toBeNull();
+    }
+
+    const [watcher] = await db
+      .select({ status: watchers.status, statusReason: watchers.statusReason })
+      .from(watchers)
+      .where(eq(watchers.id, watcherId));
+    expect(watcher.status).toBe("stopped");
+    expect(watcher.statusReason).toBe("auto_update");
+    const events = await db
+      .select()
+      .from(watcherEvents)
+      .where(eq(watcherEvents.watcherId, watcherId));
+    expect(events).toHaveLength(0);
+  });
+
+  it("keeps queued files when the restart reason has spaces around it", async () => {
+    const instrumentId = "stop-keep-padded-reason-inst";
+    const ids = await seedQueuedRun(instrumentId, "run-1", token);
+    const watcherId = await insertWatcher(instrumentId, "lab-pc");
+
+    const res = await api(`/api/v1/watchers/${watcherId}/heartbeat`, {
+      method: "POST",
+      token,
+      body: { status: "stopped", status_reason: " auto_update " },
+    });
+    expect(res.status).toBe(200);
+
+    const rows = await getTestDb()
+      .select({ status: files.status })
+      .from(files)
+      .where(inArray(files.id, ids));
+    for (const r of rows) {
+      expect(r.status).toBe("upload_requested");
+    }
   });
 
   it("reverts queued files when a stopped heartbeat gives any other reason", async () => {
@@ -206,8 +270,14 @@ describe("Heartbeat — revert upload queue on watcher stop", () => {
     }
   });
 
-  it("lets the sweep cancel the kept files if the PC doesn't come back", async () => {
-    const instrumentId = "stop-keep-then-sweep-inst";
+  // The sweep is what cancels the kept files, so it follows each restart
+  // reason. The watcher reads Unresponsive at the same 15 minutes (see
+  // `watchers.test.ts`).
+  it.each([
+    "system_shutdown",
+    "auto_update",
+  ])("lets the sweep cancel the kept files if the watcher doesn't come back from a %s stop", async (reason) => {
+    const instrumentId = `stop-keep-then-sweep-${reason}-inst`;
     const ids = await seedQueuedRun(instrumentId, "run-1", token);
     const watcherId = await insertWatcher(instrumentId, "lab-pc");
     const db = getTestDb();
@@ -215,7 +285,7 @@ describe("Heartbeat — revert upload queue on watcher stop", () => {
     const res = await api(`/api/v1/watchers/${watcherId}/heartbeat`, {
       method: "POST",
       token,
-      body: { status: "stopped", status_reason: "system_shutdown" },
+      body: { status: "stopped", status_reason: reason },
     });
     expect(res.status).toBe(200);
 
@@ -231,12 +301,17 @@ describe("Heartbeat — revert upload queue on watcher stop", () => {
     for (const r of queuedRows) {
       expect(r.status).toBe("upload_requested");
     }
+    const waiting = await api(`/api/v1/watchers/${watcherId}`, { token });
+    expect((await waiting.json()).status).toBe("stopped");
 
-    // 20 minutes later, with no heartbeat since, the sweep cancels them.
+    // 20 minutes later, with no heartbeat since, the sweep cancels them, and
+    // the watcher shows as Unresponsive (`stale`).
     await db
       .update(watchers)
       .set({ lastHeartbeatAt: new Date(Date.now() - 20 * MINUTE_MS) })
       .where(eq(watchers.id, watcherId));
+    const gone = await api(`/api/v1/watchers/${watcherId}`, { token });
+    expect((await gone.json()).status).toBe("stale");
     const late = await api("/api/cron/upload-queue-sweep", {
       headers: { Authorization: `Bearer ${CRON_SECRET}` },
     });
