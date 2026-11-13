@@ -187,7 +187,12 @@ describe("proxy matcher", () => {
     "/",
     "/comments",
     "/instruments/a/runs/b",
+    "/instruments/x/runs/Q%2541",
     "/api/v1/runs",
+    "/api/v1/instruments/x/runs/y",
+    "/api/v1/instruments/x/runs/y/request-upload-url",
+    "/api/v1/instruments/x/runs/y/comments",
+    "/api/v1/instruments/x/runs/Q%2541/restore",
     "/api/local-s3",
     "/api/local-s3x/b/k",
   ])("runs on %s", (path) => {
