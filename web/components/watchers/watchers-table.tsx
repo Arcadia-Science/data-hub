@@ -137,7 +137,10 @@ export function WatchersTable({
                   <div className="flex flex-wrap items-center gap-1.5">
                     <WatcherStatusBadge
                       className="text-xs"
-                      reason={row.statusReason}
+                      lastOnlineAt={row.lastHeartbeatAt}
+                      // A deregistered watcher reads Stopped whatever it
+                      // reported last, so its reason doesn't apply.
+                      reason={row.deletedAt ? null : row.statusReason}
                       status={row.effectiveStatus}
                     />
                     {row.deletedAt ? null : (

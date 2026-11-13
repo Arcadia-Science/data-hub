@@ -133,7 +133,8 @@ class Admin:
         )
 
     def delete_run(self, instrument_id: str, run_id: str) -> ApiResult:
-        """Soft-delete a run. Its files stay, and the watcher's updates to it get a 409."""
+        """Soft-delete a run. Its files stay but their requested uploads are cancelled, and the
+        watcher's updates to it get a 409."""
         return self._call(
             "DELETE",
             f"/api/v1/instruments/{instrument_id}/runs/{run_id}",

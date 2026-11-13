@@ -137,7 +137,7 @@ registry.registerPath({
   operationId: "createWatcherEvent",
   summary: "Report a watcher event",
   description:
-    "Requires scope `watchers:report`. PAT only; browser sessions are rejected.",
+    "Requires scope `watchers:report`. PAT only; browser sessions are rejected. Event types that only Data Hub writes, such as `upload_requests_cancelled`, are rejected with a 400 error. The event list still returns them.",
   tags: ["Watchers"],
   security: bearerSecurity,
   request: { params: watcherParams, body: body(watcherEventBody) },

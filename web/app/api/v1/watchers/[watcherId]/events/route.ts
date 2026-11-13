@@ -16,6 +16,10 @@ import { watcherEvents, watcherEventTypeEnum } from "@/lib/db/schema";
 // schema change — historically this was a hand-maintained Set and drifted
 // from the DB enum (the auto-update events were defined in the schema but
 // silently 400'd here, dropping the entire batch they appeared in).
+//
+// This set covers every type, for the `event_type` filter of the list below.
+// The POST body schema (`watcherEventBody`) leaves out the types that only
+// Data Hub writes, such as `upload_requests_cancelled`.
 const VALID_EVENT_TYPES = new Set<string>(watcherEventTypeEnum.enumValues);
 
 export async function POST(

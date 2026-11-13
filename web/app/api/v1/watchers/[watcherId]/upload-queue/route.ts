@@ -36,7 +36,10 @@ export async function GET(
   // A file is "pending upload" when a user requested it via the web UI
   // (upload_requested_at is set) but it hasn't been uploaded yet
   // (uploaded_at is NULL). Scoped to the watcher's instrument so each
-  // watcher only sees files relevant to its instrument.
+  // watcher only sees files relevant to its instrument. Files of a deleted
+  // run are left out: the server refuses their uploads, so listing them would
+  // only make the watcher fail on them. Deleting a run cancels its requests,
+  // and this filter covers any that are still marked as requested.
   const rows = await db
     .select({
       id: files.id,
@@ -51,6 +54,7 @@ export async function GET(
     .where(
       and(
         eq(instrumentRuns.instrumentId, watcher.instrumentId),
+        isNull(instrumentRuns.deletedAt),
         isNotNull(files.uploadRequestedAt),
         isNull(files.uploadedAt),
         isNull(files.deletedAt)

@@ -147,6 +147,8 @@ Reprocessing sends only the original instrument files. Files Data Hub generated,
 
 **Delete** marks the run deleted without removing stored files. To find a deleted run again, turn on **Show deleted runs** under **Add filter**, then open it and choose **Restore**. Anyone signed in can delete or restore a run. Files that were queued for reprocessing when the run was deleted stay queued and don’t start while the run is deleted. If you restore the run, they start as processing slots free up.
 
+Deleting a run also cancels the uploads that were requested for its files, so the watcher stops trying to send them. Those files go back to **Pending**. Restoring the run doesn’t bring the requests back. Choose **Upload** again if you still want the files. See [Request an upload](/docs/browse-runs#request-upload).
+
 ![Deleted run page with a red banner naming who deleted it and when, and a Restore button](/images/deleted-run.webp)
 
 ### How reprocessing is queued [#reprocess-queue]

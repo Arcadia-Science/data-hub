@@ -2,10 +2,13 @@
 
 The watcher sends a heartbeat every few seconds (2 s in this suite). The server stores each
 one, keeps the newest status on the watcher row, and answers ``GET /watchers/:id`` with the
-*effective* status, which turns a watcher that has been silent for five minutes into
-``stale``. The suite never waits for those five minutes: it ages ``last_heartbeat_at`` in
-the database, after it has made sure the running watcher can't refresh it (a fault on
-``/heartbeat``, a 426, or a stopped watcher).
+*effective* status, which turns a running watcher that has been silent for five minutes into
+``stale``. A watcher that stopped cleanly stays ``stopped`` however old its last heartbeat
+is. (One that stopped for a Windows restart or an update turns ``stale`` after 15 minutes.
+A test here can't make a watcher send the mark for that, so the integration tests of the web
+app cover it.) The suite never waits for those five minutes: it ages
+``last_heartbeat_at`` in the database, after it has made sure the running watcher can't
+refresh it (a fault on ``/heartbeat``, a 426, or a stopped watcher).
 """
 
 from __future__ import annotations
@@ -21,7 +24,12 @@ from e2e_support.drivers import WatcherDriver
 from e2e_support.factory import WatcherFactory
 from e2e_support.files import SMALL, write_run
 from e2e_support.proxy_helpers import silence_heartbeats
-from e2e_support.server import HeartbeatRow, ServerView
+from e2e_support.server import (
+    STALE_AFTER_MINUTES,
+    SWEEP_GRACE_MINUTES,
+    HeartbeatRow,
+    ServerView,
+)
 from e2e_support.waiting import KnownBugStillPresent, known_bug, stays_true, wait_until
 
 pytestmark = pytest.mark.e2e
@@ -161,14 +169,6 @@ def test_graceful_stop_shows_stopped_and_starting_again_shows_watching(
 
 
 @pytest.mark.covers("watcher.stopped->stays_stopped")
-@pytest.mark.xfail(
-    strict=True,
-    raises=KnownBugStillPresent,
-    reason=(
-        "ENG-2124: a cleanly stopped watcher reads `stale` five minutes "
-        "after its last heartbeat, although the docs list Stopped as a status of its own"
-    ),
-)
 def test_a_cleanly_stopped_watcher_keeps_reading_stopped(
     watcher: WatcherFactory, server: ServerView
 ) -> None:
@@ -182,21 +182,16 @@ def test_a_cleanly_stopped_watcher_keeps_reading_stopped(
     # The stopped watcher sends no more heartbeats, so its last one only gets older. Docs
     # ("Watcher status" in concepts): Stopped is "the watcher shut down cleanly and said so
     # in its last heartbeat", and Unresponsive means "the process crashed, the PC is off, or
-    # the network is blocking the API". A clean stop is neither of those a few minutes on.
-    server.age_past_stale(pc.watcher_id)
-    with known_bug():
-        assert server.effective_status(pc.watcher_id) == "stopped"
+    # the network is blocking the API". A clean stop is neither of those, however long ago it
+    # was: not past the 5-minute mark, not past the 15-minute one that applies to a stop for
+    # a restart, and not a day on.
+    for minutes in (STALE_AFTER_MINUTES + 1, SWEEP_GRACE_MINUTES + 1, 24 * 60):
+        server.age_heartbeat(pc.watcher_id, minutes)
+        assert server.effective_status(pc.watcher_id) == "stopped", minutes
+    assert server.watcher(pc.watcher_id).status == "stopped"
 
 
 @pytest.mark.covers("watcher.stopped->stays_stopped_in_list")
-@pytest.mark.xfail(
-    strict=True,
-    raises=KnownBugStillPresent,
-    reason=(
-        "ENG-2124: the watcher list shows a cleanly stopped watcher as "
-        "`stale` and lists it under the stale filter, five minutes after its last heartbeat"
-    ),
-)
 def test_the_watcher_list_keeps_a_cleanly_stopped_watcher_stopped(
     watcher: WatcherFactory, server: ServerView
 ) -> None:
@@ -205,21 +200,21 @@ def test_the_watcher_list_keeps_a_cleanly_stopped_watcher_stopped(
     server.wait_for_watcher_status(pc.watcher_id, "watching")
     assert pc.stop() == 0
     server.wait_for_watcher_status(pc.watcher_id, "stopped")
-    assert [(r["id"], r["status"]) for r in server.list_watchers(status="stopped")] == [
-        (pc.watcher_id, "stopped")
-    ]
+
+    def stopped_rows() -> list[tuple[str, str]]:
+        return [(r["id"], r["status"]) for r in server.list_watchers(status="stopped")]
+
+    assert stopped_rows() == [(pc.watcher_id, "stopped")]
     assert server.list_watchers(status="stale") == []
 
     # The stopped watcher sends no more heartbeats, so its last one only gets older. The list
-    # route does it in two places: its `stale` filter is a check on the heartbeat's age that
-    # doesn't ask whether the watcher said it was stopping, and the status it prints is the
-    # computed one. The web app itself calls a stopped watcher "expected to be silent" that
-    # "shouldn't read as an alarm" (the status badge), and an unresponsive one is an alarm.
-    server.age_past_stale(pc.watcher_id)
-    with known_bug():
-        stopped = [(r["id"], r["status"]) for r in server.list_watchers(status="stopped")]
-        assert stopped == [(pc.watcher_id, "stopped")]
-        assert server.list_watchers(status="stale") == []
+    # route's `stale` filter and the status it prints both follow the same rule as the detail
+    # route: a stop the watcher announced stays `stopped`, so the watcher is still listed
+    # under `stopped`, with that status, and never under `stale`.
+    for minutes in (STALE_AFTER_MINUTES + 1, SWEEP_GRACE_MINUTES + 1, 24 * 60):
+        server.age_heartbeat(pc.watcher_id, minutes)
+        assert stopped_rows() == [(pc.watcher_id, "stopped")], minutes
+        assert server.list_watchers(status="stale") == [], minutes
 
 
 # ---------------------------------------------------------------------------
