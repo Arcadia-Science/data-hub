@@ -1,6 +1,6 @@
-// Watcher status rules that need no database. Client components import them
-// too, so this file must not import `@/lib/db` or anything that does. Server
-// code reaches the same names through `@/lib/api/watchers`.
+// Watcher status rules that need no database. Server code and client
+// components both import them from this file, so it must not import `@/lib/db`
+// or anything that does.
 
 // The `status_reason` on the `stopped` heartbeat of a watcher that stopped
 // because Windows is shutting down or restarting. Such a PC is expected back, so

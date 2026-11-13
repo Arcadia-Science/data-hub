@@ -26,13 +26,15 @@ const DAY = 24 * 60 * MINUTE;
 function statusOf(
   status: string,
   statusReason: string | null,
-  ageMs: number | null
+  ageMs: number | null,
+  deregistered = false
 ): EffectiveStatus {
   return computeEffectiveStatus(
     {
       status,
       statusReason,
       lastHeartbeatAt: ageMs === null ? null : new Date(NOW.getTime() - ageMs),
+      deletedAt: deregistered ? new Date(NOW.getTime() - MINUTE) : null,
     },
     NOW
   );
@@ -130,11 +132,36 @@ describe("computeEffectiveStatus", () => {
     });
   });
 
+  // A deregistered watcher can't heartbeat, so it reads stopped whatever it
+  // last said and however old that was.
+  describe.each<
+    [name: string, status: string, reason: string | null, ageMs: number | null]
+  >([
+    ["registered, no heartbeat", "registered", null, null],
+    ["watching, fresh", "watching", null, MINUTE],
+    ["watching, a day old", "watching", null, DAY],
+    ["watching, no heartbeat", "watching", null, null],
+    [
+      "waiting, six minutes",
+      "waiting",
+      "watch_directory not found",
+      6 * MINUTE,
+    ],
+    ["stopped", "stopped", null, DAY],
+    ["stopped for a restart, a day old", "stopped", "system_shutdown", DAY],
+    ["stopped for a restart, no heartbeat", "stopped", "auto_update", null],
+  ])("deregistered, %s", (_name, status, reason, ageMs) => {
+    it("reads stopped", () => {
+      expect(statusOf(status, reason, ageMs, true)).toBe("stopped");
+    });
+  });
+
   it("reads the clock when no time is passed", () => {
     const status = computeEffectiveStatus({
       status: "watching",
       statusReason: null,
       lastHeartbeatAt: new Date(),
+      deletedAt: null,
     });
     expect(status).toBe("watching");
   });

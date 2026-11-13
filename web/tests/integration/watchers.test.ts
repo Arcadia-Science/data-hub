@@ -546,9 +546,11 @@ const DAY_MS = 24 * 60 * MINUTE_MS;
 // One watcher per case, each on an instrument of its own. The case sends the
 // heartbeat (none for `registered`), and the test then sets `last_heartbeat_at`
 // to `ageMs` ago, or to NULL, the way a watcher that went quiet looks. The
-// ages keep a minute away from the 5-minute and 15-minute limits.
+// ages keep a minute away from the 5-minute and 15-minute limits. A case that
+// is `deregistered` is deregistered last, through the DELETE route.
 interface StatusCase {
   ageMs: number | null;
+  deregistered?: boolean;
   expected: ShownStatus;
   heartbeat: { status: string; status_reason?: string } | null;
   name: string;
@@ -675,6 +677,62 @@ const STATUS_CASES: StatusCase[] = [
   ]),
 ];
 
+// A deregistered watcher can't send heartbeats, so it reads `stopped` whatever
+// it last said. The list route shows it when `include_deleted` is true.
+const DEREGISTERED_CASES: StatusCase[] = [
+  {
+    name: "deregistered, was registered",
+    heartbeat: null,
+    ageMs: null,
+    expected: "stopped",
+    storedReason: null,
+    deregistered: true,
+  },
+  {
+    name: "deregistered, was watching, fresh",
+    heartbeat: { status: "watching" },
+    ageMs: MINUTE_MS,
+    expected: "stopped",
+    storedReason: null,
+    deregistered: true,
+  },
+  {
+    name: "deregistered, was watching, six minutes",
+    heartbeat: { status: "watching" },
+    ageMs: 6 * MINUTE_MS,
+    expected: "stopped",
+    storedReason: null,
+    deregistered: true,
+  },
+  {
+    name: "deregistered, was watching, no heartbeat",
+    heartbeat: { status: "watching" },
+    ageMs: null,
+    expected: "stopped",
+    storedReason: null,
+    deregistered: true,
+  },
+  {
+    name: "deregistered, was waiting, six minutes",
+    heartbeat: { status: "waiting", status_reason: WAITING_REASON },
+    ageMs: 6 * MINUTE_MS,
+    expected: "stopped",
+    storedReason: WAITING_REASON,
+    deregistered: true,
+  },
+  {
+    name: "deregistered, stopped for a restart, a day old",
+    heartbeat: { status: "stopped", status_reason: "system_shutdown" },
+    ageMs: DAY_MS,
+    expected: "stopped",
+    storedReason: "system_shutdown",
+    deregistered: true,
+  },
+];
+
+const ALL_CASES: StatusCase[] = [...STATUS_CASES, ...DEREGISTERED_CASES];
+const ACTIVE_CASES = ALL_CASES.filter((testCase) => !testCase.deregistered);
+
 const ALL_STATUSES: ShownStatus[] = [
   "registered",
   "watching",
@@ -735,8 +793,18 @@ describe("Watchers API: the status a watcher shows", () => {
     return row.statusReason;
   }
 
-  async function listed(status?: string): Promise<Map<string, string>> {
-    const query = status ? `?status=${status}` : "";
+  async function listed(
+    status?: string,
+    includeDeleted = false
+  ): Promise<Map<string, string>> {
+    const params = new URLSearchParams();
+    if (status) {
+      params.set("status", status);
+    }
+    if (includeDeleted) {
+      params.set("include_deleted", "true");
+    }
+    const query = params.size > 0 ? `?${params}` : "";
     const res = await api(`/api/v1/watchers${query}`, { token });
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -758,7 +826,7 @@ describe("Watchers API: the status a watcher shows", () => {
     await resetDb();
     ({ token } = await seedTestUser());
 
-    for (const [index, testCase] of STATUS_CASES.entries()) {
+    for (const [index, testCase] of ALL_CASES.entries()) {
       const id = await registerWatcher(
         `shown-status-inst-${index}`,
         `lab-pc-${index}`
@@ -770,6 +838,13 @@ describe("Watchers API: the status a watcher shows", () => {
       }
       // After the heartbeat, which sets the timestamp to now.
       await ageHeartbeat(id, testCase.ageMs);
+      if (testCase.deregistered) {
+        const res = await api(`/api/v1/watchers/${id}`, {
+          method: "DELETE",
+          token,
+        });
+        expect(res.status).toBe(200);
+      }
     }
   });
 
@@ -778,7 +853,7 @@ describe("Watchers API: the status a watcher shows", () => {
   });
 
   it.each(
-    STATUS_CASES
+    ACTIVE_CASES
   )("GET /api/v1/watchers/:id shows $expected for $name", async (testCase) => {
     const res = await api(`/api/v1/watchers/${idOf(testCase.name)}`, {
       token,
@@ -792,8 +867,19 @@ describe("Watchers API: the status a watcher shows", () => {
 
   it("GET /api/v1/watchers prints the same status for each watcher", async () => {
     const shown = await listed();
-    expect(shown.size).toBe(STATUS_CASES.length);
-    for (const testCase of STATUS_CASES) {
+    expect(shown.size).toBe(ACTIVE_CASES.length);
+    for (const testCase of ACTIVE_CASES) {
+      expect({
+        name: testCase.name,
+        status: shown.get(idOf(testCase.name)),
+      }).toEqual({ name: testCase.name, status: testCase.expected });
+    }
+  });
+
+  it("GET /api/v1/watchers?include_deleted=true prints a deregistered watcher as stopped", async () => {
+    const shown = await listed(undefined, true);
+    expect(shown.size).toBe(ALL_CASES.length);
+    for (const testCase of ALL_CASES) {
       expect({
         name: testCase.name,
         status: shown.get(idOf(testCase.name)),
@@ -804,32 +890,46 @@ describe("Watchers API: the status a watcher shows", () => {
   it.each(
     ALL_STATUSES
   )("GET /api/v1/watchers?status=%s returns exactly the watchers that show it", async (status) => {
-    const expectedNames = STATUS_CASES.filter(
-      (testCase) => testCase.expected === status
-    ).map((testCase) => testCase.name);
-    // A status with no case would pass trivially.
-    expect(expectedNames.length).toBeGreaterThan(0);
+    // With and without the deregistered watchers.
+    for (const includeDeleted of [false, true]) {
+      const cases = includeDeleted ? ALL_CASES : ACTIVE_CASES;
+      const expectedNames = cases
+        .filter((testCase) => testCase.expected === status)
+        .map((testCase) => testCase.name);
+      // A status with no case would pass trivially.
+      expect(expectedNames.length).toBeGreaterThan(0);
 
-    const shown = await listed(status);
-    const shownNames = STATUS_CASES.filter((testCase) =>
-      shown.has(idOf(testCase.name))
-    ).map((testCase) => testCase.name);
-    expect(shownNames.sort()).toEqual(expectedNames.sort());
-    expect(shown.size).toBe(expectedNames.length);
-    for (const printed of shown.values()) {
-      expect(printed).toBe(status);
+      const shown = await listed(status, includeDeleted);
+      const shownNames = cases
+        .filter((testCase) => shown.has(idOf(testCase.name)))
+        .map((testCase) => testCase.name);
+      expect(shownNames.sort()).toEqual(expectedNames.sort());
+      expect(shown.size).toBe(expectedNames.length);
+      for (const printed of shown.values()) {
+        expect(printed).toBe(status);
+      }
     }
   });
 
   it("lists every watcher under exactly one status filter", async () => {
-    const appearances = new Map<string, number>();
-    for (const status of ALL_STATUSES) {
-      for (const id of (await listed(status)).keys()) {
-        appearances.set(id, (appearances.get(id) ?? 0) + 1);
+    for (const includeDeleted of [false, true]) {
+      const appearances = new Map<string, number>();
+      for (const status of ALL_STATUSES) {
+        for (const id of (await listed(status, includeDeleted)).keys()) {
+          appearances.set(id, (appearances.get(id) ?? 0) + 1);
+        }
       }
+      const cases = includeDeleted ? ALL_CASES : ACTIVE_CASES;
+      expect(appearances.size).toBe(cases.length);
+      expect([...appearances.values()].every((n) => n === 1)).toBe(true);
     }
-    expect(appearances.size).toBe(STATUS_CASES.length);
-    expect([...appearances.values()].every((n) => n === 1)).toBe(true);
+  });
+
+  it("never lists a deregistered watcher under stale", async () => {
+    const stale = await listed("stale", true);
+    for (const testCase of DEREGISTERED_CASES) {
+      expect(stale.has(idOf(testCase.name))).toBe(false);
+    }
   });
 
   it("GET /api/v1/watchers rejects a status it doesn't know", async () => {

@@ -42,8 +42,8 @@ __all__ = [
     "WatcherRow",
 ]
 
-# The server's own timers, from `STALE_THRESHOLD_MS` and `UPLOAD_REQUEST_REVERT_GRACE_MS` in
-# web/lib/api/watchers.ts.
+# The server's own timers: `STALE_THRESHOLD_MS` in web/lib/api/watchers.ts and
+# `UPLOAD_REQUEST_REVERT_GRACE_MS` in web/lib/api/watcher-status.ts.
 STALE_AFTER_MINUTES = 5
 SWEEP_GRACE_MINUTES = 15
 

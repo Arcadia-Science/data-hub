@@ -282,6 +282,8 @@ export async function deregisterInstrumentWatchers(
 }
 
 interface WatcherLike {
+  /** Set when the watcher was deregistered. */
+  deletedAt: Date | null;
   lastHeartbeatAt: Date | null;
   status: string;
   /** Why the watcher is `waiting`, or why it `stopped` for a restart. */
@@ -300,6 +302,8 @@ export type EffectiveStatus =
  * recency. "stale" is never stored in the DB: it's a virtual status computed
  * here, and `effectiveStatusCondition` below must agree with it.
  *
+ * - Deregistered: always `stopped`. It can no longer send heartbeats, so
+ *   staleness is moot, whatever it reported last.
  * - `registered`: no heartbeat yet, so it is exempt from staleness checks.
  * - `watching` and `waiting`: `stale` once the last heartbeat is more than
  *   `STALE_THRESHOLD_MS` old, or missing.
@@ -313,6 +317,10 @@ export function computeEffectiveStatus(
   watcher: WatcherLike,
   now: Date = new Date()
 ): EffectiveStatus {
+  if (watcher.deletedAt) {
+    return "stopped";
+  }
+
   if (watcher.status === "registered") {
     return "registered";
   }
@@ -353,19 +361,23 @@ export function effectiveStatusCondition(
     sql`, `
   );
 
+  // A deregistered watcher is `stopped` and nothing else, so every other
+  // status needs `deleted_at is null`.
+  const active = sql`${watchers.deletedAt} is null`;
+
   switch (status) {
     case "registered":
-      return sql`${watchers.status} = 'registered'`;
+      return sql`(${active} and ${watchers.status} = 'registered')`;
     case "watching":
-      return sql`(${watchers.status} = 'watching' and ${heartbeat} >= ${staleBefore})`;
+      return sql`(${active} and ${watchers.status} = 'watching' and ${heartbeat} >= ${staleBefore})`;
     case "waiting":
-      return sql`(${watchers.status} = 'waiting' and ${heartbeat} >= ${staleBefore})`;
+      return sql`(${active} and ${watchers.status} = 'waiting' and ${heartbeat} >= ${staleBefore})`;
     case "stopped":
       // `status_reason` is checked for NULL first, because `NULL not in (...)`
       // is NULL, not true, and a plain stop has no reason.
-      return sql`(${watchers.status} = 'stopped' and (${watchers.statusReason} is null or ${watchers.statusReason} not in (${restartReasons}) or ${heartbeat} >= ${restartStaleBefore}))`;
+      return sql`(${watchers.deletedAt} is not null or (${watchers.status} = 'stopped' and (${watchers.statusReason} is null or ${watchers.statusReason} not in (${restartReasons}) or ${heartbeat} >= ${restartStaleBefore})))`;
     case "stale":
-      return sql`((${watchers.status} in ('watching', 'waiting') and (${heartbeat} is null or ${heartbeat} < ${staleBefore})) or (${watchers.status} = 'stopped' and ${watchers.statusReason} in (${restartReasons}) and (${heartbeat} is null or ${heartbeat} < ${restartStaleBefore})))`;
+      return sql`(${active} and ((${watchers.status} in ('watching', 'waiting') and (${heartbeat} is null or ${heartbeat} < ${staleBefore})) or (${watchers.status} = 'stopped' and ${watchers.statusReason} in (${restartReasons}) and (${heartbeat} is null or ${heartbeat} < ${restartStaleBefore}))))`;
     default:
       return status satisfies never;
   }
@@ -465,9 +477,7 @@ export async function getWatcherList(opts: {
     instrumentDisplayName: row.instrumentDisplayName,
     hostname: row.hostname,
     watcherVersion: row.watcherVersion,
-    // Deregistered watchers always show as "stopped" regardless of their
-    // last DB status — they can no longer heartbeat so staleness is moot.
-    effectiveStatus: row.deletedAt ? "stopped" : computeEffectiveStatus(row),
+    effectiveStatus: computeEffectiveStatus(row),
     statusReason: row.statusReason,
     configRevision: row.configRevision,
     appliedConfigRevision: row.appliedConfigRevision,
@@ -550,7 +560,7 @@ export const getWatcherById = cache(async function getWatcherById(
     hostname: row.hostname,
     osInfo: row.osInfo,
     watcherVersion: row.watcherVersion,
-    effectiveStatus: row.deletedAt ? "stopped" : computeEffectiveStatus(row),
+    effectiveStatus: computeEffectiveStatus(row),
     statusReason: row.statusReason,
     configRevision: row.configRevision,
     appliedConfigRevision: row.appliedConfigRevision,

@@ -2,7 +2,7 @@ import { and, eq, isNull, type SQL } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 import { authorize } from "@/lib/api/auth";
 import { apiError, VALIDATION_ERROR } from "@/lib/api/errors";
-import { watcherStatusSchema } from "@/lib/api/openapi/schemas/common";
+import { watcherStatusSchema } from "@/lib/api/openapi";
 import {
   computeEffectiveStatus,
   effectiveStatusCondition,
@@ -78,6 +78,7 @@ export async function GET(request: NextRequest) {
         status: row.status,
         statusReason: row.status_reason,
         lastHeartbeatAt: row.last_heartbeat_at,
+        deletedAt: row.deleted_at,
       },
       now
     ),
