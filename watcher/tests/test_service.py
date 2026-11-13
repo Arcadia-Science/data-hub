@@ -1148,6 +1148,8 @@ class _LoopHarness:
         # SCM-routing handler is the thing under test.
         from data_hub_watcher import logging_setup
 
+        # For the tests that need the real file handler (a log file in tmp_path).
+        self.real_setup_file_logging = logging_setup.setup_file_logging
         self.setup_file_logging_calls: list[None] = []
 
         def _fake_setup_file_logging() -> Path:
@@ -1733,6 +1735,7 @@ class TestRunServiceLoopLogging:
 
         assert len(harness.start_calls) == 1
         assert logging.getLogger().level == logging.DEBUG
+        assert harness.svc.logger.isEnabledFor(logging.DEBUG)
 
         # DEBUG and INFO lines from another module now reach the logger, and they still stay out
         # of the Event Log, as INFO lines do.
@@ -1744,6 +1747,57 @@ class TestRunServiceLoopLogging:
 
         harness.sm.LogInfoMsg.assert_not_called()
         harness.sm.LogWarningMsg.assert_not_called()
+
+    @pytest.mark.parametrize("level", ["WARNING", "ERROR"])
+    @pytest.mark.parametrize("source", ["env file", "process environment"])
+    def test_the_service_keeps_its_own_lifecycle_lines_when_the_level_is_raised(
+        self, harness: _LoopHarness, level: str, source: str
+    ) -> None:
+        # A level above INFO quiets the other modules. The service's own lines ("starting", "is
+        # running", "stopped") are the ones an operator and the end-to-end suite look for, so
+        # they stay in watcher.log and the Event Log. This uses the real file handler.
+        from data_hub_watcher import logging_setup
+
+        log_dir = harness.tmp_path / "logs"
+        harness.monkeypatch.setattr(logging_setup, "WATCHER_LOG_DIR", log_dir)
+        harness.monkeypatch.setattr(
+            logging_setup, "setup_file_logging", harness.real_setup_file_logging
+        )
+        if source == "process environment":
+            harness.monkeypatch.setenv("DATA_HUB_WATCHER_LOG_LEVEL", level)
+        else:
+
+            def load_env_file(*args: Any, **kwargs: Any) -> None:
+                harness.dotenv_calls.append((args, kwargs))
+                if kwargs.get("override"):
+                    harness.monkeypatch.setenv("DATA_HUB_WATCHER_LOG_LEVEL", level)
+
+            import dotenv
+
+            harness.monkeypatch.setattr(dotenv, "load_dotenv", load_env_file)
+        stop_event = threading.Event()
+        stop_event.set()
+
+        harness.svc._run_service_loop(stop_event, harness.sm)
+        # Another module logs after the service has started, as the watcher does for each file.
+        monitor_logger = logging.getLogger("data_hub_watcher.monitor")
+        monitor_logger.info("File stable: a.csv")
+        monitor_logger.error("Upload failed: a.csv")
+
+        assert logging.getLogger().level == getattr(logging, level)
+        watcher_log = (log_dir / logging_setup.LOG_FILENAME).read_text(encoding="utf-8")
+        assert "starting" in watcher_log
+        assert "is running" in watcher_log
+        assert "stopped" in watcher_log
+        assert "File stable" not in watcher_log
+        assert "Upload failed" in watcher_log
+        info_messages = [c.args[0] for c in harness.sm.LogInfoMsg.call_args_list]
+        assert any("starting" in m for m in info_messages)
+        assert any("is running" in m for m in info_messages)
+        assert any(m.endswith("stopped") for m in info_messages)
+        assert not any("File stable" in m for m in info_messages)
+        harness.sm.LogErrorMsg.assert_called_once()
+        assert "Upload failed" in harness.sm.LogErrorMsg.call_args.args[0]
 
     def test_service_lifecycle_lines_reach_the_event_log(
         self,

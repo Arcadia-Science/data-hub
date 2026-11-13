@@ -567,6 +567,18 @@ def _repair_upgrade_worker_if_missing(config_dir: Path) -> None:
         )
 
 
+def _keep_own_lines_at_info() -> None:
+    """Keep this module's INFO lines, whatever level the root logger has.
+
+    The service's own lines ("starting", "is running", "stopped", "restarting to load
+    upgraded watcher") are what an operator reads in ``watcher.log`` and the Event Log, and
+    what the end-to-end suite waits for. ``DATA_HUB_WATCHER_LOG_LEVEL=WARNING`` or ``ERROR``
+    in the env file quiets the other modules, so this logger stays at INFO. A root level
+    below INFO (DEBUG) stays as it is.
+    """
+    logger.setLevel(min(logging.getLogger().getEffectiveLevel(), logging.INFO))
+
+
 def _load_env_file(path: Path, *, override: bool) -> None:
     """Load the env file at *path* into the environment, or end the service.
 
@@ -658,7 +670,10 @@ def _run_service_loop(
     # ``DATA_HUB_WATCHER_LOG_LEVEL`` when it is in the process environment.
     # The registered env file is loaded further down this function, and
     # ``apply_log_level_from_env`` applies a value set there right after
-    # that load.
+    # that load. A level of WARNING or ERROR quiets the other modules, but
+    # this module's own logger keeps INFO (``_keep_own_lines_at_info``,
+    # called after each of the two applications), so the lifecycle lines
+    # stay.
     #
     # The Event Log takes this module's own INFO lines (``logger.name``
     # is ``__main__`` when the SCM runs the file, so it isn't hard-coded)
@@ -667,6 +682,7 @@ def _run_service_loop(
     logging.getLogger().setLevel(logging.INFO)
     log_path = setup_file_logging()
     attach_servicemanager_handler(sm, info_from=logger.name)
+    _keep_own_lines_at_info()
     logger.info("%s starting (pid=%s, log=%s)", SERVICE_DISPLAY_NAME, os.getpid(), log_path)
 
     # Read registry paths BEFORE the upgrade-worker self-repair so
@@ -700,6 +716,7 @@ def _run_service_loop(
         _load_env_file(base_env, override=False)
     _load_env_file(env_path, override=True)
     apply_log_level_from_env()
+    _keep_own_lines_at_info()
     try:
         cfg = load_config(path)
     except Exception as exc:
