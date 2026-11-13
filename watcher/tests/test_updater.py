@@ -1537,6 +1537,10 @@ class TestUpdaterWorkerDispatch:
         assert emitted[0].details["reason"] == "worker_did_not_stop_service"
         assert emitted[0].details["target_version"] == "9.9.9"
         assert emitted[0].details["via_worker"] is True
+        # The message says where to look, and with no result from the worker there are
+        # no details from it.
+        assert "upgrade-worker.log" in emitted[0].message
+        assert not [key for key in emitted[0].details if key.startswith("worker_")]
         # What the hand-off wrote is cleared, as after a failed `schtasks /Run`.
         assert not (config_dir / UPGRADE_REQUEST_FILENAME).exists()
         assert not (config_dir / UPGRADE_MARKER_FILENAME).exists()
@@ -1784,6 +1788,48 @@ class TestUpdaterWorkerDispatch:
             "worker_did_not_stop_service"
         )
         h.reporter.queue_event.assert_not_called()
+
+    def test_the_expiry_reports_what_the_worker_left_and_clears_it(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from data_hub_watcher.upgrade_worker import (
+            UPGRADE_REQUEST_FILENAME,
+            UpgradeResult,
+            upgrade_result_path,
+        )
+
+        h, _handoff, clock, _trigger_calls = self._hand_off_an_upgrade(tmp_path, monkeypatch)
+        config_dir = tmp_path / ".data-hub"
+        # The worker ran but couldn't stop the service, so `uv` failed on the files the
+        # running service holds. It wrote its result, and the service is still running.
+        result = UpgradeResult(
+            request_id="req-1",
+            target_version="9.9.9",
+            succeeded=False,
+            returncode=2,
+            stdout_tail="",
+            stderr_tail="error: failed to remove directory: Access is denied",
+            finished_at="2026-01-01T00:00:00+00:00",
+            error=None,
+        )
+        upgrade_result_path(config_dir).write_text(json.dumps(result.to_dict()), encoding="utf-8")
+        clock.advance(UPGRADE_HANDOFF_TIMEOUT_SECONDS)
+
+        h.updater.on_tick()
+
+        emitted = [c.args[0] for c in h.reporter.queue_event.call_args_list]
+        assert [e.event_type for e in emitted] == [EventType.UPDATE_FAILED]
+        details = emitted[0].details
+        assert details["reason"] == "worker_did_not_stop_service"
+        assert details["worker_returncode"] == 2
+        assert details["worker_stderr_tail"] == result.stderr_tail
+        assert details["worker_stdout_tail"] == ""
+        assert details["worker_error"] is None
+        assert details["worker_request_id"] == "req-1"
+        # Cleared with the request and the marker, so a later upgrade isn't blamed for it.
+        assert not upgrade_result_path(config_dir).exists()
+        assert not (config_dir / UPGRADE_REQUEST_FILENAME).exists()
+        assert not (config_dir / UPGRADE_MARKER_FILENAME).exists()
 
     def test_posix_uv_tool_still_uses_in_process_path(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

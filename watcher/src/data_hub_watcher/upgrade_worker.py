@@ -145,6 +145,20 @@ class UpgradeResult:
     finished_at: str
     error: str | None = None
 
+    def event_details(self) -> dict[str, Any]:
+        """What an update event says about the worker's run.
+
+        The names are the ones the report after a restart uses (`worker_returncode`
+        and the rest).
+        """
+        return {
+            "worker_returncode": self.returncode,
+            "worker_stdout_tail": self.stdout_tail,
+            "worker_stderr_tail": self.stderr_tail,
+            "worker_error": self.error,
+            "worker_request_id": self.request_id,
+        }
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "request_id": self.request_id,

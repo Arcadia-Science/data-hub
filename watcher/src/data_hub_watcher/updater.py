@@ -55,9 +55,12 @@ from data_hub_watcher.self_update import (
 )
 from data_hub_watcher.state import StateDB
 from data_hub_watcher.upgrade_worker import (
+    UPGRADE_WORKER_LOG_FILENAME,
     build_pkg_spec,
     clear_upgrade_request,
+    clear_upgrade_result,
     detect_installed_extras,
+    read_upgrade_result,
     write_upgrade_request,
 )
 
@@ -555,27 +558,37 @@ class Updater:
         return self._check_and_apply()
 
     def _report_handoff_expired(self, target: str) -> None:
-        """The worker didn't stop the service: report it and clear what the hand-off wrote."""
+        """The worker didn't stop the service: report it, and clear what the hand-off left."""
         logger.warning(
             "The upgrade worker did not stop the service within %d s of the hand-off "
             "for %s; allowing a new attempt",
             UPGRADE_HANDOFF_TIMEOUT_SECONDS,
             target,
         )
+        # A worker that ran but couldn't stop the service (`Stop-Service` failed, or
+        # `uv` failed on the files the running service holds) left its result, which
+        # has the real error. Report it, and clear it so that a later upgrade is not
+        # blamed for it.
+        worker_result = read_upgrade_result(self._config_dir)
+        clear_upgrade_result(self._config_dir)
         # As in the `schtasks` failure branch: the next attempt starts from a clean
         # slate. A worker that hasn't started yet finds no request and does nothing;
         # one that is already running has read it and carries on regardless. The
         # marker goes with `_emit_failure`.
         clear_upgrade_request(self._config_dir)
+        # Only a uv-tool install on Windows hands an upgrade to the worker.
+        extra: dict[str, Any] = {"install_method": InstallMethod.UV_TOOL.value, "via_worker": True}
+        if worker_result is not None:
+            extra.update(worker_result.event_details())
         self._emit_failure(
             target,
             "worker_did_not_stop_service",
             message=(
                 f"Watcher upgrade to {target} failed: the upgrade worker did not stop "
-                f"the service within {UPGRADE_HANDOFF_TIMEOUT_SECONDS // 60} minutes"
+                f"the service within {UPGRADE_HANDOFF_TIMEOUT_SECONDS // 60} minutes; "
+                f"check {UPGRADE_WORKER_LOG_FILENAME} in the watcher's config folder"
             ),
-            # Only a uv-tool install on Windows hands an upgrade to the worker.
-            extra={"install_method": InstallMethod.UV_TOOL.value, "via_worker": True},
+            extra=extra,
         )
 
     # ------------------------------------------------------------------
