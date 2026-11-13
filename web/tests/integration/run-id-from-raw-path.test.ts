@@ -42,8 +42,9 @@ describe("Run ID from the raw path", () => {
     expect(res.status).toBe(201);
   }
 
-  // The proxy replaces the header on every request, so a client can't make a
-  // route read another run's ID than the one in its URL.
+  // The proxy replaces the header on every request, and `readRunIdParam`
+  // ignores a header that disagrees with the route parameter, so a client
+  // can't make a route read another run's ID than the one in its URL.
   it("ignores a raw path header that the client sends", async () => {
     await createRun("header-run-a");
     await createRun("header-run-b");

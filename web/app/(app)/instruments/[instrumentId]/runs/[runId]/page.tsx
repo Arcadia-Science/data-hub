@@ -50,7 +50,7 @@ interface Props {
 
 // The run ID as the client sent it. On Vercel, Next.js decodes a page's route
 // parameter twice, so the parameter is only the fallback for when the proxy
-// header is missing. See `readRunIdParam`.
+// header is missing or disagrees with it. See `readRunIdParam`.
 async function readRunId(runIdParam: string) {
   return readRunIdParam(await headers(), decodePageParam(runIdParam));
 }

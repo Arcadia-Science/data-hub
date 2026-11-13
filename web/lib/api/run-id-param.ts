@@ -5,6 +5,17 @@ export const RAW_PATH_HEADER = "x-data-hub-raw-path";
 // The API path, or the run page path, up to and including the run ID.
 const RUN_ID_IN_PATH = /^(?:\/api\/v1)?\/instruments\/[^/]+\/runs\/([^/]+)/;
 
+// Decodes once, and returns the input when it has a malformed escape. This is
+// what Next.js does to a route parameter the second time on Vercel (see
+// `decodeQueryPathParameter` in the Next.js server).
+function safeDecode(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
 /**
  * Returns the run ID of a request, exactly as the client sent it.
  *
@@ -16,9 +27,16 @@ const RUN_ID_IN_PATH = /^(?:\/api\/v1)?\/instruments\/[^/]+\/runs\/([^/]+)/;
  * show this.
  *
  * `proxy.ts` copies the path as sent into a request header. This reads the run
- * ID from that header and decodes it once. It returns `paramValue`, the
- * fallback that the caller passes in, when the header is missing, doesn't name
- * a run, or has a malformed escape.
+ * ID from that header and decodes it once. It trusts that value only when it
+ * agrees with `paramValue`: it is the same, or it is what a second decoding
+ * turns into `paramValue`. Otherwise the header doesn't belong to this route,
+ * for example when a client planted it, and `paramValue` wins.
+ *
+ * `paramValue` is the fallback that the caller passes in. A route handler
+ * passes its route parameter. The run page passes its parameter decoded with
+ * `decodePageParam`, because a page gets the parameter still encoded. It is
+ * returned when the header is missing, doesn't name a run, has a malformed
+ * escape, or disagrees.
  */
 export function readRunIdParam(
   headers: Pick<Headers, "get">,
@@ -29,9 +47,13 @@ export function readRunIdParam(
   if (segment === undefined) {
     return paramValue;
   }
+  let runId: string;
   try {
-    return decodeURIComponent(segment);
+    runId = decodeURIComponent(segment);
   } catch {
     return paramValue;
   }
+  return runId === paramValue || safeDecode(runId) === paramValue
+    ? runId
+    : paramValue;
 }

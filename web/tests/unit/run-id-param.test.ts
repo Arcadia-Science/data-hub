@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { RAW_PATH_HEADER, readRunIdParam } from "@/lib/api/run-id-param";
+import { decodePageParam } from "@/lib/runs/page-param";
 
 function headersWith(rawPath: string | null): Headers {
   const headers = new Headers();
@@ -12,6 +13,31 @@ function headersWith(rawPath: string | null): Headers {
 function apiPath(encodedRunId: string, rest = "request-upload-url") {
   return `/api/v1/instruments/x/runs/${encodedRunId}/${rest}`;
 }
+
+function pagePath(encodedRunId: string) {
+  return `/instruments/x/runs/${encodedRunId}`;
+}
+
+// What Next.js passed as `params.runId` on a Vercel preview, for each run ID
+// segment that was sent. A page gets the parameter still encoded. `page` is
+// null for a segment that was only tried on a route handler.
+const VERCEL_PROBE: {
+  sent: string;
+  route: string;
+  page: string | null;
+  runId: string;
+}[] = [
+  { sent: "Q%2541", route: "QA", page: "QA", runId: "Q%41" },
+  { sent: "50%2525", route: "50%", page: "50%25", runId: "50%25" },
+  { sent: "a%252541", route: "a%41", page: "a%2541", runId: "a%2541" },
+  { sent: "100%2599", route: "100%99", page: null, runId: "100%99" },
+  { sent: "a%23b%3Fc", route: "a#b?c", page: "a%23b%3Fc", runId: "a#b?c" },
+  { sent: "a%2Fb", route: "a/b", page: "a%2Fb", runId: "a/b" },
+  { sent: "a%20b", route: "a b", page: "a%20b", runId: "a b" },
+  { sent: "caf%C3%A9", route: "café", page: "caf%C3%A9", runId: "café" },
+  { sent: "x%2B1", route: "x+1", page: null, runId: "x+1" },
+  { sent: "plain-id_1", route: "plain-id_1", page: null, runId: "plain-id_1" },
+];
 
 describe("readRunIdParam", () => {
   describe("on Vercel, where Next.js decodes the parameter twice", () => {
@@ -32,16 +58,40 @@ describe("readRunIdParam", () => {
         "a%2541"
       );
     });
+
+    it.each(VERCEL_PROBE)("gives a route handler $runId for $sent", ({
+      sent,
+      route,
+      runId,
+    }) => {
+      expect(readRunIdParam(headersWith(apiPath(sent)), route)).toBe(runId);
+    });
+
+    // The run page passes its parameter through `decodePageParam` first.
+    it.each(
+      VERCEL_PROBE.filter((row) => row.page !== null)
+    )("gives the run page $runId for $sent", ({ sent, page, runId }) => {
+      const fallback = decodePageParam(page ?? "");
+      expect(readRunIdParam(headersWith(pagePath(sent)), fallback)).toBe(runId);
+    });
   });
 
   describe("under next start, where the parameter is decoded once", () => {
-    it("returns the same value as the parameter", () => {
-      expect(readRunIdParam(headersWith(apiPath("Q%2541")), "Q%41")).toBe(
-        "Q%41"
-      );
-      expect(readRunIdParam(headersWith(apiPath("50%2525")), "50%25")).toBe(
-        "50%25"
-      );
+    it.each(VERCEL_PROBE)("gives a route handler $runId for $sent", ({
+      sent,
+      runId,
+    }) => {
+      const route = decodeURIComponent(sent);
+      expect(readRunIdParam(headersWith(apiPath(sent)), route)).toBe(runId);
+    });
+
+    // A page gets the parameter still encoded.
+    it.each(VERCEL_PROBE)("gives the run page $runId for $sent", ({
+      sent,
+      runId,
+    }) => {
+      const fallback = decodePageParam(sent);
+      expect(readRunIdParam(headersWith(pagePath(sent)), fallback)).toBe(runId);
     });
   });
 
@@ -89,6 +139,39 @@ describe("readRunIdParam", () => {
           "real-run"
         )
       ).toBe("real-run");
+    });
+  });
+
+  describe("a header that doesn't agree with the parameter", () => {
+    it("returns the parameter when the header names another run", () => {
+      // A client planted the header, or the proxy saw another path.
+      expect(
+        readRunIdParam(headersWith(apiPath("other-run", "restore")), "my-run")
+      ).toBe("my-run");
+    });
+
+    it("returns the parameter when the header names another run with an escape", () => {
+      expect(readRunIdParam(headersWith(apiPath("Q%2541")), "Q")).toBe("Q");
+      expect(readRunIdParam(headersWith(apiPath("Q%2541")), "QB")).toBe("QB");
+    });
+
+    it("returns the parameter when the header only agrees after three decodings", () => {
+      // `a%25252541` decodes to `a%252541`, then `a%2541`, then `a%41`.
+      expect(readRunIdParam(headersWith(apiPath("a%25252541")), "a%41")).toBe(
+        "a%41"
+      );
+    });
+
+    it("returns the parameter when the run page's fallback is another run", () => {
+      expect(readRunIdParam(headersWith(pagePath("other-run")), "my-run")).toBe(
+        "my-run"
+      );
+    });
+
+    it("returns the parameter when the header names the run with other case", () => {
+      expect(readRunIdParam(headersWith(apiPath("RUN-1")), "run-1")).toBe(
+        "run-1"
+      );
     });
   });
 
