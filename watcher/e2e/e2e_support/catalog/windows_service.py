@@ -104,12 +104,11 @@ TRANSITIONS: tuple[Transition, ...] = (
         "restarted.",
         platforms=SERVICE,
     ),
-    xfail_bug(
+    covered(
         MACHINE,
         "service.env_file->log_level_honored",
         "`DATA_HUB_WATCHER_LOG_LEVEL` in the registered env file sets the service's log "
         "level, as it does for `watch`.",
-        "ENG-2119",
         platforms=SERVICE,
     ),
     covered(
@@ -214,19 +213,13 @@ TRANSITIONS: tuple[Transition, ...] = (
         "take longer than the 120 s of the second one).",
         platforms=SERVICE,
     ),
-    xfail_bug(
+    covered(
         MACHINE,
         "service.config_invalid->logged_in_watcher_log",
-        "PROPOSED — confirm intent: a config that doesn't load (missing, malformed, "
-        "invalid) is logged in `watcher.log` and ends the service through the "
-        "`SystemExit(1)` path, like the other start-up refusals. Today `_run_service_loop` "
-        "calls `load_config` outside any `try`, so the `ClickException` is raised out of "
-        "`SvcRun`: pywin32 still stops the service with the same failure code, but nothing "
-        "reaches `watcher.log`, only the Event Log (a traceback in a `SvcRun() method "
-        "failed` entry, which the driver copies into the log text). The shared "
-        "`startup.config_invalid->refused` is covered under the service as well, because it "
-        "reads that text.",
-        "ENG-2130",
+        "A config that doesn't load (missing, not UTF-8, malformed or invalid) is logged in "
+        "`watcher.log`, and the service ends through the `SystemExit(1)` path, like the other "
+        "start-up refusals. The shared `startup.config_invalid->refused` is covered under the "
+        "service as well, because it reads that text.",
         platforms=SERVICE,
     ),
     covered(

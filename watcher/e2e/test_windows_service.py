@@ -493,14 +493,6 @@ def _watching_gaps(beats: list[HeartbeatRow]) -> list[float]:
     ]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=KnownBugStillPresent,
-    reason=(
-        "ENG-2119: the service sets its log level before it loads the "
-        "env file, so DATA_HUB_WATCHER_LOG_LEVEL there is ignored"
-    ),
-)
 @pytest.mark.covers("service.env_file->log_level_honored")
 def test_the_log_level_in_the_env_file_is_honored_by_the_service(
     watcher: WatcherFactory, server: ServerView, proxy: FaultProxy
@@ -510,9 +502,10 @@ def test_the_log_level_in_the_env_file_is_honored_by_the_service(
         overrides={**CHECK_EVERY_HEARTBEAT, "DATA_HUB_WATCHER_LOG_LEVEL": "DEBUG"},
     )
     start_watching(pc, server)
-    # The watcher checks for an update on every heartbeat and finds none, which it says at
-    # DEBUG level ("Skipping update attempt"). Wait for the checks, which are the reason a
-    # DEBUG line would be there.
+    # The watcher checks for an update on every heartbeat. The suite advertises the version
+    # it runs, so the check finds nothing to install, and the updater says so at DEBUG level
+    # ("Skipping update attempt"). Wait for the checks, which are the reason that line would
+    # be there.
     wait_until(
         lambda: (
             len([r for r in proxy.requests if r.path.split("?")[0].endswith("/update-check")]) >= 3
@@ -523,8 +516,9 @@ def test_the_log_level_in_the_env_file_is_honored_by_the_service(
     )
     server.wait_for_heartbeats(pc.watcher_id, count=2)
 
-    with known_bug():
-        pc.wait_for_log(r"\[DEBUG\]", timeout=10)
+    # The watcher's own DEBUG line, not any `[DEBUG]` line: the logging setup keeps urllib3 at
+    # INFO, but another library's DEBUG line would say nothing about the watcher's loggers.
+    pc.wait_for_log(r"\[DEBUG\] data_hub_watcher\.updater: Skipping update attempt", timeout=10)
 
 
 @pytest.mark.covers("service.config_revision->applied_without_restart")
@@ -1165,32 +1159,21 @@ def test_an_upgrade_is_dispatched_to_the_worker_once(
     assert [b.get("status_reason") for b in stopped_heartbeats(proxy)] == ["auto_update"]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=KnownBugStillPresent,
-    reason=(
-        "ENG-2130: `_run_service_loop` calls `load_config` "
-        "outside any `try`, so the error is raised out of `SvcRun` and reaches only the Event "
-        "Log, where every other start-up refusal is logged in watcher.log"
-    ),
-)
 @pytest.mark.covers("service.config_invalid->logged_in_watcher_log")
 def test_a_config_that_does_not_load_is_logged_in_the_service_log(watcher: WatcherFactory) -> None:
     pc = service_pc(watcher)
     pc.install_service()
     pc.write_config_text("instrument: [unclosed\n")
 
-    # The start is refused, as for any config that doesn't load, and the driver finds the
-    # message where pywin32 put it: in the Event Log's entry for the failed `SvcRun`.
+    # The start is refused, as for any other start-up refusal.
     refused_start(pc)
     assert "Malformed YAML" in pc.log_text()
 
-    # PROPOSED: the service logs it, as it logs the other refusals, in the file an operator reads.
-    with known_bug():
-        assert "Malformed YAML" in pc.watcher_log_text(), (
-            "watcher.log has no word about the config that failed to load:\n"
-            + pc.watcher_log_text()[-1500:]
-        )
+    # The service logs the reason, as it logs the other refusals, in the file an operator reads.
+    assert "Malformed YAML" in pc.watcher_log_text(), (
+        "watcher.log has no word about the config that failed to load:\n"
+        + pc.watcher_log_text()[-1500:]
+    )
 
 
 @pytest.mark.xfail(

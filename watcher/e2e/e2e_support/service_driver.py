@@ -1019,13 +1019,12 @@ class WindowsServiceDriver(WatcherDriver):
         """After a run that ended badly, copy what the service host reported to the Event Log
         about its failure into a file :meth:`log_text` reads.
 
-        An exception that nothing catches in the service (a config that doesn't load raises
-        ``ClickException`` outside any ``try``) is not in ``watcher.log``: pywin32 reports its
-        traceback to the Event Log, in an entry that says ``The instance's SvcRun() method
-        failed``. That entry is the only one copied. The service's own log lines (including
-        ``logger.exception`` tracebacks) reach the Event Log too, and ``watcher.log`` has them
-        already, so copying them would show them twice. A scenario that wants the message finds
-        it in the log text.
+        An exception that nothing catches in the service is not in ``watcher.log``: pywin32
+        reports its traceback to the Event Log, in an entry that says ``The instance's SvcRun()
+        method failed``. That entry is the only one copied. The service's own log lines
+        (including ``logger.exception`` tracebacks) reach the Event Log too, and ``watcher.log``
+        has them already, so copying them would show them twice. A scenario that wants the
+        message finds it in the log text.
         """
         status = self.host.status()
         if status is None or status.state is not ServiceState.STOPPED:

@@ -422,6 +422,10 @@ Logs are written to `C:\ProgramData\DataHubWatcher\watcher.log` on Windows and `
 
 The Windows service also writes to the Application event log, but only warnings, errors and its own lifecycle lines (starting, running, stopped). The INFO lines the other modules write for each file stay in `watcher.log`, so a run of thousands of files can't fill the Application log and push out older warnings and errors.
 
+`DATA_HUB_WATCHER_LOG_LEVEL` sets the root log level. The service applies it a second time after it loads its registered env file (1.4.2), so a value set there counts. The service's own logger keeps INFO when the level is WARNING or ERROR, so its lifecycle lines stay in `watcher.log` and the Event Log. The `urllib3` logger stays at INFO or above whatever the root level is, `--verbose` included, because at DEBUG it logs every request URL and an upload goes to a pre-signed S3 URL.
+
+When the service can't load its env file or its config, whatever the reason (a file that isn't UTF-8, for example, as Windows PowerShell 5.1 writes with `>` and `>>`), it logs one error that names the file and exits with `SystemExit(1)` like the other start-up refusals. The exception doesn't escape `SvcRun`.
+
 ### Initial scan identity
 
 When the watcher starts it walks the watch directory to catch files that arrived while it was stopped. Identity for "have I already uploaded this?" is `(relative_path, size, mtime)` rather than a full-content hash — this keeps startup fast even on directories holding hundreds of GB of instrument output. Content integrity is still verified at upload time: the uploader computes a SHA-256 on every file it PUTs to S3 and records it alongside the upload.

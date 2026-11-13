@@ -572,6 +572,44 @@ def _repair_upgrade_worker_if_missing(config_dir: Path) -> None:
         )
 
 
+def _keep_own_lines_at_info() -> None:
+    """Keep this module's INFO lines, whatever level the root logger has.
+
+    The service's own lines ("starting", "is running", "stopped", "restarting to load
+    upgraded watcher") are what an operator reads in ``watcher.log`` and the Event Log, and
+    what the end-to-end suite waits for. ``DATA_HUB_WATCHER_LOG_LEVEL=WARNING`` or ``ERROR``
+    in the env file quiets the other modules, so this logger stays at INFO. A root level
+    below INFO (DEBUG) stays as it is.
+    """
+    logger.setLevel(min(logging.getLogger().getEffectiveLevel(), logging.INFO))
+
+
+def _load_env_file(path: Path, *, override: bool) -> None:
+    """Load the env file at *path* into the environment, or end the service.
+
+    A file python-dotenv can't read is refused like the other start-up errors: one error line
+    that names the file, in ``watcher.log`` and the Event Log, then ``SystemExit(1)``.
+    Otherwise the exception would escape ``SvcRun``. Windows PowerShell 5.1 writes UTF-16 for
+    ``>`` and ``>>``, so a file made or appended to that way fails with a decode error or an
+    "embedded null byte" (both are ``ValueError``).
+    """
+    from dotenv import load_dotenv
+
+    try:
+        load_dotenv(path, override=override)
+    except OSError as exc:
+        logger.error("Cannot read env file %s: %s.", path, exc)
+        raise SystemExit(1) from exc
+    except ValueError as exc:
+        logger.error(
+            "Cannot load env file %s: %s. Save it as UTF-8 text, "
+            "not UTF-16 or a Windows code page.",
+            path,
+            exc,
+        )
+        raise SystemExit(1) from exc
+
+
 def _run_service_loop(
     stop_event: threading.Event,
     sm: Any,
@@ -605,7 +643,7 @@ def _run_service_loop(
     """
     import platform
 
-    from dotenv import load_dotenv
+    import click
 
     from data_hub_watcher.api_client import ApiError, DataHubClient
     from data_hub_watcher.config_io import load_config
@@ -615,6 +653,7 @@ def _run_service_loop(
         state_db_dir,
     )
     from data_hub_watcher.logging_setup import (
+        apply_log_level_from_env,
         attach_servicemanager_handler,
         setup_file_logging,
     )
@@ -632,10 +671,14 @@ def _run_service_loop(
     # Python starts the root logger at WARNING, and the CLI's
     # ``basicConfig`` never runs in the service's process, so without
     # this every INFO line (the "starting" and "is running" lines among
-    # them) would be dropped. ``DATA_HUB_WATCHER_LOG_LEVEL`` still wins
-    # inside ``setup_file_logging``, but only when it is in the process
-    # environment: the registered env file is loaded further down in this
-    # function, so a value set there is ignored (known bug ENG-2119).
+    # them) would be dropped. ``setup_file_logging`` applies
+    # ``DATA_HUB_WATCHER_LOG_LEVEL`` when it is in the process environment.
+    # The registered env file is loaded further down this function, and
+    # ``apply_log_level_from_env`` applies a value set there right after
+    # that load. A level of WARNING or ERROR quiets the other modules, but
+    # this module's own logger keeps INFO (``_keep_own_lines_at_info``,
+    # called after each of the two applications), so the lifecycle lines
+    # stay.
     #
     # The Event Log takes this module's own INFO lines (``logger.name``
     # is ``__main__`` when the SCM runs the file, so it isn't hard-coded)
@@ -644,6 +687,7 @@ def _run_service_loop(
     logging.getLogger().setLevel(logging.INFO)
     log_path = setup_file_logging()
     attach_servicemanager_handler(sm, info_from=logger.name)
+    _keep_own_lines_at_info()
     logger.info("%s starting (pid=%s, log=%s)", SERVICE_DISPLAY_NAME, os.getpid(), log_path)
 
     # Read registry paths BEFORE the upgrade-worker self-repair so
@@ -674,9 +718,36 @@ def _run_service_loop(
     # silently miss the shared half.
     base_env = env_file_path()
     if base_env != env_path and base_env.exists():
-        load_dotenv(base_env)
-    load_dotenv(env_path, override=True)
-    cfg = load_config(path)
+        _load_env_file(base_env, override=False)
+    _load_env_file(env_path, override=True)
+    apply_log_level_from_env()
+    _keep_own_lines_at_info()
+    try:
+        cfg = load_config(path)
+    except Exception as exc:
+        # Every way the config can fail to load ends the service like the other start-up
+        # refusals: one error line in watcher.log and the Event Log, not only the traceback
+        # that pywin32 reports when an exception escapes ``SvcRun``. ``load_config`` turns a
+        # missing, unreadable, undecodable, malformed or invalid file into a ClickException.
+        # An OSError is what it doesn't convert, such as ``Path.exists()`` failing (an
+        # unreachable network share, say). Any other exception is a bug in the load, so it
+        # is logged with its traceback.
+        expected = isinstance(exc, (click.ClickException, OSError))
+        if isinstance(exc, click.ClickException):
+            detail = exc.format_message()
+        elif isinstance(exc, OSError):
+            detail = str(exc)
+        else:
+            detail = f"Unexpected {type(exc).__name__}: {exc}"
+        logger.error(
+            "Cannot load config %s. Check it with "
+            "'data-hub-watcher --config \"%s\" config validate'.\n%s",
+            path,
+            path,
+            detail,
+            exc_info=not expected,
+        )
+        raise SystemExit(1) from exc
     inst = cfg.instrument
 
     base_url = cfg.api_base_url
