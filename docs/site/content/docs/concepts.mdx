@@ -56,11 +56,11 @@ Instrument pages and the instruments table sum this up per instrument: **Online*
 
 ### Heartbeat [#heartbeat]
 
-A status ping the watcher sends to the API every 60 seconds. It carries the watcher version, instrument ID, watch directory, upload mode, activity counters, and uptime, and it drives the **Last Heartbeat** column and the online health shown on the dashboard. The same tick runs the auto-updater. The upload queue is checked separately, also once a minute, so a slow upload can’t delay a heartbeat.
+A status ping the watcher sends to the API every 60 seconds. It carries the watcher version, instrument ID, watch directory, upload mode, activity counters, and uptime, and it drives the **Last Heartbeat** column and the online health shown on the dashboard. The same tick runs the auto-updater. The upload queue is checked separately, also once a minute, so a slow upload can’t delay a heartbeat. With watcher 1.4.3 and later, the counts of a heartbeat that fails to send go out with the next one, so an outage doesn’t lose them. Older watchers lose them.
 
 ### Events [#events]
 
-A per-watcher log of lifecycle moments and errors: `watcher_started`, `run_reported`, `file_uploaded`, `update_succeeded`, and `error` (with a `details.kind` discriminator), among others. Events are batched and flushed on each heartbeat and are visible on the dashboard, which makes them the primary tool for diagnosing a watcher remotely. Data Hub writes some events itself, such as `upload_requests_cancelled`, which it records when someone deletes a run that has requested uploads. See [Troubleshoot a watcher](/docs/troubleshoot-a-watcher).
+A per-watcher log of lifecycle moments and errors: `watcher_started`, `run_reported`, `file_uploaded`, `update_succeeded`, and `error` (with a `details.kind` discriminator), among others. Events are batched and flushed on each heartbeat and are visible on the dashboard, which makes them the primary tool for diagnosing a watcher remotely. With watcher 1.4.3 and later, the watcher keeps the events it hasn’t sent in its state file on the PC. An event that was queued when the watcher was killed, or that Data Hub couldn’t take at the time, is sent after the next start and keeps its original time. Older watchers lose those events. Data Hub writes some events itself, such as `upload_requests_cancelled`, which it records when someone deletes a run that has requested uploads. See [Troubleshoot a watcher](/docs/troubleshoot-a-watcher).
 
 ### Environment [#environment]
 
