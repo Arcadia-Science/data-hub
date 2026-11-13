@@ -1,7 +1,8 @@
+import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { taggedFilename } from "@/lib/api/run-file-identity";
 import { WATCHER_VERSION_HEADER } from "@/lib/api/watcher-compat";
-import { instruments } from "@/lib/db/schema";
+import { files as filesTable, instruments } from "@/lib/db/schema";
 import {
   api,
   closeTestDb,
@@ -635,6 +636,62 @@ describe("same-named files from different folders", () => {
       expect(rows.filter((row) => row.deleted_at === null)).toHaveLength(1);
       expect(rows).toHaveLength(2);
     });
+
+    it("does not dismiss a file that reaches S3 while the dismiss is waiting", async () => {
+      const runId = "dismissed-path-dismiss-race";
+      await createRunWith(runId, reported(1));
+      const [row] = await runFiles(runId);
+      const db = getTestDb();
+
+      // Hold the row so the dismiss, which has already read it as `detected`,
+      // waits at its update. Meanwhile the processor adopts the file.
+      let dismissal: Promise<Response> | undefined;
+      await db.transaction(async (tx) => {
+        await tx
+          .select({ id: filesTable.id })
+          .from(filesTable)
+          .where(eq(filesTable.id, row.id))
+          .for("update");
+        dismissal = api(`/api/v1/files/${row.id}`, { method: "DELETE", token });
+        await waitForBlockedUpdate();
+        await tx
+          .update(filesTable)
+          .set({
+            status: "uploaded",
+            s3Bucket: "test-bucket",
+            s3Key: `${instrumentId}/${runId}/sample.tif`,
+            uploadedAt: new Date(),
+          })
+          .where(eq(filesTable.id, row.id));
+      });
+
+      expect((await dismissal)?.status).toBe(409);
+      const [after] = await db
+        .select({
+          deletedAt: filesTable.deletedAt,
+          status: filesTable.status,
+        })
+        .from(filesTable)
+        .where(eq(filesTable.id, row.id));
+      expect(after).toEqual({ deletedAt: null, status: "uploaded" });
+    });
+
+    // True once a statement that updates `files` waits for a row lock.
+    async function waitForBlockedUpdate() {
+      for (let attempt = 0; attempt < 100; attempt++) {
+        const waiting = await getTestDb().execute(
+          sql`select 1 from pg_stat_activity
+              where datname = current_database()
+                and wait_event_type = 'Lock'
+                and query ilike 'update "files"%'`
+        );
+        if (waiting.rows.length > 0) {
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      throw new Error("The dismiss never waited for the row lock");
+    }
   });
 
   async function filenames(runId: string): Promise<string[]> {
