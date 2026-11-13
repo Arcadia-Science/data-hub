@@ -140,8 +140,9 @@ TRANSITIONS: tuple[Transition, ...] = (
     covered(
         MACHINE,
         "run.restored->updates_accepted",
-        "After an admin restores a deleted run, the next file of that run is reported "
-        "again, with the update the earlier refusal left behind.",
+        "After an admin restores a deleted run, the watcher still leaves it alone, because "
+        "it remembers that the server refused it as deleted. Once the watcher restarts, it "
+        "reports the files the refusal left behind, and the next file of the run.",
     ),
     xfail_bug(
         MACHINE,
@@ -150,6 +151,14 @@ TRANSITIONS: tuple[Transition, ...] = (
         "its state database, for example after `state forget`) is refused with a 409, as "
         "updating it is, and attaches no files to it.",
         "ENG-2114",
+    ),
+    covered(
+        MACHINE,
+        "run.deleted->refusal_reported_once_per_start",
+        "A watcher that has forgotten a run an admin deleted, and whose folder holds several "
+        "files of that run, sends one refused report and records one `run_report_failed` event "
+        "(with `reason: run_deleted`) for the run in each start, and no update for its other "
+        "files. After the admin restores the run, the next start sends every file.",
     ),
     xfail_bug(
         MACHINE,
