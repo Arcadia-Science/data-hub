@@ -227,8 +227,11 @@ class FileMonitor:
         # being rolled back, and joining an unstarted thread raises.
         if self._observer.is_alive():
             self._observer.join(timeout=observer_timeout)
-        stopped = self.join(timeout)
-        logger.info("FileMonitor stopped")
+        stopped = self._wait_for_checker(timeout)
+        if stopped:
+            logger.info("FileMonitor stopped")
+        else:
+            logger.info("FileMonitor stopping: its stability checker is still running")
         return stopped
 
     def join(self, timeout: float) -> bool:
@@ -236,6 +239,12 @@ class FileMonitor:
 
         Returns whether it has exited.
         """
+        stopped = self._wait_for_checker(timeout)
+        if stopped:
+            logger.info("FileMonitor stopped")
+        return stopped
+
+    def _wait_for_checker(self, timeout: float) -> bool:
         if self._checker_thread and self._checker_thread.is_alive():
             self._checker_thread.join(timeout=timeout)
         return self._checker_thread is None or not self._checker_thread.is_alive()

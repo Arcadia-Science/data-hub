@@ -26,12 +26,14 @@ import requests
 import yaml
 
 from data_hub_watcher import runtime
-from data_hub_watcher.api_client import ApiError, DataHubClient
+from data_hub_watcher.api_client import DEFAULT_TIMEOUT, ApiError, DataHubClient
 from data_hub_watcher.config_io import save_config
 from data_hub_watcher.constants import (
     DEFAULT_CHECK_INTERVAL_TICKS,
     DEFAULT_IDLE_TICKS_REQUIRED,
     HEARTBEAT_INTERVAL_SECONDS,
+    STOP_BUDGET_SECONDS,
+    SYSTEM_SHUTDOWN_HTTP_TIMEOUT,
     UPGRADE_HANDOFF_TIMEOUT_SECONDS,
 )
 from data_hub_watcher.events import EventType
@@ -1310,15 +1312,44 @@ class TestStopMarksASystemShutdown:
         assert [e["message"] for e in stopped] == ["Service stopped: Windows is shutting down"]
 
     @pytest.mark.parametrize("waiting", [False, True], ids=["running", "waiting"])
-    def test_any_other_stop_keeps_the_clients_timeout(self, env: _Env, waiting: bool) -> None:
+    def test_any_other_stop_sends_the_last_requests_with_what_the_stop_can_spare(
+        self, env: _Env, waiting: bool
+    ) -> None:
+        # Every stop is limited to 25 s, so the last two requests get the client's usual
+        # timeout cut down to fit, which is longer than at a shutdown.
         sup = env.supervisor(env.write_config(_cfg(env.tmp_path / "later")) if waiting else None)
         sup.start()
         assert (sup.waiting_reason is not None) is waiting
 
         sup.stop(stopped_message="Service stopped")
 
-        assert env.client.send_heartbeat.call_args.kwargs["timeout"] is None
-        assert env.client.send_events.call_args.kwargs["timeout"] is None
+        for send in (env.client.send_heartbeat, env.client.send_events):
+            connect, read = send.call_args.kwargs["timeout"]
+            assert SYSTEM_SHUTDOWN_HTTP_TIMEOUT[0] < connect <= DEFAULT_TIMEOUT[0]
+            # Long enough for a server that takes 6 s to answer.
+            assert max(SYSTEM_SHUTDOWN_HTTP_TIMEOUT[1], 6) < read <= DEFAULT_TIMEOUT[1]
+            assert connect + read <= STOP_BUDGET_SECONDS
+
+    @pytest.mark.parametrize("system_shutdown", [False, True], ids=["stop", "shutdown"])
+    @pytest.mark.parametrize("waiting", [False, True], ids=["running", "waiting"])
+    def test_the_stop_event_reaches_the_server_before_the_final_heartbeat(
+        self, env: _Env, waiting: bool, system_shutdown: bool
+    ) -> None:
+        sup = env.supervisor(env.write_config(_cfg(env.tmp_path / "later")) if waiting else None)
+        sup.start()
+        assert (sup.waiting_reason is not None) is waiting
+        sent: list[str] = []
+        env.client.send_heartbeat.side_effect = lambda _id, payload, **_kw: sent.append(
+            f"heartbeat {payload['status']}"
+        )
+        env.client.send_events.side_effect = lambda _id, events, **_kw: sent.extend(
+            f"event {e['event_type']}" for e in events
+        )
+
+        sup.stop(stopped_message="Service stopped", system_shutdown=system_shutdown)
+
+        assert sent.index("event watcher_stopped") < sent.index("heartbeat stopped")
+        assert sent[-1] == "heartbeat stopped"
 
 
 class TestStopMarksAnUpdate:
@@ -1606,6 +1637,46 @@ class TestHandOffToTheWorker:
         assert self._final_status_reason(env) == "auto_update"
         assert EventType.UPDATE_FAILED.value not in self._flushed_event_types(env)
         # What the worker reads, and the next process's marker, are still there.
+        assert upgrade_request_path(env.tmp_path).exists()
+        assert upgrade_marker_path(env.tmp_path).exists()
+        env.client.get_update_info.assert_not_called()
+        assert triggers == [None]
+
+    def test_a_tick_that_runs_while_the_uploads_finish_does_not_end_the_hand_off(
+        self, env: _Env, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from data_hub_watcher.updater import upgrade_marker_path
+        from data_hub_watcher.upgrade_worker import upgrade_request_path
+
+        sup, triggers, now = self._hand_off(env, monkeypatch)
+        assert sup.rt is not None
+        updater = self._updater(sup)
+        heartbeat = sup.rt.heartbeat
+        now[0] += UPGRADE_HANDOFF_TIMEOUT_SECONDS + 1
+        env.client.get_update_info.reset_mock()
+        on_tick_results: list[Any] = []
+        real_on_tick = updater.on_tick
+        real_request_stop = sup.rt.uploader.request_stop
+
+        def recording_on_tick() -> Any:
+            on_tick_results.append(real_on_tick())
+            return on_tick_results[-1]
+
+        def request_stop_then_tick() -> None:
+            # The heartbeat loop goes on ticking until the uploads have stopped, which can
+            # take most of the stop's budget. A tick in that time reaches the updater after
+            # the stop has chosen its reason, and while the window by the clock is over.
+            real_request_stop()
+            heartbeat._tick()
+
+        monkeypatch.setattr(updater, "on_tick", recording_on_tick)
+        monkeypatch.setattr(sup.rt.uploader, "request_stop", request_stop_then_tick)
+
+        sup.stop(stopped_message="Service stopped")
+
+        assert on_tick_results == [None]
+        assert self._final_status_reason(env) == "auto_update"
+        assert EventType.UPDATE_FAILED.value not in self._flushed_event_types(env)
         assert upgrade_request_path(env.tmp_path).exists()
         assert upgrade_marker_path(env.tmp_path).exists()
         env.client.get_update_info.assert_not_called()

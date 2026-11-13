@@ -1109,10 +1109,11 @@ def test_an_upgrade_is_dispatched_to_the_worker_once(
     start_watching(pc, server)
 
     # An upload that is still under way when the worker's `Stop-Service` arrives. The stop waits
-    # up to 5 seconds for it (`FileMonitor.stop`), and the heartbeat, with its update check every
-    # second, keeps going until the stop gets past that wait. So checks come after the dispatch
-    # however fast the worker is (on a runner it stops the service about a second after it is
-    # triggered). The precondition below checks that this window opened.
+    # for it until about 15 seconds in (`STOP_BUDGET_SECONDS` less `STOP_RESERVE_SECONDS`) and
+    # then cuts it off, and the heartbeat, with its update check every second, keeps going until
+    # the stop gets past that wait. So checks come after the dispatch however fast the worker is
+    # (on a runner it stops the service about a second after it is triggered). The precondition
+    # below checks that this window opened.
     proxy.add_fault("delay", path=r"/api/local-s3/", method="PUT", delay_seconds=20, count=1)
     write_run(watch_dir, "RUN001", {"held.csv": SMALL})
     proxy.wait_for_request(
