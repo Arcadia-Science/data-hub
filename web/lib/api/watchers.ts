@@ -128,11 +128,14 @@ export async function enforceWatcherBinding(
  * Called when a watcher's `watch_directory` changes: every queued file's
  * `relative_path` was anchored to the old root, so none resolve under the
  * new one and the watcher would otherwise re-error on each heartbeat poll.
+ * It is also called when a run is deleted, with `runUuid` set to that run's
+ * internal ID so that only the run's own requests are reverted.
  * Returns the reverted file ids (for event reporting).
  */
 export async function revertPendingUploadRequests(
   instrumentId: string,
-  executor: DbExecutor = db
+  executor: DbExecutor = db,
+  runUuid?: string
 ): Promise<number[]> {
   const reverted = await executor
     .update(files)
@@ -146,6 +149,7 @@ export async function revertPendingUploadRequests(
             .from(instrumentRuns)
             .where(eq(instrumentRuns.instrumentId, instrumentId))
         ),
+        runUuid === undefined ? undefined : eq(files.instrumentRunId, runUuid),
         eq(files.status, "upload_requested"),
         isNull(files.uploadedAt),
         isNull(files.deletedAt)
@@ -157,6 +161,60 @@ export async function revertPendingUploadRequests(
     executor
   );
   return reverted.map((row) => row.id);
+}
+
+/**
+ * Cancels a run's requested uploads because the run was deleted. The files go
+ * back to `detected` so they leave the upload queue, and the instrument's
+ * active watcher gets an `upload_requests_cancelled` event. A deleted run
+ * refuses uploads, so without this the watcher would keep retrying files that
+ * the server turns away. Records no event when nothing was queued or when the
+ * instrument has no active watcher. Returns the number of files reverted.
+ *
+ * Call it in the same transaction as the delete.
+ */
+export async function cancelRunUploadRequests(
+  run: { id: string; instrumentId: string; runId: string },
+  executor: DbExecutor = db
+): Promise<number> {
+  const revertedIds = await revertPendingUploadRequests(
+    run.instrumentId,
+    executor,
+    run.id
+  );
+  if (revertedIds.length === 0) {
+    return 0;
+  }
+
+  const [watcher] = await executor
+    .select({ id: watchers.id })
+    .from(watchers)
+    .where(
+      and(
+        eq(watchers.instrumentId, run.instrumentId),
+        isNull(watchers.deletedAt)
+      )
+    )
+    .limit(1);
+  if (!watcher) {
+    return revertedIds.length;
+  }
+
+  const count = revertedIds.length;
+  await executor.insert(watcherEvents).values({
+    watcherId: watcher.id,
+    eventType: "upload_requests_cancelled",
+    message: `Cancelled ${count} requested ${count === 1 ? "upload" : "uploads"} because run ${run.runId} was deleted`,
+    details: {
+      kind: "upload_requests_cancelled",
+      reason: "run_deleted",
+      run_id: run.runId,
+      cancelled_count: count,
+    },
+    timestamp: new Date(),
+  });
+
+  return count;
 }
 
 // The `status_reason` on the `stopped` heartbeat of a watcher that stopped

@@ -62,6 +62,9 @@ export const watcherEventTypeEnum = pgEnum("watcher_event_type", [
   "update_started",
   "update_succeeded",
   "update_failed",
+  // The server cancelled requested uploads because their run was deleted.
+  // Only the server writes this type, the watcher never sends it.
+  "upload_requests_cancelled",
 ]);
 
 export const uploadModeEnum = pgEnum("upload_mode", ["auto", "manual"]);

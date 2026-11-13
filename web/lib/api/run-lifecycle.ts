@@ -6,6 +6,7 @@ import {
   actorUser,
 } from "@/lib/api/actor";
 import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
+import { cancelRunUploadRequests } from "@/lib/api/watchers";
 import { db } from "@/lib/db";
 import { instrumentRuns } from "@/lib/db/schema";
 
@@ -68,10 +69,19 @@ export async function softDeleteRun(input: {
 
   const now = new Date();
   const { userId, tokenId } = actorColumns(input.actor);
-  await db
-    .update(instrumentRuns)
-    .set({ deletedAt: now, deletedBy: userId, deletedByToken: tokenId })
-    .where(eq(instrumentRuns.id, run.id));
+  // A deleted run refuses uploads, so cancel the ones already requested in the
+  // same transaction. Otherwise they would stay in the watcher's queue. A
+  // restore does not bring them back: someone has to request them again.
+  await db.transaction(async (tx) => {
+    await tx
+      .update(instrumentRuns)
+      .set({ deletedAt: now, deletedBy: userId, deletedByToken: tokenId })
+      .where(eq(instrumentRuns.id, run.id));
+    await cancelRunUploadRequests(
+      { id: run.id, instrumentId: run.instrumentId, runId: run.runId },
+      tx
+    );
+  });
 
   return {
     ok: true,
