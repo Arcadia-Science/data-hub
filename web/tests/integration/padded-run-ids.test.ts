@@ -338,6 +338,8 @@ describe("Run IDs with spaces at the start or end", () => {
     ["POST", "/request-upload-url"],
     ["POST", "/request-upload-all"],
     ["POST", "/comments"],
+    ["GET", "/notebook-links"],
+    ["POST", "/notebook-links"],
   ])("%s %s returns 404 for an ID that is only spaces", async (method, suffix) => {
     const res = await api(runPath("   ", suffix), {
       method,

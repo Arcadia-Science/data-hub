@@ -38,6 +38,7 @@ import {
   getPreferences,
   listInstrumentSubscriptions,
 } from "@/lib/api/notifications";
+import { parseHasNotebookLinkParam } from "@/lib/api/validators";
 import { getWatcherConfigState } from "@/lib/api/watcher-config/revisions";
 import { getWatcherById } from "@/lib/api/watchers";
 import { auth } from "@/lib/auth";
@@ -316,6 +317,7 @@ async function InstrumentRunsSection({
       auntyTemperature: filters.aunty_temperature ?? undefined,
       auntyRampRate: filters.aunty_ramp_rate ?? undefined,
       ranBy: filters.ran_by ?? undefined,
+      hasNotebookLink: parseHasNotebookLinkParam(filters.has_notebook_link),
       statuses: filters.status.length > 0 ? filters.status : undefined,
       sort: filters.sort,
       order: filters.order,

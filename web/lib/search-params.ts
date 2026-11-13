@@ -9,6 +9,9 @@ import {
 import { FILES_LIFECYCLE_FILTER_VALUES } from "@/lib/runs/file-lifecycle-filter";
 import { RUN_STATUS_VALUES, type RunStatus } from "@/lib/runs/run-status";
 
+// "Lab Notebook" column filter: runs with at least one notebook link, or none.
+export const HAS_NOTEBOOK_LINK_VALUES = ["true", "false"] as const;
+
 // Shared by the dashboard, a member's runs page, and every instrument page.
 // Defaults stay out of the URL so an unsorted link matches the table's
 // built-in order: acquisition time, newest first.
@@ -44,6 +47,7 @@ export const dashboardSearchParams = {
   // Attribution filter: either a userId or the reserved sentinel
   // "unattributed". Mirrors `instrumentDetailSearchParams.ran_by`.
   ran_by: parseAsString,
+  has_notebook_link: parseAsStringLiteral(HAS_NOTEBOOK_LINK_VALUES),
   page: parseAsInteger.withDefault(1),
   per_page: parseAsInteger.withDefault(10),
   ...runSortSearchParams,
@@ -91,6 +95,7 @@ export const instrumentDetailSearchParams = {
   aunty_ramp_rate: parseAsString,
   // Attribution filter: either a userId or the reserved sentinel "unattributed".
   ran_by: parseAsString,
+  has_notebook_link: parseAsStringLiteral(HAS_NOTEBOOK_LINK_VALUES),
   // Derived run status, multi-select. Empty array = no filter (show all).
   status: parseAsArrayOf(parseAsStringLiteral(RUN_STATUS_VALUES))
     .withDefault([])
@@ -176,6 +181,7 @@ export function hasActiveFilters(params: {
   include_deleted: boolean;
   status: RunStatus[];
   ran_by: string | null;
+  has_notebook_link: string | null;
 }): boolean {
   return (
     params.search !== "" ||
@@ -184,7 +190,8 @@ export function hasActiveFilters(params: {
     params.date_to !== null ||
     params.include_deleted ||
     params.status.length > 0 ||
-    params.ran_by !== null
+    params.ran_by !== null ||
+    params.has_notebook_link !== null
   );
 }
 
@@ -212,6 +219,7 @@ export const INSTRUMENT_NULLABLE_FILTER_KEYS = [
   "aunty_temperature",
   "aunty_ramp_rate",
   "ran_by",
+  "has_notebook_link",
 ] as const;
 
 type InstrumentFilterParams = {

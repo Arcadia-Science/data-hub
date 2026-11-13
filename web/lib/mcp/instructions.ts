@@ -21,7 +21,7 @@ Writes need the write scope and otherwise fail with "Token is missing required
 scope: write"; ask the user to re-authorize instead of retrying. Confirm before
 deleting, dismissing, unclaiming, reprocessing, cancelling queued files, or
 changing a watcher's config.
-Claims and comments always act as the signed-in user.
+Claims, comments, and notebook links always act as the signed-in user.
 
 Dates: dateFrom/dateTo are inclusive UTC days, matched on a run's acquired
 time, or its created time when that is missing. The dashboard uses the
@@ -31,7 +31,8 @@ Stalled runs recover with reprocess_run. Pending runs need
 request_run_upload_all and an online watcher.
 
 Tool routing:
-- global_search for filenames, instrument names, users, or comments.
+- global_search for filenames, instrument names, users, comments, or a
+  pasted notebook URL.
 - search_runs for date, status, or metadata filters; ranBy="me" for my runs.
 - Metadata filter values: get_instrument_filter_options.
 - get_run_report for results; get_run is metadata only.

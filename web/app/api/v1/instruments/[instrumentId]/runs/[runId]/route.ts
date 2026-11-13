@@ -6,8 +6,8 @@ import { authorize, authorizeToken } from "@/lib/api/auth";
 import {
   apiError,
   apiErrorFromResult,
-  CONFLICT,
   NOT_FOUND,
+  runDeletedError,
 } from "@/lib/api/errors";
 import {
   foldEarlierAcquiredAt,
@@ -18,6 +18,8 @@ import { patchRunBody, readJsonBody } from "@/lib/api/openapi";
 import { recordDetectedFiles } from "@/lib/api/run-file-identity";
 import { readRunIdParam } from "@/lib/api/run-id-param";
 import { softDeleteRun } from "@/lib/api/run-lifecycle";
+import { notebookLinkToWire } from "@/lib/api/run-notebook-link-wire";
+import { listNotebookLinksForRun } from "@/lib/api/run-notebook-links";
 import { watcherClientFrom } from "@/lib/api/watcher-compat";
 import { db } from "@/lib/db";
 import { files, instrumentRuns } from "@/lib/db/schema";
@@ -52,11 +54,14 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
     );
   }
 
-  const fileRows = await db
-    .select()
-    .from(files)
-    .where(eq(files.instrumentRunId, run.id))
-    .orderBy(files.createdAt);
+  const [fileRows, notebookLinks] = await Promise.all([
+    db
+      .select()
+      .from(files)
+      .where(eq(files.instrumentRunId, run.id))
+      .orderBy(files.createdAt),
+    listNotebookLinksForRun(run.id),
+  ]);
 
   // Generate short-lived pre-signed URLs only for files that have been
   // uploaded to S3 (s3Key is non-null). Detected/queued files get null.
@@ -102,6 +107,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
     deleted_by_token: actorToken(run.deletedBy),
     metadata: run.metadata,
     attributions: run.attributions,
+    notebook_links: notebookLinks.map(notebookLinkToWire),
     files: filesWithUrls,
   });
 }
@@ -137,7 +143,9 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
   }
 
   if (run.deletedAt) {
-    return apiError(409, CONFLICT, "Cannot update a soft-deleted run");
+    return runDeletedError(
+      "This run was deleted on Data Hub. Restore it to make changes."
+    );
   }
 
   const body = await readJsonBody(request, patchRunBody);

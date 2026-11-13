@@ -5,14 +5,23 @@ import {
   errorResponses,
   instrumentIdParam,
   jsonResponse,
+  notebookLinkIdParam,
   registry,
   runIdParam,
 } from "../registry";
 import {
+  bulkAddNotebookLinkBody,
+  bulkAddNotebookLinkResult,
+  bulkRemoveNotebookLinksBody,
+  bulkRemoveNotebookLinksResult,
   commentBody,
   commentDeleted,
   commentsListResponse,
+  createNotebookLinkBody,
   createRunBody,
+  notebookLink,
+  notebookLinkDeleted,
+  notebookLinksListResponse,
   patchRunBody,
   reportItemsQuery,
   reportItemsResponse,
@@ -28,6 +37,7 @@ import {
   runReprocessed,
   runRestored,
   runUpdated,
+  updateNotebookLinkBody,
   uploadAllQueued,
   uploadQueued,
   uploadUrlResponse,
@@ -39,6 +49,7 @@ const runParams = z.object({
   runId: runIdParam,
 });
 const commentParams = runParams.extend({ commentId: commentIdParam });
+const notebookLinkParams = runParams.extend({ linkId: notebookLinkIdParam });
 const tag = ["Runs"];
 const scoped = (scope: string) => `Requires scope \`${scope}\`.`;
 const scopedPat = (scope: string) =>
@@ -81,7 +92,7 @@ registry.registerPath({
   path: "/instruments/{instrumentId}/runs",
   operationId: "createInstrumentRun",
   summary: "Create an instrument run",
-  description: scopedPat("runs:create"),
+  description: `${scopedPat("runs:create")} Returns 200 with the existing run when it already exists. Returns 409 (\`details.reason: run_deleted\`) when the run exists and was deleted and the body has \`source: "watcher"\`, an \`acquired_at\`, or a non-empty \`detected_files\`. The request then attaches no files and changes nothing. A body with only \`run_id\` and \`source: "lambda"\` still gets 200.`,
   tags: tag,
   security: bearerSecurity,
   request: {
@@ -110,7 +121,7 @@ registry.registerPath({
   path: "/instruments/{instrumentId}/runs/{runId}",
   operationId: "updateInstrumentRun",
   summary: "Update a run",
-  description: scopedPat("runs:update"),
+  description: `${scopedPat("runs:update")} Returns 409 (\`details.reason: run_deleted\`) when the run was deleted. Restore it first.`,
   tags: tag,
   security: bearerSecurity,
   request: { params: runParams, body: body(patchRunBody) },
@@ -209,7 +220,7 @@ registry.registerPath({
   path: "/instruments/{instrumentId}/runs/{runId}/request-upload-url",
   operationId: "requestRunUploadUrl",
   summary: "Request a presigned upload URL",
-  description: `${scopedPat("runs:upload")} Watchers at 1.1.0 or newer send \`relative_path\` and \`X-Data-Hub-Watcher-Version\`. A file whose name is already used by a different folder is stored as \`<stem>~<folder hash>.<ext>\`, and the returned \`s3_key\` uses that stored name. Older watchers are looked up by filename only. Watchers at 1.2.0 or newer receive a multipart upload for files of 100 MB or more. Older watchers are refused when the file is over 5 GB.`,
+  description: `${scopedPat("runs:upload")} Watchers at 1.1.0 or newer send \`relative_path\` and \`X-Data-Hub-Watcher-Version\`. A file whose name is already used by a different folder is stored as \`<stem>~<folder hash>.<ext>\`, and the returned \`s3_key\` uses that stored name. Older watchers are looked up by filename only. Watchers at 1.2.0 or newer receive a multipart upload for files of 100 MB or more. Older watchers are refused when the file is over 5 GB. Returns 409 (\`details.reason: run_deleted\`) when the run was deleted.`,
   tags: tag,
   security: bearerSecurity,
   request: { params: runParams, body: body(requestUploadUrlBody) },
@@ -261,4 +272,74 @@ registry.registerPath({
   security: bearerSecurity,
   request: { params: commentParams },
   responses: ok("Deleted comment.", commentDeleted),
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/instruments/{instrumentId}/runs/{runId}/notebook-links",
+  operationId: "listRunNotebookLinks",
+  summary: "List a run's lab notebook links",
+  description: `${scoped("runs:read")} Oldest first.`,
+  tags: tag,
+  security: bearerSecurity,
+  request: { params: runParams },
+  responses: ok("Notebook links.", notebookLinksListResponse),
+});
+registry.registerPath({
+  method: "post",
+  path: "/instruments/{instrumentId}/runs/{runId}/notebook-links",
+  operationId: "createRunNotebookLink",
+  summary: "Add a lab notebook link to a run",
+  description: `${scoped("runs:link")} Returns 409 when the run is deleted, already links to the same page (\`details.link_id\` names that link), or has the most links allowed.`,
+  tags: tag,
+  security: bearerSecurity,
+  request: { params: runParams, body: body(createNotebookLinkBody) },
+  responses: {
+    201: jsonResponse("Created notebook link.", notebookLink),
+    ...errorResponses(),
+  },
+});
+registry.registerPath({
+  method: "patch",
+  path: "/instruments/{instrumentId}/runs/{runId}/notebook-links/{linkId}",
+  operationId: "updateRunNotebookLink",
+  summary: "Edit a lab notebook link",
+  description: `${scoped("runs:link")} Anyone with the scope can edit any link.`,
+  tags: tag,
+  security: bearerSecurity,
+  request: { params: notebookLinkParams, body: body(updateNotebookLinkBody) },
+  responses: ok("Updated notebook link.", notebookLink),
+});
+registry.registerPath({
+  method: "delete",
+  path: "/instruments/{instrumentId}/runs/{runId}/notebook-links/{linkId}",
+  operationId: "deleteRunNotebookLink",
+  summary: "Remove a lab notebook link",
+  description: `${scoped("runs:link")} The link is deleted for good. Removing it again returns 404.`,
+  tags: tag,
+  security: bearerSecurity,
+  request: { params: notebookLinkParams },
+  responses: ok("Removed notebook link.", notebookLinkDeleted),
+});
+registry.registerPath({
+  method: "post",
+  path: "/instrument-runs/notebook-links",
+  operationId: "bulkAddRunNotebookLink",
+  summary: "Add a lab notebook link to many runs",
+  description: `${scoped("runs:link")} Reports an outcome for each run instead of failing the whole request.`,
+  tags: tag,
+  security: bearerSecurity,
+  request: { body: body(bulkAddNotebookLinkBody) },
+  responses: ok("Outcome for each run.", bulkAddNotebookLinkResult),
+});
+registry.registerPath({
+  method: "post",
+  path: "/instrument-runs/notebook-links/remove",
+  operationId: "bulkRemoveRunNotebookLinks",
+  summary: "Remove lab notebook links from many runs",
+  description: `${scoped("runs:link")} Reports an outcome for each run instead of failing the whole request.`,
+  tags: tag,
+  security: bearerSecurity,
+  request: { body: body(bulkRemoveNotebookLinksBody) },
+  responses: ok("Outcome for each run.", bulkRemoveNotebookLinksResult),
 });

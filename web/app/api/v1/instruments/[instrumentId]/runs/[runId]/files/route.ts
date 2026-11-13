@@ -122,9 +122,10 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
 
   // No matching row yet — insert one. Set relativePath = filename so that
   // future watcher reports also dedup against this row via the existing
-  // (instrument_run_id, relative_path) partial unique index. The
-  // onConflictDoNothing() guards against concurrent retries that race past
-  // the lookup above.
+  // (instrument_run_id, relative_path) partial unique index, which covers
+  // active rows only, so a dismissed row at that path doesn't block this
+  // insert. The onConflictDoNothing() guards against concurrent retries that
+  // race past the lookup above.
   const [inserted] = await db
     .insert(files)
     .values({
