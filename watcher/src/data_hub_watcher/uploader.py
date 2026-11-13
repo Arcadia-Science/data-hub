@@ -1012,8 +1012,9 @@ class Uploader:
         if self._stop_requested() or pending.run_id in self._deleted_runs:
             # Neither is a failed attempt: an interrupted upload, or a run Data Hub refuses
             # because it was deleted. The row stays, so once the run is restored the next
-            # start uploads the file, and a run that stays deleted costs one request per
-            # start, with no event for each of its files.
+            # start uploads the file. A run that stays deleted costs one or a few requests per
+            # start (up to `upload_parallelism` from the rows before the first refusal fills
+            # the set, and one from the detector), with no event for each of its files.
             return
         attempts = self._state_db.bump_pending_upload_attempts(pending.relative_path)
         if attempts < MAX_PENDING_UPLOAD_ATTEMPTS:
