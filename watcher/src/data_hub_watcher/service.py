@@ -827,12 +827,16 @@ def _run_service_loop(
     # restart-loop and a fix from the web app can still reach this PC.
     supervisor.start()
 
-    if supervisor.waiting_reason is not None:
+    if stop_event.is_set():
+        # Said in place of "is running" and "is waiting", which a stop during the start makes
+        # untrue, as the CLI leaves out its status lines. The end-to-end drivers wait for
+        # either of those as the ready signal, or for the service to have stopped, which a
+        # service that was asked to stop does.
+        logger.info("%s was asked to stop while it was starting", SERVICE_DISPLAY_NAME)
+    elif supervisor.waiting_reason is not None:
         logger.warning("%s is waiting: %s", SERVICE_DISPLAY_NAME, supervisor.waiting_reason)
     else:
         logger.info("%s is running", SERVICE_DISPLAY_NAME)
-    if stop_event.is_set():
-        logger.info("%s was asked to stop while it was starting", SERVICE_DISPLAY_NAME)
 
     # Poll until the SCM's stop_event is set (operator-initiated stop, or OS
     # shutdown) or the runtime asks to shut down (the in-process updater
