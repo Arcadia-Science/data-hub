@@ -16,7 +16,7 @@ the file is left for the next start.
 
 from __future__ import annotations
 
-from e2e_support.catalog.model import Transition, covered, excluded, xfail_bug
+from e2e_support.catalog.model import CLI, Transition, covered, excluded, xfail_bug
 
 MACHINE = "upload_auto"
 
@@ -165,6 +165,17 @@ TRANSITIONS: tuple[Transition, ...] = (
         "upload.pending->file_missing",
         "A pending upload whose file is gone at start is dropped with a "
         "`pending_upload_missing` event.",
+    ),
+    covered(
+        MACHINE,
+        "upload.unreadable_file->uploaded_after_release",
+        "A file that is on disk but can't be opened (here one with no read permission; on "
+        "Windows, one that an instrument keeps open, which the service suite covers as "
+        "`file.locked->uploaded_after_release`) is reported with its run and then left "
+        "alone: one `upload_failed` event says it will be retried, its `pending_uploads` row "
+        "stays without an attempt counted, and the server is asked for nothing. Once the "
+        "file can be read, the next upload poll uploads it, with no restart.",
+        platforms=CLI,
     ),
     covered(
         MACHINE,

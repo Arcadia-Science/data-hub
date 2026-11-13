@@ -33,6 +33,8 @@ Per test:
 * ``private_install``: what ``watcher(own_install=True)`` uses for a ``uv tool`` install of
   the test's own. A scenario doesn't ask for it: that would tie it to one kind of driver.
 * ``unreadable_folder``: a folder this user can't list, for the one scenario about it.
+* ``unreadable_file``: a function that takes every permission off a file, for the scenarios about
+  a file that is there and can't be read yet.
 
 A test that is only for one kind of driver is marked ``@pytest.mark.platforms("cli")`` (or
 ``"service"``). The ``pytest_runtest_setup`` hook below skips it under the other kind, and the
@@ -439,38 +441,91 @@ def private_install(
     return make
 
 
+def _skip_or_fail(message: str) -> None:
+    """Skip a scenario that this machine can't run, or fail it on CI (where ``$CI`` is set).
+
+    The catalog check reads the test files and never sees a skip like this, so the scenario
+    stays counted as covered whatever a local run does. A quiet skip on CI would make that
+    count false without anybody noticing, so there it fails and says why. It is a helper for
+    fixtures, not a ``pytest.skip`` in a test, because the check refuses those.
+    """
+    if os.environ.get("CI"):
+        pytest.fail(message, pytrace=False)
+    pytest.skip(message)
+
+
 @pytest.fixture
 def unreadable_folder(tmp_path: Path) -> Iterator[Path]:
     """A folder that this user can't list (mode 000), for the one scenario about it.
 
     Root, and a user with a capability such as ``CAP_DAC_OVERRIDE``, can list it anyway, and
-    then the scenario can't run. That is a skip on a developer's machine and a failure on CI
-    (where ``$CI`` is set). The catalog check reads the test files and never sees a skip like
-    this, so the scenario stays counted as covered whatever a local run does. A quiet skip
-    on CI would make that count false without anybody noticing, so there it fails and says
-    why. This is a fixture, not a ``pytest.skip`` in the test, because the check refuses those.
+    then the scenario can't run: a skip on a developer's machine and a failure on CI (see
+    ``_skip_or_fail``).
     """
     folder = tmp_path / "locked"
     folder.mkdir()
     folder.chmod(0o000)
     try:
         if _can_list(folder):
-            message = (
+            _skip_or_fail(
                 "This user can list a folder with no permissions (root, or a capability such "
                 "as CAP_DAC_OVERRIDE), so the scenario about an unreadable watch folder "
                 "can't run. Run the suite as an ordinary user."
             )
-            if os.environ.get("CI"):
-                pytest.fail(message, pytrace=False)
-            pytest.skip(message)
         yield folder
     finally:
         folder.chmod(0o700)
 
 
+@pytest.fixture
+def unreadable_file(tmp_path: Path) -> Iterator[Callable[[Path], None]]:
+    """A function that takes every permission off a file (mode 000), so the watcher can see
+    the file but not open it. ``make_readable`` (in ``e2e_support.files``) undoes it.
+
+    It stands in, on Linux and macOS, for a file that an instrument keeps open with exclusive
+    sharing on Windows: both are a file that is there and can't be read yet. Root, and a user
+    with a capability such as ``CAP_DAC_OVERRIDE``, can read such a file anyway, and then the
+    scenarios about it can't run: a skip on a developer's machine and a failure on CI (see
+    ``_skip_or_fail``). The fixture checks that on a file of its own before the test starts.
+    Every file it was used on gets its permissions back when the test ends.
+    """
+    probe = tmp_path / "unreadable-probe"
+    probe.write_text("x")
+    probe.chmod(0o000)
+    try:
+        if _can_read(probe):
+            _skip_or_fail(
+                "This user can read a file with no permissions (root, or a capability such "
+                "as CAP_DAC_OVERRIDE), so the scenario about a file that can't be read yet "
+                "can't run. Run the suite as an ordinary user."
+            )
+    finally:
+        probe.chmod(0o600)
+    made: list[Path] = []
+
+    def make_unreadable(path: Path) -> None:
+        path.chmod(0o000)
+        made.append(path)
+
+    try:
+        yield make_unreadable
+    finally:
+        for path in made:
+            if path.exists():
+                path.chmod(0o644)
+
+
 def _can_list(folder: Path) -> bool:
     try:
         next(folder.iterdir(), None)
+    except PermissionError:
+        return False
+    return True
+
+
+def _can_read(file: Path) -> bool:
+    try:
+        file.open("rb").close()
     except PermissionError:
         return False
     return True

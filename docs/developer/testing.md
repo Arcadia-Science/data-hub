@@ -405,6 +405,7 @@ shared code is the package `watcher/e2e/e2e_support/`, which pytest finds throug
 | `private_install` | What `watcher(own_install=True)` uses to install the watcher for one PC alone. A watcher that updates itself reinstalls into the folder it runs from, so a test that updates asks the factory for its own install. A test doesn't use this fixture, because that would tie it to one kind of driver |
 | `package_index` | A local package index that serves the wheels in the suite's wheel folder (the current wheel, and the bumped one once a test has asked for `bumped_wheel`). Pass `package_index.url` to `watcher(index_url=...)`. Each test starts with an empty request log and no failure switches |
 | `unreadable_folder` | A folder this user can't list, for the one scenario about an unreadable watch folder. Where the user can list it anyway (root) it skips the test on your machine and fails it on CI, so the scenario can't go untested without anybody noticing |
+| `unreadable_file` | A function that takes every permission off a file, so the watcher can see it but can't open it: `unreadable_file(path)`. It stands in, on Linux and macOS, for a file that an instrument keeps open with exclusive sharing on Windows. `make_readable(path)` from `e2e_support.files` gives the permissions back, and the fixture restores any it still holds when the test ends. Where the user can read such a file anyway (root) it skips the test on your machine and fails it on CI, as `unreadable_folder` does |
 | `instrument_id` | A fresh instrument, the only one in the database. The watcher tables and instruments are emptied before every test |
 | `proxy` | A fresh `FaultProxy` between the watcher and the server, with no faults. The watcher's `api_base_url` points at it, and so do the upload URLs |
 | `server` | A `ServerView` |
@@ -519,7 +520,7 @@ def test_an_interrupt_stops_the_watcher(...): ...
 The catalog check reads the marker, so it knows which transitions each kind covers, and it
 refuses the other ways of skipping a test, which would hide it from the check (see
 [the catalog](#the-transition-catalog)). A skip that depends on the machine is a fixture in
-`conftest.py` (`unreadable_folder`).
+`conftest.py` (`unreadable_folder`, `unreadable_file`).
 
 ### The overrides it sets
 

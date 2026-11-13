@@ -26,6 +26,7 @@ __all__ = [
     "SMALL",
     "ExclusiveWriter",
     "GrowingFile",
+    "make_readable",
     "payload",
     "write_file",
     "write_run",
@@ -68,6 +69,11 @@ def write_file(path: Path, content: bytes | int = SMALL, *, mtime: float | None 
     if mtime is not None:
         os.utime(path, (mtime, mtime))
     return data
+
+
+def make_readable(path: Path) -> None:
+    """Give a file that the ``unreadable_file`` fixture shut out an ordinary file's permissions."""
+    path.chmod(0o644)
 
 
 def write_run(

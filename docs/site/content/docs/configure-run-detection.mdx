@@ -31,6 +31,8 @@ If files appear on disk but never become runs, check for `pattern_mismatch` even
 
 A file that keeps changing past `max_stability_wait_seconds` (default 300, or 5 minutes) is abandoned with a `stability_timeout` error event. Raise that cap for instruments whose writes take longer; it must be at least the stability period.
 
+A file that the instrument keeps open after its last write can look finished while the watcher still can’t read it. The watcher shows one **Upload Failed** event on its page for each such file, saying it can’t read the file yet, and shows another for it each time the watcher starts or its config changes. It tries the file again every minute for as long as it takes, and uploads it once the instrument lets go. A file someone requests with **Upload** on the run page stays requested in the meantime. Watcher 1.4.2 and later do this. Older watchers try such a file again only at the next start, and cancel a request for it after three tries.
+
 ## Choose auto or manual upload
 
 | Mode | Behavior |

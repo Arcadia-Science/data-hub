@@ -123,7 +123,7 @@ The full set of presets, and the custom-regex option, is in the [Configuration r
 
 ### Stability period [#stability-period]
 
-How many seconds a file must stay unchanged (same size and modification time) before the watcher treats it as fully written and eligible for upload. The default is 5 seconds; raise it for instruments that write large files slowly. A file that keeps changing past `max_stability_wait_seconds` (default 300, or 5 minutes) is abandoned with a `stability_timeout` error event.
+How many seconds a file must stay unchanged (same size and modification time) before the watcher treats it as fully written and eligible for upload. The default is 5 seconds; raise it for instruments that write large files slowly. A file that keeps changing past `max_stability_wait_seconds` (default 300, or 5 minutes) is abandoned with a `stability_timeout` error event. A file that the instrument keeps open after its last write can look finished while the watcher still can’t read it. Watcher 1.4.2 and later try it again every minute and upload it once the instrument lets go of it. Older watchers try it again only the next time they start.
 
 ### Upload mode [#upload-mode]
 
