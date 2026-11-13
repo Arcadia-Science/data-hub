@@ -213,7 +213,7 @@ Get-Content ~/.data-hub/upgrade-worker.log -Tail 20 -Wait
 
 ### Turn on debug logging for the service
 
-Add `DATA_HUB_WATCHER_LOG_LEVEL=DEBUG` to the env file the service loads (typically `~/.data-hub/.env.<environment>`) and restart the service. No reinstall needed.
+Add `DATA_HUB_WATCHER_LOG_LEVEL=DEBUG` to the env file the service loads (typically `~/.data-hub/.env.<environment>`) and restart the service. No reinstall needed. This works with watcher 1.4.2 and later; earlier versions ignore the setting in the env file.
 
 ## Where are the logs?
 

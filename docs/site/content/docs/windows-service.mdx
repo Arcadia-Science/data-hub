@@ -78,4 +78,4 @@ The service and the CLI share one rotating log:
 
 - `C:\ProgramData\DataHubWatcher\watcher.log`
 
-A separate `service-bootstrap.log` next to it captures crashes before the service control dispatcher takes over (missing `pywin32`, moved venv, corrupt install). To turn on debug logging without a reinstall, add `DATA_HUB_WATCHER_LOG_LEVEL=DEBUG` to the env file the service loads and restart the service.
+A separate `service-bootstrap.log` next to it captures crashes before the service control dispatcher takes over (missing `pywin32`, moved venv, corrupt install). To turn on debug logging without a reinstall, add `DATA_HUB_WATCHER_LOG_LEVEL=DEBUG` to the env file the service loads and restart the service (watcher 1.4.2 and later).
