@@ -753,6 +753,38 @@ class TestDeregistered:
         assert on_tick.call_count == 2
         on_deregistered.assert_called_once_with()
 
+    def test_a_startup_beat_that_is_the_third_reply_flushes_nothing_and_starts_no_thread(
+        self,
+    ) -> None:
+        # The count is shared with the loops before this one, so a new loop's synchronous
+        # startup beat can be the third reply in a row.
+        shared = DeregisteredReplies()
+        shared.add()
+        shared.add()
+        loop, on_deregistered, reporter = self._loop([_deregistered()], deregistered_replies=shared)
+
+        loop.start()
+
+        on_deregistered.assert_called_once_with()
+        assert loop._stop_event.is_set()
+        # The events would get the same 404, and nothing may run after the stop was asked for.
+        reporter.flush.assert_not_called()
+        assert loop._thread is None
+
+    def test_a_startup_beat_that_is_not_the_third_reply_starts_the_loop_as_usual(self) -> None:
+        shared = DeregisteredReplies()
+        shared.add()
+        loop, on_deregistered, reporter = self._loop([_deregistered()], deregistered_replies=shared)
+
+        loop.start()
+        try:
+            on_deregistered.assert_not_called()
+            reporter.flush.assert_called_once_with()
+            assert loop._thread is not None and loop._thread.is_alive()
+        finally:
+            loop._stop_event.set()
+            loop._thread.join(5)  # type: ignore[union-attr]
+
     def test_the_final_heartbeat_does_not_count_and_does_not_reset(self) -> None:
         loop, on_deregistered, _reporter = self._loop(
             [_deregistered(), _deregistered(), _deregistered(), _deregistered()]

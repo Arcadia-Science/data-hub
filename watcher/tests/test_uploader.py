@@ -1265,6 +1265,24 @@ class TestUploadQueueWorker:
             # Let the blocked poll finish so the daemon thread exits cleanly.
             release.set()
 
+    def test_a_stop_requested_before_the_start_stays_requested(self) -> None:
+        # A heartbeat that learns the watcher was deregistered requests the stop, and the
+        # runtime that is starting then must not undo it.
+        uploader = MagicMock()
+        stop = threading.Event()
+        worker = UploadQueueWorker(
+            uploader, stop_event=stop, interval_seconds=0, retry_pending_on_start=True
+        )
+        stop.set()
+
+        worker.start()
+
+        assert worker.stop(timeout=5) is True
+        assert stop.is_set()
+        # The loop never ran a poll.
+        uploader.retry_waiting_files.assert_not_called()
+        uploader.poll_upload_queue.assert_not_called()
+
     def test_retries_pending_uploads_before_the_first_poll(self) -> None:
         uploader = MagicMock()
         stop = threading.Event()

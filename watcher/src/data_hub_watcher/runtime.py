@@ -620,6 +620,13 @@ def start_runtime(
     inside a running process passes ``check_upgrade_marker=False`` (see
     :func:`report_upgrade_outcome`). With ``started_message=None`` no started
     event is queued; the caller queues one once the start has succeeded.
+
+    Returns without starting the upload worker or the file monitor when the registration
+    was deleted on Data Hub (``rt.deregistered_event``) by the time the heartbeat loop has
+    started. The run of "deregistered" replies is shared with the loops that came before
+    this runtime's, so its startup heartbeat can be the third in a row. The runtime is then
+    left as it is, for the stop that follows to unwind (`stop_runtime`), and nothing retries
+    the pending uploads or scans the backlog in the meantime.
     """
     if started_message is not None:
         rt.reporter.queue_event(
@@ -641,6 +648,8 @@ def start_runtime(
     rt.detector.hydrate_from_state_db()
 
     rt.heartbeat.start()
+    if rt.deregistered_event.is_set():
+        return
     # Start upload polling before the (potentially long) initial scan so
     # queued uploads keep draining while the scan walks the backlog.
     if rt.upload_worker is not None:
@@ -1759,6 +1768,10 @@ class WatcherSupervisor:
         uploads or for the heartbeat loop to stop, when the third reply arrives, and
         the runtime it then builds would retry the pending uploads and scan and upload the
         backlog while the watcher stops.
+
+        The runtime's own startup heartbeat can be the third reply too (`start_runtime`). It
+        is then kept in `self.rt`, with no thread of it running, for the stop to unwind, and
+        the started event is not queued: it could never be sent.
         """
         if self.deregistered_event.is_set():
             return
@@ -1796,6 +1809,8 @@ class WatcherSupervisor:
             self._teardown_for_rebuild()
             raise
         self.rt = rt
+        if self.deregistered_event.is_set():
+            return
         if announce_late:
             self.reporter.queue_event(
                 WatcherEvent(event_type=EventType.WATCHER_STARTED, message=started_message)

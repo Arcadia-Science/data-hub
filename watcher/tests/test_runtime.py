@@ -23,7 +23,7 @@ import threading
 import time
 from pathlib import Path
 from typing import Any, Literal
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -985,6 +985,46 @@ class TestBuildRuntimeDeregistered:
             self._beat(rt, 1)
 
             assert rt.deregistered_event.is_set()
+        finally:
+            rt.state_db.close()
+
+    @pytest.mark.parametrize("upload_mode", ["auto", "manual"])
+    def test_a_start_whose_first_heartbeat_is_the_third_reply_starts_no_more_threads(
+        self, tmp_path: Path, db_path: Path, upload_mode: Literal["auto", "manual"]
+    ) -> None:
+        replies = DeregisteredReplies()
+        # Two replies that the loops before this runtime's counted.
+        replies.add()
+        replies.add()
+        client = MagicMock()
+        client.send_heartbeat.side_effect = _deregistered()
+        rt = build_runtime(
+            client=client,
+            cfg=_make_config(tmp_path, upload_mode=upload_mode),
+            db_path=db_path,
+            deregistered_replies=replies,
+        )
+        try:
+            with patch.object(FileMonitor, "start") as monitor_start:
+                start_runtime(rt, started_message="Watcher started on test")
+
+            assert rt.deregistered_event.is_set()
+            assert rt.shutdown_event.is_set()
+            # The stop that the reply asked for is still in force: nothing was started that
+            # could have undone it, and nothing retried the pending uploads.
+            assert rt.uploader._stop_requested()
+            assert rt.upload_worker is not None
+            assert rt.upload_worker._thread is None
+            monitor_start.assert_not_called()
+            assert rt.heartbeat._thread is None
+            # The started event that start_runtime queued was not flushed.
+            client.send_events.assert_not_called()
+
+            # The stop that follows has nothing to wait for.
+            stop_runtime(rt, stopped_message="Watcher stopped", deregistered=True)
+
+            client.send_events.assert_not_called()
+            assert client.send_heartbeat.call_count == 1
         finally:
             rt.state_db.close()
 

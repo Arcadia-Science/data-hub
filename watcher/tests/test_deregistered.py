@@ -13,7 +13,7 @@ from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -31,6 +31,7 @@ from data_hub_watcher.models import (
     RunDetectionConfig,
     WatcherConfig,
 )
+from data_hub_watcher.monitor import FileMonitor
 from data_hub_watcher.runtime import WatcherSupervisor
 from data_hub_watcher.state import StateDB
 
@@ -564,6 +565,49 @@ class TestARebuildThatOverlapsIt:
         assert builds == []
 
 
+def _count_events_at_each_reply(env: _Env) -> list[int]:
+    """Make every heartbeat from now on get the "deregistered" reply.
+
+    Returns a list that gets one entry per reply: how many event posts had been made when it came.
+    """
+    events_at_reply: list[int] = []
+
+    def reply(*_args: Any, **_kwargs: Any) -> None:
+        events_at_reply.append(env.client.send_events.call_count)
+        raise _deregistered()
+
+    env.client.send_heartbeat.side_effect = reply
+    return events_at_reply
+
+
+def _assert_nothing_runs_after_the_third_reply(
+    env: _Env, sup: WatcherSupervisor, events_at_reply: list[int], monitor_start: MagicMock
+) -> None:
+    """The start-up heartbeat of the new loop got the third reply, so nothing else may start.
+
+    The runtime that was built for it is kept, for the stop to unwind, but none of its threads
+    runs, no uploads are retried and no event is posted after that reply.
+    """
+    assert sup.deregistered_event.is_set()
+    # No event is posted after the third reply: the new loop doesn't flush the
+    # `watcher_started` event it was given.
+    assert env.client.send_events.call_count == events_at_reply[-1]
+    # The runtime or the waiting loop is kept for the stop to unwind.
+    if sup.rt is not None:
+        rt = sup.rt
+        # The stop that the third reply asked for is still in force.
+        assert rt.uploader._stop_requested()
+        assert rt.upload_worker is not None
+        assert rt.upload_worker._thread is None
+        monitor_start.assert_not_called()
+        assert rt.monitor._checker_thread is None
+        assert not rt.monitor._observer.is_alive()
+        assert rt.heartbeat._thread is None
+    else:
+        assert sup._waiting is not None
+        assert sup._waiting.heartbeat._thread is None
+
+
 class TestTheCountSurvivesStateChanges:
     """Each switch builds a new heartbeat loop, and the run of replies goes on across them.
 
@@ -571,9 +615,17 @@ class TestTheCountSurvivesStateChanges:
     minutes, would otherwise postpone its stop for good.
     """
 
-    def test_a_waiting_watcher_that_starts_watching_keeps_the_count(self, env: _Env) -> None:
+    @pytest.fixture
+    def monitor_start(self) -> Iterator[MagicMock]:
+        """A stand-in for `FileMonitor.start`, which runs the whole initial scan."""
+        with patch.object(FileMonitor, "start") as start:
+            yield start
+
+    def test_a_waiting_watcher_that_starts_watching_keeps_the_count(
+        self, env: _Env, monitor_start: MagicMock
+    ) -> None:
         sup = _waiting_supervisor(env)
-        env.client.send_heartbeat.side_effect = _deregistered()
+        events_at_reply = _count_events_at_each_reply(env)
         _tick(sup, DEREGISTERED_HEARTBEAT_THRESHOLD - 1)
         assert not sup.deregistered_event.is_set()
         _bring_the_folder_back(env)
@@ -584,25 +636,33 @@ class TestTheCountSurvivesStateChanges:
         assert sup.deregistered_event.is_set()
         assert sup.poll(timeout=0) is True
         assert sup.classify_shutdown().is_deregistered is True
+        assert sup.rt is not None
+        _assert_nothing_runs_after_the_third_reply(env, sup, events_at_reply, monitor_start)
 
-    def test_a_config_rebuild_keeps_the_count(self, env: _Env) -> None:
+    def test_a_config_rebuild_keeps_the_count(self, env: _Env, monitor_start: MagicMock) -> None:
         sup = env.supervisor()
         sup.start()
-        env.client.send_heartbeat.side_effect = _deregistered()
+        monitor_start.reset_mock()
+        events_at_reply = _count_events_at_each_reply(env)
         _tick(sup, DEREGISTERED_HEARTBEAT_THRESHOLD - 1)
         assert not sup.deregistered_event.is_set()
 
-        sup._apply(_revision(1, env.watch_dir, stability_period_seconds=7))
+        applied = sup._apply(_revision(1, env.watch_dir, stability_period_seconds=7))
 
-        assert sup.deregistered_event.is_set()
+        # The new runtime's start-up heartbeat is the third reply in a row, and the revision
+        # is not recorded as applied.
+        assert applied is False
         assert sup.poll(timeout=0) is True
+        assert sup.rt is not None
+        _assert_nothing_runs_after_the_third_reply(env, sup, events_at_reply, monitor_start)
 
     def test_a_failed_start_that_falls_back_to_waiting_keeps_the_count(
-        self, env: _Env, monkeypatch: pytest.MonkeyPatch
+        self, env: _Env, monkeypatch: pytest.MonkeyPatch, monitor_start: MagicMock
     ) -> None:
         sup = env.supervisor()
         sup.start()
-        env.client.send_heartbeat.side_effect = _deregistered()
+        monitor_start.reset_mock()
+        events_at_reply = _count_events_at_each_reply(env)
         _tick(sup, DEREGISTERED_HEARTBEAT_THRESHOLD - 1)
         sup._teardown_for_rebuild()
 
@@ -613,8 +673,44 @@ class TestTheCountSurvivesStateChanges:
         sup._start_or_wait_on_error(started_message="Watcher restarted")
 
         # The waiting loop's first heartbeat is the third reply in a row.
-        assert sup.deregistered_event.is_set()
         assert sup.poll(timeout=0) is True
+        assert sup.rt is None
+        _assert_nothing_runs_after_the_third_reply(env, sup, events_at_reply, monitor_start)
+
+    @pytest.mark.parametrize("announce_late", [False, True], ids=["started", "announced-late"])
+    def test_the_stop_that_follows_the_third_reply_unwinds_what_was_built(
+        self, env: _Env, closes: list[StateDB], monitor_start: MagicMock, announce_late: bool
+    ) -> None:
+        sup = env.supervisor()
+        sup.start()
+        monitor_start.reset_mock()
+        events_at_reply = _count_events_at_each_reply(env)
+        _tick(sup, DEREGISTERED_HEARTBEAT_THRESHOLD - 1)
+        sup._teardown_for_rebuild()
+
+        sup._start_watching_or_wait(
+            started_message="Watcher restarted", announce_late=announce_late
+        )
+
+        assert sup.rt is not None
+        built = sup.rt
+        _assert_nothing_runs_after_the_third_reply(env, sup, events_at_reply, monitor_start)
+        if announce_late:
+            # The late `watcher_started` event is not queued for a watcher that can't send it.
+            queued = [event.event_type for event in built.reporter._queue]
+            assert EventType.WATCHER_STARTED not in queued
+        closes.clear()
+        heartbeats = env.client.send_heartbeat.call_count
+        events = env.client.send_events.call_count
+
+        # Components that never started stop without a wait or an error.
+        sup.stop(stopped_message="Watcher stopped: its registration was deleted")
+
+        assert sup.rt is None
+        assert env.client.send_heartbeat.call_count == heartbeats
+        assert env.client.send_events.call_count == events
+        assert built.state_db in closes
+        assert sup._state in closes
 
     def test_a_success_in_a_new_loop_starts_the_count_again(self, env: _Env) -> None:
         sup = _waiting_supervisor(env)

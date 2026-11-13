@@ -154,6 +154,13 @@ class HeartbeatLoop:
         ``WATCHER_STARTED`` event the runtime queued moments ago becomes
         visible right away rather than piggy-backing on the first
         loop-driven flush ~``interval`` seconds later.
+
+        The run of "deregistered" replies is shared with the loops that came before this one
+        (see `DeregisteredReplies`), so the startup beat can be the reply that reaches
+        `DEREGISTERED_HEARTBEAT_THRESHOLD`. The loop has then ended itself and called
+        `on_deregistered`, and ``start()`` returns at once: it flushes no events (they would
+        get the same 404) and starts no thread. A caller that has more to start, such as
+        `start_runtime`, checks for the stop before it starts it.
         """
         self._start_time = time.monotonic()
         self._stop_event.clear()
@@ -165,6 +172,8 @@ class HeartbeatLoop:
         # and emit the standard ``heartbeat_recovered`` event when the
         # link comes back.
         self._send_heartbeat(status=self._status)
+        if self._deregistered:
+            return
         self._event_reporter.flush()
         self._thread = threading.Thread(target=self._run, daemon=True, name="heartbeat")
         self._thread.start()
