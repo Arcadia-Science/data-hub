@@ -535,6 +535,15 @@ class _WaitingFile:
     run_id: str
 
 
+@dataclass(frozen=True)
+class _Hashed:
+    """A file as it was when it was hashed: its digests and the stat taken just before."""
+
+    sha256: str
+    crc64nvme: str
+    stat: os.stat_result
+
+
 def _guess_content_type(path: Path) -> str:
     # `mimetypes.guess_type` is case-sensitive on some platforms. Azure
     # Cielo writes reports as `.PDF`; without the lowercase, the PUT
@@ -1426,6 +1435,29 @@ class Uploader:
             )
         )
 
+    def _take_digests(
+        self,
+        path: Path,
+        compute: Callable[[], tuple[str, str]],
+        presigned: PresignedUploadResponse | None = None,
+    ) -> tuple[str, str] | None:
+        """Run *compute*, which hashes *path*, and return its ``(sha256, crc64nvme)``.
+
+        Returns ``None`` when there is nothing to upload from: a stop cut the hash
+        off, which is not a failure and is logged only, or the hash failed, which
+        `_fail_hash` has reported. Raises `CantReadYet` for a file that can't be
+        read yet. *presigned* is passed on to `_fail_hash`.
+        """
+        try:
+            return compute()
+        except DigestCancelled:
+            # `abort` cut the hash off. Nothing was sent or recorded.
+            logger.info("Upload cut off; deferring %s", path.name)
+            return None
+        except Exception as exc:
+            self._fail_hash(path, exc, presigned)
+            return None
+
     @staticmethod
     def _raise_if_cant_read(path: Path, exc: BaseException) -> None:
         """Raise `CantReadYet` when an upload error is really a file that can't be read.
@@ -1488,79 +1520,119 @@ class Uploader:
         self,
         path: Path,
         presigned: PresignedUploadResponse,
-        crc64nvme: str,
-        size_bytes: int,
+        hashed: _Hashed,
         content_type: str | None,
         relative_path: str | None,
         run_id: str,
         transfer: _Transfer,
-    ) -> bool:
+    ) -> tuple[_Hashed, PresignedUploadResponse] | None:
+        """Upload *path* in parts and have the server complete the upload.
+
+        Returns the file as it was when the checksum of the finished upload was
+        made, with the response for that upload, or ``None`` when the upload did
+        not finish (a stop, or a failure that is already reported). The file is
+        *hashed* unless the server rejected its checksum. The restart after a
+        rejection hashes the file again, and the result then holds that hash, the
+        stat taken before it, and the restarted upload.
+        """
         upload = presigned
-        if not upload.upload_id or not upload.part_size or not upload.part_count:
+        upload_id = upload.upload_id
+        if not upload_id or not upload.part_size or not upload.part_count:
             self._fail_upload(
                 path.name,
                 upload.s3_key,
                 RuntimeError("incomplete multipart response"),
             )
-            return False
+            return None
 
         # One restart when S3 says the assembled file does not match. A second
         # mismatch is a real failure.
         for digest_attempt in range(2):
             if self._stop_requested():
-                return False
+                return None
             try:
-                parts = self._put_parts(path, upload, size_bytes, transfer)
+                parts = self._put_parts(path, upload, hashed.stat.st_size, transfer)
             except _UploadStopped:
-                return False
+                return None
             except CantReadYet:
                 # The file can't be read yet, so the upload is not a failure: it
                 # is started over once the file can be read. The parts already
                 # sent are no use to that upload, so free them now, and pass
                 # this on once every part worker has exited.
-                self._abort_quietly(upload.file_id, upload.upload_id)
+                self._abort_quietly(upload.file_id, upload_id)
                 raise
             except Exception as exc:
                 # ``_put_parts`` returns or raises only after every part worker
                 # has exited, so no PUT is still in flight when the upload is
                 # aborted. S3 says to abort only after the parts are done.
-                self._abort_quietly(upload.file_id, upload.upload_id)
+                self._abort_quietly(upload.file_id, upload_id)
                 self._fail_upload(path.name, upload.s3_key, exc)
-                return False
+                return None
             try:
-                self._complete_with_retries(upload, parts, crc64nvme)
-                return True
+                self._complete_with_retries(upload, parts, hashed.crc64nvme)
+                return hashed, upload
             except ApiError as exc:
                 code = exc.detail.code if exc.detail else ""
                 if code == "BadDigest" and digest_attempt == 0:
                     logger.warning("Checksum rejected for %s; starting the upload over", path.name)
-                    self._abort_quietly(upload.file_id, upload.upload_id)
-                    try:
-                        stat = path.stat()
-                        upload = self._client.request_upload_url(
-                            self._instrument_id,
-                            run_id,
-                            path.name,
-                            content_type=content_type,
-                            size_bytes=size_bytes,
-                            file_created_at_ts=file_created_at(stat),
-                            relative_path=relative_path,
-                        )
-                    except ApiError as restart_exc:
-                        self._fail_upload(path.name, upload.s3_key, restart_exc)
-                        return False
-                    if upload.upload_type != "multipart" or not upload.upload_id:
-                        self._fail_upload(
-                            path.name,
-                            upload.s3_key,
-                            RuntimeError("restart did not return a multipart upload"),
-                        )
-                        return False
+                    self._abort_quietly(upload.file_id, upload_id)
+                    restarted = self._restart_multipart(
+                        path, upload.s3_key, content_type, relative_path, run_id
+                    )
+                    if restarted is None:
+                        return None
+                    hashed, upload, upload_id = restarted
                     continue
-                self._abort_quietly(upload.file_id, upload.upload_id)
+                self._abort_quietly(upload.file_id, upload_id)
                 self._fail_upload(path.name, upload.s3_key, exc)
-                return False
-        return False
+                return None
+        return None
+
+    def _restart_multipart(
+        self,
+        path: Path,
+        s3_key: str,
+        content_type: str | None,
+        relative_path: str | None,
+        run_id: str,
+    ) -> tuple[_Hashed, PresignedUploadResponse, str] | None:
+        """Hash *path* as it is now and start a new multipart upload for those bytes.
+
+        The server rejected the checksum of the first attempt, so the file is not what
+        was hashed: it changed while the parts were sent. Its size may have changed
+        too, so the new upload is requested with the size the file has now. The caller
+        has aborted the first upload, so a stop, a failure or a file that can't be read
+        yet leaves nothing open on the server. Returns the new digests and stat with
+        the new upload and its ID, or ``None`` when the restart can't go on. *s3_key*
+        is the first upload's, for the failure event. Raises `CantReadYet` for a file
+        that can't be read yet.
+        """
+        stat = _stat(path)
+        digests = self._take_digests(path, partial(file_digests, path, self._abort))
+        if digests is None:
+            return None
+        sha, crc64nvme = digests
+        try:
+            upload = self._client.request_upload_url(
+                self._instrument_id,
+                run_id,
+                path.name,
+                content_type=content_type,
+                size_bytes=stat.st_size,
+                file_created_at_ts=file_created_at(stat),
+                relative_path=relative_path,
+            )
+        except ApiError as exc:
+            self._fail_upload(path.name, s3_key, exc)
+            return None
+        if upload.upload_type != "multipart" or not upload.upload_id:
+            self._fail_upload(
+                path.name,
+                upload.s3_key,
+                RuntimeError("restart did not return a multipart upload"),
+            )
+            return None
+        return _Hashed(sha, crc64nvme, stat), upload, upload.upload_id
 
     def _abort_quietly(self, file_id: int, upload_id: str) -> None:
         try:
@@ -1824,13 +1896,8 @@ class Uploader:
             # every poll. Hash it first: a request made before that would cost the
             # server a request per poll, and for a large file would start a
             # multipart upload only to abort it.
-            try:
-                sha, crc64nvme = file_digests(path, self._abort)
-            except DigestCancelled:
-                logger.info("Upload cut off; deferring %s", path.name)
-                return False
-            except Exception as exc:
-                self._fail_hash(path, exc)
+            digests = self._take_digests(path, partial(file_digests, path, self._abort))
+            if digests is None:
                 return False
             try:
                 presigned = request_url()
@@ -1861,17 +1928,13 @@ class Uploader:
                     self._fail_presign(path, exc)
                     return False
 
-                try:
-                    sha, crc64nvme = sha_future.result()
-                except DigestCancelled:
-                    # `abort` cut the hash off. Nothing was sent or recorded.
-                    logger.info("Upload cut off; deferring %s", path.name)
-                    return False
-                except Exception as exc:
-                    self._fail_hash(path, exc, presigned)
+                digests = self._take_digests(path, sha_future.result, presigned)
+                if digests is None:
                     return False
         # Both are done: the URL request and the hash.
         prep_seconds = time.monotonic() - prep_started
+        sha, crc64nvme = digests
+        hashed = _Hashed(sha, crc64nvme, stat)
 
         s3_key = presigned.s3_key
         s3_bucket = presigned.s3_bucket
@@ -1905,17 +1968,15 @@ class Uploader:
         transfer = _Transfer()
         is_multipart = presigned.upload_type == "multipart"
         if is_multipart:
-            if not self._upload_multipart(
-                path,
-                presigned,
-                crc64nvme,
-                stat.st_size,
-                content_type,
-                rel_path,
-                run_id,
-                transfer,
-            ):
+            finished = self._upload_multipart(
+                path, presigned, hashed, content_type, rel_path, run_id, transfer
+            )
+            if finished is None:
                 return False
+            # A checksum the server rejected starts the upload over from the file as it
+            # is then, so what was uploaded may not be what was hashed first. Record and
+            # report the file that was uploaded, with the upload that finished.
+            hashed, presigned = finished
             transfer.finish()
         else:
             if not self._upload_single_put(path, presigned, content_type, s3_key, transfer):
@@ -1947,11 +2008,11 @@ class Uploader:
 
         self._state_db.record_upload(
             path.name,
-            sha,
+            hashed.sha256,
             s3_key,
             relative_path=rel_path,
-            size_bytes=stat.st_size,
-            mtime=stat.st_mtime,
+            size_bytes=hashed.stat.st_size,
+            mtime=hashed.stat.st_mtime,
         )
         self._bump_files_uploaded()
         self._reporter.queue_event(
@@ -1960,8 +2021,8 @@ class Uploader:
                 message=f"Uploaded {path.name}",
                 details={
                     "s3_key": s3_key,
-                    "sha256": sha,
-                    "size_bytes": stat.st_size,
+                    "sha256": hashed.sha256,
+                    "size_bytes": hashed.stat.st_size,
                     # Hashing and the upload-URL request. They run together, except for a
                     # file that was found unreadable before: those run one after the other.
                     "prep_seconds": round(prep_seconds, 3),
