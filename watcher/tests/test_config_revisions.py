@@ -20,7 +20,7 @@ from collections.abc import Callable, Iterator
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
@@ -34,6 +34,7 @@ from data_hub_watcher.constants import (
     DEFAULT_IDLE_TICKS_REQUIRED,
     HEARTBEAT_INTERVAL_SECONDS,
     STOP_BUDGET_SECONDS,
+    STOP_FLUSH_WAIT_SECONDS,
     SYSTEM_SHUTDOWN_HTTP_TIMEOUT,
     UPGRADE_HANDOFF_TIMEOUT_SECONDS,
 )
@@ -1951,6 +1952,33 @@ class TestSavedEventsAcrossRestarts:
             assert state.pending_events(WATCHER_ID) == []
         finally:
             state.close()
+
+    def test_the_stop_gives_a_flush_a_tick_left_running_a_moment_before_it_detaches_the_store(
+        self, env: _Env
+    ) -> None:
+        # A tick's flush that is still sending can only delete the events it sends while the
+        # store is attached, so the stop waits for it, but never past its own limit.
+        sup = env.supervisor()
+        sup.start()
+
+        with patch.object(sup.reporter, "detach_store", wraps=sup.reporter.detach_store) as detach:
+            sup.stop(stopped_message="Watcher stopped")
+
+        assert 0 < detach.call_args.kwargs["wait_for_flush"] <= STOP_FLUSH_WAIT_SECONDS
+
+    def test_a_stop_that_has_used_up_its_time_does_not_wait_for_a_flush_to_detach_the_store(
+        self, env: _Env
+    ) -> None:
+        sup = env.supervisor()
+        sup.start()
+
+        with (
+            patch.object(runtime, "_stop_deadline", return_value=time.monotonic() - 1),
+            patch.object(sup.reporter, "detach_store", wraps=sup.reporter.detach_store) as detach,
+        ):
+            sup.stop(stopped_message="Watcher stopped")
+
+        assert detach.call_args.kwargs["wait_for_flush"] == 0
 
     def test_an_event_queued_after_the_stop_does_not_open_the_closed_database_again(
         self, env: _Env

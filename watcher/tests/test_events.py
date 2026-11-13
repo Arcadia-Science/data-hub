@@ -1179,3 +1179,91 @@ class TestSavedEvents:
         assert "stay queued" not in caplog.text
         assert _saved(state) == ["run-3", "run-4"]
         assert [e.event.message for e in reporter._queue] == ["run-3", "run-4"]
+
+
+class TestDetachingWhileAFlushRuns:
+    """A heartbeat tick that a stop gave up on can still be sending a batch when the store is
+    detached. If the server takes it, the flush has to delete its rows before the store goes,
+    or the next start sends the batch again.
+    """
+
+    @staticmethod
+    def _flush_in_a_thread(
+        saving: EventReporter, client: MagicMock
+    ) -> tuple[threading.Thread, threading.Event, list[str]]:
+        """Start a flush whose request waits for the returned event, then stores the batch."""
+        stored: list[str] = []
+        in_request = threading.Event()
+        release = threading.Event()
+
+        def slow(_watcher_id: str, events: list[dict[str, Any]], **_kwargs: Any) -> None:
+            in_request.set()
+            release.wait(10)
+            stored.extend(e["message"] for e in events)
+
+        client.send_events.side_effect = slow
+        thread = threading.Thread(target=saving.flush)
+        thread.start()
+        assert in_request.wait(5)
+        return thread, release, stored
+
+    def test_a_flush_that_ends_in_time_deletes_its_rows_before_the_store_is_detached(
+        self, saving: EventReporter, client: MagicMock, state: StateDB
+    ) -> None:
+        saving.queue_event(_event(1))
+        tick, release, stored = self._flush_in_a_thread(saving, client)
+        # The stop's own flush gave up on the lock at its deadline.
+        saving.flush(deadline=time.monotonic() + 0.1)
+        threading.Timer(0.2, release.set).start()
+
+        saving.detach_store(wait_for_flush=5)
+        tick.join(5)
+
+        assert stored == ["run-1"]
+        assert _saved(state) == []
+        assert saving._store is None
+
+    def test_a_flush_that_is_still_running_when_the_wait_ends_leaves_its_rows_for_the_next_start(
+        self, saving: EventReporter, client: MagicMock, state: StateDB
+    ) -> None:
+        # What is left of the problem: the request outlasts the stop. The server takes the
+        # batch and the next start sends it again, a duplicate that is accepted.
+        saving.queue_event(_event(1))
+        tick, release, stored = self._flush_in_a_thread(saving, client)
+
+        began = time.monotonic()
+        saving.detach_store(wait_for_flush=0.1)
+        assert time.monotonic() - began < 2
+        release.set()
+        tick.join(5)
+
+        assert stored == ["run-1"]
+        assert _saved(state) == ["run-1"]
+        assert len(saving._queue) == 0
+
+    def test_detaching_without_a_wait_does_not_wait_for_a_flush(
+        self, saving: EventReporter, client: MagicMock, state: StateDB
+    ) -> None:
+        saving.queue_event(_event(1))
+        tick, release, _stored = self._flush_in_a_thread(saving, client)
+
+        began = time.monotonic()
+        saving.detach_store()
+        elapsed = time.monotonic() - began
+        release.set()
+        tick.join(5)
+
+        assert elapsed < 1
+        assert saving._store is None
+
+    def test_a_flush_that_starts_after_the_detach_sends_from_memory(
+        self, saving: EventReporter, client: MagicMock, state: StateDB
+    ) -> None:
+        saving.queue_event(_event(1))
+        saving.detach_store(wait_for_flush=1)
+        saving.queue_event(_event(2))
+
+        saving.flush()
+
+        assert _sent_batches(client) == [["run-2"]]
+        assert _saved(state) == ["run-1"]

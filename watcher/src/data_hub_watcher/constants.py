@@ -111,6 +111,10 @@ STOP_FINAL_HEARTBEAT_SECONDS = 5
 # The least a join gets in a stop that has run out of time: after the uploads are cut off,
 # and for a heartbeat in progress.
 STOP_MIN_WAIT_SECONDS = 1
+# The most a stop waits, at its very end and only if the stop budget has time left, for an
+# event flush that a heartbeat tick left running, so that the flush can delete the saved
+# events it sends if the server takes them (`EventReporter.detach_store`).
+STOP_FLUSH_WAIT_SECONDS = 2
 SERVICE_STOP_WAIT_HINT_MILLISECONDS = 30_000
 # Windows waits for the service to stop, at a restart or a shutdown, for the
 # preshutdown timeout: 10 s by default from Windows 10 build 15063 and 180 s

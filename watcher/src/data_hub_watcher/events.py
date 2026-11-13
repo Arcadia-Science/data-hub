@@ -383,19 +383,32 @@ class EventReporter:
             self._queue = deque([*saved, *self._queue])
             self._trim()
 
-    def detach_store(self) -> None:
+    def detach_store(self, *, wait_for_flush: float = 0.0) -> None:
         """Stop saving events, before the store is closed. Call it once nothing queues events.
 
         Events queued from now on stay in memory. What is saved but not yet sent stays in the
         store for the next start, and leaves the queue, so this process doesn't send it as
         well (it couldn't delete the rows afterwards, and the next start would send them
         again). Returns once no thread is inside a store call.
+
+        A flush that is running when this is called, such as the tick that a stop gave up on
+        (`HeartbeatLoop.stop_loop`), has its batch in flight. If the server takes it, the flush
+        deletes the batch's rows, which it can't do once the store is detached. So this waits
+        up to *wait_for_flush* seconds for the flush lock, and holds it through the detach: a
+        flush that ends in time has deleted its rows before the store goes. A flush that is
+        still running after the wait loses its rows to the detach, and if its request then
+        succeeds, the next start sends that batch again.
         """
-        with self._lock:
-            if self._store is None:
-                return
-            self._store = None
-            self._queue = deque(entry for entry in self._queue if entry.row_id is None)
+        holds_flush_lock = self._flush_lock.acquire(timeout=max(0.0, wait_for_flush))
+        try:
+            with self._lock:
+                if self._store is None:
+                    return
+                self._store = None
+                self._queue = deque(entry for entry in self._queue if entry.row_id is None)
+        finally:
+            if holds_flush_lock:
+                self._flush_lock.release()
 
     def _save(self, event: WatcherEvent) -> int | None:
         """Save *event* in the store and return its row id, or `None` if it isn't saved.

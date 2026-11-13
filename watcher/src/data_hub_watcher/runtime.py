@@ -34,6 +34,7 @@ from data_hub_watcher.constants import (
     PRUNE_DAYS,
     STOP_BUDGET_SECONDS,
     STOP_FINAL_HEARTBEAT_SECONDS,
+    STOP_FLUSH_WAIT_SECONDS,
     STOP_MIN_WAIT_SECONDS,
     STOP_RESERVE_SECONDS,
     SYSTEM_SHUTDOWN_HTTP_TIMEOUT,
@@ -1142,7 +1143,14 @@ class WatcherSupervisor:
         stop begins to wind anything down: the heartbeat loop keeps ticking while uploads
         finish, and a tick that runs during the rest of the stop can't dispatch an update
         or end the hand-off.
+
+        Last, the saved events are detached from the reporter and the state database is
+        closed. A flush that a heartbeat tick left running gets up to
+        `STOP_FLUSH_WAIT_SECONDS` before that, within what is left of the budget, to delete
+        the events it sends if the server takes them (see `EventReporter.detach_store`).
         """
+        # The same limit that `stop_runtime` sets for itself, a moment later.
+        deadline = _stop_deadline(system_shutdown)
         handed_off = self._handoff.begin_stop()
         stop_reason = self._final_stop_reason(
             system_shutdown=system_shutdown, operator_stop=operator_stop, handed_off=handed_off
@@ -1164,15 +1172,17 @@ class WatcherSupervisor:
                 stopped_message=stopped_message,
                 system_shutdown=system_shutdown,
                 stop_reason=stop_reason,
-                deadline=_stop_deadline(system_shutdown),
+                deadline=deadline,
             )
             self._waiting = None
         if self._state is not None:
             # Events queued from here on, such as one from a heartbeat tick that was left
             # running (see `HeartbeatLoop.stop_loop`), stay in memory: a write after the
             # close would open the database again. What is saved and unsent waits for the
-            # next start.
-            self.reporter.detach_store()
+            # next start. A flush that such a tick left running gets a moment, within what
+            # is left of the stop budget, to delete the events it sends if the server takes
+            # them, because it can't once the store is detached.
+            self.reporter.detach_store(wait_for_flush=min(_left(deadline), STOP_FLUSH_WAIT_SECONDS))
             self._state.close()
 
     def _final_stop_reason(
