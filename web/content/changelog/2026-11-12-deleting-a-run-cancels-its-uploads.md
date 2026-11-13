@@ -9,6 +9,8 @@ Now deleting a run cancels the uploads that were requested for its files. The fi
 
 Restoring a run doesn't bring the requests back. Choose **Upload** again for the files you still want.
 
-Files that were already stuck in deleted runs are cancelled when this release is deployed. Also, the dashboard's **Pending uploads** count and the pending-upload count that `get_system_status` reports for each instrument no longer include files from deleted runs.
+Uploads that are already stuck in deleted runs are cancelled when this release is deployed.
+
+The dashboard's **Pending uploads** count, and the pending-upload count that `get_system_status` reports for each instrument, no longer include files from deleted runs.
 
 This needs no new watcher version.
