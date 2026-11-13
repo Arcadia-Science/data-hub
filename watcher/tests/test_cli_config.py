@@ -115,6 +115,30 @@ class TestConfigValidate:
         assert "watch_directory not found" in result.output
         assert "wait" in result.output
 
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            ("version: 1\n".encode("utf-16"), "UTF-8"),
+            (b"1: a\n", "Config validation failed"),
+        ],
+        ids=["utf16-file", "key-that-is-not-a-string"],
+    )
+    def test_reports_a_file_it_cannot_load_instead_of_crashing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, raw: bytes, expected: str
+    ) -> None:
+        path = tmp_path / "config.yaml"
+        path.write_bytes(raw)
+        monkeypatch.setattr(cli_module, "resolve_config_path", lambda _override: path)
+        monkeypatch.setattr(cli_module, "load_env", lambda *a, **k: None)
+
+        result = CliRunner().invoke(cli_module.cli, ["config", "validate"])
+
+        # A ClickException is printed as "Error: ..." and exits 1. Any other exception would
+        # reach the runner as the result's exception, with a traceback.
+        assert result.exit_code == 1
+        assert isinstance(result.exception, SystemExit)
+        assert expected in result.output
+
     def test_valid_config_passes(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         watch_dir = tmp_path / "data"
         watch_dir.mkdir()
