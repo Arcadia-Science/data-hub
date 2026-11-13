@@ -1947,9 +1947,10 @@ class Uploader:
         decides how to wait.
 
         Returns `False` at once, without a request, for a file of a run in the set of
-        deleted runs. That is neither a failure nor an attempt, so the callers that
-        count attempts check the run too. *requested* is for a file someone asked to
-        have uploaded from the web.
+        deleted runs, both before the file is taken and, for a thread that had to wait
+        for it, after: another thread may have been refused in the meantime. That is
+        neither a failure nor an attempt, so the callers that count attempts check the
+        run too. *requested* is for a file someone asked to have uploaded from the web.
         It is always asked of the server, because the run may have been restored, and the
         server's answer settles the run (`_note_run_accepted`, `_note_run_deleted`). Its
         caller tells a refusal from another failure with `_last_refusal`.
@@ -1957,6 +1958,9 @@ class Uploader:
         if not requested and self._skips_deleted_run(path, run_id):
             return False
         with self._exclusive(path) as waited:
+            # A thread that waited for the file may have been refused in the meantime.
+            if not requested and self._skips_deleted_run(path, run_id):
+                return False
             uploaded = self._upload_locked(path, run_id, waited)
             if uploaded:
                 # Still under the file's lock, so a thread that gets the file next

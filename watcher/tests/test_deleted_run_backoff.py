@@ -583,6 +583,40 @@ def _in_deleted_runs(up: Uploader, run_id: str = RUN) -> Uploader:
     return up
 
 
+class _WaitSpy(threading.Condition):
+    """The uploader's per-file condition, which says when a thread starts to wait on it."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.waiting = threading.Event()
+
+    def wait(self, timeout: float | None = None) -> bool:
+        self.waiting.set()
+        return super().wait(timeout)
+
+
+def _upload_that_waits_for_the_file(
+    up: Uploader, path: Path, *, requested: bool, meanwhile: Callable[[], object]
+) -> bool:
+    """Upload *path* on a thread that has to wait for another thread to finish with it.
+
+    *meanwhile* runs once the thread is waiting, before the other thread lets go.
+    """
+    spy = _WaitSpy()
+    up._in_flight_changed = spy
+    result: list[bool] = []
+    thread = threading.Thread(
+        target=lambda: result.append(up._upload_single(path, RUN, requested=requested))
+    )
+    with up._exclusive(path):
+        thread.start()
+        assert spy.waiting.wait(10)
+        meanwhile()
+    thread.join(10)
+    assert not thread.is_alive()
+    return result[0]
+
+
 class TestAnUploadRequestedForARunInTheSet:
     """A queue that lists a file of a run in the set means the run was restored since.
 
@@ -745,3 +779,31 @@ class TestAnUploadRequestedForARunInTheSet:
         assert len(missing) == 1
         _request_url_mock(up).assert_not_called()
         cast(MagicMock, up._client).cancel_upload_request.assert_called_once_with(1)
+
+    def test_a_thread_that_waited_for_the_file_sends_no_request_after_a_refusal(
+        self, uploads_dir: Path, state_db: StateDB
+    ) -> None:
+        up = _uploader(uploads_dir, state_db)
+        [file] = _make_files(uploads_dir, 1)
+
+        # The thread that holds the file is refused while this one waits for it.
+        uploaded = _upload_that_waits_for_the_file(
+            up, file.path, requested=False, meanwhile=lambda: up._deleted_runs.add(RUN)
+        )
+
+        assert uploaded is False
+        _request_url_mock(up).assert_not_called()
+
+    def test_a_requested_upload_that_waited_for_the_file_still_asks(
+        self, uploads_dir: Path, state_db: StateDB
+    ) -> None:
+        up = _in_deleted_runs(_uploader(uploads_dir, state_db))
+        [file] = _make_files(uploads_dir, 1)
+
+        uploaded = _upload_that_waits_for_the_file(
+            up, file.path, requested=True, meanwhile=lambda: None
+        )
+
+        # The stub refuses it, but it was asked.
+        assert uploaded is False
+        _request_url_mock(up).assert_called_once()
