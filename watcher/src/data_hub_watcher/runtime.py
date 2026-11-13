@@ -827,12 +827,11 @@ def stop_runtime(
     # ``StateDB.close`` assumes writer threads have joined; a large upload
     # outliving the join once wrote post-close. If one won't stop in time, skip
     # the close rather than race it (the OS reaps). The worker's file and part
-    # the close rather than race it (the OS reaps). The worker's file and part
-    # threads are daemon threads, so a PUT still in flight does not hold the
-    # process open past this point. In auto mode that file is retried at the next
-    # start, from ``pending_uploads``. A requested file is not, after a normal stop:
-    # the server cancels it with the `stopped` heartbeat. Only a stop for a Windows
-    # restart leaves it queued.
+    # threads are daemon threads, and so are the ones that hash a file and ask for its
+    # upload URL, so none of them holds the process open past this point. In auto mode
+    # that file is retried at the next start, from ``pending_uploads``. A requested file
+    # is not, after a normal stop: the server cancels it with the `stopped` heartbeat.
+    # Only a stop for a Windows restart leaves it queued.
     if not upload_worker_stopped:
         logger.warning(
             "Upload worker still running at shutdown; leaving the state DB "
