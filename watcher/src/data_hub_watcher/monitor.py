@@ -96,8 +96,10 @@ class _EventHandler(FileSystemEventHandler):
         self._on_event = on_event
         self._recursive = recursive
         # The path the observer was scheduled with. Where watchdog reports the loss
-        # of the watched folder, it gives exactly that string as the event's
-        # `src_path`, so a plain comparison is enough.
+        # of the watched folder, it gives that path as the event's `src_path`, so a
+        # comparison with it is the test. It is not exact everywhere: FSEvents
+        # normalizes the path to NFC on macOS, so a folder whose name is written
+        # another way is not matched, and the heartbeat tick is what notices.
         self._root = root
         self._on_root_gone = on_root_gone
 
@@ -105,6 +107,10 @@ class _EventHandler(FileSystemEventHandler):
         self._note_root_event(event)
 
     def on_moved(self, event: FileSystemEvent) -> None:
+        # In watchdog 6.0.0 no emitter reports the watched folder itself as moved, so
+        # this does nothing there. It is harmless, and covers a release or a platform
+        # that does. A folder that is renamed is noticed by the supervisor's check of
+        # the folder's identity, not by this.
         self._note_root_event(event)
 
     def _note_root_event(self, event: FileSystemEvent) -> None:
@@ -181,7 +187,9 @@ class FileMonitor:
         (not a file or folder inside it), on the observer's thread, so it must
         only note the event and return. It is a prompt to check sooner, not a
         guarantee: whether watchdog reports the loss of the folder depends on the
-        platform and on how the path was written, so `is_watching` is the check.
+        platform and on how the path was written, so the owner's own check is the
+        test: `watch_directory_problem` for a folder that is missing, and
+        `is_watching` for one that was deleted and created again.
     should_stop:
         Called between the entries of the initial scan. When it returns `True`, the
         scan ends early and `start` returns without starting the observer or the
@@ -289,20 +297,48 @@ class FileMonitor:
 
         *timeout* bounds the wait for the stability checker, which may be in
         the middle of an auto-mode upload, and *observer_timeout* the wait for
-        the observer. Returns whether the stability checker exited in time.
+        the observer's stop and its thread together (see `_stop_observer`).
+        Returns whether the stability checker exited in time.
         """
         self._checker_stop.set()
-        self._observer.stop()
-        # Not started when `start()` failed partway, e.g. in a rebuild that is
-        # being rolled back, and joining an unstarted thread raises.
-        if self._observer.is_alive():
-            self._observer.join(timeout=observer_timeout)
+        self._stop_observer(observer_timeout)
         stopped = self._wait_for_checker(timeout)
         if stopped:
             logger.info("FileMonitor stopped")
         else:
             logger.info("FileMonitor stopping: its stability checker is still running")
         return stopped
+
+    def _stop_observer(self, timeout: float) -> None:
+        """Stop the observer and wait for its thread, together for at most *timeout*.
+
+        watchdog's `Observer.stop` joins its emitter threads with no timeout, and an
+        emitter that is blocked on a hung network share doesn't end, so the stop runs on
+        its own thread. A stop that is still running when *timeout* is up is left to
+        finish: the observer's threads are daemon threads, and the watcher goes on
+        without them.
+        """
+        deadline = time.monotonic() + timeout
+
+        def stop() -> None:
+            try:
+                self._observer.stop()
+            except Exception:
+                logger.exception("Stopping the file observer failed")
+
+        stopper = threading.Thread(target=stop, daemon=True, name="observer-stop")
+        stopper.start()
+        stopper.join(timeout=timeout)
+        if stopper.is_alive():
+            logger.warning(
+                "The file observer did not stop within %ss (is the watch folder's share "
+                "hung?); going on without waiting for it",
+                timeout,
+            )
+        # Not started when `start()` failed partway, e.g. in a rebuild that is
+        # being rolled back, and joining an unstarted thread raises.
+        if self._observer.is_alive():
+            self._observer.join(timeout=max(0.0, deadline - time.monotonic()))
 
     def is_watching(self) -> bool:
         """Whether watchdog is still watching the folder.

@@ -142,8 +142,10 @@ class HeartbeatLoop:
         if send_stopped:
             self.send_final_heartbeat(stop_reason=stop_reason)
 
-    def stop_loop(self, *, join_timeout: float | None = None) -> None:
+    def stop_loop(self, *, join_timeout: float | None = None) -> bool:
         """Stop the periodic heartbeats and wait for a tick in progress. Sends nothing.
+
+        Returns whether the loop's thread has exited (`True` too when it never ran).
 
         A tick is a heartbeat request, which can run for tens of seconds, an event flush and
         an update check. The final "stopped" heartbeat must not overtake that tick's
@@ -162,6 +164,11 @@ class HeartbeatLoop:
             if join_timeout is None:
                 join_timeout = max(self._interval, HEARTBEAT_INTERVAL_SECONDS) + 5
             self._thread.join(timeout=join_timeout)
+        return self.has_exited()
+
+    def has_exited(self) -> bool:
+        """Whether the loop's thread is gone: never started, or ended after a stop."""
+        return self._thread is None or not self._thread.is_alive()
 
     def send_final_heartbeat(
         self,

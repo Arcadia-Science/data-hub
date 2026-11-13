@@ -27,7 +27,7 @@ import requests
 import yaml
 from watchdog.events import DirDeletedEvent, DirMovedEvent, FileDeletedEvent
 
-from data_hub_watcher import runtime
+from data_hub_watcher import models, runtime
 from data_hub_watcher.api_client import DEFAULT_TIMEOUT, ApiError, DataHubClient
 from data_hub_watcher.config_io import save_config
 from data_hub_watcher.constants import (
@@ -51,6 +51,7 @@ from data_hub_watcher.models import (
     RunDetectionConfig,
     WatcherConfig,
 )
+from data_hub_watcher.monitor import FileMonitor
 from data_hub_watcher.runtime import WatcherSupervisor
 from data_hub_watcher.state import StateDB
 from data_hub_watcher.updater import UpgradeHandoff
@@ -968,6 +969,33 @@ class TestWaitingState:
         assert cfg.instrument.watch_directory == (env.tmp_path / "later").resolve()
 
 
+class _DeadShare:
+    """A stand-in for `watch_directory_problem` that blocks like a stat on a hung share."""
+
+    def __init__(self) -> None:
+        self.release = threading.Event()
+        self.calls: list[Path] = []
+
+    def install(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(models, "watch_directory_problem", self)
+
+    def __call__(self, path: Path) -> str | None:
+        self.calls.append(path)
+        # Longer than the tests wait for the check, so a check that waited would fail them.
+        self.release.wait(8)
+        return None
+
+
+@pytest.fixture
+def dead_share() -> Iterator[_DeadShare]:
+    share = _DeadShare()
+    try:
+        yield share
+    finally:
+        # Lets the thread of a look that is still blocked end.
+        share.release.set()
+
+
 class TestWatchFolderVanishesWhileWatching:
     """The watch folder disappears under a running watcher (watcher 1.4.3).
 
@@ -977,6 +1005,11 @@ class TestWatchFolderVanishesWhileWatching:
 
     PART_SIZE = 64
     PART_COUNT = 4
+
+    @pytest.fixture(autouse=True)
+    def _a_short_confirmation_wait(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Look again after 50 ms, not 3 s. The tests of the confirmation set their own."""
+        monkeypatch.setattr(runtime, "FOLDER_CONFIRM_DELAY_SECONDS", 0.05)
 
     @pytest.fixture(autouse=True)
     def _only_the_test_reports_the_folder_gone(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1125,19 +1158,29 @@ class TestWatchFolderVanishesWhileWatching:
         self, env: _Env, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         # A real heartbeat thread, ticking every second: its tick must only ask for the
-        # check, which `poll` runs on this thread.
+        # check. The decision, the teardown and the move are the `poll` thread's, and the
+        # look at the folder runs on a thread of its own (see `FolderProbe`), never on the
+        # heartbeat's.
         monkeypatch.setenv("DATA_HUB_WATCHER_HEARTBEAT_INTERVAL_SECONDS", "1")
-        checked_on: list[threading.Thread] = []
-        real_problem = runtime.watch_directory_problem
+        looked_on: list[threading.Thread] = []
+        torn_down_on: list[threading.Thread] = []
+        real_problem = models.watch_directory_problem
+        real_teardown = WatcherSupervisor._teardown_for_rebuild
 
         def spy(path: Path) -> str | None:
-            checked_on.append(threading.current_thread())
+            looked_on.append(threading.current_thread())
             return real_problem(path)
 
-        monkeypatch.setattr(runtime, "watch_directory_problem", spy)
+        def teardown(self_: WatcherSupervisor, **kwargs: Any) -> None:
+            torn_down_on.append(threading.current_thread())
+            real_teardown(self_, **kwargs)
+
+        monkeypatch.setattr(models, "watch_directory_problem", spy)
+        monkeypatch.setattr(WatcherSupervisor, "_teardown_for_rebuild", teardown)
         sup = env.supervisor()
         sup.start()
-        checked_on.clear()
+        looked_on.clear()
+        torn_down_on.clear()
 
         shutil.rmtree(env.watch_dir)
         deadline = time.monotonic() + 15
@@ -1145,8 +1188,9 @@ class TestWatchFolderVanishesWhileWatching:
             assert time.monotonic() < deadline, "the watcher never moved to waiting"
             sup.poll(timeout=0.5)
 
-        assert checked_on
-        assert set(checked_on) == {threading.current_thread()}
+        assert looked_on
+        assert not any(t.name == "heartbeat" for t in looked_on)
+        assert torn_down_on == [threading.current_thread()]
 
     def test_a_delete_event_for_the_folder_itself_asks_for_a_check_at_once(
         self, env: _Env, monkeypatch: pytest.MonkeyPatch
@@ -1339,6 +1383,315 @@ class TestWatchFolderVanishesWhileWatching:
             if e["event_type"] == EventType.WATCHER_STOPPED.value
         ]
         assert [e["message"] for e in stopped] == ["Watcher stopped by user"]
+
+    # ------------------------------------------------------------------
+    # The look at the folder can't hang the poll thread
+    # ------------------------------------------------------------------
+
+    def test_a_look_at_a_hung_share_does_not_hold_the_poll_thread(
+        self, env: _Env, monkeypatch: pytest.MonkeyPatch, dead_share: _DeadShare
+    ) -> None:
+        monkeypatch.setattr(runtime, "FOLDER_PROBE_TIMEOUT_SECONDS", 0.3)
+        sup = env.supervisor()
+        sup.start()
+        dead_share.install(monkeypatch)
+
+        started = time.monotonic()
+        self._tick(sup)
+
+        # The check gave up on the stat after 0.3 s, twice (the confirmation too), where an
+        # unbounded one would still be waiting.
+        assert time.monotonic() - started < 5
+        assert sup.rt is None
+        reason = f"watch_directory not responding: {env.watch_dir}"
+        assert sup.waiting_reason == reason
+        # Both looks waited for the same blocked thread: a share that stays hung costs one
+        # thread, not one for each look.
+        assert len(dead_share.calls) == 1
+        events = self._events(env, sup)
+        assert self._unavailable_reasons(events) == [reason]
+        assert self._started_messages(events) == ["Watcher started on test-host"]
+
+    def test_the_waiting_states_look_is_bounded_too(
+        self, env: _Env, monkeypatch: pytest.MonkeyPatch, dead_share: _DeadShare
+    ) -> None:
+        monkeypatch.setattr(runtime, "FOLDER_PROBE_TIMEOUT_SECONDS", 0.3)
+        sup = env.supervisor()
+        sup.start()
+        shutil.rmtree(env.watch_dir)
+        self._tick(sup)
+        assert sup.waiting_reason is not None and "not found" in sup.waiting_reason
+        dead_share.install(monkeypatch)
+
+        started = time.monotonic()
+        self._waiting_tick(sup)
+
+        assert time.monotonic() - started < 5
+        # Still waiting, now for another reason, which the heartbeat says too.
+        reason = f"watch_directory not responding: {env.watch_dir}"
+        assert sup.waiting_reason == reason
+        assert sup._waiting is not None
+        payload = sup._waiting.heartbeat._build_payload("waiting")
+        assert payload["status_reason"] == reason
+        assert self._unavailable_reasons(self._events(env, sup))[-1] == reason
+
+    def test_a_stop_during_the_wait_before_the_second_look_is_seen_at_once(
+        self, env: _Env, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(runtime, "FOLDER_CONFIRM_DELAY_SECONDS", 30)
+        sup = env.supervisor()
+        sup.start()
+        rt = sup.rt
+        shutil.rmtree(env.watch_dir)
+        sup._request_folder_check()
+        polling = threading.Thread(target=lambda: sup.poll(timeout=0), daemon=True)
+
+        started = time.monotonic()
+        polling.start()
+        time.sleep(0.3)
+        assert polling.is_alive(), "the check should be waiting to look again"
+        sup.request_stop()
+        polling.join(5)
+
+        assert not polling.is_alive()
+        assert time.monotonic() - started < 5
+        # The stop is the caller's to carry out: nothing was moved or torn down.
+        assert sup.rt is rt and sup.waiting_reason is None
+
+    # ------------------------------------------------------------------
+    # A runtime whose threads can't be cut off doesn't hold the move
+    # ------------------------------------------------------------------
+
+    def test_threads_blocked_on_the_share_do_not_hold_the_move_or_let_a_new_runtime_start(
+        self, env: _Env, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # An auto-mode upload an earlier start never finished, so the runtime's upload worker
+        # starts sending it as soon as it starts.
+        (env.watch_dir / "RUN009_big.csv").write_bytes(b"x" * 256)
+        cfg = env.write_config(_cfg(env.watch_dir))
+        state = env.state()
+        try:
+            state.record_report(
+                "RUN009", [], new_run=False, pending_relative_paths=["RUN009_big.csv"]
+            )
+        finally:
+            state.close()
+        env.client.request_upload_url.return_value = PresignedUploadResponse(
+            upload_url="https://s3.example/RUN009_big.csv",
+            s3_bucket="test-bucket",
+            s3_key="test-instrument/RUN009/RUN009_big.csv",
+            file_id=9,
+            expires_in=900,
+            already_uploaded=False,
+        )
+
+        # The PUT blocks like a read of a share that has hung. It ignores the cut-off, which
+        # only a read that returns can see, and fails once the share answers.
+        sending = threading.Event()
+        share_answers = threading.Event()
+
+        def put(session: Any, url: str, *, data: Any, **kwargs: Any) -> MagicMock:
+            sending.set()
+            share_answers.wait(30)
+            raise OSError("the share went away")
+
+        monkeypatch.setattr(requests.Session, "put", put)
+        monkeypatch.setattr(runtime, "WATCH_FOLDER_GONE_DRAIN_TIMEOUT_SECONDS", 0.2)
+        monkeypatch.setattr(runtime, "WATCH_FOLDER_GONE_JOIN_SECONDS", 0.3)
+        sup = env.supervisor(cfg)
+        sup.start()
+        old_rt = sup.rt
+        assert old_rt is not None
+        try:
+            assert sending.wait(10), "the upload never started"
+            shutil.rmtree(env.watch_dir)
+
+            started = time.monotonic()
+            self._tick(sup)
+
+            # The drain, then the wait after the cut-off, 0.2 s and 0.3 s here. Not for as
+            # long as the share takes.
+            assert time.monotonic() - started < 10
+            assert sup.rt is None
+            assert sup.waiting_reason is not None and "not found" in sup.waiting_reason
+            # The runtime's upload thread is still blocked, so its state DB stays open.
+            assert sup._cut_off == [old_rt]
+            assert old_rt.state_db._connections
+
+            # The folder is back, but the new runtime waits for the old threads to end.
+            env.watch_dir.mkdir()
+            self._waiting_tick(sup)
+            assert sup.rt is None and sup._waiting is not None
+            assert sup._cut_off == [old_rt]
+
+            share_answers.set()
+            worker = old_rt.upload_worker
+            assert worker is not None and worker._thread is not None
+            worker._thread.join(10)
+            assert not worker._thread.is_alive()
+            self._waiting_tick(sup)
+
+            new_rt = sup.rt
+            assert new_rt is not None and new_rt is not old_rt
+            assert sup._cut_off == []
+            assert not old_rt.state_db._connections
+        finally:
+            share_answers.set()
+
+    def test_a_config_rebuild_waits_for_the_threads_that_a_move_left_behind(
+        self, env: _Env, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        sup = env.supervisor()
+        sup.start()
+        rt = sup.rt
+        assert rt is not None
+        # A runtime that the move to waiting left behind, with a thread still running. Its
+        # monitor and heartbeat have stopped, as the move stops them before it gives up.
+        rt.heartbeat.stop_loop()
+        rt.monitor.stop()
+        blocked = threading.Event()
+        thread = threading.Thread(target=lambda: blocked.wait(30), daemon=True)
+        thread.start()
+        assert rt.upload_worker is not None
+        rt.upload_worker._thread = thread
+        sup.rt = None
+        sup._cut_off.append(rt)
+        sup._enter_waiting("watch_directory not found: x", started_message=None)
+        env.client.get_latest_config_revision.return_value = _revision(
+            2, _settings(env.watch_dir, file_patterns=["*.csv", "*.txt"])
+        )
+        threading.Timer(0.6, blocked.set).start()
+
+        started = time.monotonic()
+        _deliver(sup, 2)
+
+        # The config rebuild kept to the rule that no runtime starts next to an old upload
+        # thread: it waited for it.
+        assert time.monotonic() - started >= 0.5
+        assert sup._cut_off == []
+        assert sup.rt is not None and sup.applied_revision == 2
+
+    # ------------------------------------------------------------------
+    # Pending uploads in the window before the move
+    # ------------------------------------------------------------------
+
+    def test_a_pending_upload_is_kept_while_its_folder_is_gone_before_the_move(
+        self, env: _Env
+    ) -> None:
+        sup = env.supervisor()
+        sup.start()
+        rt = sup.rt
+        assert rt is not None
+        state = env.state()
+        try:
+            state.record_report(
+                "RUN010", [], new_run=False, pending_relative_paths=["RUN010_x.csv"]
+            )
+        finally:
+            state.close()
+        shutil.rmtree(env.watch_dir)
+        sup._folder_check_due.clear()
+
+        # What the upload worker does, in the time between the folder going and the check:
+        # every file in it looks missing.
+        rt.uploader.retry_pending_uploads()
+
+        state = env.state()
+        try:
+            [pending] = state.pending_uploads()
+            assert (pending.relative_path, pending.attempts) == ("RUN010_x.csv", 0)
+        finally:
+            state.close()
+        events = self._events(env, sup)
+        assert "pending_upload_missing" not in [
+            (e.get("details") or {}).get("kind") for e in events
+        ]
+        # The uploader asked for the check, so the move doesn't wait for the next tick.
+        assert sup._folder_check_due.is_set()
+        sup.poll(timeout=0)
+        assert sup.rt is None and sup.waiting_reason is not None
+
+    # ------------------------------------------------------------------
+    # One failed look is not enough
+    # ------------------------------------------------------------------
+
+    def test_a_folder_that_is_unavailable_for_a_moment_costs_the_watcher_nothing(
+        self, env: _Env, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(runtime, "FOLDER_CONFIRM_DELAY_SECONDS", 0.2)
+        sup = env.supervisor()
+        sup.start()
+        rt = sup.rt
+        real_problem = models.watch_directory_problem
+        answers = [f"watch_directory not found: {env.watch_dir}"]
+        looks: list[float] = []
+
+        def blip(path: Path) -> str | None:
+            looks.append(time.monotonic())
+            return answers.pop(0) if answers else real_problem(path)
+
+        monkeypatch.setattr(models, "watch_directory_problem", blip)
+
+        self._tick(sup)
+
+        # The first look found a problem and the one after the delay didn't: nothing moved,
+        # no upload was cut off, and no event or waiting heartbeat says otherwise.
+        assert len(looks) == 2
+        assert looks[1] - looks[0] >= 0.2
+        assert sup.rt is rt and sup.waiting_reason is None
+        statuses = [c.args[1]["status"] for c in env.client.send_heartbeat.call_args_list]
+        assert statuses == ["watching"]
+        events = self._events(env, sup)
+        assert self._unavailable_reasons(events) == []
+        assert self._started_messages(events) == ["Watcher started on test-host"]
+
+    def test_the_reason_reported_is_the_one_the_second_look_found(
+        self, env: _Env, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # On Windows, a folder that has been deleted is "delete pending" for a moment: it
+        # can still be statted and can't be listed ("Access is denied"), then it is gone.
+        sup = env.supervisor()
+        sup.start()
+        denied = f"watch_directory is not readable: {env.watch_dir} (Access is denied)"
+        gone = f"watch_directory not found: {env.watch_dir}"
+        answers = [denied, gone]
+        real_problem = models.watch_directory_problem
+        monkeypatch.setattr(
+            models,
+            "watch_directory_problem",
+            lambda path: answers.pop(0) if answers else real_problem(path),
+        )
+        shutil.rmtree(env.watch_dir)
+
+        self._tick(sup)
+
+        assert sup.waiting_reason == gone
+        self._waiting_tick(sup)
+        assert sup.waiting_reason == gone
+        # One event, with that reason, and no second one for "not readable".
+        assert self._unavailable_reasons(self._events(env, sup)) == [gone]
+
+    # ------------------------------------------------------------------
+    # Smaller things
+    # ------------------------------------------------------------------
+
+    def test_a_failure_of_the_folder_check_is_logged_as_that(
+        self, env: _Env, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        sup = env.supervisor()
+        sup.start()
+
+        def boom() -> None:
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(sup, "_check_folder", boom)
+        sup._request_folder_check()
+
+        with caplog.at_level(logging.ERROR, logger="data_hub_watcher.runtime"):
+            sup.poll(timeout=0)
+
+        assert "Checking the watch folder failed" in caplog.text
+        assert "config change" not in caplog.text
 
 
 def _record_handlers(monkeypatch: pytest.MonkeyPatch) -> list[Any]:

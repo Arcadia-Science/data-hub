@@ -592,6 +592,13 @@ class Uploader:
         value keep their previous behaviour. Production wiring (see
         ``runtime.build_runtime``) reads this from the per-instrument
         config.
+    watch_folder_unavailable:
+        Called before the uploader gives up on a file it can't find or counts a failed
+        attempt against it. Returns whether the watch folder itself is gone or not
+        answering (and asks the supervisor to check it), in which case the file isn't
+        missing, the folder is: the file's `pending_uploads` row or place in the
+        server's queue stays, and nothing is counted. `None` (unit tests) means
+        the folder is never gone.
     """
 
     def __init__(
@@ -606,6 +613,7 @@ class Uploader:
         watch_directory: Path,
         upload_parallelism: int = 1,
         stop_event: threading.Event | None = None,
+        watch_folder_unavailable: Callable[[], bool] | None = None,
     ) -> None:
         self._client = client
         self._state_db = state_db
@@ -614,6 +622,7 @@ class Uploader:
         self._instrument_id = instrument_id
         self._watcher_id = watcher_id
         self._watch_dir = watch_directory
+        self._watch_folder_unavailable = watch_folder_unavailable
         if upload_parallelism < 1:
             raise ValueError(f"upload_parallelism must be >= 1, got {upload_parallelism}")
         self._parallelism = upload_parallelism
@@ -903,6 +912,9 @@ class Uploader:
         path = waiting.path
         key = relative_key(path, self._watch_dir)
         if not _is_file(path):
+            if self._folder_is_gone():
+                # Not the file that is missing. It keeps waiting, and its row stays.
+                return
             self._stop_waiting(waiting)
             self._drop_missing_pending(key, waiting.run_id, path)
             return
@@ -923,6 +935,16 @@ class Uploader:
         # failed for another reason was reported or logged when it failed, and
         # its row stays for the next start's retry, as for any failed upload.
         self._stop_waiting(waiting)
+
+    def _folder_is_gone(self) -> bool:
+        """Whether the watch folder itself is gone or not answering, so a file isn't missing.
+
+        Asked before a file that can't be found is dropped, or counts against its attempts:
+        in the time between the folder disappearing and the supervisor moving to the
+        waiting state, every file in it looks missing. The supervisor is asked to check
+        the folder at once.
+        """
+        return self._watch_folder_unavailable is not None and self._watch_folder_unavailable()
 
     def _drop_missing_pending(self, relative_path: str, run_id: str, path: Path) -> None:
         """Give up on a pending upload whose file is no longer on disk."""
@@ -955,6 +977,9 @@ class Uploader:
         # for traversal the way server-supplied queue paths are.
         path = self._watch_dir / pending.relative_path
         if not _is_file(path):
+            if self._folder_is_gone():
+                # Not the file that is missing: the row stays for the next start.
+                return
             self._drop_missing_pending(pending.relative_path, pending.run_id, path)
             return
         try:
@@ -973,6 +998,9 @@ class Uploader:
             return
         if self._stop_requested():
             # An interrupted upload is not a failed attempt.
+            return
+        if self._folder_is_gone():
+            # Neither is one that failed because its folder went away.
             return
         attempts = self._state_db.bump_pending_upload_attempts(pending.relative_path)
         if attempts < MAX_PENDING_UPLOAD_ATTEMPTS:
@@ -1191,6 +1219,10 @@ class Uploader:
                 return
             reason = "upload_failed"
         else:
+            if self._folder_is_gone():
+                # Not the file that is missing. The request stays queued, and the next
+                # poll (or the next runtime) tries it again. No error, no attempt.
+                return
             ok = False
             reason = "missing"
             # Throttle: surface the visible "missing" error only on the
@@ -1220,6 +1252,10 @@ class Uploader:
             # A stop, or a config rebuild, cut the upload off. That isn't a
             # failed attempt, so it can't use up the last one and cancel the
             # request: the file stays queued for the next poll or runtime.
+            return
+        if self._folder_is_gone():
+            # An upload that failed because its folder went away isn't the file's
+            # failure either.
             return
 
         attempt_count += 1

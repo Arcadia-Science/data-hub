@@ -148,6 +148,26 @@ CONFIG_APPLY_DRAIN_TIMEOUT_SECONDS = 120
 # missing. The files that were cut off are uploaded again once the folder is back
 # (`pending_uploads` rows, or the server's queue).
 WATCH_FOLDER_GONE_DRAIN_TIMEOUT_SECONDS = 10
+# What the move to the waiting state gives each of the other waits that a folder on a
+# dead share can hold up, after that drain: the threads of uploads that were cut off
+# (`Uploader.abort`, which can't reach a thread that is blocked reading the share), the
+# file monitor's observer, and the heartbeat tick in progress. A thread that is still
+# running then is left behind and the watcher waits without it, instead of keeping the
+# `poll` thread, which is the one that sees a stop, in the wait. The next runtime does
+# not start until the cut-off upload threads have exited.
+WATCH_FOLDER_GONE_JOIN_SECONDS = 5
+# A look at the watch folder (`FolderProbe`) runs on its own thread and is given this
+# long. A stat or a listing on a share that has hung can block for the SMB timeout
+# (about a minute on Windows) or, on a hard NFS mount, forever, and the `poll` thread
+# has to stay free to see a stop. A look that takes longer counts as a problem:
+# "not responding".
+FOLDER_PROBE_TIMEOUT_SECONDS = 10
+# A running watcher moves to the waiting state only when a second look, this long
+# after the first one that found a problem, finds one too. A share that drops and
+# comes back within seconds, or a folder that is still being deleted, costs it nothing:
+# the move cuts off every upload in progress and rescans the folder at the next start.
+# The reason reported is the one of the second look.
+FOLDER_CONFIRM_DELAY_SECONDS = 3
 # While waiting with the watch folder present, a start that keeps failing is
 # retried after 1, 2, 4 and 8 heartbeat intervals, then every 15 minutes, so a
 # persistent failure doesn't rebuild the runtime and log a traceback every

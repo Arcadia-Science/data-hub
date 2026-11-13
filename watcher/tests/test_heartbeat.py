@@ -293,6 +293,24 @@ class TestHeartbeatStop:
 
         assert loop._stop_event.is_set()
 
+    def test_stop_loop_says_whether_the_thread_has_exited(self) -> None:
+        loop, thread = self._loop_with_a_tick_in_progress(MagicMock())
+
+        # A tick that outlasts the wait is left behind, which the move to the waiting state
+        # needs to know before it closes the state database.
+        assert loop.stop_loop(join_timeout=1) is False
+        assert loop.has_exited() is False
+
+        thread.is_alive.return_value = False
+        assert loop.stop_loop(join_timeout=1) is True
+        assert loop.has_exited() is True
+
+    def test_a_loop_that_never_ran_has_exited(self) -> None:
+        loop = _make_loop(MagicMock(), MagicMock(spec=EventReporter))
+
+        assert loop.has_exited() is True
+        assert loop.stop_loop(join_timeout=1) is True
+
     def test_stop_without_the_final_heartbeat_is_for_a_rebuild(self) -> None:
         # The config rebuild stops the loop and starts a new one: the watcher never stops.
         client = MagicMock()
