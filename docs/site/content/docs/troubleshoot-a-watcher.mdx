@@ -112,7 +112,7 @@ On an instrument in **auto** mode, **Request upload** needs watcher 1.2.1 or lat
 
 Watchers older than 1.2.0 can’t upload files larger than 5 GB, and Data Hub refuses the upload instead of letting it fail partway. Update the watcher to 1.2.0 or later, which uploads large files in parts.
 
-### An upload was cut off by a restart or an update
+### An upload was cut off by a restart or an update [#an-upload-was-cut-off-by-a-restart-or-an-update]
 
 Watcher 1.2.1 and later retry an automatic upload that didn’t finish the next time the watcher starts, on up to three starts. Two events tell you when it stops trying:
 

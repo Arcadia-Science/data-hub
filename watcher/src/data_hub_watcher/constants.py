@@ -70,6 +70,26 @@ WATCHER_LOG_DIR = _resolve_watcher_log_dir()
 SUPPORTED_ENVIRONMENTS: tuple[str, ...] = ("staging", "production", "preview")
 
 HEARTBEAT_INTERVAL_SECONDS = 60
+# The `status_reason` on the final `stopped` heartbeat when the stop was caused by
+# Windows shutting down or restarting. A server that knows the value keeps the
+# instrument's requested uploads queued, for the watcher to upload after the PC
+# starts again. The server's `SYSTEM_SHUTDOWN_STATUS_REASON` must say the same.
+SYSTEM_SHUTDOWN_STATUS_REASON = "system_shutdown"
+# Windows waits for the service to stop, at a restart or a shutdown, for the
+# preshutdown timeout: 10 s by default from Windows 10 build 15063 and 180 s
+# before it. A stop for Windows shutting down limits itself to about 8 s on any
+# build, so it can't hold the restart up. It is 7 s for the stop itself, which
+# starts when the service loop notices the stop, up to 1 s after Windows sends
+# it. Every wait in it is short: uploads are cut off first (`Uploader.abort`),
+# each of the four joins (file monitor's observer and stability checker, upload
+# worker, a heartbeat in progress) takes at most 1 s, and the final heartbeat
+# and the event flush share what is left of the 7 s, each request with a
+# connect timeout of at most 2 s and a read timeout of at most 3 s. A file
+# whose upload was cut off is uploaded again at the next start: it keeps its
+# `pending_uploads` row, or stays in the server's queue.
+SYSTEM_SHUTDOWN_STOP_BUDGET_SECONDS = 7
+SYSTEM_SHUTDOWN_JOIN_SECONDS = 1
+SYSTEM_SHUTDOWN_HTTP_TIMEOUT: tuple[float, float] = (2, 3)  # (connect, read) seconds
 # Kept separate from ``HEARTBEAT_INTERVAL_SECONDS`` so the poll cadence can
 # diverge now that uploads no longer ride the heartbeat tick.
 UPLOAD_POLL_INTERVAL_SECONDS = 60

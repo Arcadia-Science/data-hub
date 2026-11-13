@@ -1249,6 +1249,73 @@ class TestOldServer:
         assert "config_sync_failed" not in kinds
 
 
+class TestStopMarksASystemShutdown:
+    """`WatcherSupervisor.stop` sends the final heartbeat, running or waiting, and marks it
+    when Windows is shutting down (the server then keeps requested uploads queued)."""
+
+    @staticmethod
+    def _final_heartbeat(env: _Env) -> dict[str, Any]:
+        payload = env.client.send_heartbeat.call_args.args[1]
+        assert payload["status"] == "stopped"
+        return payload
+
+    @pytest.mark.parametrize("waiting", [False, True], ids=["running", "waiting"])
+    def test_a_system_shutdown_marks_the_final_heartbeat(self, env: _Env, waiting: bool) -> None:
+        sup = env.supervisor(env.write_config(_cfg(env.tmp_path / "later")) if waiting else None)
+        sup.start()
+        assert (sup.waiting_reason is not None) is waiting
+
+        sup.stop(stopped_message="Service stopped: Windows is shutting down", system_shutdown=True)
+
+        assert self._final_heartbeat(env)["status_reason"] == "system_shutdown"
+
+    @pytest.mark.parametrize("waiting", [False, True], ids=["running", "waiting"])
+    def test_any_other_stop_does_not(self, env: _Env, waiting: bool) -> None:
+        sup = env.supervisor(env.write_config(_cfg(env.tmp_path / "later")) if waiting else None)
+        sup.start()
+        assert (sup.waiting_reason is not None) is waiting
+
+        sup.stop(stopped_message="Service stopped")
+
+        assert "status_reason" not in self._final_heartbeat(env)
+
+    @pytest.mark.parametrize("waiting", [False, True], ids=["running", "waiting"])
+    def test_a_system_shutdown_sends_the_last_requests_with_a_short_timeout(
+        self, env: _Env, waiting: bool
+    ) -> None:
+        # Windows ends the service within about 10 s, so the final heartbeat and the events
+        # can't wait for the client's usual 5 s connect and 30 s read.
+        sup = env.supervisor(env.write_config(_cfg(env.tmp_path / "later")) if waiting else None)
+        sup.start()
+        assert (sup.waiting_reason is not None) is waiting
+
+        sup.stop(stopped_message="Service stopped: Windows is shutting down", system_shutdown=True)
+
+        for send in (env.client.send_heartbeat, env.client.send_events):
+            connect, read = send.call_args.kwargs["timeout"]
+            assert 0 < connect <= 2
+            assert 0 < read <= 3
+        assert self._final_heartbeat(env)["status"] == "stopped"
+        stopped = [
+            e
+            for c in env.client.send_events.call_args_list
+            for e in c.args[1]
+            if e["event_type"] == "watcher_stopped"
+        ]
+        assert [e["message"] for e in stopped] == ["Service stopped: Windows is shutting down"]
+
+    @pytest.mark.parametrize("waiting", [False, True], ids=["running", "waiting"])
+    def test_any_other_stop_keeps_the_clients_timeout(self, env: _Env, waiting: bool) -> None:
+        sup = env.supervisor(env.write_config(_cfg(env.tmp_path / "later")) if waiting else None)
+        sup.start()
+        assert (sup.waiting_reason is not None) is waiting
+
+        sup.stop(stopped_message="Service stopped")
+
+        assert env.client.send_heartbeat.call_args.kwargs["timeout"] is None
+        assert env.client.send_events.call_args.kwargs["timeout"] is None
+
+
 class TestHeartbeatRevisionFields:
     def _loop(self, client: MagicMock, **kwargs: Any) -> HeartbeatLoop:
         return HeartbeatLoop(

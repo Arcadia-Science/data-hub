@@ -88,6 +88,8 @@ You don’t need to deregister a watcher just because its token was revoked. Re-
 - In **manual** upload mode, every file waits in this queue until someone requests it.
 - In **auto** upload mode, files upload on their own, and the queue covers files that need another try. This works with watcher 1.2.1 and later; older watchers in auto mode never pick up requests, so the file shows **Uploading** and stays that way.
 
+When a watcher stops cleanly and shows as **Stopped**, Data Hub cancels its pending requests and the files go back to `detected`, because nothing is left to upload them. Restarting the instrument PC, or a full shutdown, is the exception with watcher 1.4.1 and later: the requests stay queued for the watcher to upload after the PC starts again, and Data Hub cancels them only if no heartbeat arrives for about 15 minutes. See [When the PC restarts or shuts down](/docs/windows-service#when-the-pc-restarts-or-shuts-down).
+
 ## Approving manual uploads [#approving-manual-uploads]
 
 For instruments in [manual upload mode](/docs/concepts#upload-mode), the watcher reports runs but waits for server approval before uploading file bytes. Approve a file with **Upload**, or choose **Dismiss** to tell the watcher not to upload it. To act on several files at once, select them in the files table and use the bar that appears.

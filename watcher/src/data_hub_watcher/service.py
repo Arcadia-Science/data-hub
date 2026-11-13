@@ -567,8 +567,19 @@ def _repair_upgrade_worker_if_missing(config_dir: Path) -> None:
         )
 
 
-def _run_service_loop(stop_event: threading.Event, sm: Any) -> None:
+def _run_service_loop(
+    stop_event: threading.Event,
+    sm: Any,
+    system_shutdown: threading.Event | None = None,
+) -> None:
     """Run the watcher service loop until *stop_event* is set.
+
+    *system_shutdown* is set, before *stop_event*, when the stop is Windows
+    shutting down or restarting. The final ``stopped`` heartbeat then says so
+    (the server keeps requested uploads queued across the restart), the
+    ``watcher_stopped`` event reads "Service stopped: Windows is shutting down",
+    and the stop is limited to about 7 s (see ``stop_runtime``), because Windows
+    ends the service when its preshutdown timeout passes.
 
     This is the testable body of ``DataHubWatcherService.SvcDoRun``.
     Extracted as a top-level function so unit tests can exercise the
@@ -602,7 +613,7 @@ def _run_service_loop(stop_event: threading.Event, sm: Any) -> None:
         attach_servicemanager_handler,
         setup_file_logging,
     )
-    from data_hub_watcher.runtime import WatcherSupervisor
+    from data_hub_watcher.runtime import ShutdownReason, WatcherSupervisor
 
     # Wire up file logging + Windows Event Log routing BEFORE any
     # other work, so a registry-read or env-load failure on the very
@@ -741,8 +752,18 @@ def _run_service_loop(stop_event: threading.Event, sm: Any) -> None:
     # event message reflects whether this is an upgrade-driven restart
     # or a normal stop. Shared with the CLI ``watch`` path via
     # ``classify_shutdown`` so the two entrypoints can't drift.
-    decision = supervisor.classify_shutdown()
-    supervisor.stop(stopped_message=decision.stopped_message)
+    is_system_shutdown = system_shutdown is not None and system_shutdown.is_set()
+    if is_system_shutdown:
+        # The PC is going down, so nothing restarts the process: this wins over an
+        # auto-update restart that was pending at the same time, and the next boot
+        # loads the new version anyway.
+        decision = ShutdownReason(
+            is_upgrade_restart=False,
+            stopped_message=f"{supervisor.role} stopped: Windows is shutting down",
+        )
+    else:
+        decision = supervisor.classify_shutdown()
+    supervisor.stop(stopped_message=decision.stopped_message, system_shutdown=is_system_shutdown)
 
     if decision.is_upgrade_restart:
         logger.info("%s restarting to load upgraded watcher", SERVICE_DISPLAY_NAME)
@@ -777,15 +798,60 @@ def _create_service_class() -> type | None:
         def __init__(self, args: list[str]) -> None:
             super().__init__(args)
             self._stop_event = threading.Event()
+            # Set before ``_stop_event`` when Windows is shutting down or restarting.
+            self._system_shutdown = threading.Event()
 
         def SvcDoRun(self) -> None:
             import servicemanager  # type: ignore[import-untyped]
 
-            _run_service_loop(self._stop_event, servicemanager)
+            _run_service_loop(self._stop_event, servicemanager, self._system_shutdown)
 
-        def SvcStop(self) -> None:
+        def _begin_stop(self, *, system_shutdown: bool = False) -> None:
+            """Tell the SCM the stop has begun and let the service loop run it."""
+            if system_shutdown:
+                # Before the stop event, so the loop reads it once it sees the stop.
+                self._system_shutdown.set()
             self.ReportServiceStatus(ws.SERVICE_STOP_PENDING)
             self._stop_event.set()
+
+        def SvcStop(self) -> None:
+            self._begin_stop()
+
+        # A restart or a full shutdown of the PC reaches the service as
+        # SERVICE_CONTROL_PRESHUTDOWN. Windows sends that before it sends
+        # SERVICE_CONTROL_SHUTDOWN to the other services, and by default the SCM sends
+        # the shutdown control with no regard to service dependencies, so the network
+        # can already be stopping while the watcher sends its final heartbeat. A
+        # service that accepts preshutdown and stops is not sent the shutdown control,
+        # so the class has no ``SvcShutdown``.
+        #
+        # pywin32 311's ``GetAcceptedControls`` reports stop for a class that has a
+        # ``SvcStop``, pause and continue for one that has both ``SvcPause`` and
+        # ``SvcContinue``, and shutdown for one that has a ``SvcShutdown``. It sends a
+        # control it has no method for to ``SvcOtherEx``, so this takes the
+        # ``GetAcceptedControls`` override below and the check in ``SvcOtherEx``. The
+        # service reports what it accepts each time it runs, so a PC upgraded in place
+        # has this from the restart into the new wheel, with no ``service reinstall``.
+        #
+        # Windows waits for the service to stop for the preshutdown timeout, and a wait
+        # hint can't raise it: 10 s by default from Windows 10 build 15063, and 180 s
+        # before that. So a stop for a system shutdown limits itself to about 8 s on
+        # any build: the service loop notices the stop within a second unless it is
+        # busy with config work, then ``stop_runtime`` has a budget of 7 s. It
+        # cuts uploads off first, joins for at most 1 s each, and sends the final
+        # heartbeat and the events with a short HTTP timeout (constants
+        # ``SYSTEM_SHUTDOWN_*``). An upload cut off is retried at the next start.
+        # ``service stop`` has no such limit.
+        def GetAcceptedControls(self) -> int:
+            return super().GetAcceptedControls() | ws.SERVICE_ACCEPT_PRESHUTDOWN
+
+        def SvcOtherEx(self, control: int, event_type: int, data: Any) -> None:
+            if control == ws.SERVICE_CONTROL_PRESHUTDOWN:
+                # Control handlers should return quickly: start the stop, then log.
+                self._begin_stop(system_shutdown=True)
+                logger.info("%s stopping: Windows is shutting down", SERVICE_DISPLAY_NAME)
+                return None
+            return super().SvcOtherEx(control, event_type, data)
 
     return DataHubWatcherService
 
