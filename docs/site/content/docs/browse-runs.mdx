@@ -96,6 +96,12 @@ While files are uploading, queued, or processing, the run page checks for update
 
 Use **Claim** on the run details page to attribute yourself. You can claim or unclaim your own user only, so nobody else can attribute a run to you. Claims show on the run and appear in “ran by” filters on Home and elsewhere. API tokens can’t claim runs; a signed-in person has to.
 
+### Asked after a download [#claim-prompt]
+
+When you download a run archive or a file from a run nobody has claimed, Data Hub asks **Did you run this?** in a card near the bottom of the page. Choose **I ran this** to claim the run, or **Not me** so that browser doesn’t ask about the run again. Downloading several runs from a runs list asks once about all the unclaimed ones, and **I ran these** claims them all.
+
+An AI assistant connected to the [MCP server](/docs/mcp) learns the same thing when it downloads from an unclaimed run, so it can ask you and claim the run for you.
+
 ## Download files [#download-files]
 
 From the files table you can:

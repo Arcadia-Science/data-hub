@@ -69,6 +69,8 @@ export type FileDownloadLookup =
       contentType: string | null;
       filename: string;
       ok: true;
+      // Internal ID of the file's run.
+      runUuid: string;
       s3Bucket: string;
       s3Key: string;
     }
@@ -117,6 +119,7 @@ export async function lookupFileForDownload(
     category: file.category,
     contentType: file.contentType,
     filename: file.filename,
+    runUuid: file.instrumentRunId,
     s3Bucket: file.s3Bucket,
     s3Key: file.s3Key,
   };

@@ -322,6 +322,59 @@ describe("MCP Server (HTTP)", () => {
     expect(result.content[0].text.toLowerCase()).toContain("not found");
   });
 
+  // The assistant offers `claim_run` when a run it downloads from is
+  // unclaimed, so the download tool has to name the run and its claim status.
+  it("get_file_download_url names the file's run and says whether anyone has claimed it", async () => {
+    const db = getTestDb();
+    const claimRunId = "mcp-claim-status-run";
+    const [run] = await db
+      .insert(schema.instrumentRuns)
+      .values({ instrumentId, runId: claimRunId, source: "watcher" })
+      .returning({ id: schema.instrumentRuns.id });
+    const [file] = await db
+      .insert(schema.files)
+      .values({
+        instrumentRunId: run.id,
+        filename: "claim.csv",
+        relativePath: "claim.csv",
+        status: "uploaded",
+        s3Bucket: "test-raw-data-bucket",
+        s3Key: `${instrumentId}/${claimRunId}/claim.csv`,
+      })
+      .returning({ id: schema.files.id });
+
+    try {
+      const before = await callTool("get_file_download_url", {
+        fileId: file.id,
+      });
+      expect(before.isError).toBeFalsy();
+      expect(JSON.parse(before.content[0].text)).toMatchObject({
+        instrumentId,
+        runId: claimRunId,
+        unclaimed: true,
+      });
+
+      const claimed = await callTool("claim_run", {
+        instrumentId,
+        runId: claimRunId,
+      });
+      expect(claimed.isError).toBeFalsy();
+
+      const after = await callTool("get_file_download_url", {
+        fileId: file.id,
+      });
+      expect(after.isError).toBeFalsy();
+      expect(JSON.parse(after.content[0].text).unclaimed).toBe(false);
+    } finally {
+      // Later tests count this instrument's runs. Files don't cascade with
+      // their run, so they go first.
+      await db.delete(schema.files).where(eq(schema.files.id, file.id));
+      await db
+        .delete(schema.instrumentRuns)
+        .where(eq(schema.instrumentRuns.id, run.id));
+    }
+  });
+
   // A run created as ` RUN1 ` is stored as `RUN1`, so a tool call has to find
   // the run whether or not the ID has spaces at either end.
   it("get_run finds a run when the ID has spaces around it", async () => {

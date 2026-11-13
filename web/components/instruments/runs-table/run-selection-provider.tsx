@@ -28,6 +28,9 @@ export interface RunRef {
   instrumentId: string;
   runId: string;
   stats: RunStats;
+  // Nobody has claimed the run, and it isn't deleted. A download asks the
+  // person whether they ran it.
+  unclaimed: boolean;
 }
 
 // Explicit context interface: state / actions / meta. Consumers never touch

@@ -13,6 +13,10 @@ export interface AnalyticsEvents {
     granted: boolean;
   };
   archive_downloaded: SurfaceEvent;
+  // Sent from the browser, so they have no `user_id`. `runs` counts the runs
+  // the prompt asks about or answers for.
+  claim_prompt_answered: { answer: "claimed" | "dismissed"; runs: number };
+  claim_prompt_shown: { runs: number };
   comment_added: SurfaceEvent;
   comment_deleted: SurfaceEvent;
   comment_edited: SurfaceEvent;

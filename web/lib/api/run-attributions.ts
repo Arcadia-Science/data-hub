@@ -4,10 +4,33 @@
 // user never claimed) stores nothing and leaves the time alone, matching
 // the repeat-report rule in `recordDetectedFiles`.
 
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { touchRuns } from "@/lib/api/touch-runs";
 import { db } from "@/lib/db";
-import { runAttributions } from "@/lib/db/schema";
+import { instrumentRuns, runAttributions } from "@/lib/db/schema";
+
+export interface RunClaimStatus {
+  instrumentId: string;
+  runId: string;
+  // Nobody has claimed the run, and it isn't deleted.
+  unclaimed: boolean;
+}
+
+/** Looks a run up by its internal ID. Returns null when there is no such run. */
+export async function getRunClaimStatus(
+  runUuid: string
+): Promise<RunClaimStatus | null> {
+  const [row] = await db
+    .select({
+      instrumentId: instrumentRuns.instrumentId,
+      runId: instrumentRuns.runId,
+      unclaimed: sql<boolean>`${instrumentRuns.deletedAt} is null and not exists (select 1 from ${runAttributions} where ${runAttributions.runId} = ${instrumentRuns.id})`,
+    })
+    .from(instrumentRuns)
+    .where(eq(instrumentRuns.id, runUuid))
+    .limit(1);
+  return row ?? null;
+}
 
 export async function claimRuns(
   runIds: readonly string[],

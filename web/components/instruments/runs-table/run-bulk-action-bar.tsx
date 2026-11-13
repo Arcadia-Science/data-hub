@@ -14,6 +14,12 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useArchiveDownload } from "@/hooks/use-archive-download";
+import { useClaimPrompt } from "@/hooks/use-claim-prompt";
+import { buildArchiveHref } from "@/lib/runs/archive-href";
+import {
+  type AttributionMethod,
+  fanOutAttribution,
+} from "@/lib/runs/attribution-requests";
 import { cn } from "@/lib/utils";
 
 import { type RunRef, useRunSelection } from "./run-selection-provider";
@@ -31,29 +37,6 @@ import { type RunRef, useRunSelection } from "./run-selection-provider";
 // delete so we never offer a button that would succeed on some rows and
 // silently skip others.
 // ---------------------------------------------------------------------------
-
-type AttributionMethod = "PUT" | "DELETE";
-
-async function fanOutAttribution(
-  method: AttributionMethod,
-  refs: RunRef[]
-): Promise<{ ok: number; failed: number }> {
-  const results = await Promise.all(
-    refs.map(async (ref) => {
-      const url = `/api/v1/instruments/${ref.instrumentId}/runs/${encodeURIComponent(
-        ref.runId
-      )}/attributions/me`;
-      try {
-        const res = await fetch(url, { method });
-        return res.ok;
-      } catch {
-        return false;
-      }
-    })
-  );
-  const ok = results.filter(Boolean).length;
-  return { ok, failed: results.length - ok };
-}
 
 async function fanOutUpload(
   refs: RunRef[]
@@ -89,6 +72,7 @@ export function RunBulkActionBar() {
   const { state, actions, meta } = useRunSelection();
   const router = useRouter();
   const { actions: archiveActions } = useArchiveDownload();
+  const claimPrompt = useClaimPrompt();
   const { state: sidebarState, isMobile } = useSidebar();
   const [isPending, startTransition] = useTransition();
   const [reprocessOpen, setReprocessOpen] = useState(false);
@@ -154,9 +138,7 @@ export function RunBulkActionBar() {
       for (const ref of refs) {
         try {
           await archiveActions.start({
-            archiveUrl: `/api/v1/instruments/${ref.instrumentId}/runs/${encodeURIComponent(
-              ref.runId
-            )}/download-archive`,
+            archiveUrl: buildArchiveHref(ref.instrumentId, ref.runId),
             runId: ref.runId,
             defaultFilename: `${ref.runId}.zip`,
           });
@@ -168,6 +150,7 @@ export function RunBulkActionBar() {
     toast.success(
       `Preparing ${refs.length} ${refs.length === 1 ? "archive" : "archives"}`
     );
+    claimPrompt.ask(refs);
   }
 
   const deleteTargets = refs.map((r) => ({
