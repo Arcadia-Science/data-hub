@@ -23,6 +23,7 @@ import {
   seedNotifications,
   seedRunAttributions,
   seedRunComments,
+  seedRunNotebookLinks,
   seedRuns,
   seedSlackChannelConfig,
   seedTeammates,
@@ -77,7 +78,7 @@ export async function seedWorkspace(db: Db): Promise<SeededWorkspace> {
   console.log("Seeding teammate users…");
   const teammates = await seedTeammates(db);
 
-  console.log("Seeding run comments + attributions…");
+  console.log("Seeding run comments, attributions, and notebook links…");
   const commentAuthors = [
     { id: userId, name: SEED_ADMIN_NAME },
     ...teammates.map((t) => ({ id: t.id, name: t.name })),
@@ -88,6 +89,7 @@ export async function seedWorkspace(db: Db): Promise<SeededWorkspace> {
     ...teammates.slice(0, 8).map((t) => t.id),
   ];
   await seedRunAttributions(db, runs, attributionUserIds);
+  await seedRunNotebookLinks(db, runs, attributionUserIds);
 
   console.log("Seeding archive_jobs…");
   await seedArchiveJobs(db, runs, userId);

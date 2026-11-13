@@ -46,7 +46,7 @@ Fetch the OpenAPI document (no auth required):
 curl https://datahub.example.com/api/v1/openapi.json
 ```
 
-The document covers the integrator surface: instruments, runs, comments, files, watchers, archive jobs, search, and `POST /notifications/dispatch`. Routes that only the dashboard uses are left out: `/tokens`, `/users`, `/feedback`, `/settings/*`, and the notification inbox. The MCP transport is documented separately.
+The document covers the integrator surface: instruments, runs, comments, lab notebook links, files, watchers, archive jobs, search, and `POST /notifications/dispatch`. Routes that only the dashboard uses are left out: `/tokens`, `/users`, `/feedback`, `/settings/*`, and the notification inbox. The MCP transport is documented separately.
 
 ## Actions taken by a token [#actions-taken-by-a-token]
 
@@ -54,6 +54,7 @@ A token acts under its own name, not as a person, so responses name the token wh
 
 - A comment posted by a token has `user: null` and a `token` object with the token’s `id` and `name`. A comment posted by a person has `token: null`.
 - A run deleted by a token has `deleted_by_token` set, alongside `deleted_at`.
+- A lab notebook link added or last edited by a token has `created_by_token` or `updated_by_token` set, and `created_by` or `updated_by` null.
 
 Read both fields when you display who did something. See [How a token acts](/docs/manage-tokens#how-a-token-acts).
 

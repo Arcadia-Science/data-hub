@@ -127,6 +127,7 @@ You can also run `npm run db:seed` on its own — it calls the schema-driven `cl
 | `files` | 1–4 per run | Mix of `uploaded` / `completed` / `failed`. Fixture instruments (qPCR, gel doc, both SpectraMax readers) render the real fixture bytes in `LOCAL_S3_MIRROR`; other instruments use production-shaped synthetic filenames (see [Working with file bytes locally](#working-with-file-bytes-locally)) |
 | `run_comments` | multi-author threads | Q&A / notes across Alice + teammates; richer threads on ~⅓ of runs |
 | `run_attributions` | 1 per run | Rotated across Alice + teammates |
+| `run_notebook_links` | 0–2 per run | Every other run links to a synthetic Notion or ELN page, every sixth run to two; some links have labels |
 | `archive_jobs` | 3 | One each of `ready` / `building` / `failed` |
 | `watcher_release_config` | 1 (singleton) | `1.0.0 / 0.1.0 / false` (matches seeded watcher version) |
 
