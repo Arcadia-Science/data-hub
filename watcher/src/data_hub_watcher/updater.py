@@ -25,6 +25,7 @@ import json
 import logging
 import sys
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -37,6 +38,7 @@ from data_hub_watcher.constants import (
     DEFAULT_CHECK_INTERVAL_TICKS,
     DEFAULT_IDLE_TICKS_REQUIRED,
     HEARTBEAT_INTERVAL_SECONDS,
+    UPGRADE_HANDOFF_TIMEOUT_SECONDS,
     WATCHER_VERSION,
 )
 from data_hub_watcher.events import EventReporter, EventType, WatcherEvent
@@ -54,6 +56,7 @@ from data_hub_watcher.self_update import (
 from data_hub_watcher.state import StateDB
 from data_hub_watcher.upgrade_worker import (
     build_pkg_spec,
+    clear_upgrade_request,
     detect_installed_extras,
     write_upgrade_request,
 )
@@ -317,7 +320,8 @@ class Updater:
     Construction is intentionally side-effect-free — wiring happens in
     :mod:`data_hub_watcher.runtime`. State held: two counters (idle
     ticks observed, ticks-since-last-check), an ``_upgrade_in_progress``
-    flag that gates concurrent dispatches, and references to the
+    flag that gates concurrent dispatches, the time and target of an
+    upgrade handed to the Windows worker, and references to the
     collaborators.
     """
 
@@ -334,6 +338,7 @@ class Updater:
         updater_cfg: UpdaterConfig | None = None,
         upgrade_runner: Callable[..., Any] | None = None,
         upgrade_executor: Callable[[Callable[[], None]], None] | None = None,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._client = client
         self._reporter = reporter
@@ -378,6 +383,15 @@ class Updater:
         # safety.
         self._ticks_since_check = c.check_interval_ticks if c.check_on_start else 0
         self._upgrade_in_progress = False
+        # The clock is a parameter so tests can move it past the hand-off window.
+        self._clock = clock
+        # Set by `_apply_via_worker`, once `schtasks` has accepted the hand-off,
+        # and cleared by `on_tick` when the window ends. The worker stops the
+        # service from outside, so no in-process flag says the upgrade is under
+        # way: this is what keeps every later tick from dispatching the same
+        # upgrade again. Read and written under `_lock`.
+        self._handed_off_at: float | None = None
+        self._handed_off_target: str | None = None
         # Per-target memo for the "ineligible install method" refusal
         # path: we want one ``UPDATE_FAILED`` event per *new* server
         # target so admins can spot lab PCs stuck on a dev install
@@ -406,6 +420,7 @@ class Updater:
         on ticks where we did call ``/update-check``, which lets tests
         assert on the decision without monkeypatching logging.
         """
+        expired_target: str | None = None
         with self._lock:
             if self._cfg.environment == "preview":
                 # Preview deployments are short-lived URL-suffixed builds
@@ -424,17 +439,78 @@ class Updater:
                     reason="upgrade subprocess already in progress",
                 )
 
+            if self._handed_off_at is not None:
+                if self._handoff_in_progress():
+                    # The Windows upgrade worker has the upgrade and is about
+                    # to stop this service. Skip the check, as above, so the
+                    # same upgrade isn't dispatched again meanwhile.
+                    return UpdateAttemptResult(
+                        attempted=False,
+                        succeeded=None,
+                        reason="upgrade handed to the worker",
+                    )
+                # The window is over and this service is still running: the
+                # worker never stopped it. Forget the hand-off, report it
+                # below, and go on with this tick as if there had been none.
+                expired_target = self._handed_off_target
+                self._handed_off_at = None
+                self._handed_off_target = None
+
             if self._counters.last_files_uploaded == 0:
                 self._idle_ticks += 1
             else:
                 self._idle_ticks = 0
 
             self._ticks_since_check += 1
-            if self._ticks_since_check < self._check_interval_ticks:
-                return None
-            self._ticks_since_check = 0
+            check_due = self._ticks_since_check >= self._check_interval_ticks
+            if check_due:
+                self._ticks_since_check = 0
 
+        if expired_target is not None:
+            # Outside the lock: it sends the event.
+            self._report_handoff_expired(expired_target)
+        if not check_due:
+            return None
         return self._check_and_apply()
+
+    def upgrade_handed_off(self) -> bool:
+        """Whether an upgrade was handed to the Windows worker and its window is open.
+
+        The window is `UPGRADE_HANDOFF_TIMEOUT_SECONDS` from the hand-off. The
+        worker stops the service from outside, so a stop that arrives in the
+        window is the worker's: `WatcherSupervisor.stop` sends it as an update
+        stop. This only reads: `on_tick` is what ends the window.
+        """
+        with self._lock:
+            return self._handed_off_at is not None and self._handoff_in_progress()
+
+    def _handoff_in_progress(self) -> bool:
+        """The window check behind `upgrade_handed_off` and `on_tick`. Hold `_lock`."""
+        assert self._handed_off_at is not None
+        return self._clock() - self._handed_off_at < UPGRADE_HANDOFF_TIMEOUT_SECONDS
+
+    def _report_handoff_expired(self, target: str) -> None:
+        """The worker didn't stop the service: report it and clear what the hand-off wrote."""
+        logger.warning(
+            "The upgrade worker did not stop the service within %d s of the hand-off "
+            "for %s; allowing a new attempt",
+            UPGRADE_HANDOFF_TIMEOUT_SECONDS,
+            target,
+        )
+        # As in the `schtasks` failure branch: the next attempt starts from a
+        # clean slate, and a worker that runs late finds no request. The marker
+        # goes with `_emit_failure`.
+        clear_upgrade_request(self._config_dir)
+        self._emit_failure(
+            target,
+            "worker_did_not_stop_service",
+            message=(
+                f"Watcher upgrade to {target} failed: the upgrade worker did not stop "
+                f"the service within {UPGRADE_HANDOFF_TIMEOUT_SECONDS // 60} minutes"
+            ),
+            # Only a uv-tool install on Windows hands an upgrade to the worker.
+            extra={"install_method": InstallMethod.UV_TOOL.value, "via_worker": True},
+        )
 
     # ------------------------------------------------------------------
     # Internals
@@ -806,8 +882,6 @@ class Updater:
             # specific reason that points at the recovery command.
             logger.warning("schtasks /Run failed: %s", exc)
             clear_upgrade_marker(self._config_dir)
-            from data_hub_watcher.upgrade_worker import clear_upgrade_request
-
             clear_upgrade_request(self._config_dir)
             self._emit_failure(
                 target,
@@ -831,6 +905,14 @@ class Updater:
                 {"method": method.value, "via_worker": True},
             )
 
+        # Remember the hand-off, so no tick dispatches this upgrade again while
+        # the worker gets to stopping the service (see `on_tick`), and so a stop
+        # in that time is reported as an update stop. Only here: a refusal or a
+        # failed ``schtasks`` above hands nothing over.
+        with self._lock:
+            self._handed_off_at = self._clock()
+            self._handed_off_target = target
+
         # The worker stops the service before invoking ``uv``, so we
         # don't expect to be alive much longer. The success /
         # final-failure event is emitted from the next process's
@@ -852,6 +934,7 @@ class Updater:
         target: str,
         reason: str,
         *,
+        message: str | None = None,
         extra: dict[str, Any] | None = None,
     ) -> None:
         details: dict[str, Any] = {
@@ -864,7 +947,7 @@ class Updater:
         self._reporter.queue_event(
             WatcherEvent(
                 event_type=EventType.UPDATE_FAILED,
-                message=f"Watcher upgrade to {target} failed: {reason}",
+                message=message or f"Watcher upgrade to {target} failed: {reason}",
                 details=details,
             )
         )

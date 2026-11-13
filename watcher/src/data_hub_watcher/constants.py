@@ -75,6 +75,11 @@ HEARTBEAT_INTERVAL_SECONDS = 60
 # instrument's requested uploads queued, for the watcher to upload after the PC
 # starts again. The server's `SYSTEM_SHUTDOWN_STATUS_REASON` must say the same.
 SYSTEM_SHUTDOWN_STATUS_REASON = "system_shutdown"
+# How long the updater remembers that it handed an upgrade to the Windows upgrade
+# worker. The worker stops the service within seconds, so a service still running
+# after this long was not stopped by it. Until then the updater dispatches nothing
+# else, and a stop is sent as `auto_update`.
+UPGRADE_HANDOFF_TIMEOUT_SECONDS = 600
 # Windows waits for the service to stop, at a restart or a shutdown, for the
 # preshutdown timeout: 10 s by default from Windows 10 build 15063 and 180 s
 # before it. A stop for Windows shutting down limits itself to about 8 s on any

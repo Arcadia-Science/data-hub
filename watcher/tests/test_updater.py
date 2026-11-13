@@ -26,6 +26,7 @@ from data_hub_watcher.constants import (
     DEFAULT_CHECK_INTERVAL_TICKS,
     DEFAULT_IDLE_TICKS_REQUIRED,
     DEFAULT_INDEX_URL,
+    UPGRADE_HANDOFF_TIMEOUT_SECONDS,
 )
 from data_hub_watcher.events import EventReporter, EventType
 from data_hub_watcher.heartbeat import WatcherCounters
@@ -129,6 +130,7 @@ def _make_updater(
     upgrade_runner: Any = None,
     updater_cfg: UpdaterConfig | None = None,
     upgrade_executor: Callable[[Callable[[], None]], None] = _inline_executor,
+    clock: Callable[[], float] = time.monotonic,
 ) -> _UpdaterHarness:
     cfg = cfg or _make_config(tmp_path)
     client = client or MagicMock()
@@ -167,6 +169,7 @@ def _make_updater(
         ),
         upgrade_runner=upgrade_runner,
         upgrade_executor=upgrade_executor,
+        clock=clock,
     )
     return _UpdaterHarness(
         updater=updater,
@@ -176,6 +179,19 @@ def _make_updater(
         counters=counters,
         request_restart=request_restart,
     )
+
+
+class _FakeClock:
+    """A clock the test moves, for the window after an upgrade is handed to the worker."""
+
+    def __init__(self) -> None:
+        self.now = 1_000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
 
 
 def _success_completed_process() -> subprocess.CompletedProcess[str]:
@@ -1410,6 +1426,172 @@ class TestUpdaterWorkerDispatch:
         assert "schtasks_stderr" in details
         assert details["schtasks_returncode"] == 1
         assert "service reinstall" in details["reason"]
+
+    def test_a_dispatched_upgrade_is_not_dispatched_again_while_the_worker_has_it(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The worker stops the service from outside, so nothing in this process says the
+        # upgrade is under way. Without a memory of the hand-off, each later update check
+        # dispatched the same upgrade again: a second request and `UPDATE_STARTED`, and a
+        # second `schtasks /Run` for the worker to find the service already stopped.
+        clock = _FakeClock()
+        h = _make_updater(tmp_path, clock=clock)
+        h.client.get_update_info.return_value = _info(latest="9.9.9")
+        self._force_windows_uv_tool(monkeypatch)
+        trigger_calls: list[None] = []
+        monkeypatch.setattr(
+            "data_hub_watcher.scheduled_task.trigger_upgrade_task",
+            lambda **_kw: trigger_calls.append(None),
+        )
+        h.counters.last_files_uploaded = 0
+        assert h.updater.upgrade_handed_off() is False
+        for _ in range(3):
+            h.updater.on_tick()
+        assert trigger_calls == [None]
+        assert h.updater.upgrade_handed_off() is True
+
+        # Many more ticks, enough for several update checks, until just before the window ends.
+        h.client.get_update_info.reset_mock()
+        results = []
+        for _ in range(12):
+            clock.advance((UPGRADE_HANDOFF_TIMEOUT_SECONDS - 1) / 12)
+            results.append(h.updater.on_tick())
+
+        assert trigger_calls == [None]
+        h.client.get_update_info.assert_not_called()
+        assert all(
+            r is not None and r.attempted is False and r.reason == "upgrade handed to the worker"
+            for r in results
+        )
+        emitted = [c.args[0] for c in h.reporter.queue_event.call_args_list]
+        assert [e.event_type for e in emitted] == [EventType.UPDATE_STARTED]
+        assert h.updater.upgrade_handed_off() is True
+
+    def test_a_service_still_running_when_the_window_ends_reports_it_and_may_dispatch_again(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from data_hub_watcher.upgrade_worker import UPGRADE_REQUEST_FILENAME
+
+        clock = _FakeClock()
+        h = _make_updater(tmp_path, clock=clock)
+        h.client.get_update_info.return_value = _info(latest="9.9.9")
+        self._force_windows_uv_tool(monkeypatch)
+        trigger_calls: list[None] = []
+        monkeypatch.setattr(
+            "data_hub_watcher.scheduled_task.trigger_upgrade_task",
+            lambda **_kw: trigger_calls.append(None),
+        )
+        h.counters.last_files_uploaded = 0
+        for _ in range(3):
+            h.updater.on_tick()
+        assert trigger_calls == [None]
+        config_dir = tmp_path / ".data-hub"
+        assert (config_dir / UPGRADE_REQUEST_FILENAME).exists()
+        assert (config_dir / UPGRADE_MARKER_FILENAME).exists()
+        h.reporter.queue_event.reset_mock()
+
+        # The window is over and this service was never stopped.
+        clock.advance(UPGRADE_HANDOFF_TIMEOUT_SECONDS)
+        assert h.updater.upgrade_handed_off() is False
+        h.updater.on_tick()
+
+        emitted = [c.args[0] for c in h.reporter.queue_event.call_args_list]
+        assert [e.event_type for e in emitted] == [EventType.UPDATE_FAILED]
+        assert emitted[0].details["reason"] == "worker_did_not_stop_service"
+        assert emitted[0].details["target_version"] == "9.9.9"
+        assert emitted[0].details["via_worker"] is True
+        # What the hand-off wrote is cleared, as after a failed `schtasks /Run`.
+        assert not (config_dir / UPGRADE_REQUEST_FILENAME).exists()
+        assert not (config_dir / UPGRADE_MARKER_FILENAME).exists()
+        h.reporter.flush.assert_called()
+
+        # The hand-off is forgotten, so checks go on as usual: the next one that is due
+        # dispatches again. That is a hand-off with a window of its own, and the failure
+        # is not reported a second time.
+        h.client.get_update_info.reset_mock()
+        h.updater.on_tick()
+        h.updater.on_tick()
+        h.client.get_update_info.assert_called_once()
+        assert trigger_calls == [None, None]
+        assert h.updater.upgrade_handed_off() is True
+        types = [c.args[0].event_type for c in h.reporter.queue_event.call_args_list]
+        assert types == [EventType.UPDATE_FAILED, EventType.UPDATE_STARTED]
+
+    def test_a_schtasks_failure_hands_nothing_over(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The upgrade never reached the worker, so the next update check may try it
+        # again, and a stop meanwhile is not an update stop.
+        from data_hub_watcher.scheduled_task import ScheduledTaskError
+
+        h = _make_updater(tmp_path)
+        h.client.get_update_info.return_value = _info(latest="9.9.9")
+        self._force_windows_uv_tool(monkeypatch)
+        attempts: list[None] = []
+
+        def refuse(**_kw: Any) -> None:
+            attempts.append(None)
+            raise ScheduledTaskError(
+                "schtasks /Run failed",
+                argv=["schtasks.exe", "/Run"],
+                stderr="ERROR",
+                returncode=1,
+            )
+
+        monkeypatch.setattr("data_hub_watcher.scheduled_task.trigger_upgrade_task", refuse)
+        h.counters.last_files_uploaded = 0
+        for _ in range(3):
+            h.updater.on_tick()
+        assert attempts == [None]
+        assert h.updater.upgrade_handed_off() is False
+
+        results = [h.updater.on_tick() for _ in range(3)]
+
+        assert attempts == [None, None]
+        assert results[-1] is not None and results[-1].reason == "scheduled task trigger failed"
+        types = [c.args[0].event_type for c in h.reporter.queue_event.call_args_list]
+        assert types.count(EventType.UPDATE_FAILED) == 2
+
+    def test_a_refused_dispatch_hands_nothing_over(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        h = _make_updater(tmp_path)
+        h.client.get_update_info.return_value = _info(latest="9.9.9")
+        self._force_windows_uv_tool(monkeypatch)
+        monkeypatch.setattr(
+            "data_hub_watcher.updater._resolve_uv_executable",
+            lambda override=None, prefix=None: (None, [r"C:\uv.exe"]),
+        )
+        monkeypatch.setattr(
+            "data_hub_watcher.scheduled_task.trigger_upgrade_task",
+            lambda **_kw: pytest.fail("a refused dispatch must not trigger the task"),
+        )
+        h.counters.last_files_uploaded = 0
+
+        for _ in range(3):
+            h.updater.on_tick()
+
+        assert h.updater.upgrade_handed_off() is False
+
+    def test_an_in_process_upgrade_is_not_a_hand_off(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # That path has a flag of its own, and ends in `request_upgrade_restart`.
+        runner = MagicMock(return_value=_success_completed_process())
+        h = _make_updater(tmp_path, upgrade_runner=runner)
+        h.client.get_update_info.return_value = _info(latest="9.9.9")
+        monkeypatch.setattr("data_hub_watcher.updater.sys.platform", "linux")
+        monkeypatch.setattr(
+            "data_hub_watcher.updater.detect_install_method", lambda: InstallMethod.UV_TOOL
+        )
+        h.counters.last_files_uploaded = 0
+
+        for _ in range(3):
+            h.updater.on_tick()
+
+        runner.assert_called_once()
+        h.request_restart.assert_called_once_with("9.9.9")
+        assert h.updater.upgrade_handed_off() is False
 
     def test_posix_uv_tool_still_uses_in_process_path(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
