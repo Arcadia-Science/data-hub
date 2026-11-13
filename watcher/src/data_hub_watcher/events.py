@@ -20,6 +20,12 @@ a database migration. Known ``kind`` values, with their per-kind
   ``status_code`` is 0 when no HTTP status came back.
   ``details = {"kind", "run_id", "operation": "create"|"update",
   "status_code", "error", "file_count"}``.
+* ``state_write_failed`` -- the server accepted a run report, but writing it
+  to the state database failed (a full disk, say). The watcher retries the
+  write on the backoff of a failed report, and uploads nothing and sends
+  nothing more for the run until it works.
+  Only the first of a row of failed writes for a run is emitted.
+  ``details = {"kind", "run_id", "error", "file_count"}``.
 * ``config_sync_failed`` -- the startup ``PUT /watchers/:id/config``
   call raised ``ApiError``. ``details = {"kind", "checksum", "error"}``.
 * ``stability_timeout`` -- a file kept changing past the configured

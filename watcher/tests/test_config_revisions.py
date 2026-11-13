@@ -385,7 +385,9 @@ class TestRebuildDuringPartUploads:
         cfg = env.write_config(_cfg(env.watch_dir))
         state = env.state()
         try:
-            state.record_pending_uploads("RUN009", ["RUN009_big.csv"])
+            state.record_report(
+                "RUN009", [], new_run=False, pending_relative_paths=["RUN009_big.csv"]
+            )
         finally:
             state.close()
 

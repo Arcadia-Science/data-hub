@@ -21,6 +21,7 @@ from __future__ import annotations
 import hashlib
 import re
 from pathlib import Path
+from typing import Literal
 
 import pytest
 
@@ -922,57 +923,53 @@ def test_pending_upload_for_a_file_that_vanished_is_dropped_at_the_next_start(
     assert s3_puts(proxy) == []
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=KnownBugStillPresent,
-    reason="ENG-2111: a watcher killed after the run report and "
-    "before the pending record never uploads those files",
-)
 @pytest.mark.covers("upload.crash_after_report->retried_after_restart")
+@pytest.mark.parametrize("initial_scan", ["full", "new-only"])
 def test_watcher_killed_after_the_run_report_uploads_the_files_after_a_restart(
+    initial_scan: Literal["full", "new-only"],
     watcher: WatcherFactory,
     server: ServerView,
     proxy: FaultProxy,
     instrument_id: str,
     watch_dir: Path,
 ) -> None:
-    pc = watcher()
+    # Under `new-only` the first start baselines the folder. The file that the kill leaves
+    # unrecorded arrives after that, so the next start must not take it for backlog.
+    pc = watcher(initial_scan=initial_scan)
     start_watching(pc, server)
 
     # The watcher's next write of a `pending_uploads` row is made to take minutes, so it sits
-    # exactly between "the run was reported" and "the files were recorded as pending".
+    # exactly between "the server has the run" and "the watcher has remembered it".
     with pc.stall_writes("pending_uploads"):
         content = write_run(watch_dir, RUN, {"small.csv": SMALL})["small.csv"]
         # The run is reported ...
         reported = server.wait_for_file(instrument_id, RUN, SMALL_PATH, status="detected")
         assert reported.size_bytes == SMALL
         # ... and the watcher is stuck in the write. The wait is for the database's write lock
-        # to be held without a break, and not for a row of the watcher's own: a fix that writes
-        # the pending record in the same transaction as the reported run leaves no committed row
-        # of either to wait for, and the watcher is stuck all the same. (A fix that writes the
-        # pending record before it reports the run would be stuck before the report: the wait
-        # for the server's row above would then fail, loudly, and the scenario needs a second
-        # look.)
+        # to be held without a break, and not for a row of the watcher's own: the run, its
+        # files and the pending record are written in one transaction, so the watcher holds the
+        # lock with no committed row of any of them to wait for. (A fix that wrote the pending
+        # record before it reports the run would be stuck before the report: the wait for the
+        # server's row above would then fail, loudly, and the scenario needs a second look.)
         pc.wait_for_state_db_busy(hold_seconds=1.0)
         pc.kill()
-    # The crash left nothing to retry, and the upload had not started.
+    # The kill left no pending row and no remembered run, and the upload had not started.
     assert pending(pc) == []
+    assert pc.state_query("SELECT run_id FROM runs") == []
+    assert pc.state_query("SELECT relative_path FROM detected_files") == []
     assert calls(proxy, "POST", "/request-upload-url") == []
 
-    # Intended: the files of a run the watcher reported are not forgotten, so an auto-mode
-    # watcher that starts again uploads them. Today nothing does.
+    # The write was cut short and left nothing, so the next start finds the file again in its
+    # initial scan, reports the run again (the server keeps its row) and uploads the file.
     pc.start()
-    with known_bug():
-        server.wait_for_uploaded(instrument_id, RUN, SMALL_PATH, content=content, timeout=12)
+    server.wait_for_uploaded(instrument_id, RUN, SMALL_PATH, content=content, timeout=12)
+    wait_for_pending(pc, [])
+    assert pc.state_query("SELECT relative_path FROM baseline_files") == []
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=KnownBugStillPresent,
-    reason="ENG-2111: a pending record that can't be written, with no "
-    "crash at all, loses the file in the same way",
+@pytest.mark.covers(
+    "upload.pending_record_failed->retried_after_restart", "event.state_write_failed->emitted"
 )
-@pytest.mark.covers("upload.pending_record_failed->retried_after_restart")
 def test_a_pending_record_that_cannot_be_written_does_not_lose_the_file(
     watcher: WatcherFactory,
     server: ServerView,
@@ -983,23 +980,56 @@ def test_a_pending_record_that_cannot_be_written_does_not_lose_the_file(
     pc = watcher()
     start_watching(pc, server)
 
-    # Writing the `pending_uploads` row fails (as it would on a full disk). Today that happens
-    # after the run has been reported and remembered. Nothing crashes: the watcher reports the
-    # failed callback and carries on. (Whether the run has been reported by then is not checked,
-    # so the scenario holds for a fix that writes the pending row first.)
+    # Writing the `pending_uploads` row fails (as it would on a full disk). The server has the
+    # run by then, and the watcher records the run, its files and the pending row in one
+    # transaction, so the failed write leaves none of them. Nothing crashes: the watcher
+    # reports the failed write, retries it, and uploads nothing until it has gone through.
     with pc.fail_writes("pending_uploads", "disk or database is full"):
         content = write_run(watch_dir, RUN, {"small.csv": SMALL})["small.csv"]
         failed = server.wait_for_event(
-            pc.watcher_id, event_type="error", kind="stable_callback_failed", timeout=30
+            pc.watcher_id, event_type="error", kind="state_write_failed", timeout=30
         )
         assert "disk or database is full" in failed.details["error"]
+        assert failed.details["run_id"] == RUN
         assert pc.is_running()
         assert calls(proxy, "POST", "/request-upload-url") == []
+        # The watcher stops before there is room again, so the retry never gets to write.
+        pc.stop()
     assert pending(pc) == []
+    assert pc.state_query("SELECT run_id FROM runs") == []
+    assert pc.state_query("SELECT relative_path FROM detected_files") == []
 
-    # Intended: as after a crash, the files of a reported run are not forgotten, and the next
-    # start uploads them. Today the run is remembered as handled, with nothing to say that its
-    # file was never uploaded.
-    pc.restart()
-    with known_bug():
-        server.wait_for_uploaded(instrument_id, RUN, SMALL_PATH, content=content, timeout=12)
+    # As after a kill, the next start finds the file again, reports the run again and uploads it.
+    pc.start()
+    server.wait_for_uploaded(instrument_id, RUN, SMALL_PATH, content=content, timeout=12)
+    wait_for_pending(pc, [])
+
+
+@pytest.mark.covers("upload.pending_record_failed->retried_in_process")
+def test_a_pending_record_that_cannot_be_written_is_retried_by_the_running_watcher(
+    watcher: WatcherFactory,
+    server: ServerView,
+    proxy: FaultProxy,
+    instrument_id: str,
+    watch_dir: Path,
+) -> None:
+    pc = watcher()
+    start_watching(pc, server)
+
+    with pc.fail_writes("pending_uploads", "disk or database is full"):
+        content = write_run(watch_dir, RUN, {"small.csv": SMALL})["small.csv"]
+        server.wait_for_event(
+            pc.watcher_id, event_type="error", kind="state_write_failed", timeout=30
+        )
+        assert calls(proxy, "POST", "/request-upload-url") == []
+        assert pc.state_query("SELECT run_id FROM runs") == []
+
+    # There is room again. The watcher's next retry (every 5 s at first, then longer) writes the
+    # run, the file and the pending row, and uploads the file, with no restart and no new file.
+    server.wait_for_uploaded(instrument_id, RUN, SMALL_PATH, content=content, timeout=60)
+    wait_for_pending(pc, [])
+    assert pc.state_query("SELECT run_id FROM runs") == [(RUN,)]
+    assert pc.state_query("SELECT relative_path FROM detected_files") == [(SMALL_PATH,)]
+    # The server was told about the run once: the retry only wrote.
+    assert len(calls(proxy, "POST", f"/instruments/{instrument_id}/runs")) == 1
+    assert calls(proxy, "PATCH", f"/instruments/{instrument_id}/runs/{RUN}") == []
