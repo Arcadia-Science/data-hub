@@ -718,7 +718,7 @@ def test_a_deleted_run_refuses_updates_and_catches_up_after_it_is_restored(
     assert len(error_events(server, pc.watcher_id, "run_report_failed")) == 1
 
 
-@pytest.mark.covers("run.deleted->rereport_conflict")
+@pytest.mark.covers("run.deleted->rereport_conflict", "event.run_report_failed->emitted")
 def test_reporting_a_deleted_run_again_is_refused_and_attaches_no_files(
     watcher: WatcherFactory,
     server: ServerView,
@@ -760,6 +760,14 @@ def test_reporting_a_deleted_run_again_is_refused_and_attaches_no_files(
     )
     assert status == 409, "the server accepted a report of a deleted run"
     assert server.file(instrument_id, "RUN001", "RUN001/second.csv") is None
+
+    # The operator sees the refusal in the Event Log, in the server's own words.
+    failed = server.wait_for_event(pc.watcher_id, event_type="error", kind="run_report_failed")
+    assert failed.details["run_id"] == "RUN001"
+    assert failed.details["operation"] == "create"
+    assert failed.details["status_code"] == 409
+    assert failed.message.startswith("Failed to report run RUN001: ")
+    assert "deleted on Data Hub" in failed.message
 
 
 # The test server is `next start`, which decodes a route parameter once. On Vercel, Next.js decodes

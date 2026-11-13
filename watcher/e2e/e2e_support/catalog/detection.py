@@ -148,7 +148,8 @@ TRANSITIONS: tuple[Transition, ...] = (
         "run.deleted->rereport_conflict",
         "A watcher whose state database has no record of a run an admin deleted (for example "
         "after `state forget`) reports that run again. The server refuses the report with a 409, "
-        "as it refuses an update to the run, and attaches none of the report's files.",
+        "as it refuses an update to the run, and attaches none of the report's files. The watcher "
+        "records a `run_report_failed` event for it (`operation: create`, `status_code: 409`).",
     ),
     xfail_bug(
         MACHINE,
