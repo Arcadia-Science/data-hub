@@ -799,6 +799,43 @@ class TestPollUploadQueueAttemptCap:
         uploader.poll_upload_queue()
         assert reporter_mock.queue_event.call_count == 2
 
+    def test_a_file_requested_again_right_after_its_cancellation_gets_three_fresh_attempts(
+        self,
+        uploader: Uploader,
+        mock_client: MagicMock,
+    ) -> None:
+        """A file requested again after its cancel gets three fresh attempts.
+
+        The queue keeps listing the file, which models a re-request before any
+        poll goes by without it. The successful cancel removed the file's
+        attempt record, so the first poll after the re-request is a new first
+        attempt, not an immediate cancel from the old record.
+        """
+        mock_client.get_upload_queue.return_value = self._ghost_queue()
+        reporter_mock = cast(MagicMock, uploader._reporter)
+
+        # The first give-up: three misses, then the cancel succeeds.
+        for _ in range(MAX_QUEUE_FILE_ATTEMPTS):
+            uploader.poll_upload_queue()
+        mock_client.cancel_upload_request.assert_called_once_with(1)
+        assert 1 not in uploader._queue_attempts
+        assert reporter_mock.queue_event.call_count == 1
+
+        # Requested again while the queue still lists it. This poll is a new
+        # first attempt: it reports the missing file again and is not cancelled.
+        uploader.poll_upload_queue()
+        assert uploader._queue_attempts[1].count == 1
+        assert mock_client.cancel_upload_request.call_count == 1
+        assert reporter_mock.queue_event.call_count == 2
+        assert reporter_mock.report_error.call_count == 1
+
+        # Two more misses complete the three fresh attempts, and the second cancel follows.
+        for _ in range(MAX_QUEUE_FILE_ATTEMPTS - 1):
+            uploader.poll_upload_queue()
+        assert mock_client.cancel_upload_request.call_count == 2
+        assert reporter_mock.report_error.call_count == 2
+        assert 1 not in uploader._queue_attempts
+
     def test_cancel_failure_is_retried_next_poll(
         self,
         uploader: Uploader,

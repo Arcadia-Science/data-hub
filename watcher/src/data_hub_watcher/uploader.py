@@ -645,9 +645,10 @@ class Uploader:
         # Per-file upload-queue attempt bookkeeping, keyed by server file id.
         # Bounds retries before giving up (see ``_process_queued_file``) and
         # doubles as the emit-once throttle for the missing-file error. Pruned
-        # each poll, so a re-requested id starts fresh. ``poll_upload_queue``
-        # replaces the dict before it starts the file tasks and returns only
-        # after they finish, and each task touches only its own file id.
+        # each poll, and a successful cancel also removes the file's record, so
+        # a re-requested id starts fresh. ``poll_upload_queue`` replaces the
+        # dict before it starts the file tasks and returns only after they
+        # finish, and each task touches only its own file id.
         self._queue_attempts: dict[int, _QueueAttempt] = {}
         # The ids in the queue the last poll saw, so an unchanged queue is not
         # logged at INFO on every poll. Used by `poll_upload_queue` alone.
@@ -1242,7 +1243,9 @@ class Uploader:
         Reverts the file to ``detected`` server-side so it leaves the upload
         queue. On API failure the attempt record is left in place so the next
         poll retries the cancel; the give-up event fires only on a successful
-        cancel, so a retried cancel doesn't re-flood the log.
+        cancel, so a retried cancel doesn't re-flood the log. After a successful
+        cancel the record is removed, so a file requested again right away starts
+        over with ``MAX_QUEUE_FILE_ATTEMPTS`` attempts.
         """
         try:
             self._client.cancel_upload_request(qf.id)
@@ -1256,6 +1259,7 @@ class Uploader:
             self._bump_errors()
             return
 
+        self._queue_attempts.pop(qf.id, None)
         logger.warning(
             "Gave up on queued file after %d attempts: %s (reason=%s)",
             MAX_QUEUE_FILE_ATTEMPTS,
