@@ -329,7 +329,7 @@ class TestStopRuntimeForASystemShutdown:
         # The final heartbeat is marked, and it and the flush share one deadline that is the
         # budget from when the stop began.
         heartbeat_kwargs = parts.heartbeat.stop.call_args.kwargs
-        assert heartbeat_kwargs["system_shutdown"] is True
+        assert heartbeat_kwargs["stop_reason"] == "system_shutdown"
         deadline = heartbeat_kwargs["deadline"]
         assert before + SYSTEM_SHUTDOWN_STOP_BUDGET_SECONDS <= deadline
         assert deadline <= after + SYSTEM_SHUTDOWN_STOP_BUDGET_SECONDS
@@ -352,7 +352,7 @@ class TestStopRuntimeForASystemShutdown:
         ]
         parts.monitor.stop.assert_called_once_with()
         parts.upload_worker.stop.assert_called_once_with(timeout=UPLOAD_WORKER_STOP_TIMEOUT_SECONDS)
-        parts.heartbeat.stop.assert_called_once_with(system_shutdown=False, deadline=None)
+        parts.heartbeat.stop.assert_called_once_with(stop_reason=None, deadline=None)
         parts.reporter.flush.assert_called_once_with(deadline=None)
 
     @pytest.mark.parametrize(
@@ -388,8 +388,27 @@ class TestStopRuntimeForASystemShutdown:
         stop_runtime(shutdown_rt, stopped_message="Service stopped", system_shutdown=True)
         stop_runtime(other_rt, stopped_message="Service stopped")
 
-        assert shutdown_parts.heartbeat.stop.call_args.kwargs["system_shutdown"] is True
-        assert other_parts.heartbeat.stop.call_args.kwargs["system_shutdown"] is False
+        assert shutdown_parts.heartbeat.stop.call_args.kwargs["stop_reason"] == "system_shutdown"
+        assert other_parts.heartbeat.stop.call_args.kwargs["stop_reason"] is None
+
+    def test_the_final_heartbeat_carries_the_reason_it_is_given(self) -> None:
+        rt, parts = self._runtime()
+
+        stop_runtime(rt, stopped_message="Service stopped", stop_reason="auto_update")
+
+        assert parts.heartbeat.stop.call_args.kwargs["stop_reason"] == "auto_update"
+        # A stop for an update is not a shutdown: no abort, and no short limit.
+        assert "uploader.abort" not in self._steps(parts)
+        assert parts.heartbeat.stop.call_args.kwargs["deadline"] is None
+
+    def test_a_system_shutdown_wins_over_a_reason_it_is_given(self) -> None:
+        rt, parts = self._runtime()
+
+        stop_runtime(
+            rt, stopped_message="Service stopped", system_shutdown=True, stop_reason="auto_update"
+        )
+
+        assert parts.heartbeat.stop.call_args.kwargs["stop_reason"] == "system_shutdown"
 
     def test_a_shutdown_without_an_upload_worker_is_still_limited(self) -> None:
         rt, parts = self._runtime()

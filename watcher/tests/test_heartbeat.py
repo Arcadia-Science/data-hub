@@ -287,7 +287,7 @@ class TestHeartbeatStopWithADeadline:
         client = MagicMock()
         loop, thread = self._loop_with_a_tick_in_progress(client)
 
-        loop.stop(system_shutdown=True, deadline=time.monotonic() + 7)
+        loop.stop(stop_reason="system_shutdown", deadline=time.monotonic() + 7)
 
         thread.join.assert_called_once_with(timeout=SYSTEM_SHUTDOWN_JOIN_SECONDS)
         connect, read = client.send_heartbeat.call_args.kwargs["timeout"]
@@ -327,29 +327,36 @@ class TestHeartbeatStopWithADeadline:
 
 
 class TestFinalHeartbeatReason:
-    """The final ``stopped`` heartbeat says when Windows shutting down caused the stop.
+    """The final ``stopped`` heartbeat says when the watcher stops to come back.
 
     The server keeps the instrument's requested uploads queued for a ``stopped``
-    heartbeat with ``status_reason: system_shutdown``, and cancels them for any
-    other ``stopped`` heartbeat. The value is the contract with the server, so the
-    tests spell it out.
+    heartbeat with ``status_reason: system_shutdown`` (Windows shutting down) or
+    ``auto_update`` (an update being installed), and cancels them for any other
+    ``stopped`` heartbeat. The values are the contract with the server, so the
+    tests spell them out.
     """
 
     @staticmethod
-    def _final_payload(**stop_kwargs: bool) -> dict[str, object]:
+    def _final_payload(stop_reason: str | None = None) -> dict[str, object]:
         client = MagicMock()
         loop = _make_loop(client, MagicMock(spec=EventReporter))
 
-        loop.stop(**stop_kwargs)
+        loop.stop(stop_reason=stop_reason)
 
         client.send_heartbeat.assert_called_once()
         return client.send_heartbeat.call_args.args[1]
 
     def test_a_stop_caused_by_a_system_shutdown_carries_the_reason(self) -> None:
-        payload = self._final_payload(system_shutdown=True)
+        payload = self._final_payload("system_shutdown")
 
         assert payload["status"] == "stopped"
         assert payload["status_reason"] == "system_shutdown"
+
+    def test_a_stop_for_an_update_carries_the_reason(self) -> None:
+        payload = self._final_payload("auto_update")
+
+        assert payload["status"] == "stopped"
+        assert payload["status_reason"] == "auto_update"
 
     def test_any_other_stop_carries_no_reason(self) -> None:
         payload = self._final_payload()
@@ -357,10 +364,11 @@ class TestFinalHeartbeatReason:
         assert payload["status"] == "stopped"
         assert "status_reason" not in payload
 
-    def test_a_heartbeat_that_is_not_the_final_one_never_carries_it(self) -> None:
+    @pytest.mark.parametrize("reason", ["system_shutdown", "auto_update"])
+    def test_a_heartbeat_that_is_not_the_final_one_never_carries_it(self, reason: str) -> None:
         client = MagicMock()
         loop = _make_loop(client, MagicMock(spec=EventReporter))
 
-        loop._send_heartbeat(status="watching", system_shutdown=True)
+        loop._send_heartbeat(status="watching", stop_reason=reason)
 
         assert "status_reason" not in client.send_heartbeat.call_args.args[1]

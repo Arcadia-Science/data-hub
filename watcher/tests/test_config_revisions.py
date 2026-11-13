@@ -1316,6 +1316,90 @@ class TestStopMarksASystemShutdown:
         assert env.client.send_events.call_args.kwargs["timeout"] is None
 
 
+class TestStopMarksAnUpdate:
+    """`WatcherSupervisor.stop` marks the final heartbeat `auto_update` for an update.
+
+    The server then keeps the instrument's requested uploads queued for the watcher to
+    upload after it starts again. An update is under way when an in-process update was
+    installed (the `watch` CLI, or a pip-installed service) or when the updater handed an
+    upgrade to the Windows worker, which stops the service from outside.
+    """
+
+    @staticmethod
+    def _started(env: _Env, *, waiting: bool) -> WatcherSupervisor:
+        sup = env.supervisor(env.write_config(_cfg(env.tmp_path / "later")) if waiting else None)
+        sup.start()
+        assert (sup.waiting_reason is not None) is waiting
+        return sup
+
+    @staticmethod
+    def _hand_off_to_the_worker(sup: WatcherSupervisor, monkeypatch: pytest.MonkeyPatch) -> None:
+        # The running runtime's updater, or the one that runs while waiting.
+        updater = sup.rt.updater if sup.rt is not None else sup._waiting.updater  # type: ignore[union-attr]
+        monkeypatch.setattr(updater, "upgrade_handed_off", lambda: True)
+
+    @staticmethod
+    def _final_status_reason(env: _Env) -> str | None:
+        payload = env.client.send_heartbeat.call_args.args[1]
+        assert payload["status"] == "stopped"
+        return payload.get("status_reason")
+
+    @pytest.mark.parametrize("waiting", [False, True], ids=["running", "waiting"])
+    def test_an_in_process_update_marks_the_final_heartbeat(self, env: _Env, waiting: bool) -> None:
+        sup = self._started(env, waiting=waiting)
+        # What the updater does once the new version is installed.
+        sup.upgrade_restart_event.set()
+
+        sup.stop(stopped_message="Watcher restarting for auto-update")
+
+        assert self._final_status_reason(env) == "auto_update"
+
+    @pytest.mark.parametrize("waiting", [False, True], ids=["running", "waiting"])
+    def test_a_hand_off_to_the_worker_marks_the_final_heartbeat(
+        self, env: _Env, monkeypatch: pytest.MonkeyPatch, waiting: bool
+    ) -> None:
+        sup = self._started(env, waiting=waiting)
+        self._hand_off_to_the_worker(sup, monkeypatch)
+
+        # The worker's `Stop-Service` is an ordinary stop for the service loop.
+        sup.stop(stopped_message="Service stopped")
+
+        assert self._final_status_reason(env) == "auto_update"
+
+    @pytest.mark.parametrize("waiting", [False, True], ids=["running", "waiting"])
+    def test_a_system_shutdown_wins_over_an_update(
+        self, env: _Env, monkeypatch: pytest.MonkeyPatch, waiting: bool
+    ) -> None:
+        sup = self._started(env, waiting=waiting)
+        sup.upgrade_restart_event.set()
+        self._hand_off_to_the_worker(sup, monkeypatch)
+
+        sup.stop(stopped_message="Service stopped: Windows is shutting down", system_shutdown=True)
+
+        assert self._final_status_reason(env) == "system_shutdown"
+
+    @pytest.mark.parametrize("waiting", [False, True], ids=["running", "waiting"])
+    def test_a_stop_the_operator_asked_for_is_never_marked(
+        self, env: _Env, monkeypatch: pytest.MonkeyPatch, waiting: bool
+    ) -> None:
+        # Ctrl+C in the CLI, even with an update installed or handed off at that moment.
+        sup = self._started(env, waiting=waiting)
+        sup.upgrade_restart_event.set()
+        self._hand_off_to_the_worker(sup, monkeypatch)
+
+        sup.stop(stopped_message="Watcher stopped by user", operator_stop=True)
+
+        assert self._final_status_reason(env) is None
+
+    @pytest.mark.parametrize("waiting", [False, True], ids=["running", "waiting"])
+    def test_a_stop_with_no_update_under_way_is_not_marked(self, env: _Env, waiting: bool) -> None:
+        sup = self._started(env, waiting=waiting)
+
+        sup.stop(stopped_message="Service stopped")
+
+        assert self._final_status_reason(env) is None
+
+
 class TestHeartbeatRevisionFields:
     def _loop(self, client: MagicMock, **kwargs: Any) -> HeartbeatLoop:
         return HeartbeatLoop(

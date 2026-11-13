@@ -1257,7 +1257,9 @@ def watch(ctx: click.Context, dry_run: bool) -> None:
     run_supervisor(supervisor, stop_requested)
 
     if stop_requested.is_set():
-        supervisor.stop(stopped_message="Watcher stopped by user")
+        # The operator asked for this stop, so it is never marked as an update stop,
+        # even if an update was installed or handed off while they pressed Ctrl+C.
+        supervisor.stop(stopped_message="Watcher stopped by user", operator_stop=True)
         raise SystemExit(0)
 
     # Distinguish an upgrade-driven shutdown from a generic one by

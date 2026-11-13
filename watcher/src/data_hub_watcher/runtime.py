@@ -28,10 +28,12 @@ import yaml
 from data_hub_watcher import config_io, testing_overrides
 from data_hub_watcher.api_client import ApiError, DataHubClient
 from data_hub_watcher.constants import (
+    AUTO_UPDATE_STATUS_REASON,
     CONFIG_APPLY_DRAIN_TIMEOUT_SECONDS,
     DEFAULT_CONFIG_DIR,
     PRUNE_DAYS,
     SYSTEM_SHUTDOWN_JOIN_SECONDS,
+    SYSTEM_SHUTDOWN_STATUS_REASON,
     SYSTEM_SHUTDOWN_STOP_BUDGET_SECONDS,
     UPLOAD_WORKER_STOP_TIMEOUT_SECONDS,
     WAITING_START_RETRY_MAX_SECONDS,
@@ -685,12 +687,19 @@ def _shutdown_deadline(system_shutdown: bool) -> float | None:
 
 
 def stop_runtime(
-    rt: WatcherRuntime, *, stopped_message: str, system_shutdown: bool = False
+    rt: WatcherRuntime,
+    *,
+    stopped_message: str,
+    system_shutdown: bool = False,
+    stop_reason: str | None = None,
 ) -> None:
     """Shut everything down in reverse order and flush pending events.
 
+    *stop_reason* is the `status_reason` of the final `stopped` heartbeat, for a
+    stop to install an update (see `HeartbeatLoop.stop`).
+
     *system_shutdown* marks the final `stopped` heartbeat as caused by Windows
-    shutting down (see `HeartbeatLoop.stop`), and limits the stop to
+    shutting down, in place of *stop_reason*, and limits the stop to
     `SYSTEM_SHUTDOWN_STOP_BUDGET_SECONDS`: Windows ends the process when its
     preshutdown timeout passes, 10 s on current builds. Uploads are cut off
     first (`Uploader.abort`), so the joins that follow are short, and the final
@@ -701,6 +710,8 @@ def stop_runtime(
     for as long as each is allowed.
     """
     deadline = _shutdown_deadline(system_shutdown)
+    if system_shutdown:
+        stop_reason = SYSTEM_SHUTDOWN_STATUS_REASON
     if deadline is None:
         rt.monitor.stop()
         # The monitor's result isn't checked: only the upload worker decides
@@ -742,7 +753,7 @@ def stop_runtime(
             message=stopped_message,
         )
     )
-    rt.heartbeat.stop(system_shutdown=system_shutdown, deadline=deadline)
+    rt.heartbeat.stop(stop_reason=stop_reason, deadline=deadline)
     rt.reporter.flush(deadline=deadline)
     if upload_worker_stopped and monitor_stopped:
         rt.state_db.close()
@@ -980,14 +991,34 @@ class WatcherSupervisor:
             )
         return ShutdownReason(is_upgrade_restart=False, stopped_message=f"{self.role} stopped")
 
-    def stop(self, *, stopped_message: str, system_shutdown: bool = False) -> None:
+    def stop(
+        self,
+        *,
+        stopped_message: str,
+        system_shutdown: bool = False,
+        operator_stop: bool = False,
+    ) -> None:
         """Stop whatever is running and flush events.
 
         *system_shutdown* marks the final `stopped` heartbeat as caused by Windows
         shutting down, and limits the stop to about 7 s (see `stop_runtime`).
+
+        Otherwise the heartbeat is marked as an update stop, with
+        `AUTO_UPDATE_STATUS_REASON`, when an in-process update was installed or an
+        upgrade was handed to the Windows worker (`Updater.upgrade_handed_off`). A
+        stop the operator asked for (*operator_stop*, Ctrl+C in the CLI) is never
+        marked, even with an update in progress.
         """
+        stop_reason = self._final_stop_reason(
+            system_shutdown=system_shutdown, operator_stop=operator_stop
+        )
         if self.rt is not None:
-            stop_runtime(self.rt, stopped_message=stopped_message, system_shutdown=system_shutdown)
+            stop_runtime(
+                self.rt,
+                stopped_message=stopped_message,
+                system_shutdown=system_shutdown,
+                stop_reason=stop_reason,
+            )
             self.rt = None
         elif self._waiting is not None:
             # Only the heartbeat loop runs while waiting: the same limit applies.
@@ -995,11 +1026,32 @@ class WatcherSupervisor:
             self.reporter.queue_event(
                 WatcherEvent(event_type=EventType.WATCHER_STOPPED, message=stopped_message)
             )
-            self._waiting.heartbeat.stop(system_shutdown=system_shutdown, deadline=deadline)
+            self._waiting.heartbeat.stop(stop_reason=stop_reason, deadline=deadline)
             self._waiting = None
             self.reporter.flush(deadline=deadline)
         if self._state is not None:
             self._state.close()
+
+    def _final_stop_reason(self, *, system_shutdown: bool, operator_stop: bool) -> str | None:
+        """The `status_reason` for the final `stopped` heartbeat, or `None`."""
+        if system_shutdown:
+            return SYSTEM_SHUTDOWN_STATUS_REASON
+        if operator_stop:
+            return None
+        if self.classify_shutdown().is_upgrade_restart:
+            # An in-process update was installed and the process is exiting to load it.
+            return AUTO_UPDATE_STATUS_REASON
+        updater = (
+            self.rt.updater
+            if self.rt is not None
+            else self._waiting.updater
+            if self._waiting is not None
+            else None
+        )
+        if updater is not None and updater.upgrade_handed_off():
+            # The Windows upgrade worker is stopping this service to install an update.
+            return AUTO_UPDATE_STATUS_REASON
+        return None
 
     # ------------------------------------------------------------------
     # config revisions
