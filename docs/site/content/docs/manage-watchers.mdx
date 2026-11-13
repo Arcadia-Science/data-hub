@@ -101,4 +101,4 @@ For instruments in [manual upload mode](/docs/concepts#upload-mode), the watcher
 Safeguards that keep the queue healthy:
 
 - Changing an instrument’s watch folder, from the web app or on the PC, reverts pending upload requests to `detected` so stale paths drain instead of erroring
-- A queued file that keeps failing (missing on disk or failing to upload) is retried on at most three polls, then cancelled server-side
+- A queued file that keeps failing (missing on disk or failing to upload) is retried on at most three polls, then cancelled server-side. If the file is requested again, it gets three new tries. Before watcher 1.4.3, a request made right after the cancellation was cancelled at once
