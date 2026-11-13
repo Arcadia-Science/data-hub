@@ -1,6 +1,9 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { watcherUploadQueueResponse } from "@/lib/api/openapi";
+import {
+  watcherEventsListResponse,
+  watcherUploadQueueResponse,
+} from "@/lib/api/openapi";
 import {
   files,
   instrumentRuns,
@@ -255,6 +258,26 @@ describe("Deleting a run cancels its requested uploads", () => {
     expect(event.message).toBe(
       "Cancelled 1 requested upload because run run-1 was deleted"
     );
+  });
+
+  it("lists the event and filters the event list by its type", async () => {
+    const instrumentId = "cancel-list-inst";
+    await seedInstrument(instrumentId);
+    const watcherId = await seedWatcher(instrumentId);
+    const run = await seedRun(token, instrumentId, "run-1", ["a"]);
+    await markRequested([run.fileIds.a]);
+
+    await deleteRun(token, instrumentId, "run-1");
+
+    const res = await api(
+      `/api/v1/watchers/${watcherId}/events?event_type=upload_requests_cancelled`,
+      { token }
+    );
+    expect(res.status).toBe(200);
+    const { data } = watcherEventsListResponse.parse(await res.json());
+    expect(data.map((event) => event.event_type)).toEqual([
+      "upload_requests_cancelled",
+    ]);
   });
 
   it("takes the files out of the watcher's upload queue", async () => {
@@ -550,5 +573,293 @@ describe("Dashboard pending uploads after a run is deleted", () => {
       count: "0",
       note: "Upload queue is clear",
     });
+  });
+});
+
+// Requests that overlap with a delete. Each test holds a lock in its own
+// transaction, so a request waits at a known step, and changes the database
+// while the request waits. That makes the order of events fixed.
+
+type TestTx = Parameters<
+  Parameters<ReturnType<typeof getTestDb>["transaction"]>[0]
+>[0];
+
+// Waits until at least `count` database sessions are waiting for a lock.
+async function waitForBlockedSessions(count: number): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    const result = await getTestDb().execute<{ n: number }>(
+      sql`select count(*)::int as n from pg_stat_activity
+          where datname = current_database() and wait_event_type = 'Lock'`
+    );
+    if (result.rows[0].n >= count) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`Fewer than ${count} sessions waited for a lock`);
+}
+
+// Takes a lock in a transaction, starts the requests, and waits until each of
+// them is stuck on a lock. Then it runs `during` in the same transaction and
+// commits, which lets the requests go on. Returns their responses.
+async function holdLockWhile(steps: {
+  lock: (tx: TestTx) => Promise<unknown>;
+  start: () => Promise<Response>[];
+  during?: (tx: TestTx) => Promise<unknown>;
+}): Promise<Response[]> {
+  const { pending } = await getTestDb().transaction(async (tx) => {
+    await steps.lock(tx);
+    const started = steps.start();
+    await waitForBlockedSessions(started.length);
+    await steps.during?.(tx);
+    // An object, because a bare promise would be awaited before the commit.
+    return { pending: started };
+  });
+  return await Promise.all(pending);
+}
+
+const lockFile = (id: number) => (tx: TestTx) =>
+  tx.execute(sql`select id from files where id = ${id} for update`);
+const lockFilesTable = (tx: TestTx) =>
+  tx.execute(sql`lock table files in access exclusive mode`);
+
+describe("Deleting a run while other requests are in flight", () => {
+  let token: string;
+  let userId: string;
+
+  beforeAll(async () => {
+    await resetDb();
+    ({ token, userId } = await seedTestUser());
+  });
+
+  afterAll(async () => {
+    await closeTestDb();
+  });
+
+  const runPath = (instrumentId: string, runId: string) =>
+    `/api/v1/instruments/${instrumentId}/runs/${runId}`;
+  const sendDelete = (instrumentId: string, runId: string) =>
+    api(runPath(instrumentId, runId), { method: "DELETE", token });
+
+  it("locks the files before the run, so a delete and a revert don't deadlock", async () => {
+    const instrumentId = "race-order-inst";
+    await seedInstrument(instrumentId);
+    await seedWatcher(instrumentId);
+    const run = await seedRun(token, instrumentId, "run-1", ["a"]);
+    await markRequested([run.fileIds.a]);
+
+    const [res] = await holdLockWhile({
+      // This transaction plays another revert of the instrument's requests.
+      // It has locked the file and goes on to touch the run. If the delete had
+      // locked the run first, the two would wait for each other.
+      lock: lockFile(run.fileIds.a),
+      start: () => [sendDelete(instrumentId, "run-1")],
+      during: async (tx) => {
+        await tx.execute(sql`set local lock_timeout = '5s'`);
+        await tx
+          .update(instrumentRuns)
+          .set({ updatedAt: new Date() })
+          .where(eq(instrumentRuns.id, run.runUuid));
+      },
+    });
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).already_applied).toBe(false);
+    expect((await readFile(run.fileIds.a)).status).toBe("detected");
+  });
+
+  it("changes nothing when another delete wins the race", async () => {
+    const instrumentId = "race-lost-inst";
+    await seedInstrument(instrumentId);
+    const watcherId = await seedWatcher(instrumentId);
+    const run = await seedRun(token, instrumentId, "run-1", ["a"]);
+    await markRequested([run.fileIds.a]);
+    const winnerDeletedAt = new Date("2026-01-01T00:00:00.000Z");
+
+    const [res] = await holdLockWhile({
+      // The winner has marked the run deleted but has not committed yet. The
+      // loser waits to touch the run, and goes on once the winner commits.
+      lock: (tx) =>
+        tx
+          .update(instrumentRuns)
+          .set({ deletedAt: winnerDeletedAt, deletedBy: userId })
+          .where(eq(instrumentRuns.id, run.runUuid)),
+      start: () => [sendDelete(instrumentId, "run-1")],
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.already_applied).toBe(true);
+    expect(new Date(body.deleted_at)).toEqual(winnerDeletedAt);
+    expect(body.deleted_by).toBe(userId);
+    expect(body.deleted_by_token).toBeNull();
+
+    // The loser did not overwrite who deleted the run, and its changes to the
+    // file and the event log were rolled back.
+    const [row] = await getTestDb()
+      .select({
+        deletedAt: instrumentRuns.deletedAt,
+        deletedBy: instrumentRuns.deletedBy,
+        deletedByToken: instrumentRuns.deletedByToken,
+      })
+      .from(instrumentRuns)
+      .where(eq(instrumentRuns.id, run.runUuid));
+    expect(row).toEqual({
+      deletedAt: winnerDeletedAt,
+      deletedBy: userId,
+      deletedByToken: null,
+    });
+    expect((await readFile(run.fileIds.a)).status).toBe("upload_requested");
+    expect(await readCancelEvents(watcherId)).toHaveLength(0);
+  });
+
+  it("lets only one of two overlapping deletes cancel the requests", async () => {
+    const instrumentId = "race-twins-inst";
+    await seedInstrument(instrumentId);
+    const watcherId = await seedWatcher(instrumentId);
+    const run = await seedRun(token, instrumentId, "run-1", ["a", "b"]);
+    await markRequested(Object.values(run.fileIds));
+
+    const responses = await holdLockWhile({
+      // Both deletes have looked up the run, which is still live, and wait to
+      // touch the files. They then run at the same time.
+      lock: lockFilesTable,
+      start: () => [
+        sendDelete(instrumentId, "run-1"),
+        sendDelete(instrumentId, "run-1"),
+      ],
+    });
+
+    expect(responses.map((res) => res.status)).toEqual([200, 200]);
+    const bodies = await Promise.all(responses.map((res) => res.json()));
+    expect(bodies.filter((body) => !body.already_applied)).toHaveLength(1);
+    expect(bodies[0].deleted_at).toBe(bodies[1].deleted_at);
+
+    for (const id of Object.values(run.fileIds)) {
+      expect((await readFile(id)).status).toBe("detected");
+    }
+    const events = await readCancelEvents(watcherId);
+    expect(events).toHaveLength(1);
+    expect(
+      (events[0].details as { cancelled_count: number }).cancelled_count
+    ).toBe(2);
+  });
+
+  it("changes nothing when a request for upload-all loses to a delete", async () => {
+    const instrumentId = "race-all-inst";
+    await seedInstrument(instrumentId);
+    const watcherId = await seedWatcher(instrumentId);
+    const run = await seedRun(token, instrumentId, "run-1", ["a", "b"]);
+
+    const [res] = await holdLockWhile({
+      // The request has checked that the run is live and waits to queue the
+      // files. The run is deleted before it can.
+      lock: lockFilesTable,
+      start: () => [
+        api(`${runPath(instrumentId, "run-1")}/request-upload-all`, {
+          method: "POST",
+          token,
+        }),
+      ],
+      during: (tx) =>
+        tx
+          .update(instrumentRuns)
+          .set({ deletedAt: new Date() })
+          .where(eq(instrumentRuns.id, run.runUuid)),
+    });
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error.code).toBe("CONFLICT");
+    for (const id of Object.values(run.fileIds)) {
+      const file = await readFile(id);
+      expect(file.status).toBe("detected");
+      expect(file.uploadRequestedAt).toBeNull();
+    }
+    expect(await readQueue(token, watcherId)).toEqual([]);
+  });
+
+  it("changes nothing when a request for chosen files loses to a delete", async () => {
+    const instrumentId = "race-some-inst";
+    await seedInstrument(instrumentId);
+    const watcherId = await seedWatcher(instrumentId);
+    const run = await seedRun(token, instrumentId, "run-1", ["a", "b"]);
+
+    const [res] = await holdLockWhile({
+      lock: lockFilesTable,
+      start: () => [
+        api(`${runPath(instrumentId, "run-1")}/request-upload`, {
+          method: "POST",
+          token,
+          body: { file_ids: Object.values(run.fileIds) },
+        }),
+      ],
+      during: (tx) =>
+        tx
+          .update(instrumentRuns)
+          .set({ deletedAt: new Date() })
+          .where(eq(instrumentRuns.id, run.runUuid)),
+    });
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error.message).toBe(
+      "Cannot request uploads for a soft-deleted run"
+    );
+    for (const id of Object.values(run.fileIds)) {
+      expect((await readFile(id)).status).toBe("detected");
+    }
+    expect(await readQueue(token, watcherId)).toEqual([]);
+  });
+
+  it("does not queue a file that stopped being detected while the request ran", async () => {
+    const instrumentId = "race-status-inst";
+    await seedInstrument(instrumentId);
+    await seedWatcher(instrumentId);
+    const run = await seedRun(token, instrumentId, "run-1", ["a", "b"]);
+
+    const [res] = await holdLockWhile({
+      lock: lockFile(run.fileIds.a),
+      start: () => [
+        api(`${runPath(instrumentId, "run-1")}/request-upload`, {
+          method: "POST",
+          token,
+          body: { file_ids: [run.fileIds.a, run.fileIds.b] },
+        }),
+      ],
+      // The file is uploaded by another path while the request waits.
+      during: (tx) =>
+        tx
+          .update(files)
+          .set({ status: "uploaded", uploadedAt: new Date() })
+          .where(eq(files.id, run.fileIds.a)),
+    });
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error.code).toBe("CONFLICT");
+    // Without the status condition, the upload request would turn the
+    // uploaded file back into a requested one.
+    expect((await readFile(run.fileIds.a)).status).toBe("uploaded");
+  });
+
+  it("accepts two requests for the same files at the same time", async () => {
+    const instrumentId = "race-twice-inst";
+    await seedInstrument(instrumentId);
+    const watcherId = await seedWatcher(instrumentId);
+    const run = await seedRun(token, instrumentId, "run-1", ["a"]);
+    const request = () =>
+      api(`${runPath(instrumentId, "run-1")}/request-upload`, {
+        method: "POST",
+        token,
+        body: { file_ids: [run.fileIds.a] },
+      });
+
+    const responses = await holdLockWhile({
+      lock: lockFile(run.fileIds.a),
+      start: () => [request(), request()],
+    });
+
+    expect(responses.map((res) => res.status)).toEqual([200, 200]);
+    expect((await readFile(run.fileIds.a)).status).toBe("upload_requested");
+    expect(await readQueue(token, watcherId)).toEqual(["a"]);
   });
 });
