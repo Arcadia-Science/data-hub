@@ -3,7 +3,8 @@
 A stop for an in-process update is marked `auto_update` on the final heartbeat, which
 `WatcherSupervisor.stop` decides itself. A stop the operator asked for, with Ctrl+C or
 SIGTERM, is never marked, even with an update under way, so the command has to say so.
-A stop that arrives during start-up is acted on once `start` returns, the same way.
+A stop that arrives during start-up is acted on once `start` returns, the same way, and the
+supervisor's one stop signal, `request_stop`, also ends the start-up scan early.
 """
 
 from __future__ import annotations
@@ -30,7 +31,7 @@ from data_hub_watcher.runtime import ShutdownReason, WatcherSupervisor
 
 
 class _FakeSupervisor:
-    """Stands in for `WatcherSupervisor`: records how it is stopped and woken."""
+    """Stands in for `WatcherSupervisor`: records how it is stopped and asked to stop."""
 
     upgrade_restart = False
     instances: list[_FakeSupervisor] = []
@@ -43,7 +44,8 @@ class _FakeSupervisor:
         self.cfg: WatcherConfig = kwargs["cfg"]
         self.waiting_reason: str | None = None
         self.stops: list[dict[str, Any]] = []
-        self.wakes = 0
+        self.stop_requested = threading.Event()
+        self.request_stops = 0
         self.signal_handlers_installed: set[int] = set()
         _FakeSupervisor.instances.append(self)
 
@@ -53,8 +55,9 @@ class _FakeSupervisor:
             signum = _FakeSupervisor.signal_during_start
             _FakeSupervisor.signal_handlers[signum](signum, None)
 
-    def wake(self) -> None:
-        self.wakes += 1
+    def request_stop(self) -> None:
+        self.request_stops += 1
+        self.stop_requested.set()
 
     def classify_shutdown(self) -> ShutdownReason:
         return ShutdownReason(
@@ -240,7 +243,7 @@ class TestStopDuringStartUp:
         assert supervisor.stops == [
             {"stopped_message": "Watcher stopped by user", "operator_stop": True}
         ]
-        assert supervisor.wakes == 1
+        assert supervisor.request_stops == 1
         assert "Shutting down" in result.output
         # Those lines would say the watcher is running or waiting, so they are not printed.
         assert "Watcher is running" not in result.output
@@ -274,3 +277,94 @@ class TestStopDuringStartUp:
         assert result.exit_code == 0, result.output
         (supervisor,) = _FakeSupervisor.instances
         assert supervisor.signal_handlers_installed == {signal.SIGINT, signal.SIGTERM}
+
+
+class TestStopDuringTheStartUpScan:
+    """Ctrl+C or SIGTERM while the start-up scan walks the watch folder ends the scan.
+
+    The real supervisor and the real file monitor run, and the signal arrives from the scan
+    itself, as it does from the terminal during a scan that takes minutes. The signal handler
+    calls the supervisor's `request_stop`, which the monitor's scan reads between entries.
+    """
+
+    FILE_COUNT = 40
+
+    @pytest.fixture
+    def watch_with_signal_during_the_scan(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        api_client: MagicMock,
+        count_scan_entries: Callable[..., Any],
+    ) -> Iterator[Callable[[int], tuple[Result, Any]]]:
+        _stub_watch_command(monkeypatch, tmp_path, api_client)
+        for i in range(self.FILE_COUNT):
+            (tmp_path / "data" / f"RUN{i:03}_a.csv").write_text("a,b\n1,2\n")
+        handlers = _record_signal_handlers(monkeypatch)
+        supervisors: list[WatcherSupervisor] = []
+
+        def make_supervisor(**kwargs: Any) -> WatcherSupervisor:
+            # `config_dir` keeps the updater's files out of the real ~/.data-hub.
+            sup = WatcherSupervisor(config_dir=tmp_path, **kwargs)
+            supervisors.append(sup)
+            return sup
+
+        monkeypatch.setattr(cli_module, "WatcherSupervisor", make_supervisor)
+
+        def watch(signum: int) -> tuple[Result, Any]:
+            scan = count_scan_entries(after=lambda: handlers[signum](signum, None), n=3)
+            return CliRunner().invoke(cli_module.cli, ["watch"]), scan
+
+        try:
+            yield watch
+        finally:
+            for sup in supervisors:
+                if sup.rt is not None or sup.waiting_reason is not None:
+                    sup.stop(stopped_message="test teardown")
+
+    @pytest.mark.parametrize("signum", [signal.SIGTERM, signal.SIGINT], ids=["sigterm", "sigint"])
+    def test_the_signal_ends_the_scan_and_the_watcher_stops_cleanly(
+        self,
+        watch_with_signal_during_the_scan: Callable[[int], tuple[Result, Any]],
+        api_client: MagicMock,
+        signum: int,
+    ) -> None:
+        result, scan = watch_with_signal_during_the_scan(signum)
+
+        assert result.exit_code == 0, result.output
+        # The scan read the entry that came with the signal and no more of the 40.
+        assert scan.entries_read == 3
+        # A normal clean stop follows: the final `stopped` heartbeat, and the stop event.
+        final = api_client.send_heartbeat.call_args.args[1]
+        assert final["status"] == "stopped"
+        stopped = [
+            e
+            for c in api_client.send_events.call_args_list
+            for e in c.args[1]
+            if e["event_type"] == "watcher_stopped"
+        ]
+        assert [e["message"] for e in stopped] == ["Watcher stopped by user"]
+        assert "Shutting down" in result.output
+        assert "Watcher is running" not in result.output
+
+    def test_the_files_the_scan_did_not_reach_are_left_for_the_next_start(
+        self,
+        watch_with_signal_during_the_scan: Callable[[int], tuple[Result, Any]],
+        tmp_path: Path,
+    ) -> None:
+        from data_hub_watcher.constants import state_db_path
+        from data_hub_watcher.state import StateDB
+
+        result, _scan = watch_with_signal_during_the_scan(signal.SIGINT)
+
+        assert result.exit_code == 0, result.output
+        # `watch` here is the first start of a `new-only` environment, which records the
+        # backlog as baseline in one go, at the end of its walk. A walk that ended early
+        # has recorded none of it, so the next start walks the folder again.
+        state = StateDB(state_db_path(tmp_path, "staging"))
+        try:
+            assert list(state.iter_baseline_stat_keys()) == []
+            assert not state.baseline_established()
+            assert state.pending_uploads() == []
+        finally:
+            state.close()

@@ -1359,6 +1359,210 @@ def _record_handlers(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
     return handlers
 
 
+class TestStopSignal:
+    """`request_stop` is the one stop signal, and it ends a long start-up scan (watcher 1.4.3).
+
+    The CLI's signal handler and the Windows service's stop both call it. A scan that takes
+    minutes on a large folder used to hold a stop until it was done.
+    """
+
+    FILE_COUNT = 40
+
+    @pytest.fixture
+    def full_scan_cfg(self, env: _Env) -> WatcherConfig:
+        """A config whose start-up scan queues what is on disk, with many files in the folder."""
+        for i in range(self.FILE_COUNT):
+            (env.watch_dir / f"RUN{i:03}_a.csv").write_text("a,b\n1,2\n")
+        cfg = _cfg(env.watch_dir).model_copy(update={"initial_scan": "full"})
+        return env.write_config(cfg)
+
+    @staticmethod
+    def _statuses(env: _Env) -> list[str]:
+        return [c.args[1]["status"] for c in env.client.send_heartbeat.call_args_list]
+
+    def test_a_stop_requested_during_the_scan_ends_it_and_start_returns(
+        self, env: _Env, full_scan_cfg: WatcherConfig, count_scan_entries: Callable[..., Any]
+    ) -> None:
+        sup = env.supervisor(full_scan_cfg)
+        scan = count_scan_entries(after=sup.request_stop, n=3)
+
+        started = time.monotonic()
+        sup.start()
+
+        # `start` returned at the third entry of 41, not at the end of the walk.
+        assert scan.entries_read == 3
+        assert time.monotonic() - started < 5
+        rt = sup.rt
+        assert rt is not None
+        assert not rt.monitor._observer.is_alive()
+        assert rt.monitor._checker_thread is None
+        assert len(rt.monitor._pending) < self.FILE_COUNT
+
+    def test_the_stop_that_follows_is_clean(
+        self, env: _Env, full_scan_cfg: WatcherConfig, count_scan_entries: Callable[..., Any]
+    ) -> None:
+        sup = env.supervisor(full_scan_cfg)
+        count_scan_entries(after=sup.request_stop, n=3)
+        sup.start()
+
+        started = time.monotonic()
+        sup.stop(stopped_message="Watcher stopped by user", operator_stop=True)
+
+        assert time.monotonic() - started < 10
+        assert self._statuses(env)[-1] == "stopped"
+        stopped = [
+            e
+            for c in env.client.send_events.call_args_list
+            for e in c.args[1]
+            if e["event_type"] == EventType.WATCHER_STOPPED.value
+        ]
+        assert [e["message"] for e in stopped] == ["Watcher stopped by user"]
+        assert sup.rt is None
+
+    def test_the_files_the_scan_did_not_reach_are_found_by_the_next_start(
+        self, env: _Env, full_scan_cfg: WatcherConfig, count_scan_entries: Callable[..., Any]
+    ) -> None:
+        first = env.supervisor(full_scan_cfg)
+        count_scan_entries(after=first.request_stop, n=3)
+        first.start()
+        first.stop(stopped_message="Watcher stopped by user", operator_stop=True)
+        state = env.state()
+        try:
+            # Nothing says any of them was handled.
+            assert list(state.iter_uploaded_stat_keys()) == []
+            assert list(state.iter_detected_stat_keys()) == []
+            assert state.pending_uploads() == []
+        finally:
+            state.close()
+
+        second = env.supervisor(full_scan_cfg)
+        second.start()
+
+        assert second.rt is not None
+        # The 40 and the file every `_Env` starts with.
+        assert len(second.rt.monitor._pending) == self.FILE_COUNT + 1
+
+    def test_a_baseline_scan_that_was_stopped_is_done_again_at_the_next_start(
+        self, env: _Env, count_scan_entries: Callable[..., Any]
+    ) -> None:
+        for i in range(self.FILE_COUNT):
+            (env.watch_dir / f"RUN{i:03}_a.csv").write_text("a,b\n1,2\n")
+        # The default config baselines what is on disk at the first start, as `new-only` does,
+        # and records the baseline in one go, at the end of the walk.
+        cfg = env.write_config(_cfg(env.watch_dir))
+        first = env.supervisor(cfg)
+        count_scan_entries(after=first.request_stop, n=3)
+        first.start()
+        first.stop(stopped_message="Watcher stopped by user", operator_stop=True)
+        state = env.state()
+        try:
+            # A partial baseline would count as done: the next start would not baseline the
+            # rest, and would upload it as new.
+            assert list(state.iter_baseline_stat_keys()) == []
+            assert not state.baseline_established()
+        finally:
+            state.close()
+
+        second = env.supervisor(cfg)
+        second.start()
+
+        state = env.state()
+        try:
+            assert len(list(state.iter_baseline_stat_keys())) == self.FILE_COUNT + 1
+            assert state.baseline_established()
+        finally:
+            state.close()
+        assert second.rt is not None and second.rt.monitor._pending == {}
+
+    def test_a_stop_requested_before_the_start_skips_the_scan_and_the_upload_worker(
+        self, env: _Env, full_scan_cfg: WatcherConfig, count_scan_entries: Callable[..., Any]
+    ) -> None:
+        sup = env.supervisor(full_scan_cfg)
+        scan = count_scan_entries()
+        sup.request_stop()
+
+        sup.start()
+
+        rt = sup.rt
+        assert rt is not None
+        assert scan.entries_read == 0
+        assert rt.upload_worker is not None and rt.upload_worker._thread is None
+        # The config sync and the first heartbeat are not cut short: the watcher says it is
+        # there, and then stops cleanly.
+        assert self._statuses(env) == ["watching"]
+        sup.stop(stopped_message="Watcher stopped by user", operator_stop=True)
+        assert self._statuses(env) == ["watching", "stopped"]
+
+    def test_an_update_restart_ends_the_scan_too(
+        self, env: _Env, full_scan_cfg: WatcherConfig, count_scan_entries: Callable[..., Any]
+    ) -> None:
+        sup = env.supervisor(full_scan_cfg)
+        # The updater asks for a restart from the heartbeat thread while the scan runs.
+        scan = count_scan_entries(after=sup.shutdown_event.set, n=3)
+
+        sup.start()
+
+        assert scan.entries_read == 3
+        assert sup.poll(timeout=0) is True
+
+    def test_a_scan_with_no_stop_runs_to_the_end(
+        self, env: _Env, full_scan_cfg: WatcherConfig, count_scan_entries: Callable[..., Any]
+    ) -> None:
+        sup = env.supervisor(full_scan_cfg)
+        scan = count_scan_entries()
+
+        sup.start()
+
+        assert scan.entries_read == self.FILE_COUNT + 1
+        assert sup.rt is not None and sup.rt.monitor._observer.is_alive()
+
+    def test_a_stop_during_a_rebuilds_scan_ends_it_too(
+        self, env: _Env, full_scan_cfg: WatcherConfig, count_scan_entries: Callable[..., Any]
+    ) -> None:
+        sup = env.supervisor(full_scan_cfg)
+        sup.start()
+        env.client.get_latest_config_revision.return_value = _revision(
+            2, _settings(env.watch_dir, file_patterns=["*.csv", "*.txt"])
+        )
+        scan = count_scan_entries(after=sup.request_stop, n=3)
+
+        _deliver(sup, 2)
+
+        assert scan.entries_read == 3
+        assert sup.applied_revision == 2
+
+    def test_request_stop_wakes_a_poll_that_is_waiting(self, env: _Env) -> None:
+        sup = env.supervisor()
+        sup.start()
+        returned = threading.Event()
+        polling = threading.Thread(
+            target=lambda: (sup.poll(timeout=30), returned.set()), daemon=True
+        )
+        polling.start()
+        time.sleep(0.2)
+        assert not returned.is_set()
+
+        sup.request_stop()
+
+        assert returned.wait(5), "the poll stayed in its wait after the stop was requested"
+        assert sup.stop_requested.is_set()
+
+    def test_poll_leaves_pending_work_alone_once_a_stop_is_requested(self, env: _Env) -> None:
+        sup = env.supervisor()
+        sup.start()
+        rt = sup.rt
+        env.client.get_latest_config_revision.reset_mock()
+        sup._revision_due.set()
+        sup._folder_check_due.set()
+        sup.request_stop()
+
+        assert sup.poll(timeout=0) is False
+
+        # A rebuild or a folder check now would only hold the stop up.
+        env.client.get_latest_config_revision.assert_not_called()
+        assert sup.rt is rt
+
+
 class TestStartAnnouncesTestOnlyOverrides:
     """`start` says which test-only overrides are set, whichever mode it starts in.
 

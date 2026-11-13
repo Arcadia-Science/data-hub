@@ -68,6 +68,10 @@ class _PendingFile:
     last_changed: float = field(default_factory=time.monotonic)
 
 
+class _ScanStopped(Exception):
+    """The initial scan was asked to stop (see `FileMonitor`'s ``should_stop``)."""
+
+
 class _EventHandler(FileSystemEventHandler):
     """Watchdog handler that forwards matching create/modify events.
 
@@ -178,6 +182,13 @@ class FileMonitor:
         only note the event and return. It is a prompt to check sooner, not a
         guarantee: whether watchdog reports the loss of the folder depends on the
         platform and on how the path was written, so `is_watching` is the check.
+    should_stop:
+        Called between the entries of the initial scan. When it returns `True`, the
+        scan ends early and `start` returns without starting the observer or the
+        stability checker (the owner is about to stop the monitor). The files the
+        scan hadn't reached are found by the scan at the next start: the scan writes
+        nothing to the state database for a file, and a baseline scan
+        (`seed_baseline`) writes nothing at all, so the next start seeds it again.
     """
 
     def __init__(
@@ -195,6 +206,7 @@ class FileMonitor:
         report_only: Callable[[str, float], bool] | None = None,
         on_report_only_file: Callable[[Path], None] | None = None,
         on_watch_root_gone: Callable[[], None] | None = None,
+        should_stop: Callable[[], bool] | None = None,
     ) -> None:
         self._watch_dir = watch_directory
         self._patterns = file_patterns
@@ -202,6 +214,7 @@ class FileMonitor:
         self._report_only = report_only
         self._on_report_only = on_report_only_file or on_stable_file
         self._on_watch_root_gone = on_watch_root_gone
+        self._should_stop = should_stop
         # Paths the initial scan picked out with `report_only`. Removed once
         # the file is dispatched, times out or disappears.
         self._report_only_paths: set[Path] = set()
@@ -233,8 +246,21 @@ class FileMonitor:
     # ------------------------------------------------------------------
 
     def start(self) -> None:
-        """Run the initial scan, start the watchdog observer, and begin the stability checker."""
-        self._initial_scan()
+        """Run the initial scan, start the watchdog observer, and begin the stability checker.
+
+        A stop during the scan (see ``should_stop``) ends it early, and then this returns
+        without starting either.
+        """
+        try:
+            # Before the scan loads its index of what was uploaded, which can be large.
+            self._raise_if_stopping()
+            self._initial_scan()
+        except _ScanStopped:
+            logger.info(
+                "Initial scan stopped early because the watcher is stopping. The files it "
+                "had not reached are scanned at the next start"
+            )
+            return
 
         handler = _EventHandler(
             self._matches_name,
@@ -329,6 +355,7 @@ class FileMonitor:
         """
         stack: list[Path] = [root]
         while stack:
+            self._raise_if_stopping()
             current = stack.pop()
             try:
                 it = os.scandir(current)
@@ -337,6 +364,10 @@ class FileMonitor:
                 continue
             with it:
                 for entry in it:
+                    # Between entries, so a stop doesn't wait for the rest of a large
+                    # folder. An entry that is a folder is no work, but it counts: a
+                    # tree of folders is as long to walk.
+                    self._raise_if_stopping()
                     if self._recursive:
                         try:
                             is_dir = entry.is_dir(follow_symlinks=False)
@@ -356,6 +387,10 @@ class FileMonitor:
                             stack.append(Path(entry.path))
                             continue
                     yield entry
+
+    def _raise_if_stopping(self) -> None:
+        if self._should_stop is not None and self._should_stop():
+            raise _ScanStopped
 
     def _load_dedup_index(self) -> dict[str, list[tuple[int, float]]]:
         """Bulk-load the union of upload + detected stat keys keyed by relative path.

@@ -310,8 +310,9 @@ def test_a_stop_that_arrives_while_the_service_is_starting_is_not_lost(
     assert pc.is_running()
     pc.request_stop()
 
-    # `SvcStop` only sets an event, which the service reads when its start has finished: the
-    # stop waits for that, and then it is a clean one.
+    # `SvcStop` sets an event that a thread hands to the supervisor's `request_stop` while the
+    # start is still running. The first heartbeat isn't cut short, so the stop waits for it,
+    # and then it is a clean one.
     assert pc.wait_exit(60) == 0
     server.wait_for_watcher_status(pc.watcher_id, "stopped")
     stopped = [

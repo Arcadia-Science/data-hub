@@ -463,3 +463,5 @@ def test_a_stop_during_start_up_still_ends_with_a_clean_stop(
     assert pc.wait_exit(30) == 0
     server.wait_for_watcher_status(pc.watcher_id, "stopped")
     own_stop_event(server, pc.watcher_id)
+    # The stop reached the start-up scan: it was not run to the end.
+    pc.wait_for_log(r"Initial scan stopped early", timeout=10)

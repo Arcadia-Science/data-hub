@@ -87,12 +87,15 @@ TRANSITIONS: tuple[Transition, ...] = (
         "process.stop->clean_stop_during_scan",
         "CLI only. A graceful stop that arrives while the watcher is still starting (during the "
         "config sync, the first heartbeat or the start-up scan) is not lost: `watch` installs "
-        "its signal handlers before it starts the supervisor, the start finishes, and the "
-        "watcher then stops with a `stopped` heartbeat and a `watcher_stopped` event. The test "
-        "holds up the first heartbeat to keep the process in that window, because the scan "
-        "itself is too quick to hit from outside. The Windows service reads its stop event once "
-        "the start has finished, so its stop is not lost either; its counterpart is "
-        "`service.stop->clean_stop_during_start` in `test_windows_service.py`.",
+        "its signal handlers before it starts the supervisor. They call the supervisor's "
+        "`request_stop`, which ends the start-up scan early, so the start returns without "
+        "scanning and the watcher then stops with a `stopped` heartbeat and a `watcher_stopped` "
+        "event. The test holds up the first heartbeat to keep the process in that window, "
+        "because the scan itself is too quick to hit from outside, and checks the log for the "
+        "scan that ended early. (A stop in the middle of a long scan is a unit test: "
+        "`test_cli_watch_stop.py`.) The Windows service hands its stop to the same call from "
+        "before its start; its counterpart is `service.stop->clean_stop_during_start` in "
+        "`test_windows_service.py`.",
         platforms=CLI,
     ),
 )

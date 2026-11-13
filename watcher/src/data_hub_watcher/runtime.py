@@ -259,6 +259,7 @@ def build_runtime(
     config_revision: Callable[[], int | None] | None = None,
     on_config_revision: Callable[[int | None], None] | None = None,
     request_folder_check: Callable[[], None] | None = None,
+    should_stop: Callable[[], bool] | None = None,
 ) -> WatcherRuntime:
     """Construct the full runtime graph from a validated config.
 
@@ -284,7 +285,8 @@ def build_runtime(
     called on every heartbeat tick, after the updater's, and when watchdog reports
     the folder itself deleted or moved. Both run on other threads than the
     supervisor's, so it must only note the request and return: the supervisor does
-    the check on its own thread.
+    the check on its own thread. *should_stop* tells the file monitor's initial scan
+    to end early (see :class:`FileMonitor`).
     """
     if not cfg.watcher_id:
         raise ValueError("cfg.watcher_id must be set before building the runtime")
@@ -381,6 +383,7 @@ def build_runtime(
         report_only=report_only,
         on_report_only_file=functools.partial(detector.on_stable_file, upload=False),
         on_watch_root_gone=request_folder_check,
+        should_stop=should_stop,
     )
 
     # Feeds the in-process auto-updater on every tick. Upload-queue polling
@@ -558,7 +561,11 @@ def report_upgrade_outcome(reporter: EventReporter, config_dir: Path) -> None:
 
 
 def start_runtime(
-    rt: WatcherRuntime, *, started_message: str | None, check_upgrade_marker: bool = True
+    rt: WatcherRuntime,
+    *,
+    started_message: str | None,
+    check_upgrade_marker: bool = True,
+    should_stop: Callable[[], bool] | None = None,
 ) -> None:
     """Queue the started event, recover unreported runs, then start threads.
 
@@ -573,6 +580,11 @@ def start_runtime(
     inside a running process passes ``check_upgrade_marker=False`` (see
     :func:`report_upgrade_outcome`). With ``started_message=None`` no started
     event is queued; the caller queues one once the start has succeeded.
+
+    *should_stop* says that a stop has been requested. The upload worker is not started
+    then, and the file monitor's initial scan, the one long step, ends early (the
+    monitor was given the same callable by :func:`build_runtime`). The config sync and
+    the first heartbeat are not cut short: each has its HTTP timeout.
     """
     if started_message is not None:
         rt.reporter.queue_event(
@@ -595,8 +607,10 @@ def start_runtime(
 
     rt.heartbeat.start()
     # Start upload polling before the (potentially long) initial scan so
-    # queued uploads keep draining while the scan walks the backlog.
-    if rt.upload_worker is not None:
+    # queued uploads keep draining while the scan walks the backlog. Not for a
+    # watcher that is stopping, which would only start uploads to cut them off.
+    stopping = should_stop is not None and should_stop()
+    if rt.upload_worker is not None and not stopping:
         rt.upload_worker.start()
     rt.monitor.start()
 
@@ -953,6 +967,10 @@ class WatcherSupervisor:
       A watcher that is already running checks the folder on each heartbeat
       tick too, and when watchdog reports it deleted, and moves to the waiting
       state if it is gone.
+    * **One stop signal.** :meth:`request_stop` is what the CLI's signal handler and
+      the Windows service's stop call. It wakes :meth:`poll`, and it ends the file
+      monitor's initial scan early, so a stop during a long start-up doesn't wait for
+      the scan.
     * **Startup sync.** Before the monitor starts, the config is pushed with
       ``based_on_revision`` and ``modified_at``, and a pending revision is
       applied first.
@@ -1005,6 +1023,8 @@ class WatcherSupervisor:
         self._latest_hint: int | None = None
         # Set from the heartbeat thread, handled on the `poll` thread.
         self._wake = threading.Event()
+        # Set by `request_stop`, from a signal handler or the service's stop call.
+        self._stop_requested = threading.Event()
         self._revision_due = threading.Event()
         self._folder_check_due = threading.Event()
         self._result_retry_due = threading.Event()
@@ -1046,6 +1066,27 @@ class WatcherSupervisor:
     @property
     def seen_revision(self) -> int | None:
         return self._seen
+
+    @property
+    def stop_requested(self) -> threading.Event:
+        """Set once a stop has been requested (see :meth:`request_stop`)."""
+        return self._stop_requested
+
+    def request_stop(self) -> None:
+        """Ask the supervisor to stop, from any thread or a signal handler.
+
+        This is the one signal for a stop: the CLI's SIGINT and SIGTERM handler and the
+        Windows service's stop call it. It wakes :meth:`poll`, makes `poll` leave pending
+        work alone, and tells the file monitor's initial scan to end early, so a stop
+        that arrives during `start` (or during a rebuild's scan) is acted on within
+        seconds. It doesn't stop anything itself: the caller still calls :meth:`stop`.
+        """
+        self._stop_requested.set()
+        self._wake.set()
+
+    def _stopping(self) -> bool:
+        """A stop was requested, or the runtime asked to shut down for an update."""
+        return self._stop_requested.is_set() or self.shutdown_event.is_set()
 
     def start(self) -> None:
         """Sync config, apply a pending revision, then start watching or waiting."""
@@ -1090,12 +1131,18 @@ class WatcherSupervisor:
         """Handle pending work, waiting up to *timeout* for some.
 
         Returns `True` once the runtime asks to shut down (an auto-update
-        restart), so the caller can stop and exit.
+        restart), so the caller can stop and exit. Once :meth:`request_stop` has
+        been called it leaves pending work alone and returns `False`: the caller
+        is about to stop.
         """
         self._wake.wait(timeout)
         self._wake.clear()
         if self._shutdown_requested():
             return True
+        if self._stop_requested.is_set():
+            # The caller is about to stop. A rebuild or a folder check now would only
+            # hold the stop up.
+            return False
         try:
             if self._result_retry_due.is_set():
                 self._result_retry_due.clear()
@@ -1113,7 +1160,7 @@ class WatcherSupervisor:
         return self._shutdown_requested()
 
     def wake(self) -> None:
-        """Make a blocked :meth:`poll` return early (used by signal handlers)."""
+        """Make a blocked :meth:`poll` return early. A stop calls :meth:`request_stop`."""
         self._wake.set()
 
     def classify_shutdown(self) -> ShutdownReason:
@@ -1646,6 +1693,7 @@ class WatcherSupervisor:
             config_revision=lambda: self._applied,
             on_config_revision=self._on_heartbeat_revision,
             request_folder_check=self._request_folder_check,
+            should_stop=self._stopping,
         )
         check_marker = not self._upgrade_marker_checked
         self._upgrade_marker_checked = True
@@ -1654,6 +1702,7 @@ class WatcherSupervisor:
                 rt,
                 started_message=None if announce_late else started_message,
                 check_upgrade_marker=check_marker,
+                should_stop=self._stopping,
             )
         except Exception:
             # Leave nothing half-started behind, then let the caller decide.
@@ -1905,7 +1954,8 @@ def run_supervisor(supervisor: WatcherSupervisor, stop_event: threading.Event) -
 
     If *stop_event* is already set when this is called (a stop that arrived during
     `supervisor.start()`), it returns at once without polling. The caller then stops the
-    supervisor, as it does for any other stop.
+    supervisor, as it does for any other stop. The CLI passes the supervisor's own
+    `stop_requested` event, which `request_stop` sets.
     """
     while not stop_event.is_set():
         if supervisor.poll(timeout=1.0):

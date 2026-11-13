@@ -1227,16 +1227,17 @@ def watch(ctx: click.Context, dry_run: bool) -> None:
         role="Watcher",
         host=platform.node(),
     )
-    # Installed before `start`, so a stop during start-up is recorded and acted on once `start`
-    # returns, as any other stop is. With the default handlers, SIGTERM would end the process
-    # at once and Ctrl+C would raise KeyboardInterrupt, and neither would send the final
-    # `stopped` heartbeat or the `watcher_stopped` event.
-    stop_requested = threading.Event()
+    # Installed before `start`, so a stop during start-up is recorded and acted on as soon
+    # as `start` returns, as any other stop is. With the default handlers, SIGTERM would end
+    # the process at once and Ctrl+C would raise KeyboardInterrupt, and neither would send
+    # the final `stopped` heartbeat or the `watcher_stopped` event. `request_stop` is the
+    # supervisor's one stop signal: it also ends the start-up scan early, so `start` returns
+    # within moments instead of when a large folder has been scanned.
+    stop_requested = supervisor.stop_requested
 
     def _shutdown(signum: int, frame: Any) -> None:
         click.echo("\nShutting down…")
-        stop_requested.set()
-        supervisor.wake()
+        supervisor.request_stop()
 
     signal.signal(signal.SIGINT, _shutdown)
     signal.signal(signal.SIGTERM, _shutdown)
