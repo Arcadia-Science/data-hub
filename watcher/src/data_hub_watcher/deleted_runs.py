@@ -9,9 +9,11 @@ class DeletedRuns:
 
     The run detector and the uploader share one instance. A report or an update goes out on
     the monitor's stability thread and uploads run on their own threads, so every method
-    takes the lock. A run stays in the set for the life of the process: both stop sending
-    requests about it, and a restart starts with an empty set and tries each run once more,
-    which is how a run that was restored gets its files.
+    takes the lock. A run stays in the set until the process ends, or until the server answers
+    an upload-URL request for it (`discard`), which it does only for a run that was restored.
+    While a run is in the set, both stop sending requests about it. A restart starts with an
+    empty set and tries each run once more, which is how a run that was restored gets the files
+    that were skipped while it was in the set.
     """
 
     def __init__(self) -> None:
@@ -24,6 +26,14 @@ class DeletedRuns:
             if run_id in self._run_ids:
                 return False
             self._run_ids.add(run_id)
+            return True
+
+    def discard(self, run_id: str) -> bool:
+        """Forget *run_id*, which the server has answered for. True when it was in the set."""
+        with self._lock:
+            if run_id not in self._run_ids:
+                return False
+            self._run_ids.remove(run_id)
             return True
 
     def __contains__(self, run_id: object) -> bool:

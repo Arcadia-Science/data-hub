@@ -4,8 +4,9 @@ The server refuses a report, an update or an upload-URL request for a deleted ru
 `error.details.reason` is `run_deleted`. A watcher that has forgotten such a run (after
 `state forget`, or after switching from `watch` to the Windows service) used to report it again for
 every stable file in the folder, and each refusal cost an error and a `run_report_failed` event.
-The refusal is now remembered for the life of the process: one event and one error for the run, no
-request for its later files, no retry, no upload attempt, and a new process tries once more.
+The refusal is now remembered until the process ends, or until the server accepts an upload that
+someone requested for the run: one event and one error for the run, no request for its later files,
+no retry, no upload attempt, and a new process tries once more.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -28,7 +29,12 @@ from data_hub_watcher.constants import (
 from data_hub_watcher.deleted_runs import DeletedRuns
 from data_hub_watcher.events import EventReporter, EventType
 from data_hub_watcher.heartbeat import WatcherCounters
-from data_hub_watcher.models import ApiErrorDetail, UploadQueueFile, UploadQueueResponse
+from data_hub_watcher.models import (
+    ApiErrorDetail,
+    PresignedUploadResponse,
+    UploadQueueFile,
+    UploadQueueResponse,
+)
 from data_hub_watcher.run_detector import FileInfo, RunDetector
 from data_hub_watcher.state import StateDB
 from data_hub_watcher.uploader import Uploader
@@ -74,6 +80,18 @@ class TestDeletedRuns:
         assert deleted.add(RUN) is False
         assert RUN in deleted
         assert "R2" not in deleted
+
+    def test_discard_forgets_a_run_once(self) -> None:
+        deleted = DeletedRuns()
+        deleted.add(RUN)
+        deleted.add("R2")
+
+        assert deleted.discard(RUN) is True
+        assert deleted.discard(RUN) is False
+        assert RUN not in deleted
+        assert "R2" in deleted
+        # A run that was forgotten is new again, and is reported once more.
+        assert deleted.add(RUN) is True
 
     def test_one_of_many_threads_adding_a_run_is_told_so(self) -> None:
         deleted = DeletedRuns()
@@ -510,43 +528,6 @@ class TestUploadsOfADeletedRun:
         assert len(rows) == len(files)
         assert [r.attempts for r in rows] == [0] * len(files)
 
-    def test_queued_files_of_a_deleted_run_are_not_attempted_cancelled_or_reported(
-        self, uploads_dir: Path, state_db: StateDB
-    ) -> None:
-        files = _make_files(uploads_dir, 3)
-        up = _uploader(uploads_dir, state_db)
-        queue = [
-            UploadQueueFile(
-                id=i + 1,
-                instrument_id="inst-1",
-                run_id=RUN,
-                relative_path=f"{RUN}/{f.filename}",
-                filename=f.filename,
-            )
-            for i, f in enumerate(files)
-        ]
-        # A file that the queue lists but is no longer on disk.
-        queue.append(
-            UploadQueueFile(
-                id=9,
-                instrument_id="inst-1",
-                run_id=RUN,
-                relative_path=f"{RUN}/gone.csv",
-                filename="gone.csv",
-            )
-        )
-        client = cast(MagicMock, up._client)
-        client.get_upload_queue.return_value = UploadQueueResponse(files=queue)
-
-        for _ in range(MAX_QUEUE_FILE_ATTEMPTS + 2):
-            up.poll_upload_queue()
-
-        assert _request_url_mock(up).call_count == 1
-        assert len(_events(up)) == 1
-        assert up._counters.errors == 1
-        assert up._queue_attempts == {}
-        client.cancel_upload_request.assert_not_called()
-
     def test_files_of_other_runs_are_uploaded_normally(
         self, uploads_dir: Path, state_db: StateDB
     ) -> None:
@@ -565,3 +546,202 @@ class TestUploadsOfADeletedRun:
             "Presigned URL request failed: f1.csv",
         ]
         assert up._counters.errors == 2
+
+
+# ==================================================================
+# Uploads someone requested from the web (the upload queue)
+# ==================================================================
+
+
+def _presigned() -> PresignedUploadResponse:
+    return PresignedUploadResponse(
+        upload_url="https://s3.example.com/presigned",
+        s3_bucket="test-bucket",
+        s3_key=f"inst-1/{RUN}/f0.csv",
+        file_id=42,
+        expires_in=3600,
+    )
+
+
+def _queue(up: Uploader, files: list[FileInfo], *, run_id: str = RUN) -> None:
+    """Make the server's upload queue list *files*, as it does for files someone requested."""
+    queued = [
+        UploadQueueFile(
+            id=i + 1,
+            instrument_id="inst-1",
+            run_id=run_id,
+            relative_path=f"{RUN}/{f.filename}",
+            filename=f.filename,
+        )
+        for i, f in enumerate(files)
+    ]
+    cast(MagicMock, up._client).get_upload_queue.return_value = UploadQueueResponse(files=queued)
+
+
+def _in_deleted_runs(up: Uploader, run_id: str = RUN) -> Uploader:
+    up._deleted_runs.add(run_id)
+    return up
+
+
+class TestAnUploadRequestedForARunInTheSet:
+    """A queue that lists a file of a run in the set means the run was restored since.
+
+    The server cancels the requests of a deleted run and refuses new ones, so the only way a
+    file of such a run is in the queue is that the run was restored and someone asked for the
+    file. That request is how the watcher learns the run is back.
+    """
+
+    def test_the_file_is_requested_once_and_uploaded_when_the_server_accepts(
+        self, uploads_dir: Path, state_db: StateDB
+    ) -> None:
+        up = _in_deleted_runs(_uploader(uploads_dir, state_db))
+        [file] = _make_files(uploads_dir, 1)
+        _queue(up, [file])
+        _request_url_mock(up).side_effect = None
+        _request_url_mock(up).return_value = _presigned()
+
+        with patch.object(Uploader, "_put_to_presigned_url") as put:
+            up.poll_upload_queue()
+
+        _request_url_mock(up).assert_called_once()
+        put.assert_called_once()
+        cast(MagicMock, up._client).mark_file_uploaded.assert_called_once()
+        assert up._counters.files_uploaded == 1
+        assert up._counters.errors == 0
+        assert [e.event_type for e in _events(up)] == [EventType.FILE_UPLOADED]
+        assert up._queue_attempts == {}
+        cast(MagicMock, up._client).cancel_upload_request.assert_not_called()
+
+    def test_the_run_leaves_the_set_when_the_server_accepts_the_request(
+        self, uploads_dir: Path, state_db: StateDB
+    ) -> None:
+        up = _in_deleted_runs(_uploader(uploads_dir, state_db))
+        up._deleted_runs.add("R2")
+        [file] = _make_files(uploads_dir, 1)
+        _queue(up, [file])
+        _request_url_mock(up).side_effect = None
+        _request_url_mock(up).return_value = _presigned()
+
+        with patch.object(Uploader, "_put_to_presigned_url"):
+            up.poll_upload_queue()
+
+        assert RUN not in up._deleted_runs
+        assert "R2" in up._deleted_runs
+
+    def test_the_uploader_and_the_detector_take_up_the_run_again(
+        self, uploads_dir: Path, state_db: StateDB, clock: _Clock
+    ) -> None:
+        deleted = DeletedRuns()
+        deleted.add(RUN)
+        up = _uploader(uploads_dir, state_db, deleted_runs=deleted)
+        p = _Process(uploads_dir, state_db, deleted_runs=deleted)
+        p.client.report_run.return_value = SimpleNamespace(id="api-run")
+        [requested, auto] = _make_files(uploads_dir, 2)
+        _queue(up, [requested])
+        _request_url_mock(up).side_effect = None
+        _request_url_mock(up).return_value = _presigned()
+
+        # While the run is in the set, the detector sends nothing and an auto-mode upload is
+        # skipped without a request.
+        p.arrive("R1_0.csv")
+        assert up.upload_files(RUN, [auto]) == 0
+        p.client.report_run.assert_not_called()
+        _request_url_mock(up).assert_not_called()
+
+        with patch.object(Uploader, "_put_to_presigned_url"):
+            up.poll_upload_queue()
+            assert _request_url_mock(up).call_count == 1
+
+            # The run is back. The detector reports the files that become stable now, and the
+            # file that was skipped is uploaded when it is tried again.
+            p.arrive("R1_1.csv")
+            assert up.upload_files(RUN, [auto]) == 1
+
+        [(report,)] = [c.args[1:] for c in p.client.report_run.call_args_list]
+        assert [f["filename"] for f in report["detected_files"]] == ["R1_1.csv"]
+        assert p.errors == []
+        assert _request_url_mock(up).call_count == 2
+
+    def test_a_file_the_detector_skipped_is_not_reported_until_a_restart(
+        self, watch_dir: Path, state_db: StateDB, clock: _Clock
+    ) -> None:
+        deleted = DeletedRuns()
+        p = _Process(watch_dir, state_db, deleted_runs=deleted)
+        # The server refuses the run's first report. Its other file arrives while the run is in
+        # the set, so it is skipped and never recorded.
+        p.client.report_run.side_effect = _refusal()
+        p.arrive("R1_0.csv", "R1_1.csv")
+        assert RUN in deleted
+
+        # An accepted upload request takes the run out of the set. Nothing sends the skipped
+        # file by itself: no retry is waiting, and the monitor reports a file only when it
+        # becomes stable.
+        deleted.discard(RUN)
+        p.client.report_run.reset_mock()
+        p.client.report_run.side_effect = None
+        p.client.report_run.return_value = SimpleNamespace(id="api-run")
+        p.detector.retry_failed_reports()
+        p.client.report_run.assert_not_called()
+
+        # The run's next new file reports the run with the file that the refusal left behind,
+        # and not with the skipped one.
+        p.arrive("R1_2.csv")
+        [sent] = [c.args[1] for c in p.client.report_run.call_args_list]
+        assert [f["filename"] for f in sent["detected_files"]] == ["R1_0.csv", "R1_2.csv"]
+        assert "R1_1.csv" not in {f.filename for f in p.detector._runs[RUN].files}
+
+    @pytest.mark.parametrize("already_in_the_set", [True, False])
+    def test_a_refusal_is_not_an_attempt_and_is_reported_only_by_the_call_that_adds_the_run(
+        self, uploads_dir: Path, state_db: StateDB, already_in_the_set: bool
+    ) -> None:
+        up = _uploader(uploads_dir, state_db)
+        if already_in_the_set:
+            up._deleted_runs.add(RUN)
+        [file] = _make_files(uploads_dir, 1)
+        _queue(up, [file])
+        polls = MAX_QUEUE_FILE_ATTEMPTS + 2
+
+        for _ in range(polls):
+            up.poll_upload_queue()
+
+        # Each poll asks once, because the request is explicit, and the queue of this test
+        # lists the file every time. The run was deleted again, which is nobody's failure.
+        assert _request_url_mock(up).call_count == polls
+        assert RUN in up._deleted_runs
+        assert up._queue_attempts == {}
+        cast(MagicMock, up._client).cancel_upload_request.assert_not_called()
+        # Reported once, by the call that added the run, or not at all when it was in the set.
+        assert len(_events(up)) == (0 if already_in_the_set else 1)
+        assert up._counters.errors == (0 if already_in_the_set else 1)
+
+    def test_a_request_that_fails_for_another_reason_is_still_an_attempt(
+        self, uploads_dir: Path, state_db: StateDB
+    ) -> None:
+        up = _in_deleted_runs(_uploader(uploads_dir, state_db))
+        [file] = _make_files(uploads_dir, 1)
+        _queue(up, [file])
+        _request_url_mock(up).side_effect = ApiError("down", status_code=503)
+
+        for _ in range(MAX_QUEUE_FILE_ATTEMPTS):
+            up.poll_upload_queue()
+
+        # Asked on every poll, and given up on after the usual number of attempts.
+        assert _request_url_mock(up).call_count == MAX_QUEUE_FILE_ATTEMPTS
+        cast(MagicMock, up._client).cancel_upload_request.assert_called_once_with(1)
+        assert RUN in up._deleted_runs
+
+    def test_a_file_that_is_missing_is_still_an_attempt(
+        self, uploads_dir: Path, state_db: StateDB
+    ) -> None:
+        up = _in_deleted_runs(_uploader(uploads_dir, state_db))
+        gone = FileInfo(path=uploads_dir / RUN / "gone.csv", filename="gone.csv", size_bytes=0)
+        _queue(up, [gone])
+
+        for _ in range(MAX_QUEUE_FILE_ATTEMPTS):
+            up.poll_upload_queue()
+
+        # Reported missing once, then cancelled, as for any run. No request was sent.
+        missing = [e for e in _events(up) if e.details.get("kind") == "queued_file_missing"]
+        assert len(missing) == 1
+        _request_url_mock(up).assert_not_called()
+        cast(MagicMock, up._client).cancel_upload_request.assert_called_once_with(1)

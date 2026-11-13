@@ -4159,7 +4159,7 @@ class TestParallelQueue:
         barrier = threading.Barrier(3, timeout=3)
         uploaded: list[str] = []
 
-        def upload(path: Path, run_id: str) -> bool:
+        def upload(path: Path, run_id: str, *, requested: bool = False) -> bool:
             barrier.wait()
             uploaded.append(path.name)
             return True
@@ -4177,7 +4177,7 @@ class TestParallelQueue:
         up = _make_uploader(mock_client, state_db, tmp_path, parallelism=3)
         finished: list[str] = []
 
-        def upload(path: Path, run_id: str) -> bool:
+        def upload(path: Path, run_id: str, *, requested: bool = False) -> bool:
             time.sleep(0.1)
             finished.append(path.name)
             return True
@@ -4220,7 +4220,7 @@ class TestParallelQueue:
         up = _make_uploader(mock_client, state_db, tmp_path, parallelism=3)
         uploaded: list[str] = []
 
-        def upload(path: Path, run_id: str) -> bool:
+        def upload(path: Path, run_id: str, *, requested: bool = False) -> bool:
             if path.name == "q-1.csv":
                 raise ValueError("unexpected response")
             uploaded.append(path.name)
@@ -4241,7 +4241,7 @@ class TestParallelQueue:
         started: list[str] = []
         saw_stop: list[bool] = []
 
-        def upload(path: Path, run_id: str) -> bool:
+        def upload(path: Path, run_id: str, *, requested: bool = False) -> bool:
             started.append(path.name)
             if path.name == "q-1.csv":
                 _press_ctrl_c()
@@ -4646,7 +4646,7 @@ class TestWorkerThreads:
         threads: list[threading.Thread] = []
         all_started = threading.Barrier(3, timeout=5)
 
-        def upload(path: Path, run_id: str) -> bool:
+        def upload(path: Path, run_id: str, *, requested: bool = False) -> bool:
             threads.append(threading.current_thread())
             all_started.wait()
             return True

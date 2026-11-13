@@ -531,6 +531,18 @@ class _QueueAttempt:
     reason: str
 
 
+class _LastRefusal(threading.local):
+    """The run Data Hub last refused an upload of as deleted, on each thread.
+
+    A failed upload returns only ``False``. `_process_queued_file` reads this after the
+    call, so that this refusal is not an attempt while any other failure is, even one for
+    a run that is in the set of deleted runs: a file someone requested is asked for
+    whatever the set says.
+    """
+
+    run_id: str | None = None
+
+
 @dataclass(frozen=True)
 class _WaitingFile:
     """An auto-mode file that was found unreadable, until a poll can read it."""
@@ -608,7 +620,9 @@ class Uploader:
     deleted_runs:
         The runs the server refused because they were deleted on Data Hub. Share the
         run detector's. An upload-URL request refused for that reason adds its run, and
-        no file of a run in the set is uploaded. Defaults to a set of its own.
+        no auto-mode or pending file of a run in the set is uploaded. A file whose upload
+        was requested from the web is always asked for once, and the run leaves the set
+        when the server answers that request. Defaults to a set of its own.
     """
 
     def __init__(
@@ -646,6 +660,8 @@ class Uploader:
         # Added to by any upload thread and read by all of them, and by the run
         # detector's thread too; the set has its own lock.
         self._deleted_runs = deleted_runs if deleted_runs is not None else DeletedRuns()
+        # Set by `_note_run_deleted` on the thread that was refused.
+        self._last_refusal = _LastRefusal()
         # Track consecutive upload-queue poll failures so the watcher
         # surfaces a ``kind=upload_queue_poll_failed`` event on the
         # 1st failure and every 10th repeat. The unthrottled case
@@ -1171,14 +1187,16 @@ class Uploader:
         open) is not an attempt. It is reported once, stays queued, and is
         tried again on every poll, with no limit.
 
-        A file of a run Data Hub refused because it was deleted is not an attempt
-        either, and is skipped before anything else, so it is not reported
-        missing on every poll. The server drops the requests of a deleted run, so
-        a queue that still lists such a file is rare.
+        A request from the web is always asked of the server, even for a run in the
+        set of deleted runs. The server cancels the requests of a run when it is
+        deleted and refuses new ones, so a queue that lists a file of such a run
+        means the run was restored since, and the request is the user's way of saying
+        so. The upload goes out as any other (see `_upload_single`), and when the
+        server answers the run leaves the set. A refusal because the run was deleted
+        again is not an attempt, and says nothing when the run is in the set already. It
+        needs the queue to have been fetched just before the delete, and the server has
+        cancelled the request since, so the file leaves the queue.
         """
-        if qf.run_id in self._deleted_runs:
-            logger.debug("Skipping queued file %s: run %s was deleted", qf.filename, qf.run_id)
-            return
         attempt = self._queue_attempts.get(qf.id)
         attempt_count = attempt.count if attempt else 0
 
@@ -1213,15 +1231,18 @@ class Uploader:
             self._cancel_queued_file(qf, "unsafe_path")
             return
 
+        refused = False
         if _exists(local_path):
+            self._last_refusal.run_id = None
             try:
-                ok = self._upload_single(local_path, qf.run_id)
+                ok = self._upload_single(local_path, qf.run_id, requested=True)
             except CantReadYet as exc:
                 # Not a failed attempt, so it never counts toward the cap. The
                 # request stays queued and the next poll tries the file again,
                 # for as long as it can't be read.
                 self._report_cant_read(local_path, qf.run_id, exc, file_id=qf.id)
                 return
+            refused = self._last_refusal.run_id == qf.run_id
             reason = "upload_failed"
         else:
             ok = False
@@ -1249,7 +1270,7 @@ class Uploader:
         if ok:
             self._queue_attempts.pop(qf.id, None)
             return
-        if self._stop_requested() or qf.run_id in self._deleted_runs:
+        if self._stop_requested() or refused:
             # A stop, or a config rebuild, cut the upload off. That isn't a
             # failed attempt, so it can't use up the last one and cancel the
             # request: the file stays queued for the next poll or runtime. Nor is
@@ -1419,18 +1440,21 @@ class Uploader:
     def _note_run_deleted(self, run_id: str, exc: ApiError) -> None:
         """Remember that Data Hub refused an upload because *run_id* was deleted, and say so once.
 
-        From now on `_upload_single` skips every file of the run before any request. A
-        file whose request was already out when this one came back is refused too, and
-        says nothing: only the call that adds the run reports it, so a run with many files
-        costs one event and one error, not one per file. The detector's reports and
-        updates stop for the run as well, because they share the set.
+        From now on `_upload_single` skips every file of the run before any request, unless
+        its upload was requested from the web. A file whose request was already out when
+        this one came back is refused too, and says nothing: only the call that adds the
+        run reports it, so a run with many files costs one event and one error, not one per
+        file. The detector's reports and updates stop for the run as well, because they
+        share the set.
         """
+        self._last_refusal.run_id = run_id
         if not self._deleted_runs.add(run_id):
             logger.debug("Run %s was already known to be deleted on Data Hub", run_id)
             return
         logger.warning(
             "Upload refused: %s (run %s was deleted on Data Hub, so its files are not "
-            "uploaded until the watcher restarts)",
+            "uploaded until the watcher restarts or an upload requested for the run is "
+            "accepted)",
             exc.message,
             run_id,
         )
@@ -1442,6 +1466,23 @@ class Uploader:
                 details={"error": exc.message, "reason": RUN_DELETED_REASON, "run_id": run_id},
             )
         )
+
+    def _note_run_accepted(self, run_id: str) -> None:
+        """Take *run_id* out of the set of deleted runs: the server gave an upload URL for it.
+
+        The server refuses that request for a deleted run, so the run was restored. From now
+        on the detector reports the run's files that become stable and, in auto mode, the
+        uploader uploads them, until the next refusal. Nothing else is retried at once. A
+        file the detector skipped while the run was in the set was not recorded, so the next
+        start's initial scan reports it, and a `pending_uploads` row is retried at the next
+        start too.
+        """
+        if self._deleted_runs.discard(run_id):
+            logger.info(
+                "Run %s is no longer deleted on Data Hub: the server gave an upload URL for it, "
+                "so the watcher reports and uploads its files again",
+                run_id,
+            )
 
     def _fail_presign(self, path: Path, exc: ApiError, run_id: str) -> None:
         """Report a refused upload-URL request."""
@@ -1888,7 +1929,14 @@ class Uploader:
                 self._in_flight.discard(key)
                 self._in_flight_changed.notify_all()
 
-    def _upload_single(self, path: Path, run_id: str) -> bool:
+    def _skips_deleted_run(self, path: Path, run_id: str) -> bool:
+        """Whether *run_id* is in the set of deleted runs, which skips the upload of *path*."""
+        if run_id not in self._deleted_runs:
+            return False
+        logger.debug("Skipping %s: run %s was deleted on Data Hub", path.name, run_id)
+        return True
+
+    def _upload_single(self, path: Path, run_id: str, *, requested: bool = False) -> bool:
         """Upload one file unless another thread is already uploading it.
 
         A caller that had to wait skips the upload when the other thread
@@ -1898,12 +1946,15 @@ class Uploader:
         neither: nothing was recorded or counted as a failure, and the caller
         decides how to wait.
 
-        Returns `False` at once, without a request, for a file of a run Data Hub
-        refused because it was deleted. That is neither a failure nor an attempt, so
-        the callers that count attempts check the run too.
+        Returns `False` at once, without a request, for a file of a run in the set of
+        deleted runs. That is neither a failure nor an attempt, so the callers that
+        count attempts check the run too. *requested* is for a file someone asked to
+        have uploaded from the web.
+        It is always asked of the server, because the run may have been restored, and the
+        server's answer settles the run (`_note_run_accepted`, `_note_run_deleted`). Its
+        caller tells a refusal from another failure with `_last_refusal`.
         """
-        if run_id in self._deleted_runs:
-            logger.debug("Skipping %s: run %s was deleted on Data Hub", path.name, run_id)
+        if not requested and self._skips_deleted_run(path, run_id):
             return False
         with self._exclusive(path) as waited:
             uploaded = self._upload_locked(path, run_id, waited)
@@ -1961,16 +2012,18 @@ class Uploader:
         if blocked is not None:
             raise _cant_read(path, blocked) from blocked
 
-        request_url = partial(
-            self._client.request_upload_url,
-            self._instrument_id,
-            run_id,
-            path.name,
-            content_type=content_type,
-            size_bytes=stat.st_size,
-            file_created_at_ts=file_created_at(stat),
-            relative_path=rel_path,
-        )
+        def request_url() -> PresignedUploadResponse:
+            presigned = self._client.request_upload_url(
+                self._instrument_id,
+                run_id,
+                path.name,
+                content_type=content_type,
+                size_bytes=stat.st_size,
+                file_created_at_ts=file_created_at(stat),
+                relative_path=rel_path,
+            )
+            self._note_run_accepted(run_id)
+            return presigned
 
         prep_started = time.monotonic()
         if self._was_found_unreadable(path):

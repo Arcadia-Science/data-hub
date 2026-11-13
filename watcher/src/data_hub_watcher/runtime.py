@@ -282,7 +282,8 @@ def build_runtime(
     *on_config_revision* connect the heartbeat to the config-revision check.
     *deleted_runs* is the set of runs the server refused because they were deleted on
     Data Hub. The run detector and the uploader share it, and a supervisor shares it
-    across rebuilds, so such a run is left alone until the process restarts.
+    across rebuilds, so such a run is left alone until the process restarts, or until
+    the server accepts an upload that someone requested for it.
     """
     if not cfg.watcher_id:
         raise ValueError("cfg.watcher_id must be set before building the runtime")
@@ -987,7 +988,8 @@ class WatcherSupervisor:
         self._handoff = upgrade_handoff if upgrade_handoff is not None else UpgradeHandoff()
         # The runs the server refused because they were deleted on Data Hub. Every runtime
         # this supervisor builds shares it, so a rebuild for a config change doesn't report
-        # such a run again. Only a restart of the process does.
+        # such a run again. Only a restart of the process does, or an upload that someone
+        # requested for the run and the server accepted.
         self._deleted_runs = DeletedRuns()
         self.rt: WatcherRuntime | None = None
         self._waiting: _WaitingMode | None = None

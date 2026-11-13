@@ -16,9 +16,10 @@ through, nothing is uploaded and no further request is sent for the run.
 
 A run that was deleted on Data Hub is refused with a 409 that says so (`is_run_deleted`).
 The first refusal is reported once, and the run is remembered in memory (`DeletedRuns`)
-until the process ends: its later files send nothing and report nothing, so a forgotten
-run with many files in the folder costs one request and one event, not one per file.
-Nothing of it is recorded, so the next start asks again.
+until the process ends, or until the server accepts an upload that someone requested for
+the run (the uploader then takes it out of the set). Its later files send nothing and
+report nothing, so a forgotten run with many files in the folder costs one request and one
+event, not one per file. Nothing of it is recorded, so the next start asks again.
 """
 
 from __future__ import annotations
@@ -349,8 +350,9 @@ class RunDetector:
     def _handle_run_deleted(self, run: RunState, operation: ReportOperation, exc: ApiError) -> None:
         """Stop reporting *run*, which the server refused because it was deleted on Data Hub.
 
-        Remembers the run for the life of the process, so no later file of it sends a request
-        (`on_stable_file`) and no retry does (`retry_failed_reports`). Counts one error and
+        Remembers the run until the process ends, or until the uploader finds it restored, so
+        no later file of it sends a request (`on_stable_file`) and no retry does
+        (`retry_failed_reports`). Counts one error and
         queues one ``run_report_failed`` event, with the reason in its details, however many
         files the run has. When the uploader has met the refusal first, it has said so, and
         nothing more is reported. A 409 is never retried, so this ends any retry that was
@@ -363,7 +365,8 @@ class RunDetector:
         verb = "report" if operation == "create" else "update"
         logger.warning(
             "Failed to %s run %s: %s (the run was deleted on Data Hub, so its files are not "
-            "reported again until the watcher restarts)",
+            "reported again until the watcher restarts or an upload requested for the run is "
+            "accepted)",
             verb,
             run.run_id,
             exc.message,
