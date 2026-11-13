@@ -251,6 +251,11 @@ def _deregistered_shutdown(role: str) -> ShutdownReason:
     )
 
 
+# Taken by every `_deregistered_requester` callback (each loop has its own) around checking and
+# setting the shared `deregistered_event`.
+_DEREGISTERED_REQUEST_LOCK = threading.Lock()
+
+
 def _deregistered_requester(
     shutdown_event: threading.Event,
     deregistered_event: threading.Event,
@@ -267,10 +272,13 @@ def _deregistered_requester(
     def request() -> None:
         # The loops of one watcher share the run of replies, so a second loop can reach the
         # threshold too (the first one's stop is still unwinding). It stops what it owns,
-        # and the reason is logged once.
-        if not deregistered_event.is_set():
+        # and the reason is logged once, by whichever loop sets the event first. The lock
+        # makes that check and the set one step, so two loops can't both see it unset.
+        with _DEREGISTERED_REQUEST_LOCK:
+            first = not deregistered_event.is_set()
+            deregistered_event.set()
+        if first:
             logger.error("%s The watcher is stopping.", DEREGISTERED_MESSAGE)
-        deregistered_event.set()
         if stop_uploads is not None:
             stop_uploads()
         shutdown_event.set()

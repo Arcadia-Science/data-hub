@@ -875,6 +875,30 @@ class TestDeregisteredRequester:
         first_uploads.assert_called_once_with()
         second_uploads.assert_called_once_with()
 
+    def test_two_loops_that_reach_the_threshold_at_once_log_it_once(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        class SlowToAnswer(threading.Event):
+            """An event whose `is_set` takes a while, so that a check and a set can interleave."""
+
+            def is_set(self) -> bool:
+                answer = super().is_set()
+                time.sleep(0.2)
+                return answer
+
+        shutdown, deregistered = threading.Event(), SlowToAnswer()
+        callbacks = [_deregistered_requester(shutdown, deregistered) for _ in range(2)]
+        threads = [threading.Thread(target=callback) for callback in callbacks]
+
+        with caplog.at_level(logging.INFO, logger="data_hub_watcher.runtime"):
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(10)
+
+        assert [r.levelno for r in caplog.records] == [logging.ERROR]
+        assert deregistered.is_set()
+
     def test_it_logs_one_error_that_says_to_run_init(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
