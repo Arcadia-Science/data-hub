@@ -11,6 +11,7 @@ import {
   getRunFilesPage,
   lookupRunByNaturalKey,
   lookupRunUuidsByNaturalKeys,
+  normalizeRunId,
   type RunAttribution,
 } from "@/lib/api/instrument-runs";
 import { claimRuns, unclaimRuns } from "@/lib/api/run-attributions";
@@ -221,7 +222,7 @@ export function registerRunTools(server: McpServer) {
       const byRun = await getAttributionsByRunIds([resolved.runUuid]);
       return structuredResult({
         instrumentId,
-        runId,
+        runId: resolved.runId,
         attributions: byRun.get(resolved.runUuid) ?? [],
       });
     }
@@ -241,16 +242,20 @@ export function registerRunTools(server: McpServer) {
         return errorResult("Authenticated user not available on this session.");
       }
 
-      const uniqueRunIds = [...new Set(runIds)];
-      const found = await lookupRunUuidsByNaturalKeys(
-        instrumentId,
-        uniqueRunIds
+      // The lookup trims each ID, and its map is keyed by the stored IDs. A
+      // missing ID is reported as the caller sent it, so the caller can match
+      // it to its input. Two spellings of one run claim that run once.
+      const sentRunIds = [...new Set(runIds)];
+      const found = await lookupRunUuidsByNaturalKeys(instrumentId, sentRunIds);
+      const notFound = sentRunIds.filter(
+        (sent) => !found.has(normalizeRunId(sent))
       );
-      const notFound = uniqueRunIds.filter((runId) => !found.has(runId));
-      const resolved = uniqueRunIds.flatMap((runId) => {
-        const runUuid = found.get(runId);
-        return runUuid ? [{ runId, runUuid }] : [];
-      });
+      const resolved = [...new Set(sentRunIds.map(normalizeRunId))].flatMap(
+        (runId) => {
+          const runUuid = found.get(runId);
+          return runUuid ? [{ runId, runUuid }] : [];
+        }
+      );
 
       const claimed: Array<{ runId: string; attributions: RunAttribution[] }> =
         [];
@@ -298,7 +303,7 @@ export function registerRunTools(server: McpServer) {
       const byRun = await getAttributionsByRunIds([resolved.runUuid]);
       return structuredResult({
         instrumentId,
-        runId,
+        runId: resolved.runId,
         attributions: byRun.get(resolved.runUuid) ?? [],
       });
     }
@@ -367,7 +372,7 @@ export function registerRunTools(server: McpServer) {
         body: validated.body,
         instrumentId,
         instrumentDisplayName: run.instrumentDisplayName,
-        runDisplayId: runId,
+        runDisplayId: run.runId,
         origin,
       });
 

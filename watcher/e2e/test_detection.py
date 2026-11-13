@@ -24,6 +24,7 @@ from e2e_support.admin import Admin
 from e2e_support.drivers import WatcherDriver
 from e2e_support.factory import WatcherFactory
 from e2e_support.files import LARGE, SMALL, GrowingFile, payload, write_file, write_run
+from e2e_support.proxy_helpers import wait_for_answer
 from e2e_support.server import EventRow, ServerView
 from e2e_support.waiting import KnownBugStillPresent, known_bug, stays_true, wait_until
 
@@ -643,8 +644,12 @@ def test_a_failed_run_update_is_retried_and_carries_the_file(
         write_file(watch_dir / "RUN001" / "b.csv")
         server.wait_for_file(instrument_id, "RUN001", "RUN001/b.csv", status="detected", timeout=30)
 
-    # The retry came after the base delay, and sent the file the failed update had not.
-    updates = [r for r in run_reports(proxy, instrument_id) if r.method == "PATCH"]
+    # The retry came after the base delay, and sent the file the failed update had not. The
+    # server stores the file before it answers, so first wait until the proxy has the answer.
+    def patches() -> list[RecordedRequest]:
+        return [r for r in run_reports(proxy, instrument_id) if r.method == "PATCH"]
+
+    updates = wait_for_answer(proxy, patches, what="the server's answer to the retried update")
     assert [(r.fault_mode, r.upstream_status) for r in updates] == [("status", None), (None, 200)]
     assert updates[1].timestamp - updates[0].timestamp >= RETRY_BASE_DELAY_SECONDS - 0.5
     pc.wait_for_log(r"Updated run RUN001 \(sent 1 new file\(s\), 2 total\)")
@@ -707,7 +712,9 @@ def test_a_deleted_run_refuses_updates_and_catches_up_after_it_is_restored(
         "RUN001/b.csv",
         "RUN001/c.csv",
     ]
-    assert [r.upstream_status for r in patches()] == [409, 200]
+    # The server stores the file before it answers, so wait until the proxy has the answer.
+    answered = wait_for_answer(proxy, patches, what="the server's answer to the update of c.csv")
+    assert [r.upstream_status for r in answered] == [409, 200]
     assert len(error_events(server, pc.watcher_id, "run_report_failed")) == 1
 
 
@@ -805,6 +812,49 @@ def test_a_run_with_url_characters_in_its_id_gets_its_files(
     assert relative_paths(server, instrument_id, "QA") == ["QA/own.csv"]
     assert not server.object_exists(instrument_id, "QA", "first.csv")
     assert not server.object_exists(instrument_id, "QA", "second.csv")
+
+
+# The run is the part of the file name before the first underscore, so `RUN1 _a.csv` is in the run
+# `RUN1 ` with a space at the end. The server saves that run as `RUN1`, and has to find it again
+# when the watcher names it with the space.
+@pytest.mark.covers("run.id_with_outer_spaces->update_reaches_run")
+@pytest.mark.parametrize("upload_mode", ["manual", "auto"])
+def test_a_run_with_a_space_at_the_end_of_its_id_gets_its_files(
+    upload_mode: Literal["auto", "manual"],
+    watcher: WatcherFactory,
+    server: ServerView,
+    instrument_id: str,
+    watch_dir: Path,
+) -> None:
+    pc = watcher(upload_mode=upload_mode, recursive=False, run_pattern=r"^([^_/]+)_[^/]*$")
+    pc.start()
+
+    def wait_until_done(name: str, content: bytes) -> None:
+        if upload_mode == "auto":
+            # Done means the row says so and the stand-in holds the bytes under the saved run ID.
+            server.wait_for_uploaded(instrument_id, "RUN1", name, content=content, timeout=20)
+        else:
+            server.wait_for_file(instrument_id, "RUN1", name, status="detected")
+
+    contents = {
+        "RUN1 _a.csv": write_file(watch_dir / "RUN1 _a.csv", SMALL),
+        "RUN1 _b.csv": write_file(watch_dir / "RUN1 _b.csv", LARGE),
+    }
+    for name, content in contents.items():
+        wait_until_done(name, content)
+
+    # A file that arrives after the run exists is reported with a run update, which also names
+    # the run with the space.
+    later = write_file(watch_dir / "RUN1 _c.csv", SMALL)
+    wait_until_done("RUN1 _c.csv", later)
+
+    assert run_names(server, instrument_id) == ["RUN1"]
+    assert relative_paths(server, instrument_id, "RUN1") == [
+        "RUN1 _a.csv",
+        "RUN1 _b.csv",
+        "RUN1 _c.csv",
+    ]
+    assert error_events(server, pc.watcher_id) == []
 
 
 @pytest.mark.xfail(

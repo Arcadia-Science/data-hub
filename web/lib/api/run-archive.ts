@@ -66,11 +66,14 @@ export type PrepareRunArchiveResult =
       expiresInSeconds: number;
       archiveBucket: string;
       archiveKey: string;
+      // The run's stored ID, which can differ from the request's by spaces.
+      runId: string;
     }
   | {
       ok: true;
       status: "building";
       jobId: string;
+      runId: string;
       // True when this call kicked off the Lambda invocation (vs. joining
       // an in-flight build started by another request). Useful for
       // logging; clients shouldn't branch on it.
@@ -132,12 +135,10 @@ export async function prepareRunArchive(
     downloadable.map((f) => ({ id: f.id, s3Key: f.s3Key }))
   );
   const archiveBucket = getS3ArchivesBucket();
-  const archiveKey = getArchiveKey(
-    input.instrumentId,
-    input.runId,
-    fingerprint
-  );
-  const filename = getArchiveDownloadFilename(input.runId);
+  // Name the archive after the stored run ID, so a request that has spaces
+  // around the ID doesn't get an archive of its own.
+  const archiveKey = getArchiveKey(input.instrumentId, run.runId, fingerprint);
+  const filename = getArchiveDownloadFilename(run.runId);
 
   // Cache hit: Lambda already produced a zip with this fingerprint and
   // the lifecycle-policy hasn't expired it. Skip the build entirely and
@@ -162,6 +163,7 @@ export async function prepareRunArchive(
       expiresInSeconds: PRESIGNED_DOWNLOAD_URL_EXPIRY_SECONDS,
       archiveBucket,
       archiveKey,
+      runId: run.runId,
     };
   }
 
@@ -191,7 +193,7 @@ export async function prepareRunArchive(
     const buildInput: InvokeBuildArchiveInput = {
       jobId: job.id,
       instrumentId: input.instrumentId,
-      runId: input.runId,
+      runId: run.runId,
       files: downloadable.map((f) => ({
         s3Key: f.s3Key,
         filename: f.filename,
@@ -210,6 +212,7 @@ export async function prepareRunArchive(
     ok: true,
     status: "building",
     jobId: job.id,
+    runId: run.runId,
     ownsBuild,
     retryAfterSeconds: estimateRetryAfterSeconds({
       fileCount: downloadable.length,
