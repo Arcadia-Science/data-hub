@@ -46,6 +46,10 @@ The Windows auto-update path requires that `service install` (or `service reinst
 
 `service reinstall` is the right command after an out-of-band wheel swap (for example a manual `uv tool install -U` from an Administrator shell). Stop and uninstall are best-effort, so it works even if the service is already gone.
 
+With watcher 1.4.2 and later, `service stop` finishes within about 25 seconds once the watcher is running, even when Data Hub doesn’t answer. It can take longer while the watcher is still starting, because it syncs its config, sends its first heartbeat and scans the watch folder before it looks for a stop. It can also take longer while the watcher applies a config change from Data Hub, which waits up to 2 minutes for uploads to finish. Once the stop begins, the watcher starts no new file or part. A part already on its way gets up to 15 seconds to arrive. In the last 10 seconds, the watcher sends its `watcher_stopped` event and then its final heartbeat, so it shows as **Stopped** when Data Hub answers.
+
+A file that the watcher had to cut off isn’t lost. When the instrument uploads automatically, the watcher uploads that file again the next time it starts. A file that someone requested with **Upload** is different: `service stop` cancels the requests, so request the file again. A restart of the PC keeps them queued, as [When the PC restarts or shuts down](#when-the-pc-restarts-or-shuts-down) describes. See also [Request uploads](/docs/manage-watchers#request-uploads).
+
 `service install` and `service reinstall` accept `--env-path PATH` to override which `.env` file the service loads (defaults to `~/.data-hub/.env.<environment>`).
 
 ## When the PC restarts or shuts down [#when-the-pc-restarts-or-shuts-down]
