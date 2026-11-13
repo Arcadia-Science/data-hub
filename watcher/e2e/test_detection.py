@@ -24,6 +24,7 @@ from e2e_support.admin import Admin
 from e2e_support.drivers import WatcherDriver
 from e2e_support.factory import WatcherFactory
 from e2e_support.files import LARGE, SMALL, GrowingFile, payload, write_file, write_run
+from e2e_support.proxy_helpers import wait_for_answer
 from e2e_support.server import EventRow, ServerView
 from e2e_support.waiting import KnownBugStillPresent, known_bug, stays_true, wait_until
 
@@ -643,8 +644,12 @@ def test_a_failed_run_update_is_retried_and_carries_the_file(
         write_file(watch_dir / "RUN001" / "b.csv")
         server.wait_for_file(instrument_id, "RUN001", "RUN001/b.csv", status="detected", timeout=30)
 
-    # The retry came after the base delay, and sent the file the failed update had not.
-    updates = [r for r in run_reports(proxy, instrument_id) if r.method == "PATCH"]
+    # The retry came after the base delay, and sent the file the failed update had not. The
+    # server stores the file before it answers, so first wait until the proxy has the answer.
+    def patches() -> list[RecordedRequest]:
+        return [r for r in run_reports(proxy, instrument_id) if r.method == "PATCH"]
+
+    updates = wait_for_answer(proxy, patches, what="the server's answer to the retried update")
     assert [(r.fault_mode, r.upstream_status) for r in updates] == [("status", None), (None, 200)]
     assert updates[1].timestamp - updates[0].timestamp >= RETRY_BASE_DELAY_SECONDS - 0.5
     pc.wait_for_log(r"Updated run RUN001 \(sent 1 new file\(s\), 2 total\)")
@@ -707,7 +712,9 @@ def test_a_deleted_run_refuses_updates_and_catches_up_after_it_is_restored(
         "RUN001/b.csv",
         "RUN001/c.csv",
     ]
-    assert [r.upstream_status for r in patches()] == [409, 200]
+    # The server stores the file before it answers, so wait until the proxy has the answer.
+    answered = wait_for_answer(proxy, patches, what="the server's answer to the update of c.csv")
+    assert [r.upstream_status for r in answered] == [409, 200]
     assert len(error_events(server, pc.watcher_id, "run_report_failed")) == 1
 
 

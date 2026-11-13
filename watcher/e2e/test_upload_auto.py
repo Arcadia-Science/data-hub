@@ -31,6 +31,7 @@ from e2e_support.admin import Admin
 from e2e_support.drivers import WatcherDriver
 from e2e_support.factory import WatcherFactory
 from e2e_support.files import LARGE, SMALL, payload, write_file, write_run
+from e2e_support.proxy_helpers import wait_for_answer
 from e2e_support.server import ServerView
 from e2e_support.waiting import KnownBugStillPresent, known_bug, wait_until
 
@@ -683,7 +684,12 @@ def test_file_that_changed_after_hashing_restarts_the_upload_once(
     # The second upload read the original bytes, the ones that were hashed (the restart sends the
     # first hash again, so only those bytes can match it), and succeeded.
     row = server.wait_for_uploaded(instrument_id, RUN, LARGE_PATH, content=original)
-    completes = calls(proxy, "POST", "/multipart-upload/complete")
+    # The server marks the file uploaded before it answers, so wait until the proxy has the answer.
+    completes = wait_for_answer(
+        proxy,
+        lambda: calls(proxy, "POST", "/multipart-upload/complete"),
+        what="the server's answer to the second completing request",
+    )
     assert [r.upstream_status for r in completes] == [400, 200]
     assert len(calls(proxy, "POST", "/request-upload-url")) == 2
     assert len(calls(proxy, "DELETE", "/multipart-upload")) == 1
