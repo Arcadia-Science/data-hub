@@ -978,11 +978,30 @@ class TestWatchFolderVanishesWhileWatching:
     PART_SIZE = 64
     PART_COUNT = 4
 
+    @pytest.fixture(autouse=True)
+    def _only_the_test_reports_the_folder_gone(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Ignore watchdog's own report of a deleted folder, so a tick is what is tested.
+
+        The tests that hand the event handler an event themselves still work: they call it
+        from the test's thread, and watchdog's runs on its observer's.
+        """
+        from data_hub_watcher import monitor as monitor_module
+
+        real = monitor_module._EventHandler._note_root_event
+
+        def from_the_test_only(handler: Any, event: Any) -> None:
+            if threading.current_thread() is threading.main_thread():
+                real(handler, event)
+
+        monkeypatch.setattr(monitor_module._EventHandler, "_note_root_event", from_the_test_only)
+
     @staticmethod
     def _tick(sup: WatcherSupervisor) -> None:
         """One heartbeat tick of the running runtime, then the supervisor's poll."""
         assert sup.rt is not None
+        sup._folder_check_due.clear()
         sup.rt.heartbeat._on_tick()  # type: ignore[misc]
+        assert sup._folder_check_due.is_set()
         sup.poll(timeout=0)
 
     @staticmethod
@@ -1116,10 +1135,6 @@ class TestWatchFolderVanishesWhileWatching:
             return real_problem(path)
 
         monkeypatch.setattr(runtime, "watch_directory_problem", spy)
-        # Leave watchdog's own report of the deleted folder out of it: only the tick asks.
-        from data_hub_watcher import monitor as monitor_module
-
-        monkeypatch.setattr(monitor_module._EventHandler, "_note_root_event", lambda *_: None)
         sup = env.supervisor()
         sup.start()
         checked_on.clear()
