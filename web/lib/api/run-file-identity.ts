@@ -403,6 +403,36 @@ export async function resolveRunFiles(
   return decisions;
 }
 
+/**
+ * For a watcher older than 1.1.0, which can only upload under the name it
+ * reports: whether each file may not get a row of its own because of a
+ * dismissed row. That is so when the file is the one a dismissed row at its path
+ * stands for, or when a dismissed row with an S3 key holds its name. Results
+ * line up with `incoming`.
+ */
+export async function blockedByDismissed(
+  executor: DbExecutor,
+  instrumentRunId: string,
+  incoming: IncomingRunFile[]
+): Promise<boolean[]> {
+  const dismissed = await loadDismissedFiles(
+    executor,
+    instrumentRunId,
+    incoming.map((file) => file.relativePath),
+    incoming.map((file) => file.filename)
+  );
+  const dismissedByPath = groupDismissedByPath(dismissed);
+  const heldNames = namesHeldByDismissed(dismissed);
+  return incoming.map(
+    (file) =>
+      heldNames.has(file.filename) ||
+      (dismissedByPath
+        .get(file.relativePath)
+        ?.some((row) => isSameAsDismissed(file, row)) ??
+        false)
+  );
+}
+
 async function insertResolved(
   executor: DbExecutor,
   instrumentRunId: string,
@@ -448,8 +478,10 @@ async function insertResolved(
  *
  * `renameDuplicates` is true only for watchers that can upload the renamed
  * file. For older watchers the insert is unchanged: a second file with a
- * name already in the run is skipped by the filename unique index. Both kinds
- * leave out a file that a dismissed row at its path stands for.
+ * name already in the run is skipped, and the filename unique index backs that
+ * up. Both kinds leave out a file that a dismissed row at its path stands for.
+ * Older watchers can't take another name, so they also leave out a file whose
+ * name a dismissed row with an S3 key holds.
  */
 export async function recordDetectedFiles(
   executor: DbExecutor,
@@ -499,22 +531,28 @@ export async function recordDetectedFiles(
       insertedAny = insertedAny || retried.size > 0;
     }
   } else {
+    // Only a file no active row has gets a row. The dismissed rows matter
+    // only then, so a re-report of known files looks at nothing more.
+    const known = await loadMatchingFiles(
+      executor,
+      instrumentRunId,
+      reported.map((file) => file.relative_path),
+      reported.map((file) => file.filename)
+    );
+    const knownPaths = new Set(known.map((row) => row.relativePath));
+    const knownNames = new Set(known.map((row) => row.filename));
+    const unknown = reported.filter(
+      (file) =>
+        !(knownPaths.has(file.relative_path) || knownNames.has(file.filename))
+    );
     // The path index no longer holds a dismissed file's path, so leave out
     // the files a dismissed row stands for, as the resolver does.
-    const dismissedByPath = groupDismissedByPath(
-      await loadDismissedFiles(
-        executor,
-        instrumentRunId,
-        reported.map((file) => file.relative_path),
-        []
-      )
+    const blocked = await blockedByDismissed(
+      executor,
+      instrumentRunId,
+      unknown.map(toIncoming)
     );
-    const fresh = reported.filter(
-      (file) =>
-        !dismissedByPath
-          .get(file.relative_path)
-          ?.some((row) => isSameAsDismissed(toIncoming(file), row))
-    );
+    const fresh = unknown.filter((_, index) => !blocked[index]);
     if (fresh.length === 0) {
       return;
     }

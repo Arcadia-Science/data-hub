@@ -782,6 +782,91 @@ describe("same-named files from different folders", () => {
       }
       throw new Error("The dismiss never waited for the row lock");
     }
+
+    describe("for a watcher older than 1.1.0", () => {
+      const oldWatcher = { [WATCHER_VERSION_HEADER]: "1.0.0" };
+      // Such a watcher uploads by filename only, so a file sits at the path
+      // that equals its name.
+      const rootPath = "sample.tif";
+
+      it("refuses the dismissed file's upload and stores nothing", async () => {
+        const runId = "dismissed-path-old-upload-same";
+        await createRunWith(
+          runId,
+          reported(1, firstCreatedAt, rootPath),
+          oldWatcher
+        );
+        await dismissAll(runId);
+
+        const upload = await requestUpload(
+          runId,
+          reported(1, firstCreatedAt, rootPath),
+          oldWatcher
+        );
+        expect(upload.status).toBe(409);
+        const rows = await runFiles(runId);
+        expect(rows).toHaveLength(1);
+        expect(rows[0]?.deleted_at).toBeTruthy();
+      });
+
+      it("gives a different file an upload URL and a row of its own", async () => {
+        const runId = "dismissed-path-old-upload-different";
+        await createRunWith(
+          runId,
+          reported(1, firstCreatedAt, rootPath),
+          oldWatcher
+        );
+        const [dismissed] = await runFiles(runId);
+        await dismissAll(runId);
+
+        const upload = await requestUpload(
+          runId,
+          reported(900, laterCreatedAt, rootPath),
+          oldWatcher
+        );
+        expect(upload.status).toBe(200);
+        const body = await upload.json();
+        expect(body.upload_url).toBeTruthy();
+        expect(body.s3_key).toBe(`${instrumentId}/${runId}/sample.tif`);
+        expect(body.file_id).not.toBe(dismissed.id);
+        expect(await runFiles(runId)).toHaveLength(2);
+
+        // A second request finds the row it made.
+        const again = await requestUpload(
+          runId,
+          reported(900, laterCreatedAt, rootPath),
+          oldWatcher
+        );
+        expect((await again.json()).file_id).toBe(body.file_id);
+        expect(await runFiles(runId)).toHaveLength(2);
+      });
+
+      it("leaves out a file whose name a dismissed file that reached S3 holds", async () => {
+        const runId = "dismissed-path-old-reached-s3";
+        await createRunWith(
+          runId,
+          reported(1, firstCreatedAt, rootPath),
+          oldWatcher
+        );
+        const [dismissed] = await runFiles(runId);
+        await dismissAll(runId);
+        await markReachedS3(dismissed.id, runId, "sample.tif");
+
+        // It can't be stored under another name, and the S3 key is taken.
+        await report(
+          runId,
+          reported(900, laterCreatedAt, rootPath),
+          oldWatcher
+        );
+        const upload = await requestUpload(
+          runId,
+          reported(900, laterCreatedAt, rootPath),
+          oldWatcher
+        );
+        expect(upload.status).toBe(409);
+        expect(await runFiles(runId)).toHaveLength(1);
+      });
+    });
   });
 
   async function filenames(runId: string): Promise<string[]> {

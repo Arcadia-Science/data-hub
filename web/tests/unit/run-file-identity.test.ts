@@ -4,9 +4,11 @@ import {
   decideStoredNames,
   type IncomingRunFile,
   isSameAsDismissed,
+  recordDetectedFiles,
   type StoredRunFile,
   taggedFilename,
 } from "@/lib/api/run-file-identity";
+import type { DbExecutor } from "@/lib/db";
 
 function incoming(
   relativePath: string,
@@ -379,5 +381,71 @@ describe("decideStoredNames with dismissed files", () => {
         filename: tagged,
       });
     });
+  });
+});
+
+// A stand-in for the database that hands out one prepared answer per select
+// and counts the writes, to show which queries a report makes.
+function fakeExecutor(answers: unknown[][]) {
+  const calls = { selects: 0, inserted: 0 };
+  const executor = {
+    select: () => ({
+      from: () => ({
+        where: () => Promise.resolve(answers[calls.selects++] ?? []),
+      }),
+    }),
+    insert: () => ({
+      values: (rows: unknown[]) => ({
+        onConflictDoNothing: () => ({
+          returning: () => {
+            calls.inserted += rows.length;
+            return Promise.resolve(rows.map((_, id) => ({ id })));
+          },
+        }),
+      }),
+    }),
+    update: () => ({ set: () => ({ where: () => Promise.resolve() }) }),
+  };
+  return { calls, executor: executor as unknown as DbExecutor };
+}
+
+describe("recordDetectedFiles for a watcher older than 1.1.0", () => {
+  const reportedFile = {
+    relative_path: "sample.tif",
+    filename: "sample.tif",
+    size_bytes: 100,
+    file_created_at: "2026-09-21T17:00:00.000Z",
+  };
+
+  it("looks at the run's active files only when it re-reports files the run has", async () => {
+    const { calls, executor } = fakeExecutor([
+      [{ id: 1, relativePath: "sample.tif", filename: "sample.tif" }],
+    ]);
+    await recordDetectedFiles(executor, "run", [reportedFile], false);
+    expect(calls).toEqual({ selects: 1, inserted: 0 });
+  });
+
+  it("also looks at dismissed files when a file has no row yet", async () => {
+    const { calls, executor } = fakeExecutor([[], []]);
+    await recordDetectedFiles(executor, "run", [reportedFile], false);
+    expect(calls).toEqual({ selects: 2, inserted: 1 });
+  });
+
+  it("stores nothing for the file a dismissed row at its path stands for", async () => {
+    const { calls, executor } = fakeExecutor([
+      [],
+      [dismissed("sample.tif", { filename: "sample.tif" })],
+    ]);
+    await recordDetectedFiles(executor, "run", [reportedFile], false);
+    expect(calls).toEqual({ selects: 2, inserted: 0 });
+  });
+
+  it("stores a different file at the dismissed path", async () => {
+    const { calls, executor } = fakeExecutor([
+      [],
+      [dismissed("sample.tif", { sizeBytes: 5 })],
+    ]);
+    await recordDetectedFiles(executor, "run", [reportedFile], false);
+    expect(calls).toEqual({ selects: 2, inserted: 1 });
   });
 });

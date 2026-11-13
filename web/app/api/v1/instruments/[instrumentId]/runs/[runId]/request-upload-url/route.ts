@@ -12,6 +12,7 @@ import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
 import { beginMultipartUpload } from "@/lib/api/multipart-upload";
 import { readJsonBody, requestUploadUrlBody } from "@/lib/api/openapi";
 import {
+  blockedByDismissed,
   type IncomingRunFile,
   resolveRunFiles,
 } from "@/lib/api/run-file-identity";
@@ -98,26 +99,38 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     ? body.relative_path
     : undefined;
 
+  const incoming: IncomingRunFile = {
+    relativePath: relativePath ?? filename,
+    filename,
+    sizeBytes: sizeBytes ?? null,
+    fileCreatedAt,
+  };
+
   // Older watchers match the row stored under the bare name. A folder
   // path can point at a renamed row when another folder took that name.
-  const existingFile = relativePath
-    ? await findOrCreateByPath(
-        run.id,
-        {
-          relativePath,
-          filename,
-          sizeBytes: sizeBytes ?? null,
-          fileCreatedAt,
-        },
-        contentType ?? null
-      )
-    : await findByFilename(run.id, filename);
+  let existingFile: typeof files.$inferSelect | null;
+  let refused: boolean;
+  if (relativePath) {
+    existingFile = await findOrCreateByPath(
+      run.id,
+      incoming,
+      contentType ?? null
+    );
+    refused = !existingFile;
+  } else {
+    existingFile = await findByFilename(run.id, filename);
+    // No row yet, so the insert below makes one unless a dismissed file's
+    // row stands in the way, the way it does for a newer watcher.
+    refused =
+      !existingFile &&
+      (await blockedByDismissed(db, run.id, [incoming]))[0] === true;
+  }
 
-  if (relativePath && !existingFile) {
+  if (refused) {
     return apiError(
       409,
       CONFLICT,
-      `Cannot store a file for '${relativePath}'. The same file was dismissed at that path.`
+      `Cannot store a file for '${incoming.relativePath}'. A dismissed file may already use that path.`
     );
   }
 
@@ -245,8 +258,9 @@ async function loadActiveFile(id: number) {
   return row ?? null;
 }
 
-// Returns null for the file a dismissed row at this path stands for, so the
-// route refuses it. A different file at that path gets a row of its own.
+// Returns null when no row can be had for the file: it is the one a dismissed
+// row at this path stands for, or the retry below lost a second race. A
+// different file at a dismissed path gets a row of its own.
 // A conflict means another request stored this path first. Deciding
 // again reuses that row, or takes the folder-hash name.
 async function findOrCreateByPath(
