@@ -88,6 +88,8 @@ A failure that isn’t a connection problem or a server error, such as `401 Unau
 
 Older watchers try again only when another file in the run finishes or the watcher restarts. Restart the watcher to report the run.
 
+A `409 Conflict` means someone deleted the run on Data Hub. Data Hub refuses the watcher’s reports of a deleted run, so files that appear in the run’s folder while it is deleted are not attached. Restoring the run doesn’t send those files by itself. After you restore the run, the watcher sends them the next time it reports the run, which happens when another file appears in the run’s folder or when the watcher restarts. Restart the watcher to send them now. Then they are attached to the run and, in automatic mode, uploaded.
+
 ## Files are not being detected
 
 - Confirm the watch directory and file patterns. The instrument’s page in the web app shows both, or run `data-hub-watcher config show` on the PC. Admins can change them from the web app; see [Change a watcher’s config](/docs/manage-watchers#change-a-watchers-config)
