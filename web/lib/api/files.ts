@@ -181,8 +181,26 @@ export async function dismissFile(fileId: number): Promise<DismissFileResult> {
     };
   }
 
+  // The update checks again what the read above saw. The processor can adopt
+  // the file in between, and a file that reached S3 must not be left as a
+  // dismissed row that holds its S3 key.
   const now = new Date();
-  await db.update(files).set({ deletedAt: now }).where(eq(files.id, fileId));
+  const [updated] = await db
+    .update(files)
+    .set({ deletedAt: now })
+    .where(
+      and(
+        eq(files.id, fileId),
+        isNull(files.deletedAt),
+        inArray(files.status, ["detected", "upload_requested"])
+      )
+    )
+    .returning({ id: files.id });
+  if (!updated) {
+    // The row changed after the read. Decide again from what it is now: it is
+    // dismissed already, or it is past the point where a dismiss is allowed.
+    return await dismissFile(fileId);
+  }
   await touchRuns([file.instrumentRunId]);
 
   return {

@@ -8,7 +8,7 @@ Code: ``monitor.py`` (``FileMonitor``: pattern filter, stability check, initial 
 
 from __future__ import annotations
 
-from e2e_support.catalog.model import Transition, covered, xfail_bug
+from e2e_support.catalog.model import Transition, covered
 
 MACHINE = "detection"
 
@@ -151,13 +151,12 @@ TRANSITIONS: tuple[Transition, ...] = (
         "as it refuses an update to the run, and attaches none of the report's files. The watcher "
         "records a `run_report_failed` event for it (`operation: create`, `status_code: 409`).",
     ),
-    xfail_bug(
+    covered(
         MACHINE,
         "file.dismissed_path->redetected",
-        "A new file at a path whose earlier file was dismissed (a different size or "
-        "modification time), reported by a watcher that forgot the old one with "
-        "`state forget`, appears on the server as `detected`.",
-        "ENG-2115",
+        "A different file at a path whose earlier file was dismissed (a different size or "
+        "creation time), reported by a watcher that forgot the old one with `state forget`, "
+        "appears on the server as a new `detected` file. The dismissed file stays dismissed.",
     ),
     covered(
         MACHINE,

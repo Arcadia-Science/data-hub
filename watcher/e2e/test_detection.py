@@ -26,7 +26,7 @@ from e2e_support.factory import WatcherFactory
 from e2e_support.files import LARGE, SMALL, GrowingFile, payload, write_file, write_run
 from e2e_support.proxy_helpers import wait_for_answer
 from e2e_support.server import EventRow, ServerView
-from e2e_support.waiting import KnownBugStillPresent, known_bug, stays_true, wait_until
+from e2e_support.waiting import stays_true, wait_until
 
 pytestmark = pytest.mark.e2e
 
@@ -858,12 +858,6 @@ def test_a_run_with_a_space_at_the_end_of_its_id_gets_its_files(
     assert error_events(server, pc.watcher_id) == []
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=KnownBugStillPresent,
-    reason="ENG-2115: the dismissed file's path stays unique in "
-    "its run, so the report of a new file at that path is dropped without a trace",
-)
 @pytest.mark.covers("file.dismissed_path->redetected")
 def test_a_new_file_at_a_dismissed_path_is_detected(
     watcher: WatcherFactory,
@@ -889,11 +883,17 @@ def test_a_new_file_at_a_dismissed_path_is_detected(
     server.wait_for_events(pc.watcher_id, event_type="run_reported", count=2)
 
     row = server.file(instrument_id, "RUN001", "RUN001/a.csv", include_deleted=False)
-    with known_bug():
-        assert row is not None, "the new file at the dismissed path is not on the server"
-        assert row.status == "detected"
-        assert row.size_bytes == 900
-        assert row.id != bad.id
+    assert row is not None, "the new file at the dismissed path is not on the server"
+    assert row.status == "detected"
+    assert row.size_bytes == 900
+    assert row.id != bad.id
+    # The dismissed file stays dismissed and keeps its own size.
+    at_path = server.files(instrument_id, "RUN001", include_deleted=True)
+    old = next((f for f in at_path if f.id == bad.id), None)
+    assert old is not None, "the dismissed file is gone from the server"
+    assert old.deleted_at is not None, "the dismissed file is no longer dismissed"
+    assert old.size_bytes == 700
+    assert len(at_path) == 2
 
 
 # ---------------------------------------------------------------------------
