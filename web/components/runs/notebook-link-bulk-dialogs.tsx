@@ -9,7 +9,6 @@ import {
   NotebookLinkForm,
   type NotebookLinkFormValues,
 } from "@/components/runs/notebook-link-form";
-import { notebookLinkShortUrl } from "@/components/runs/notebook-link-row";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -31,6 +30,11 @@ import {
   bulkRemoveNotebookLinks,
   NotebookLinkRequestError,
 } from "@/lib/runs/notebook-link-requests";
+
+/** The URL without its scheme, which every link shares. */
+function shortUrl(url: string): string {
+  return url.replace(/^https?:\/\//, "");
+}
 
 function runs(count: number): string {
   return `${count} ${count === 1 ? "run" : "runs"}`;
@@ -289,8 +293,7 @@ export function RemoveNotebookLinksDialog({
                     {link.displayName}
                   </span>
                   <span className="truncate text-muted-foreground text-xs">
-                    {notebookLinkShortUrl(link.url)} · on {link.runCount} of{" "}
-                    {runs(count)}
+                    {shortUrl(link.url)} · on {link.runCount} of {runs(count)}
                   </span>
                 </label>
               </li>

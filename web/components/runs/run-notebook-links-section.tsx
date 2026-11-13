@@ -72,7 +72,7 @@ function saveErrorMessage(error: unknown): string {
 }
 
 /**
- * The run page's "Lab notebook" section: the run's links to notebook pages,
+ * The run page's "Lab notebooks" section: the run's links to notebook pages,
  * with an inline form to add or edit one. Each change goes to the API and
  * then refreshes the page; the list shows the change right away and falls
  * back if the request fails.
@@ -209,7 +209,7 @@ export function RunNotebookLinksSection({
   const showAddButton = !(isDeleted || adding);
 
   return (
-    <section aria-label="Lab notebook" className="flex flex-col gap-2">
+    <section aria-label="Lab notebooks" className="flex flex-col gap-2">
       <RunSectionHeading
         actions={
           showAddButton ? (
@@ -228,7 +228,7 @@ export function RunNotebookLinksSection({
           ) : undefined
         }
         countLabel={optimistic.length > 0 ? optimistic.length : undefined}
-        title="Lab notebook"
+        title="Lab notebooks"
       />
       <Card className="gap-0 py-0">
         {adding ? (

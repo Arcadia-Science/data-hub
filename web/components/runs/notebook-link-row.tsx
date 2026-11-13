@@ -26,14 +26,10 @@ import {
   notebookLinkCreator,
 } from "@/lib/api/run-notebook-link-wire";
 
-/** The URL without its scheme, which every link shares. */
-export function notebookLinkShortUrl(url: string): string {
-  return url.replace(/^https?:\/\//, "");
-}
-
 /**
- * One lab notebook link on the run page: its name, the URL, and who added
- * it. The menu offers Edit and Remove unless `readOnly`, and Copy link always.
+ * One lab notebook link on the run page: its name, and who added it and
+ * when. They share a line on wider screens and stack on narrow ones. The
+ * menu offers Edit and Remove unless `readOnly`, and Copy link always.
  */
 export function NotebookLinkRow({
   link,
@@ -60,15 +56,15 @@ export function NotebookLinkRow({
   }
 
   return (
-    <div className="flex items-start gap-3 px-4 py-3">
+    <div className="flex items-start gap-3 px-4 py-3 sm:items-center">
       <ExternalLink
         aria-hidden="true"
-        className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+        className="mt-0.5 size-4 shrink-0 text-muted-foreground sm:mt-0"
       />
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+      <div className="flex min-w-0 flex-1 flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
         <TruncatedTooltip text={link.display_name}>
           <a
-            className="truncate font-medium text-sm underline-offset-2 hover:underline"
+            className="min-w-0 truncate font-medium text-sm underline-offset-2 hover:underline"
             href={link.url}
             rel="noopener noreferrer"
             target="_blank"
@@ -76,12 +72,9 @@ export function NotebookLinkRow({
             {link.display_name}
           </a>
         </TruncatedTooltip>
-        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 text-muted-foreground text-xs">
-          <TruncatedTooltip text={link.url}>
-            <span className="max-w-full truncate" tabIndex={0}>
-              {notebookLinkShortUrl(link.url)}
-            </span>
-          </TruncatedTooltip>
+        {/* On narrow screens the time gets its own line, so the dot that
+            separates it only shows when everything fits on one. */}
+        <span className="flex flex-col gap-0.5 whitespace-nowrap text-muted-foreground text-xs sm:shrink-0 sm:flex-row sm:items-center sm:gap-1">
           <span className="inline-flex items-center gap-1">
             {creator ? (
               <>
@@ -94,16 +87,18 @@ export function NotebookLinkRow({
             ) : (
               "Added"
             )}
-            <span aria-hidden="true">·</span>
-            <RelativeTime date={link.created_at} />
           </span>
-        </div>
+          <span aria-hidden="true" className="hidden sm:inline">
+            ·
+          </span>
+          <RelativeTime date={link.created_at} />
+        </span>
       </div>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
             aria-label={`Actions for ${link.display_name}`}
-            className="-mt-1 -mr-1 size-7 shrink-0 text-muted-foreground/70 hover:text-foreground"
+            className="-my-1 -mr-1 size-7 shrink-0 text-muted-foreground/70 hover:text-foreground"
             size="icon"
             type="button"
             variant="ghost"
