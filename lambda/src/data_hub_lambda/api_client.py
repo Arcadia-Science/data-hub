@@ -4,6 +4,7 @@ import os
 import random
 import time
 from typing import Any
+from urllib.parse import quote
 
 import requests
 
@@ -32,6 +33,18 @@ class ApiError(Exception):
         self.message = message
         self.status_code = status_code
         self.detail = detail
+
+
+def _path_segment(value: str) -> str:
+    """Percent-encode *value* so it is one literal segment of a URL path.
+
+    A run ID comes from a folder in the S3 key, so it can hold characters that
+    mean something in a URL. Put into a path as it is, a `#` ends the path (the
+    rest becomes a fragment that is never sent), a `?` starts a query, and `%41`
+    is sent as `A`, so the call reaches another run or none. `requests` doesn't
+    prevent any of these, so it has to be done here.
+    """
+    return quote(value, safe="")
 
 
 # (connect_timeout, read_timeout) in seconds. The read timeout is generous
@@ -220,7 +233,7 @@ class DataHubClient:
         last_error: ApiError | None = None
         for attempt in range(_GET_INSTRUMENT_ATTEMPTS):
             try:
-                resp = self._request("GET", f"/instruments/{instrument_id}")
+                resp = self._request("GET", f"/instruments/{_path_segment(instrument_id)}")
                 instrument = InstrumentResponse.model_validate(resp.json())
                 _instrument_cache[instrument_id] = (time.monotonic(), instrument)
                 return instrument
@@ -257,7 +270,7 @@ class DataHubClient:
         """
         resp = self._request_with_retry(
             "POST",
-            f"/instruments/{instrument_id}/runs",
+            f"/instruments/{_path_segment(instrument_id)}/runs",
             json={"run_id": run_id, "source": "lambda"},
         )
         return RunResponse.model_validate(resp.json())
@@ -269,7 +282,9 @@ class DataHubClient:
         the same capture folder. A renamed sidecar (`run~<hash>.json`) is
         indistinguishable from `run.json` without that path.
         """
-        resp = self._request_with_retry("GET", f"/instruments/{instrument_id}/runs/{run_id}")
+        resp = self._request_with_retry(
+            "GET", f"/instruments/{_path_segment(instrument_id)}/runs/{_path_segment(run_id)}"
+        )
         return RunDetailResponse.model_validate(resp.json())
 
     def update_run(
@@ -291,7 +306,7 @@ class DataHubClient:
 
         resp = self._request_with_retry(
             "PATCH",
-            f"/instruments/{instrument_id}/runs/{run_id}",
+            f"/instruments/{_path_segment(instrument_id)}/runs/{_path_segment(run_id)}",
             json=payload,
         )
         return RunResponse.model_validate(resp.json())
@@ -331,7 +346,7 @@ class DataHubClient:
 
         resp = self._request_with_retry(
             "POST",
-            f"/instruments/{instrument_id}/runs/{run_id}/files",
+            f"/instruments/{_path_segment(instrument_id)}/runs/{_path_segment(run_id)}/files",
             json=payload,
         )
         return FileResponse.model_validate(resp.json())

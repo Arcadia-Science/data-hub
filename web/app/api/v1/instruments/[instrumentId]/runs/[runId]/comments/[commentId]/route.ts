@@ -24,6 +24,7 @@ import {
   updateComment,
   validateCommentBody,
 } from "@/lib/api/run-comments";
+import { readRunIdParam } from "@/lib/api/run-id-param";
 
 interface RouteContext {
   params: Promise<{
@@ -59,7 +60,8 @@ async function preflight(
     return { kind: "error", response: authResult };
   }
 
-  const { instrumentId, runId, commentId } = await params;
+  const { instrumentId, runId: runIdParam, commentId } = await params;
+  const runId = readRunIdParam(request.headers, runIdParam);
   const run = await lookupRunByNaturalKey(instrumentId, runId);
   if (!run) {
     return {

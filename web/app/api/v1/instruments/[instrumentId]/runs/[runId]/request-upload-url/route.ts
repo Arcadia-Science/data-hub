@@ -15,6 +15,7 @@ import {
   type IncomingRunFile,
   resolveRunFiles,
 } from "@/lib/api/run-file-identity";
+import { readRunIdParam } from "@/lib/api/run-id-param";
 import { touchRuns } from "@/lib/api/touch-runs";
 import { WATCHER_FEATURES, watcherClientFrom } from "@/lib/api/watcher-compat";
 import { db } from "@/lib/db";
@@ -54,7 +55,8 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     return authResult;
   }
 
-  const { instrumentId, runId } = await params;
+  const { instrumentId, runId: runIdParam } = await params;
+  const runId = readRunIdParam(request.headers, runIdParam);
   const run = await lookupRunByNaturalKey(instrumentId, runId);
 
   if (!run) {

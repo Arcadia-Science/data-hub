@@ -32,6 +32,16 @@ Lambda dispatch and web reprocess eligibility use **`instrument_type`**, not the
 
 The shared `Instrument` enum in `packages/shared` is optional legacy naming for watcher/CLI display — it is not the Lambda support gate.
 
+## Run IDs in URLs
+
+A run ID comes from a folder or file name, so it can hold `%`, `#`, `?`, spaces, and non-ASCII characters. Instrument IDs are slugs, so they can't.
+
+- **Building a URL.** Encode the run ID once, as a single path segment: `encodeURIComponent` in TypeScript and `quote(run_id, safe="")` in Python. The watcher and the Lambda each do this in `_path_segment` in their `api_client.py`.
+- **Reading a URL in the web app.** A route handler under `runs/[runId]` and the run page read the run ID with `readRunIdParam(headers, param)` from `web/lib/api/run-id-param.ts`. They don't use the `runId` parameter alone, because on Vercel Next.js decodes a dynamic route parameter twice (ENG-2166). A run ID of `Q%41`, sent as `Q%2541`, reaches the handler as `QA`. Under `next start` the parameter is decoded once, so local runs and the integration tests can't show this.
+- **How it works.** `web/proxy.ts` copies the path as it was sent into the `x-data-hub-raw-path` request header on every request that it passes on, and replaces any value the client sent. `readRunIdParam` finds the run ID after `/instruments/<id>/runs/` in that header and decodes it once. It uses that value only when it agrees with the route parameter: it is the same, or it is what a second decoding turns into the parameter. If the header is missing, has no run ID in it, can't be decoded, or disagrees, it returns the parameter. A client that plants the header for another run gets the run in its own URL.
+
+A new route that has a run ID in its path has to read it the same way. `web/tests/unit/run-id-readers.test.ts` fails when a route, page, or layout under a `[runId]` folder doesn't.
+
 ## Environment variables
 
 Environment-specific configuration is managed through environment variables, never hard-coded. Each component has its own set:

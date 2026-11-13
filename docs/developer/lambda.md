@@ -127,6 +127,7 @@ The Lambda reports to the web app through `DataHubClient` in `lambda/src/data_hu
 - A retry only starts when the invocation has enough time left. `deadline.seconds_until_time_limit()` gives the seconds before the Lambda runtime kills the invocation, from the same context reading that `handler.py` records with `record_invocation_deadline`. When that is less than the next wait plus one read timeout (30 seconds) plus a 5 second margin, the client raises the last error instead of retrying. The CLI and the tests set no deadline, so they keep the full schedule. The check uses the runtime limit and not the earlier `check_deadline` cutoff, because that cutoff leaves 60 seconds to write a failure, and the retries of that write need those seconds.
 - A repeat of a final status is safe because `PATCH /api/v1/files/:fileId` accepts `completed` after `completed` and `failed` after `failed`. The repeat keeps the first `processed_at`. If the first attempt reached the server and only the response was lost, the retry succeeds instead of failing a write that landed.
 - `get_instrument` keeps its own shorter retry and a short-lived cache.
+- The client puts the instrument ID and the run ID into each URL path with `_path_segment`, which percent-encodes them. A run ID comes from the S3 key, so it can hold `#`, `?`, or `%`, and without the encoding the call reaches the wrong run or none. The handler first decodes the key of the S3 event with `unquote_plus`. See [Run IDs in URLs](conventions.md#run-ids-in-urls).
 
 ### Function URL (archive build)
 

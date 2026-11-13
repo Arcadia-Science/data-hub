@@ -197,6 +197,111 @@ class TestErrorMessage:
         assert str(exc_info.value) == "Data Hub API returned HTTP 500 with no error message"
 
 
+# A run ID is a folder name in the S3 key, so it can hold characters that mean
+# something in a URL. Each pair is the ID and how it must appear in the path.
+AWKWARD_RUN_IDS = [
+    pytest.param("Plate#3", "Plate%233", id="hash"),
+    pytest.param("Q%41", "Q%2541", id="percent-escape"),
+    pytest.param("a?b", "a%3Fb", id="question-mark"),
+    pytest.param("two words", "two%20words", id="space"),
+    pytest.param("50%", "50%25", id="trailing-percent"),
+    pytest.param("plus+sign", "plus%2Bsign", id="plus"),
+    pytest.param("caf\u00e9", "caf%C3%A9", id="non-ascii"),
+]
+
+
+def _sent_url(session: MagicMock) -> str:
+    """The URL of the one request that the mocked session received."""
+    assert session.call_count == 1
+    return session.call_args.args[1]
+
+
+class TestRunIdInThePath:
+    @pytest.mark.parametrize(("run_id", "encoded"), AWKWARD_RUN_IDS)
+    def test_get_run_encodes_the_run_id(
+        self, client: DataHubClient, run_id: str, encoded: str
+    ) -> None:
+        session = _send(client, _response(200, body={**RUN, "files": []}))
+
+        client.get_run("inst", run_id)
+
+        assert session.call_args.args[0] == "GET"
+        assert _sent_url(session) == f"{BASE_URL}/instruments/inst/runs/{encoded}"
+
+    @pytest.mark.parametrize(("run_id", "encoded"), AWKWARD_RUN_IDS)
+    def test_update_run_encodes_the_run_id(
+        self, client: DataHubClient, run_id: str, encoded: str
+    ) -> None:
+        session = _send(client, _response(200, body=RUN))
+
+        client.update_run("inst", run_id, metadata={"k": 1})
+
+        assert session.call_args.args[0] == "PATCH"
+        assert _sent_url(session) == f"{BASE_URL}/instruments/inst/runs/{encoded}"
+
+    @pytest.mark.parametrize(("run_id", "encoded"), AWKWARD_RUN_IDS)
+    def test_create_file_encodes_the_run_id(
+        self, client: DataHubClient, run_id: str, encoded: str
+    ) -> None:
+        session = _send(client, _response(201, body=FILE))
+
+        client.create_file("inst", run_id, "bucket", f"inst/{run_id}/a.nd2", "a.nd2")
+
+        assert session.call_args.args[0] == "POST"
+        assert _sent_url(session) == f"{BASE_URL}/instruments/inst/runs/{encoded}/files"
+        # The key in the body is data, not a path, so it stays as it is.
+        assert session.call_args.kwargs["json"]["s3_key"] == f"inst/{run_id}/a.nd2"
+
+    @pytest.mark.parametrize(("run_id", "encoded"), AWKWARD_RUN_IDS)
+    def test_ensure_run_sends_the_run_id_in_the_body_unchanged(
+        self, client: DataHubClient, run_id: str, encoded: str
+    ) -> None:
+        session = _send(client, _response(201, body=RUN))
+
+        client.ensure_run("inst", run_id)
+
+        assert _sent_url(session) == f"{BASE_URL}/instruments/inst/runs"
+        assert session.call_args.kwargs["json"] == {"run_id": run_id, "source": "lambda"}
+
+    def test_a_plain_run_id_is_unchanged(self, client: DataHubClient) -> None:
+        session = _send(client, _response(200, body={**RUN, "files": []}))
+
+        client.get_run("inst", "Experiment_2026-01-01.v2")
+
+        assert _sent_url(session) == f"{BASE_URL}/instruments/inst/runs/Experiment_2026-01-01.v2"
+
+    def test_an_encoded_url_reaches_the_server_as_built(self, client: DataHubClient) -> None:
+        """`requests` must not decode the escapes again on the way out."""
+        session = _send(client, _response(200, body={**RUN, "files": []}))
+
+        client.get_run("inst", "Plate#3 Q%41")
+        prepared = requests.Request("GET", _sent_url(session)).prepare()
+
+        assert prepared.url == f"{BASE_URL}/instruments/inst/runs/Plate%233%20Q%2541"
+
+    def test_a_slash_in_the_run_id_stays_inside_one_segment(self, client: DataHubClient) -> None:
+        session = _send(client, _response(200, body={**RUN, "files": []}))
+
+        client.get_run("inst", "a/b")
+
+        assert _sent_url(session) == f"{BASE_URL}/instruments/inst/runs/a%2Fb"
+
+    def test_the_instrument_id_is_encoded_too(self, client: DataHubClient) -> None:
+        session = _send(client, _response(200, body={**RUN, "files": []}))
+
+        client.get_run("in st", "run-1")
+
+        assert _sent_url(session) == f"{BASE_URL}/instruments/in%20st/runs/run-1"
+
+    def test_a_retry_sends_the_same_encoded_url(self, client: DataHubClient) -> None:
+        session = _send(client, _unavailable(), _response(200, body={**RUN, "files": []}))
+
+        client.get_run("inst", "Plate#3")
+
+        urls = [c.args[1] for c in session.call_args_list]
+        assert urls == [f"{BASE_URL}/instruments/inst/runs/Plate%233"] * 2
+
+
 # Every call the client makes, each with the response body it parses.
 _Call = Callable[[DataHubClient], object]
 RETRIED_CALLS: list[tuple[str, _Call, dict[str, Any] | None]] = [

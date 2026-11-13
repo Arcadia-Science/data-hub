@@ -12,6 +12,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
+from urllib.parse import quote
 
 import psycopg2
 import pytest
@@ -630,6 +631,38 @@ class TestIdempotentRunCreation:
         )
         assert run["run_id"] == run_id
         assert run["source"] == "lambda"
+
+
+# ------------------------------------------------------------------
+# Test 4d': Run IDs with characters that mean something in a URL
+# ------------------------------------------------------------------
+
+
+class TestRunIdsWithUrlCharacters:
+    @pytest.mark.parametrize("run_id", ["Plate#3", "Q%41", "a?b", "two words", "50%"])
+    def test_the_file_is_processed_in_the_run_with_that_id(
+        self,
+        run_id: str,
+        integration_env: IntegrationEnv,
+        make_s3_event: Callable[..., dict[str, Any]],
+        s3_fixture_files: dict[str, Path],
+        mock_context: MagicMock,
+    ) -> None:
+        filename = "Experiment_Cq Values.csv"
+        s3_key = f"azure-cielo-qpcr/{run_id}/{filename}"
+        s3_fixture_files[s3_key] = _FIXTURES_DIR / "azure_cielo_qpcr_example.csv"
+
+        lambda_handler(make_s3_event("azure-cielo-qpcr", run_id, filename), mock_context)
+
+        run = _api_get(
+            integration_env.base_url,
+            integration_env.api_token,
+            f"/api/v1/instruments/azure-cielo-qpcr/runs/{quote(run_id, safe='')}",
+        )
+        assert run["run_id"] == run_id
+        assert [f["status"] for f in run["files"]] == ["completed"]
+        # The run-level metadata is a PATCH on the same path.
+        assert run["metadata"]["dye_channels"] == ["ORANGE 560", "TAMRA", "ROX"]
 
 
 # ------------------------------------------------------------------

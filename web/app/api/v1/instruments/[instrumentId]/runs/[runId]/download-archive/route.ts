@@ -9,6 +9,7 @@ import {
   lookupRunByNaturalKey,
 } from "@/lib/api/instrument-runs";
 import { prepareRunArchive } from "@/lib/api/run-archive";
+import { readRunIdParam } from "@/lib/api/run-id-param";
 import {
   FILES_LIFECYCLE_FILTER_VALUES,
   type FilesLifecycleFilter,
@@ -160,7 +161,8 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
     return authResult;
   }
 
-  const { instrumentId, runId } = await params;
+  const { instrumentId, runId: runIdParam } = await params;
+  const runId = readRunIdParam(request.headers, runIdParam);
 
   const result = await prepareRunArchive({
     instrumentId,

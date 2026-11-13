@@ -135,9 +135,9 @@ export function normalizeRunId(runId: string): string {
 // the head and once for the body). Mirrors the same treatment applied to
 // `getInstrumentById`.
 //
-// `runId` is the real run ID. Route handlers already receive it decoded, and
-// pages decode it first with `decodePageParam`. Spaces at the start or end are
-// ignored (see `normalizeRunId`), and an ID that is only spaces finds nothing.
+// `runId` is the real run ID. Route handlers and the run page get it from
+// `readRunIdParam`. Spaces at the start or end are ignored (see
+// `normalizeRunId`), and an ID that is only spaces finds nothing.
 export const lookupRunByNaturalKey = cache(async function lookupRunByNaturalKey(
   instrumentId: string,
   runId: string

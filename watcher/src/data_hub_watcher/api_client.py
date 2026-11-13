@@ -86,10 +86,8 @@ def _path_segment(value: str) -> str:
     `%41` is sent as `A`, so the call reaches another run or none. `requests`
     doesn't encode these for us, so it has to be done here.
 
-    Two kinds of ID still can't reach their run. `.` and `..` are removed as dot
-    segments by `urllib3`. On Vercel, Next.js decodes the route parameter a
-    second time, so an ID with `%` followed by two hex digits (such as `Q%41`)
-    can be misread there.
+    An ID of `.` or `..` still can't reach its run, because `urllib3` removes it
+    as a dot segment.
     """
     return quote(value, safe="")
 

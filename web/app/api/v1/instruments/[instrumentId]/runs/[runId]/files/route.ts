@@ -4,6 +4,7 @@ import { authorizeToken } from "@/lib/api/auth";
 import { apiError, CONFLICT, NOT_FOUND } from "@/lib/api/errors";
 import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
 import { createFileBody, readJsonBody } from "@/lib/api/openapi";
+import { readRunIdParam } from "@/lib/api/run-id-param";
 import { touchRuns } from "@/lib/api/touch-runs";
 import { db } from "@/lib/db";
 import { files } from "@/lib/db/schema";
@@ -38,7 +39,8 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     return authResult;
   }
 
-  const { instrumentId, runId } = await params;
+  const { instrumentId, runId: runIdParam } = await params;
+  const runId = readRunIdParam(request.headers, runIdParam);
   const run = await lookupRunByNaturalKey(instrumentId, runId);
 
   if (!run) {
