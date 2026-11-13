@@ -91,7 +91,7 @@ export function requireMcpWrite(
 }
 
 type AttributionResolution =
-  | { ok: true; userId: string; runUuid: string }
+  | { ok: true; userId: string; runUuid: string; runId: string }
   | { ok: false; error: McpErrorResult };
 
 // Shared resolution step for claim_run / unclaim_run. The authenticated user
@@ -119,5 +119,5 @@ export async function resolveAttributionTarget(
       ),
     };
   }
-  return { ok: true, userId, runUuid: run.id };
+  return { ok: true, userId, runUuid: run.id, runId: run.runId };
 }
