@@ -39,11 +39,12 @@ export const heartbeatBody = z.object({
   status: z.enum(["registered", "watching", "stopped", "waiting"]),
   // Why the watcher is `waiting`, for example a missing watch folder. On a
   // `stopped` heartbeat, `system_shutdown` says Windows is shutting down or
-  // restarting (watcher 1.4.1 and later send it). The route stores a reason
-  // for `waiting` only.
+  // restarting (watcher 1.4.1 and later send it), and `auto_update` says the
+  // watcher is stopping to install an update (watcher 1.4.2 will send it). The
+  // route stores a reason for `waiting` and for those two stops only.
   status_reason: z.string().max(500).optional().openapi({
     description:
-      "Why the watcher is `waiting`, for example a missing watch folder. On a `stopped` heartbeat, `system_shutdown` says the watcher stopped because Windows is shutting down or restarting. Data Hub then keeps the instrument's requested uploads queued for the watcher to upload after the PC starts again, and cancels them only if no heartbeat arrives for about 15 minutes. Any other `stopped` heartbeat cancels them at once.",
+      "Why the watcher is `waiting`, for example a missing watch folder. On a `stopped` heartbeat, `system_shutdown` says the watcher stopped because Windows is shutting down or restarting (watcher 1.4.1 and later send it), and `auto_update` says it stopped to install an update and start again (watcher 1.4.2 will send it). Data Hub keeps these two reasons on the watcher, keeps the instrument's requested uploads queued for the watcher to upload after it starts again, and cancels them only if no heartbeat arrives for about 15 minutes. After that long without a heartbeat the watcher shows as `stale`. Any other `stopped` heartbeat cancels the requested uploads at once, and its reason is not kept.",
   }),
   // The highest config revision this watcher has applied.
   config_revision: z.number().int().nonnegative().nullable().optional(),
@@ -70,12 +71,23 @@ export const watcherDetail = z
     instrument_display_name: z.string().nullable().optional(),
     hostname: z.string().nullable(),
     os_info: z.string().nullable(),
-    status: watcherStatusSchema,
+    // `.describe` rather than `.openapi`. `watcherStatusSchema` is built in
+    // `./common`, which the MCP tool outputs also import directly. A schema
+    // built before `registry.ts` calls `extendZodWithOpenApi` has no
+    // `.openapi`, and whether `./common` loads before the registry depends on
+    // which route the server loads first, so `.openapi` here can break
+    // `next build`. `.describe` doesn't need the extension.
+    status: watcherStatusSchema.describe(
+      "The status Data Hub shows for the watcher. `stale` is worked out when you ask and is never stored. A `watching` or `waiting` watcher is `stale` when its last heartbeat is more than 5 minutes old. A `stopped` watcher stays `stopped`, however old its last heartbeat, unless it stopped for a restart or an update (see `status_reason`): then it is `stale` when its last heartbeat is more than 15 minutes old. A deregistered watcher is always `stopped`. The `status` filter on the list endpoint returns the watchers that show that status."
+    ),
     config_yaml: z.string().nullable().optional(),
     config_checksum: z.string().nullable().optional(),
     config_revision: z.number().int().nullable().optional(),
     applied_config_revision: z.number().int().nullable().optional(),
-    status_reason: z.string().nullable().optional(),
+    status_reason: z.string().nullable().optional().openapi({
+      description:
+        "Why the watcher is `waiting` (for example a missing watch folder), or why it stopped for a restart: `system_shutdown` for Windows shutting down or restarting, `auto_update` for an update (watcher 1.4.2 will send it). It is the reason of the watcher's last heartbeat, so it stays while `status` reads `stale`. It is null when that heartbeat was any other status, or a stop that gave no such reason.",
+    }),
     last_heartbeat_at: isoDateTime.nullable(),
     created_at: isoDateTime,
     updated_at: isoDateTime,

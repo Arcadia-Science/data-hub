@@ -2,8 +2,9 @@
 
 Code: ``heartbeat.py`` (``HeartbeatLoop``, ``WatcherCounters``); server side
 ``app/api/v1/watchers/[watcherId]/heartbeat`` and ``lib/api/watchers.ts``
-(``computeEffectiveStatus``, which adds ``stale`` after five minutes without a heartbeat).
-The suite ages ``last_heartbeat_at`` instead of waiting for the server's timers.
+(``computeEffectiveStatus``, which adds ``stale`` after five minutes without a heartbeat,
+except for a watcher that stopped cleanly). The suite ages ``last_heartbeat_at`` instead of
+waiting for the server's timers.
 """
 
 from __future__ import annotations
@@ -53,38 +54,32 @@ TRANSITIONS: tuple[Transition, ...] = (
         "watcher.stopped->watching",
         "Starting a stopped watcher again makes it `watching` again.",
     ),
-    xfail_bug(
+    covered(
         MACHINE,
         "watcher.stopped->stays_stopped",
         "A watcher that stopped cleanly keeps reading `stopped` however old its last "
         "heartbeat gets, because it can't send another one. It does not turn `stale` "
-        "(`Unresponsive`), which is for a watcher that went quiet without saying so. The web "
-        "app itself says as much: the status badge (`watcher-status-badge.tsx`) calls a "
-        'stopped watcher one that is "expected to be silent" and "shouldn\'t read as an '
-        'alarm", and the docs list Stopped as a status of its own, while '
-        "`computeEffectiveStatus` turns any status but `registered` into `stale` after five "
-        "minutes.",
-        "ENG-2124",
+        "(`Unresponsive`), which is for a watcher that went quiet without saying so. (A "
+        "watcher that stopped for a Windows restart or an update turns `stale` after 15 "
+        "minutes; only the web app's integration tests can show that, because no test here "
+        "can make a watcher send that mark.)",
     ),
-    xfail_bug(
+    covered(
         MACHINE,
         "watcher.stopped->stays_stopped_in_list",
-        "The same in the watcher list (`GET /api/v1/watchers`): five minutes after its last "
-        "heartbeat a cleanly stopped watcher is still listed under `status=stopped` with "
-        "status `stopped`, and is not listed under `status=stale`. Today the route's `stale` "
-        "filter is a SQL check on the age of `last_heartbeat_at` that doesn't look at the "
-        "stored status, and the status it prints comes from `computeEffectiveStatus`, so both "
-        "have to change for the list to agree with the detail route.",
-        "ENG-2124",
+        "The same in the watcher list (`GET /api/v1/watchers`): however old its last "
+        "heartbeat is, a cleanly stopped watcher is still listed under `status=stopped` with "
+        "status `stopped`, and is not listed under `status=stale`. The route's filter and the "
+        "status it prints follow the same rule as the detail route.",
     ),
     covered(
         MACHINE,
         "watcher.list->stale_filtered",
-        "The watcher list's `status=stale` filter returns exactly the watchers whose last "
-        "heartbeat is over five minutes old, or missing once the watcher has started, each "
-        "with status `stale`: not a running one, a stopped one that just stopped, or a "
-        "`registered` one however old its row is. The other filters list a watcher under its "
-        "own status.",
+        "The watcher list's `status=stale` filter returns exactly the watchers that read "
+        "`stale`: a running watcher whose last heartbeat is over five minutes old, or "
+        "missing once the watcher has started, each with status `stale`. Not a stopped one, "
+        "or a `registered` one however old its row is. The other filters list a watcher "
+        "under its own status.",
     ),
     covered(
         MACHINE,
