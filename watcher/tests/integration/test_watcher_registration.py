@@ -116,9 +116,11 @@ class TestRegisterWatcher:
 class TestDeregisteredWatcherReplies:
     """What the real server says to a watcher whose registration was deleted.
 
-    The watcher stops on three heartbeats in a row that get the server's own "not found"
-    reply, and refuses to start on the same reply to `GET /watchers/{id}`. The unit tests
-    build that reply by hand, so these check the shape the server really sends.
+    The watcher stops on three heartbeats in a row that get the server's "deregistered" reply
+    (a 404 with the code `WATCHER_DEREGISTERED`), and refuses to start on the same reply to
+    `GET /watchers/{id}`. A watcher ID that the server has no row for gets a plain `NOT_FOUND`,
+    and that stops nothing. The unit tests build these replies by hand, so these check the
+    shape the server really sends.
     """
 
     @staticmethod
@@ -134,7 +136,7 @@ class TestDeregisteredWatcherReplies:
 
         assert client.get_watcher(registered.watcher_id).id == registered.watcher_id
 
-    def test_a_deregistered_watcher_gets_the_not_found_reply_to_get_watcher(
+    def test_a_deregistered_watcher_gets_the_deregistered_reply_to_get_watcher(
         self,
         client: DataHubClient,
         instrument_id: str,
@@ -148,8 +150,8 @@ class TestDeregisteredWatcherReplies:
 
         assert exc_info.value.status_code == 404
         assert exc_info.value.detail is not None
-        assert exc_info.value.detail.code == "NOT_FOUND"
-        assert exc_info.value.is_not_found_reply is True
+        assert exc_info.value.detail.code == "WATCHER_DEREGISTERED"
+        assert exc_info.value.is_deregistered_reply is True
 
     def test_a_deregistered_watcher_gets_the_same_reply_to_its_heartbeat(
         self,
@@ -166,15 +168,39 @@ class TestDeregisteredWatcherReplies:
                 {"status": "watching", "instrument_id": instrument_id},
             )
 
-        assert exc_info.value.is_not_found_reply is True
+        assert exc_info.value.status_code == 404
+        assert exc_info.value.detail is not None
+        assert exc_info.value.detail.code == "WATCHER_DEREGISTERED"
+        assert exc_info.value.is_deregistered_reply is True
 
-    def test_a_watcher_id_that_was_never_registered_gets_it_too(
+    def test_a_watcher_id_that_was_never_registered_gets_a_plain_not_found(
         self, client: DataHubClient
     ) -> None:
-        with pytest.raises(ApiError) as exc_info:
-            client.get_watcher("00000000-0000-4000-8000-000000000000")
+        never_registered = "00000000-0000-4000-8000-000000000000"
 
-        assert exc_info.value.is_not_found_reply is True
+        with pytest.raises(ApiError) as exc_info:
+            client.get_watcher(never_registered)
+
+        # Still a 404, but not the reply that stops a watcher: rows can go missing from the
+        # server's database without anyone having deregistered a watcher.
+        assert exc_info.value.status_code == 404
+        assert exc_info.value.detail is not None
+        assert exc_info.value.detail.code == "NOT_FOUND"
+        assert exc_info.value.is_deregistered_reply is False
+
+    def test_a_heartbeat_of_a_watcher_id_that_was_never_registered_gets_a_plain_not_found(
+        self, client: DataHubClient, instrument_id: str
+    ) -> None:
+        with pytest.raises(ApiError) as exc_info:
+            client.send_heartbeat(
+                "00000000-0000-4000-8000-000000000000",
+                {"status": "watching", "instrument_id": instrument_id},
+            )
+
+        assert exc_info.value.status_code == 404
+        assert exc_info.value.detail is not None
+        assert exc_info.value.detail.code == "NOT_FOUND"
+        assert exc_info.value.is_deregistered_reply is False
 
 
 # ------------------------------------------------------------------

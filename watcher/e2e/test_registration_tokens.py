@@ -38,13 +38,13 @@ pytestmark = pytest.mark.e2e
 REACTION_SECONDS = 20.0
 
 # How long a watcher that must stop because it was deregistered may take. It stops on the third
-# heartbeat in a row that the server answers with "watcher not found"
+# heartbeat in a row that the server answers with its deregistered reply
 # (DEREGISTERED_HEARTBEAT_THRESHOLD), which is 4 to 6 s after the deregistration at the suite's
 # 2 s interval, and its stop takes a few seconds more.
 EXIT_SECONDS = 20.0
 
 
-def _heartbeats_answered_not_found(proxy: FaultProxy) -> list[RecordedRequest]:
+def _heartbeats_answered_with_404(proxy: FaultProxy) -> list[RecordedRequest]:
     """The heartbeats the server has answered with 404, which it does for a deregistered watcher."""
     return [
         r
@@ -450,13 +450,13 @@ def test_a_running_watcher_stops_uploading_and_stops_once_it_is_deregistered(
     server.wait_for_uploaded(instrument_id, "RUN001", "RUN001/before.csv")
 
     admin.deregister_watcher(pc.watcher_id).raise_for_status()
-    # The watcher is told by the "not found" reply to its heartbeats, and acts on the third one
+    # The watcher is told by the 404 reply to its heartbeats, and acts on the third one
     # in a row. One reply is not enough, so the file is written once it has had all three.
     wait_until(
-        lambda: len(_heartbeats_answered_not_found(proxy)) >= DEREGISTERED_HEARTBEAT_THRESHOLD,
+        lambda: len(_heartbeats_answered_with_404(proxy)) >= DEREGISTERED_HEARTBEAT_THRESHOLD,
         REACTION_SECONDS,
         lambda: server.dump(pc.watcher_id, instrument_id),
-        what="the watcher's heartbeats to be answered with not found",
+        what="the watcher's heartbeats to be answered as deregistered",
     )
     write_file(watch_dir / "RUN001" / "after.csv", SMALL)
 

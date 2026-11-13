@@ -70,12 +70,16 @@ WATCHER_LOG_DIR = _resolve_watcher_log_dir()
 SUPPORTED_ENVIRONMENTS: tuple[str, ...] = ("staging", "production", "preview")
 
 HEARTBEAT_INTERVAL_SECONDS = 60
-# A watcher whose registration was deleted on Data Hub (deregistered in the web app) can't
-# report anything again: the server answers every heartbeat with a 404 whose JSON error code
-# is `NOT_FOUND`. One such reply could come from a broken deploy, which must not stop every
-# lab PC's watcher for good, so the watcher stops only after this many heartbeats in a row
-# get it. That is about 3 minutes at the production interval. Any other result, a success
-# or any other error, starts the count again.
+# The `code` in the JSON body of the 404 that Data Hub sends for a watcher whose registration
+# was deleted: deregistered in the web app, or by retiring its instrument. A watcher ID that
+# the server has no row for at all gets `NOT_FOUND` instead, so rows that went missing from
+# the server's database (a restore to an older point, say) never stop a watcher for good.
+# The server's `WATCHER_DEREGISTERED` in `web/lib/api/errors.ts` must say the same.
+WATCHER_DEREGISTERED_ERROR_CODE = "WATCHER_DEREGISTERED"
+# A deregistered watcher can't report anything again: the server answers every heartbeat with
+# that 404. One such reply could come from a bad deploy, so the watcher stops only after this
+# many heartbeats in a row get it. That is about 3 minutes at the production interval. Any
+# other result, a success or any other error, starts the count again.
 DEREGISTERED_HEARTBEAT_THRESHOLD = 3
 # What the watcher says, in the log and at the command line, when it stops or refuses to
 # start for that reason. The word "init" is what the person on the PC has to act on.

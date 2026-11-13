@@ -79,12 +79,13 @@ TRANSITIONS: tuple[Transition, ...] = (
     covered(
         MACHINE,
         "watcher.deregistered->process_exits",
-        "After three heartbeats in a row get the server's own not-found reply (a 404 whose error "
-        "code is `NOT_FOUND`), a running watcher stops uploading at once, logs one error that "
-        "says to run `init`, and stops. It sends no `watcher_stopped` event and no final "
-        "heartbeat, because the server would refuse both. Under the CLI `watch` exits with code "
-        "3. Under the Windows service the process exits 0, so the SCM's recovery actions do not "
-        "restart it (`service.deregistered->stays_stopped`, in `test_windows_service.py`).",
+        "After three heartbeats in a row get the server's reply for a deregistered watcher (a "
+        "404 whose error code is `WATCHER_DEREGISTERED`), a running watcher stops uploading at "
+        "once, logs one error that says to run `init`, and stops. It sends no `watcher_stopped` "
+        "event and no final heartbeat, because the server would refuse both. Under the CLI "
+        "`watch` exits with code 3. Under the Windows service the process exits 0, so the SCM's "
+        "recovery actions do not restart it (`service.deregistered->stays_stopped`, in "
+        "`test_windows_service.py`).",
     ),
     covered(
         MACHINE,

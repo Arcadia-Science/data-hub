@@ -42,6 +42,37 @@ class WatcherCounters:
     last_errors: int = 0
 
 
+class DeregisteredReplies:
+    """How many heartbeats in a row Data Hub has answered with its "deregistered" reply.
+
+    The supervisor owns one and gives it to every heartbeat loop it builds, because every
+    switch between watching and waiting, every retry of a failed start and every config
+    rebuild makes a new `HeartbeatLoop`. A count that started again at 0 with each loop would
+    let a watcher that keeps changing state postpone its stop for good. Thread-safe: the
+    loop of the old runtime can still be finishing a tick when the next one starts.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._count = 0
+
+    @property
+    def count(self) -> int:
+        with self._lock:
+            return self._count
+
+    def add(self) -> int:
+        """Count one more reply and return the new total."""
+        with self._lock:
+            self._count += 1
+            return self._count
+
+    def reset(self) -> None:
+        """Start again at 0: a heartbeat got any other result."""
+        with self._lock:
+            self._count = 0
+
+
 class HeartbeatLoop:
     """Sends periodic heartbeats and flushes queued events."""
 
@@ -61,6 +92,7 @@ class HeartbeatLoop:
         config_revision: Callable[[], int | None] | None = None,
         on_config_revision: Callable[[int | None], None] | None = None,
         on_deregistered: Callable[[], None] | None = None,
+        deregistered_replies: DeregisteredReplies | None = None,
     ) -> None:
         self._client = client
         self._watcher_id = watcher_id
@@ -82,9 +114,14 @@ class HeartbeatLoop:
         # every successful heartbeat, so the runtime can fetch a new revision.
         self._on_config_revision = on_config_revision
         # Called once, from the loop's thread, when the server has answered
-        # `DEREGISTERED_HEARTBEAT_THRESHOLD` heartbeats in a row with "watcher not found".
-        # The loop ends itself first (see `_note_heartbeat_failure`).
+        # `DEREGISTERED_HEARTBEAT_THRESHOLD` heartbeats in a row with its "deregistered"
+        # reply. The loop ends itself first (see `_note_heartbeat_failure`).
         self._on_deregistered = on_deregistered
+        # The run of those replies. Shared with the other loops of the same watcher when
+        # the supervisor passes one in; a loop built without one counts on its own.
+        self._deregistered_replies = (
+            deregistered_replies if deregistered_replies is not None else DeregisteredReplies()
+        )
 
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
@@ -96,9 +133,8 @@ class HeartbeatLoop:
         # event is the only reliable signal.
         self._consecutive_heartbeat_failures = 0
         self._first_failure_at: float | None = None
-        # Heartbeats in a row that the server answered with its own "watcher not found"
-        # reply, which means the registration was deleted. See `_note_heartbeat_failure`.
-        self._not_found_in_a_row = 0
+        # Whether this loop has ended itself because of that reply. See
+        # `_note_heartbeat_failure`.
         self._deregistered = False
 
     def start(self) -> None:
@@ -244,7 +280,7 @@ class HeartbeatLoop:
             if status != "stopped":
                 self._note_heartbeat_failure(exc)
         else:
-            self._not_found_in_a_row = 0
+            self._deregistered_replies.reset()
             if self._consecutive_heartbeat_failures > 0:
                 # Recovery — emit a single event covering the full
                 # outage so the dashboard can correlate the gap with
@@ -288,22 +324,24 @@ class HeartbeatLoop:
     def _note_heartbeat_failure(self, exc: Exception) -> None:
         """Count a failed heartbeat towards the watcher having been deregistered.
 
-        Only the server's own "watcher not found" reply counts (`ApiError.is_not_found_reply`):
-        a 404 whose JSON body has the code `NOT_FOUND`. An HTML 404, any other status and a
-        network error say nothing about the registration, and any of them, like a success,
-        starts the count again, so a broken deploy or a bad proxy can't stop a watcher for
-        good by answering a few heartbeats wrong.
+        Only the server's "deregistered" reply counts (`ApiError.is_deregistered_reply`): a
+        404 whose JSON body has the code `WATCHER_DEREGISTERED`. A plain `NOT_FOUND`, an HTML
+        404, any other status and a network error say nothing about the registration, and any
+        of them, like a success, starts the count again, so a bad deploy, a bad proxy or rows
+        missing from the server's database can't stop a watcher for good by answering a few
+        heartbeats wrong. The count is shared with the other loops of the watcher (see
+        `DeregisteredReplies`).
 
         On the `DEREGISTERED_HEARTBEAT_THRESHOLD`-th reply in a row the loop ends itself, so
         that this tick flushes no events and runs no updater (both would get the same 404),
         and calls `on_deregistered` once. The final "stopped" heartbeat is the caller's to
         skip (`WatcherSupervisor.stop` does), and a failed one is not counted here.
         """
-        if not (isinstance(exc, ApiError) and exc.is_not_found_reply):
-            self._not_found_in_a_row = 0
+        if not (isinstance(exc, ApiError) and exc.is_deregistered_reply):
+            self._deregistered_replies.reset()
             return
-        self._not_found_in_a_row += 1
-        if self._deregistered or self._not_found_in_a_row < DEREGISTERED_HEARTBEAT_THRESHOLD:
+        in_a_row = self._deregistered_replies.add()
+        if self._deregistered or in_a_row < DEREGISTERED_HEARTBEAT_THRESHOLD:
             return
         self._deregistered = True
         self._stop_event.set()

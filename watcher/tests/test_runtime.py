@@ -44,7 +44,7 @@ from data_hub_watcher.constants import (
     UPLOAD_POLL_INTERVAL_SECONDS,
 )
 from data_hub_watcher.events import EventType
-from data_hub_watcher.heartbeat import HeartbeatLoop, WatcherCounters
+from data_hub_watcher.heartbeat import DeregisteredReplies, HeartbeatLoop, WatcherCounters
 from data_hub_watcher.models import (
     ApiErrorDetail,
     InstrumentConfig,
@@ -810,7 +810,17 @@ class TestStopRuntimeForADeregisteredWatcher:
         assert "reporter.queue_event" in _steps(parts)
 
 
-def _not_found() -> ApiError:
+def _deregistered() -> ApiError:
+    return ApiError(
+        "Watcher 'w-test' was deregistered",
+        status_code=404,
+        detail=ApiErrorDetail(
+            code="WATCHER_DEREGISTERED", message="Watcher 'w-test' was deregistered"
+        ),
+    )
+
+
+def _plain_not_found() -> ApiError:
     return ApiError(
         "Watcher 'w-test' not found",
         status_code=404,
@@ -849,6 +859,22 @@ class TestDeregisteredRequester:
 
         assert shutdown.is_set() and deregistered.is_set()
 
+    def test_a_second_call_stops_what_it_owns_but_logs_nothing_more(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # Two loops of one watcher can both reach the threshold, because they share the run of
+        # replies and the first one's stop is still unwinding.
+        shutdown, deregistered = threading.Event(), threading.Event()
+        first_uploads, second_uploads = MagicMock(), MagicMock()
+
+        with caplog.at_level(logging.INFO, logger="data_hub_watcher.runtime"):
+            _deregistered_requester(shutdown, deregistered, first_uploads)()
+            _deregistered_requester(shutdown, deregistered, second_uploads)()
+
+        assert [r.levelno for r in caplog.records] == [logging.ERROR]
+        first_uploads.assert_called_once_with()
+        second_uploads.assert_called_once_with()
+
     def test_it_logs_one_error_that_says_to_run_init(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
@@ -872,11 +898,11 @@ class TestBuildRuntimeDeregistered:
         for _ in range(times):
             rt.heartbeat._send_heartbeat()
 
-    def test_three_not_found_heartbeats_stop_uploads_and_ask_for_a_shutdown(
+    def test_three_deregistered_heartbeats_stop_uploads_and_ask_for_a_shutdown(
         self, tmp_path: Path, db_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
         client = MagicMock()
-        client.send_heartbeat.side_effect = _not_found()
+        client.send_heartbeat.side_effect = _deregistered()
         cfg = _make_config(tmp_path, upload_mode="auto")
         rt = build_runtime(client=client, cfg=cfg, db_path=db_path)
         try:
@@ -902,11 +928,32 @@ class TestBuildRuntimeDeregistered:
         finally:
             rt.state_db.close()
 
-    def test_two_not_found_heartbeats_then_a_success_leave_the_watcher_running(
+    def test_three_plain_not_found_heartbeats_leave_the_watcher_running(
         self, tmp_path: Path, db_path: Path
     ) -> None:
         client = MagicMock()
-        client.send_heartbeat.side_effect = [_not_found(), _not_found(), MagicMock(), _not_found()]
+        client.send_heartbeat.side_effect = _plain_not_found()
+        cfg = _make_config(tmp_path, upload_mode="auto")
+        rt = build_runtime(client=client, cfg=cfg, db_path=db_path)
+        try:
+            self._beat(rt, DEREGISTERED_HEARTBEAT_THRESHOLD + 2)
+
+            assert not rt.deregistered_event.is_set()
+            assert not rt.shutdown_event.is_set()
+            assert not rt.uploader._stop_requested()
+        finally:
+            rt.state_db.close()
+
+    def test_two_deregistered_heartbeats_then_a_success_leave_the_watcher_running(
+        self, tmp_path: Path, db_path: Path
+    ) -> None:
+        client = MagicMock()
+        client.send_heartbeat.side_effect = [
+            _deregistered(),
+            _deregistered(),
+            MagicMock(),
+            _deregistered(),
+        ]
         cfg = _make_config(tmp_path, upload_mode="auto")
         rt = build_runtime(client=client, cfg=cfg, db_path=db_path)
         try:
@@ -915,6 +962,29 @@ class TestBuildRuntimeDeregistered:
             assert not rt.deregistered_event.is_set()
             assert not rt.shutdown_event.is_set()
             assert not rt.uploader._stop_requested()
+        finally:
+            rt.state_db.close()
+
+    def test_the_loop_counts_with_the_run_of_replies_it_is_given(
+        self, tmp_path: Path, db_path: Path
+    ) -> None:
+        replies = DeregisteredReplies()
+        client = MagicMock()
+        client.send_heartbeat.side_effect = _deregistered()
+        rt = build_runtime(
+            client=client,
+            cfg=_make_config(tmp_path, upload_mode="auto"),
+            db_path=db_path,
+            deregistered_replies=replies,
+        )
+        try:
+            # Two replies that an earlier loop of the same watcher counted: this loop's first
+            # reply is the third.
+            replies.add()
+            replies.add()
+            self._beat(rt, 1)
+
+            assert rt.deregistered_event.is_set()
         finally:
             rt.state_db.close()
 
@@ -933,7 +1003,7 @@ class TestBuildRuntimeDeregistered:
 
 
 class TestWatcherIsDeregistered:
-    """The start-up check: only the server's own "watcher not found" reply refuses."""
+    """The start-up check: only the server's "deregistered" reply refuses."""
 
     def test_a_registered_watcher_is_not_deregistered(self) -> None:
         client = MagicMock()
@@ -942,11 +1012,26 @@ class TestWatcherIsDeregistered:
         assert watcher_is_deregistered(client, "w-test") is False
         client.get_watcher.assert_called_once_with("w-test")
 
-    def test_the_servers_not_found_reply_means_deregistered(self) -> None:
+    def test_the_servers_deregistered_reply_means_deregistered(self) -> None:
         client = MagicMock()
-        client.get_watcher.side_effect = _not_found()
+        client.get_watcher.side_effect = _deregistered()
 
         assert watcher_is_deregistered(client, "w-test") is True
+
+    def test_a_plain_not_found_lets_the_watcher_start(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # A watcher ID that the server has no row for, as after its database was restored to
+        # an older point, is not a deregistration. Refusing would tell every operator to run
+        # `init` for what is a problem on the server.
+        client = MagicMock()
+        client.get_watcher.side_effect = _plain_not_found()
+
+        with caplog.at_level(logging.WARNING, logger="data_hub_watcher.runtime"):
+            assert watcher_is_deregistered(client, "w-test") is False
+
+        assert [r.levelno for r in caplog.records] == [logging.WARNING]
+        assert "starting anyway" in caplog.records[0].getMessage()
 
     @pytest.mark.parametrize(
         "error",
@@ -971,6 +1056,37 @@ class TestWatcherIsDeregistered:
         # Said once, so a problem with the check itself is not silent.
         assert [r.levelno for r in caplog.records] == [logging.WARNING]
         assert "starting anyway" in caplog.records[0].getMessage()
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            ApiError("<html>" + "x" * 5000 + "</html>", status_code=502),
+            ValueError("y" * 5000),
+        ],
+        ids=["api-error", "other-exception"],
+    )
+    def test_a_long_message_is_cut_before_it_is_logged(
+        self, error: Exception, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # A proxy or a failed deploy can answer with a whole HTML page.
+        client = MagicMock()
+        client.get_watcher.side_effect = error
+
+        with caplog.at_level(logging.WARNING, logger="data_hub_watcher.runtime"):
+            assert watcher_is_deregistered(client, "w-test") is False
+
+        (record,) = caplog.records
+        assert len(record.getMessage()) < 500
+        assert "more characters" in record.getMessage()
+
+    def test_a_short_message_is_logged_whole(self, caplog: pytest.LogCaptureFixture) -> None:
+        client = MagicMock()
+        client.get_watcher.side_effect = ApiError("Server error: down", status_code=503)
+
+        with caplog.at_level(logging.WARNING, logger="data_hub_watcher.runtime"):
+            watcher_is_deregistered(client, "w-test")
+
+        assert "(Server error: down)" in caplog.records[0].getMessage()
 
 
 class TestBuildRuntimeSharedDependencies:

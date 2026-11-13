@@ -1660,6 +1660,16 @@ class TestRunServiceLoopUpgradeRestart:
         assert not any("upgraded" in m.lower() for m in log_messages)
 
 
+def _watcher_deregistered() -> ApiError:
+    return ApiError(
+        "Watcher 'w-test' was deregistered",
+        status_code=404,
+        detail=ApiErrorDetail(
+            code="WATCHER_DEREGISTERED", message="Watcher 'w-test' was deregistered"
+        ),
+    )
+
+
 def _watcher_not_found() -> ApiError:
     return ApiError(
         "Watcher 'w-test' not found",
@@ -1673,11 +1683,13 @@ class TestRunServiceLoopDeregistered:
 
     The SCM's recovery actions restart a service that exits with a failure, so the service
     returns normally, which exits 0. The start-up refusal is the other way round: it exits 1,
-    like the other refusals, so the SCM tries twice more, which covers a brief server problem.
+    like the other refusals, and not with the CLI's code 3, so the SCM tries again (twice, when
+    its failure count is 0), which covers a brief server problem. Only the server's
+    "deregistered" reply counts: a plain `NOT_FOUND` lets the service start.
     """
 
     def test_a_deregistered_watcher_stops_and_returns_normally(self, harness: _LoopHarness) -> None:
-        # The heartbeat thread, after three not-found replies, sets both events. The runtime
+        # The heartbeat thread, after three deregistered replies, sets both events. The runtime
         # shares the supervisor's `deregistered_event`, so it is set once the runtime exists.
         harness.runtime.shutdown_event.set()
         harness.on_build = lambda _handoff: harness.runtime.deregistered_event.set()
@@ -1724,7 +1736,7 @@ class TestRunServiceLoopDeregistered:
     def test_starting_a_deregistered_service_is_refused_with_the_init_message(
         self, harness: _LoopHarness
     ) -> None:
-        harness.client.get_watcher.side_effect = _watcher_not_found()
+        harness.client.get_watcher.side_effect = _watcher_deregistered()
         # Already stopped, so that a service that does not refuse ends the test instead of
         # running until the test is killed.
         stop_event = threading.Event()
@@ -1733,7 +1745,9 @@ class TestRunServiceLoopDeregistered:
         with pytest.raises(SystemExit) as excinfo:
             harness.svc._run_service_loop(stop_event, harness.sm)
 
-        # Exit 1, like the other start-up refusals: the SCM tries again twice.
+        # Exit 1, like the other start-up refusals: a failure, so the SCM tries again. (The
+        # CLI exits with code 3 for the same refusal, but the SCM only tells 0 from a failure,
+        # and the service keeps the 1 that its other refusals use.)
         assert excinfo.value.code == 1
         harness.sm.LogErrorMsg.assert_called_once()
         message = harness.sm.LogErrorMsg.call_args.args[0]
@@ -1760,12 +1774,13 @@ class TestRunServiceLoopDeregistered:
     @pytest.mark.parametrize(
         "error",
         [
+            _watcher_not_found(),
             ApiError("<html>404 Not Found</html>", status_code=404),
             ApiError("bad gateway", status_code=502),
             ApiError("connection refused", status_code=0),
             ValueError("a reply the client could not read"),
         ],
-        ids=["html-404", "5xx", "network", "unreadable-reply"],
+        ids=["plain-not-found", "html-404", "5xx", "network", "unreadable-reply"],
     )
     def test_any_other_failure_of_the_check_lets_the_service_start(
         self, harness: _LoopHarness, error: Exception

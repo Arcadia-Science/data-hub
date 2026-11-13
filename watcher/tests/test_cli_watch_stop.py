@@ -5,7 +5,8 @@ A stop for an in-process update is marked `auto_update` on the final heartbeat, 
 SIGTERM, is never marked, even with an update under way, so the command has to say so.
 
 A watcher whose registration was deleted on Data Hub exits with a code of its own, and a new
-one refuses to start and says to run `init`.
+one refuses to start, with the same code, and says to run `init`. Only the server's
+"deregistered" reply counts: a plain `NOT_FOUND` lets the watcher start.
 """
 
 from __future__ import annotations
@@ -146,7 +147,17 @@ class TestWatchStop:
         assert supervisor.stops == [{"stopped_message": "Watcher restarting for auto-update"}]
 
 
-def _not_found() -> ApiError:
+def _deregistered() -> ApiError:
+    return ApiError(
+        "Watcher 'w-test' was deregistered",
+        status_code=404,
+        detail=ApiErrorDetail(
+            code="WATCHER_DEREGISTERED", message="Watcher 'w-test' was deregistered"
+        ),
+    )
+
+
+def _plain_not_found() -> ApiError:
     return ApiError(
         "Watcher 'w-test' not found",
         status_code=404,
@@ -189,7 +200,7 @@ class TestWatchRefusesADeregisteredWatcher:
     def test_it_refuses_to_start_and_says_to_run_init(
         self, watch_until: Callable[[str], Result], client: MagicMock
     ) -> None:
-        client.get_watcher.side_effect = _not_found()
+        client.get_watcher.side_effect = _deregistered()
 
         result = watch_until("ctrl_c")
 
@@ -205,7 +216,7 @@ class TestWatchRefusesADeregisteredWatcher:
     def test_a_dry_run_refuses_too(
         self, watch_until: Callable[[str], Result], client: MagicMock
     ) -> None:
-        client.get_watcher.side_effect = _not_found()
+        client.get_watcher.side_effect = _deregistered()
 
         # The fixture has set up the stubs, and `watch_until` is not needed for the run.
         result = CliRunner().invoke(cli_module.cli, ["watch", "--dry-run"])
@@ -227,12 +238,13 @@ class TestWatchRefusesADeregisteredWatcher:
     @pytest.mark.parametrize(
         "error",
         [
+            _plain_not_found(),
             ApiError("<html>404 Not Found</html>", status_code=404),
             ApiError("bad gateway", status_code=502),
             ApiError("Connection error: refused", status_code=0),
             ValueError("a reply the client could not read"),
         ],
-        ids=["html-404", "5xx", "network", "unreadable-reply"],
+        ids=["plain-not-found", "html-404", "5xx", "network", "unreadable-reply"],
     )
     def test_any_other_failure_of_the_check_lets_the_watcher_start(
         self, watch_until: Callable[[str], Result], client: MagicMock, error: Exception

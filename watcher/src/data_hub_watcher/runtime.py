@@ -44,7 +44,7 @@ from data_hub_watcher.constants import (
     WAITING_START_RETRY_MAX_SECONDS,
 )
 from data_hub_watcher.events import EventReporter, EventType, WatcherEvent
-from data_hub_watcher.heartbeat import HeartbeatLoop, WatcherCounters
+from data_hub_watcher.heartbeat import DeregisteredReplies, HeartbeatLoop, WatcherCounters
 from data_hub_watcher.models import (
     ConfigRevisionResponse,
     InstrumentConfig,
@@ -265,7 +265,11 @@ def _deregistered_requester(
     """
 
     def request() -> None:
-        logger.error("%s The watcher is stopping.", DEREGISTERED_MESSAGE)
+        # The loops of one watcher share the run of replies, so a second loop can reach the
+        # threshold too (the first one's stop is still unwinding). It stops what it owns,
+        # and the reason is logged once.
+        if not deregistered_event.is_set():
+            logger.error("%s The watcher is stopping.", DEREGISTERED_MESSAGE)
         deregistered_event.set()
         if stop_uploads is not None:
             stop_uploads()
@@ -300,6 +304,7 @@ def build_runtime(
     shutdown_event: threading.Event | None = None,
     upgrade_restart_event: threading.Event | None = None,
     deregistered_event: threading.Event | None = None,
+    deregistered_replies: DeregisteredReplies | None = None,
     upgrade_handoff: UpgradeHandoff | None = None,
     report_only: Callable[[str, float], bool] | None = None,
     config_revision: Callable[[], int | None] | None = None,
@@ -320,8 +325,9 @@ def build_runtime(
     :class:`WatcherRuntime` for why.
 
     The remaining keyword arguments let :class:`WatcherSupervisor` rebuild the
-    runtime in place: *reporter*, the three events and *upgrade_handoff* (what the
-    updater remembers of an upgrade it handed to the Windows worker) are shared
+    runtime in place: *reporter*, the three events, *deregistered_replies* (the run of
+    "deregistered" heartbeat replies) and *upgrade_handoff* (what the updater
+    remembers of an upgrade it handed to the Windows worker) are shared
     across rebuilds, *report_only* marks files for the first scan to report without
     uploading (see :class:`FileMonitor`), and *config_revision* /
     *on_config_revision* connect the heartbeat to the config-revision check.
@@ -448,6 +454,7 @@ def build_runtime(
         on_deregistered=_deregistered_requester(
             shutdown_event, deregistered_event, uploader.request_stop
         ),
+        deregistered_replies=deregistered_replies,
     )
 
     return WatcherRuntime(
@@ -736,31 +743,44 @@ def sync_config_to_api(
     )
 
 
+# The longest piece of a failed check's message that `watcher_is_deregistered` logs. A proxy or a
+# failed deploy can answer with a whole HTML page.
+_PROBE_MESSAGE_MAX_CHARS = 300
+
+
+def _short(text: str) -> str:
+    """*text* cut to `_PROBE_MESSAGE_MAX_CHARS` characters, with a mark where it was cut."""
+    if len(text) <= _PROBE_MESSAGE_MAX_CHARS:
+        return text
+    omitted = len(text) - _PROBE_MESSAGE_MAX_CHARS
+    return f"{text[:_PROBE_MESSAGE_MAX_CHARS]}… [{omitted} more characters]"
+
+
 def watcher_is_deregistered(client: DataHubClient, watcher_id: str) -> bool:
     """Whether the server says this watcher's registration was deleted.
 
     The check that `watch` and the Windows service make at start-up, before they sync
     the config, so that a watcher that was deregistered while it was stopped refuses to
     start (`DEREGISTERED_MESSAGE`) instead of running on with 404s. It is true only for
-    the server's own "watcher not found" reply (`ApiError.is_not_found_reply`). Any other
-    failure, such as a network error or a 5xx, is logged and answered with `False`, so
-    the watcher starts as it did before this check, rather than refusing because of a
-    problem that may pass.
+    the server's "deregistered" reply (`ApiError.is_deregistered_reply`). Any other
+    failure, including a plain `NOT_FOUND` for an ID the server has no row for, a network
+    error or a 5xx, is logged and answered with `False`, so the watcher starts as it did
+    before this check, rather than refusing because of a problem that may pass.
     """
     try:
         client.get_watcher(watcher_id)
     except ApiError as exc:
-        if exc.is_not_found_reply:
+        if exc.is_deregistered_reply:
             return True
         logger.warning(
             "Could not check that this watcher is still registered (%s); starting anyway",
-            exc.message,
+            _short(exc.message),
         )
     except Exception as exc:
         logger.warning(
             "Could not check that this watcher is still registered (%s: %s); starting anyway",
             type(exc).__name__,
-            exc,
+            _short(str(exc)),
         )
     return False
 
@@ -1073,6 +1093,10 @@ class WatcherSupervisor:
         # Set, with `shutdown_event`, when the heartbeats show that the registration was
         # deleted on Data Hub. Shared by every runtime and by the waiting state.
         self.deregistered_event = threading.Event()
+        # The run of heartbeats the server answered with its "deregistered" reply, shared by
+        # every heartbeat loop this supervisor builds (watching or waiting), so a watcher that
+        # changes state can't postpone its stop by starting the count again.
+        self._deregistered_replies = DeregisteredReplies()
         # What the updater remembers of an upgrade it handed to the Windows worker.
         # Every updater this supervisor builds gets it, so a rebuilt runtime keeps it.
         self._handoff = upgrade_handoff if upgrade_handoff is not None else UpgradeHandoff()
@@ -1738,6 +1762,7 @@ class WatcherSupervisor:
             shutdown_event=self.shutdown_event,
             upgrade_restart_event=self.upgrade_restart_event,
             deregistered_event=self.deregistered_event,
+            deregistered_replies=self._deregistered_replies,
             upgrade_handoff=self._handoff,
             report_only=_any_rule(rules),
             config_revision=lambda: self._applied,
@@ -1821,6 +1846,7 @@ class WatcherSupervisor:
             config_revision=lambda: self._applied,
             on_config_revision=self._on_heartbeat_revision,
             on_deregistered=_deregistered_requester(self.shutdown_event, self.deregistered_event),
+            deregistered_replies=self._deregistered_replies,
         )
         if new_stretch:
             self.reporter.queue_event(

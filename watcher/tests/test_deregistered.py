@@ -2,12 +2,15 @@
 
 Runs a real `WatcherSupervisor` (real state DB, monitor and heartbeat loop) against a mocked
 client. The heartbeat's tick is driven by hand, so the tests don't wait for the interval: a
-tick sends one heartbeat, as the loop's thread does every minute.
+tick sends one heartbeat, as the loop's thread does every minute. Only the server's
+"deregistered" reply (a 404 with the code `WATCHER_DEREGISTERED`) counts. A plain `NOT_FOUND`
+is a watcher ID the server has no row for, and it stops nothing.
 """
 
 from __future__ import annotations
 import threading
 from collections.abc import Iterator
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
@@ -22,6 +25,7 @@ from data_hub_watcher.events import EventType, WatcherEvent
 from data_hub_watcher.models import (
     ApiErrorDetail,
     ConfigChecksumResponse,
+    ConfigRevisionResponse,
     HeartbeatResponse,
     InstrumentConfig,
     RunDetectionConfig,
@@ -33,11 +37,42 @@ from data_hub_watcher.state import StateDB
 WATCHER_ID = "w-test"
 
 
-def _not_found() -> ApiError:
+def _deregistered() -> ApiError:
+    return ApiError(
+        f"Watcher '{WATCHER_ID}' was deregistered",
+        status_code=404,
+        detail=ApiErrorDetail(
+            code="WATCHER_DEREGISTERED", message=f"Watcher '{WATCHER_ID}' was deregistered"
+        ),
+    )
+
+
+def _plain_not_found() -> ApiError:
     return ApiError(
         f"Watcher '{WATCHER_ID}' not found",
         status_code=404,
         detail=ApiErrorDetail(code="NOT_FOUND", message=f"Watcher '{WATCHER_ID}' not found"),
+    )
+
+
+def _revision(number: int, watch_dir: Path, **overrides: Any) -> ConfigRevisionResponse:
+    """A pending web revision of the settings the test supervisor starts with."""
+    settings: dict[str, Any] = {
+        "watch_directory": str(watch_dir),
+        "file_patterns": ["*.csv"],
+        "run_detection": {"pattern": r"^([^_]+)", "recursive": False},
+        "upload_mode": "auto",
+        "stability_period_seconds": 5,
+        "max_stability_wait_seconds": 300,
+        "upload_parallelism": 4,
+    }
+    settings.update(overrides)
+    return ConfigRevisionResponse(
+        revision=number,
+        source="web",
+        status="pending",
+        settings=settings,
+        created_at=datetime.now(timezone.utc),
     )
 
 
@@ -130,10 +165,10 @@ def closes(monkeypatch: pytest.MonkeyPatch) -> list[StateDB]:
 
 
 class TestRunningWatcher:
-    def test_three_not_found_heartbeats_in_a_row_stop_it(self, env: _Env) -> None:
+    def test_three_deregistered_heartbeats_in_a_row_stop_it(self, env: _Env) -> None:
         sup = env.supervisor()
         sup.start()
-        env.client.send_heartbeat.side_effect = _not_found()
+        env.client.send_heartbeat.side_effect = _deregistered()
 
         _tick(sup, DEREGISTERED_HEARTBEAT_THRESHOLD - 1)
         assert sup.poll(timeout=0) is False
@@ -146,26 +181,59 @@ class TestRunningWatcher:
         assert decision.is_deregistered is True
         assert decision.is_upgrade_restart is False
 
-    def test_two_not_found_heartbeats_then_a_success_do_not_stop_it(self, env: _Env) -> None:
+    def test_two_deregistered_heartbeats_then_a_success_do_not_stop_it(self, env: _Env) -> None:
         sup = env.supervisor()
         sup.start()
-        replies: list[Any] = [_not_found(), _not_found(), HeartbeatResponse(ok=True)]
+        replies: list[Any] = [_deregistered(), _deregistered(), HeartbeatResponse(ok=True)]
         env.client.send_heartbeat.side_effect = replies
 
         _tick(sup, 3)
-        env.client.send_heartbeat.side_effect = [_not_found(), _not_found()]
+        env.client.send_heartbeat.side_effect = [_deregistered(), _deregistered()]
         _tick(sup, 2)
 
         assert sup.poll(timeout=0) is False
         assert not sup.deregistered_event.is_set()
         assert sup.classify_shutdown().is_deregistered is False
 
+    def test_three_plain_not_found_heartbeats_in_a_row_do_not_stop_it(self, env: _Env) -> None:
+        sup = env.supervisor()
+        sup.start()
+        assert sup.rt is not None
+        uploader = sup.rt.uploader
+        env.client.send_heartbeat.side_effect = _plain_not_found()
+
+        # A watcher ID that the server has no row for, as after its database was restored to
+        # an older point: the heartbeats fail, and the watcher keeps running.
+        _tick(sup, DEREGISTERED_HEARTBEAT_THRESHOLD + 3)
+
+        assert sup.poll(timeout=0) is False
+        assert not sup.deregistered_event.is_set()
+        assert not uploader._stop_requested()
+        assert sup.classify_shutdown().is_deregistered is False
+
+    def test_a_plain_not_found_in_the_run_starts_the_count_again(self, env: _Env) -> None:
+        sup = env.supervisor()
+        sup.start()
+        replies: list[Any] = [
+            _deregistered(),
+            _deregistered(),
+            _plain_not_found(),
+            _deregistered(),
+            _deregistered(),
+        ]
+        env.client.send_heartbeat.side_effect = replies
+
+        _tick(sup, len(replies))
+
+        assert sup.poll(timeout=0) is False
+        assert not sup.deregistered_event.is_set()
+
     def test_uploads_are_stopped_as_soon_as_the_loop_knows(self, env: _Env) -> None:
         sup = env.supervisor()
         sup.start()
         assert sup.rt is not None
         uploader = sup.rt.uploader
-        env.client.send_heartbeat.side_effect = _not_found()
+        env.client.send_heartbeat.side_effect = _deregistered()
 
         _tick(sup, DEREGISTERED_HEARTBEAT_THRESHOLD - 1)
         assert not uploader._stop_requested()
@@ -187,7 +255,7 @@ class TestRunningWatcher:
     ) -> None:
         sup = env.supervisor()
         sup.start()
-        env.client.send_heartbeat.side_effect = _not_found()
+        env.client.send_heartbeat.side_effect = _deregistered()
         _tick(sup, DEREGISTERED_HEARTBEAT_THRESHOLD)
         assert sup.poll(timeout=0) is True
         assert sup.rt is not None
@@ -210,7 +278,7 @@ class TestRunningWatcher:
     def test_the_tick_that_sees_the_third_reply_sends_no_events(self, env: _Env) -> None:
         sup = env.supervisor()
         sup.start()
-        env.client.send_heartbeat.side_effect = _not_found()
+        env.client.send_heartbeat.side_effect = _deregistered()
         _tick(sup, DEREGISTERED_HEARTBEAT_THRESHOLD - 1)
         events = env.client.send_events.call_count
 
@@ -224,7 +292,7 @@ class TestRunningWatcher:
         sup.start()
         assert sup.rt is not None
         runtime_state = sup.rt.state_db
-        env.client.send_heartbeat.side_effect = _not_found()
+        env.client.send_heartbeat.side_effect = _deregistered()
         _tick(sup, DEREGISTERED_HEARTBEAT_THRESHOLD)
         closes.clear()
 
@@ -234,18 +302,19 @@ class TestRunningWatcher:
         assert runtime_state in closes
         assert sup._state in closes
 
-    def test_its_stop_is_short_when_uploads_are_running(self, env: _Env) -> None:
+    def test_its_stop_aborts_the_uploader(self, env: _Env) -> None:
         sup = env.supervisor()
         sup.start()
         assert sup.rt is not None
         uploader = sup.rt.uploader
-        env.client.send_heartbeat.side_effect = _not_found()
+        env.client.send_heartbeat.side_effect = _deregistered()
         _tick(sup, DEREGISTERED_HEARTBEAT_THRESHOLD)
 
         sup.stop(stopped_message="Watcher stopped: its registration was deleted")
 
         # The stop cut the uploads off, as one for a Windows shutdown does, instead of
-        # waiting for the parts in flight to finish.
+        # waiting for the parts in flight to finish. (`Uploader.abort` is what bounds that
+        # wait; its own tests cover how it cuts a PUT off.)
         assert uploader._abort.is_set()
 
     def test_a_watcher_that_is_not_deregistered_still_stops_with_both(self, env: _Env) -> None:
@@ -258,20 +327,26 @@ class TestRunningWatcher:
         assert EventType.WATCHER_STOPPED.value in env.sent_event_types()
 
 
-class TestWaitingWatcher:
-    @staticmethod
-    def _waiting(env: _Env) -> WatcherSupervisor:
-        """A supervisor in the waiting state: its watch folder is missing."""
-        sup = env.supervisor()
-        env.watch_dir.rename(env.tmp_path / "moved-away")
-        sup.start()
-        assert sup.rt is None
-        assert sup.waiting_reason is not None
-        return sup
+def _waiting_supervisor(env: _Env) -> WatcherSupervisor:
+    """A supervisor in the waiting state: its watch folder is missing."""
+    sup = env.supervisor()
+    env.watch_dir.rename(env.tmp_path / "moved-away")
+    sup.start()
+    assert sup.rt is None
+    assert sup.waiting_reason is not None
+    return sup
 
-    def test_three_not_found_heartbeats_in_a_row_stop_it_too(self, env: _Env) -> None:
+
+def _bring_the_folder_back(env: _Env) -> None:
+    (env.tmp_path / "moved-away").rename(env.watch_dir)
+
+
+class TestWaitingWatcher:
+    _waiting = staticmethod(_waiting_supervisor)
+
+    def test_three_deregistered_heartbeats_in_a_row_stop_it_too(self, env: _Env) -> None:
         sup = self._waiting(env)
-        env.client.send_heartbeat.side_effect = _not_found()
+        env.client.send_heartbeat.side_effect = _deregistered()
 
         _tick(sup, DEREGISTERED_HEARTBEAT_THRESHOLD - 1)
         assert sup.poll(timeout=0) is False
@@ -280,17 +355,26 @@ class TestWaitingWatcher:
         assert sup.poll(timeout=0) is True
         assert sup.classify_shutdown().is_deregistered is True
 
-    def test_two_not_found_heartbeats_then_a_success_do_not_stop_it(self, env: _Env) -> None:
+    def test_two_deregistered_heartbeats_then_a_success_do_not_stop_it(self, env: _Env) -> None:
         sup = self._waiting(env)
         env.client.send_heartbeat.side_effect = [
-            _not_found(),
-            _not_found(),
+            _deregistered(),
+            _deregistered(),
             HeartbeatResponse(ok=True),
-            _not_found(),
-            _not_found(),
+            _deregistered(),
+            _deregistered(),
         ]
 
         _tick(sup, 5)
+
+        assert sup.poll(timeout=0) is False
+        assert sup.classify_shutdown().is_deregistered is False
+
+    def test_three_plain_not_found_heartbeats_in_a_row_do_not_stop_it(self, env: _Env) -> None:
+        sup = self._waiting(env)
+        env.client.send_heartbeat.side_effect = _plain_not_found()
+
+        _tick(sup, DEREGISTERED_HEARTBEAT_THRESHOLD + 3)
 
         assert sup.poll(timeout=0) is False
         assert sup.classify_shutdown().is_deregistered is False
@@ -299,7 +383,7 @@ class TestWaitingWatcher:
         self, env: _Env, closes: list[StateDB]
     ) -> None:
         sup = self._waiting(env)
-        env.client.send_heartbeat.side_effect = _not_found()
+        env.client.send_heartbeat.side_effect = _deregistered()
         _tick(sup, DEREGISTERED_HEARTBEAT_THRESHOLD)
         assert sup.poll(timeout=0) is True
         heartbeats = env.client.send_heartbeat.call_count
@@ -320,7 +404,7 @@ class TestWaitingWatcher:
         sup = self._waiting(env)
         assert sup._waiting is not None
         heartbeat = sup._waiting.heartbeat
-        env.client.send_heartbeat.side_effect = _not_found()
+        env.client.send_heartbeat.side_effect = _deregistered()
 
         with caplog.at_level("ERROR"):
             _tick(sup, DEREGISTERED_HEARTBEAT_THRESHOLD + 2)
@@ -331,6 +415,74 @@ class TestWaitingWatcher:
         assert "data-hub-watcher init" in errors[0]
 
 
+class TestTheCountSurvivesStateChanges:
+    """Each switch builds a new heartbeat loop, and the run of replies goes on across them.
+
+    A watcher that keeps changing state, or whose network share drops out every couple of
+    minutes, would otherwise postpone its stop for good.
+    """
+
+    def test_a_waiting_watcher_that_starts_watching_keeps_the_count(self, env: _Env) -> None:
+        sup = _waiting_supervisor(env)
+        env.client.send_heartbeat.side_effect = _deregistered()
+        _tick(sup, DEREGISTERED_HEARTBEAT_THRESHOLD - 1)
+        assert not sup.deregistered_event.is_set()
+        _bring_the_folder_back(env)
+
+        # The new loop's first heartbeat is the third reply in a row.
+        sup._check_waiting_folder()
+
+        assert sup.deregistered_event.is_set()
+        assert sup.poll(timeout=0) is True
+        assert sup.classify_shutdown().is_deregistered is True
+
+    def test_a_config_rebuild_keeps_the_count(self, env: _Env) -> None:
+        sup = env.supervisor()
+        sup.start()
+        env.client.send_heartbeat.side_effect = _deregistered()
+        _tick(sup, DEREGISTERED_HEARTBEAT_THRESHOLD - 1)
+        assert not sup.deregistered_event.is_set()
+
+        sup._apply(_revision(1, env.watch_dir, stability_period_seconds=7))
+
+        assert sup.deregistered_event.is_set()
+        assert sup.poll(timeout=0) is True
+
+    def test_a_failed_start_that_falls_back_to_waiting_keeps_the_count(
+        self, env: _Env, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        sup = env.supervisor()
+        sup.start()
+        env.client.send_heartbeat.side_effect = _deregistered()
+        _tick(sup, DEREGISTERED_HEARTBEAT_THRESHOLD - 1)
+        sup._teardown_for_rebuild()
+
+        def failing_start(**_kwargs: Any) -> None:
+            raise RuntimeError("could not start")
+
+        monkeypatch.setattr(sup, "_start_watching_or_wait", failing_start)
+        sup._start_or_wait_on_error(started_message="Watcher restarted")
+
+        # The waiting loop's first heartbeat is the third reply in a row.
+        assert sup.deregistered_event.is_set()
+        assert sup.poll(timeout=0) is True
+
+    def test_a_success_in_a_new_loop_starts_the_count_again(self, env: _Env) -> None:
+        sup = _waiting_supervisor(env)
+        env.client.send_heartbeat.side_effect = _deregistered()
+        _tick(sup, DEREGISTERED_HEARTBEAT_THRESHOLD - 1)
+        _bring_the_folder_back(env)
+        env.client.send_heartbeat.side_effect = None
+        env.client.send_heartbeat.return_value = HeartbeatResponse(ok=True)
+
+        sup._check_waiting_folder()
+        env.client.send_heartbeat.side_effect = _deregistered()
+        _tick(sup, DEREGISTERED_HEARTBEAT_THRESHOLD - 1)
+
+        assert not sup.deregistered_event.is_set()
+        assert sup.poll(timeout=0) is False
+
+
 class TestTheLoopThread:
     def test_the_loop_thread_stops_the_watcher_without_help(
         self, env: _Env, monkeypatch: pytest.MonkeyPatch
@@ -339,7 +491,7 @@ class TestTheLoopThread:
         monkeypatch.setenv(testing_overrides.HEARTBEAT_INTERVAL_ENV_VAR, "1")
         sup = env.supervisor()
         sup.start()
-        env.client.send_heartbeat.side_effect = _not_found()
+        env.client.send_heartbeat.side_effect = _deregistered()
         woke = threading.Event()
 
         def poll_until_stop() -> None:
