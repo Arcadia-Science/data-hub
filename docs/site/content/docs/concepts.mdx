@@ -138,7 +138,14 @@ What the watcher does with files already sitting in the watch directory the firs
 
 ### Dismiss [#dismiss]
 
-For instruments in [manual upload mode](#upload-mode), dismissing a detected file tells the watcher not to upload it. Dismissing differs from deleting: the file never reached Data Hub storage, so there’s nothing to restore. A dismissed file stays dismissed, even if the watcher reports it again. If the instrument later writes a different file at the same path, with another size or creation time (the modification time on a system that doesn’t record creation time), Data Hub detects it as a new file and the dismissed file stays dismissed. See [Manage the watcher fleet](/docs/manage-watchers#approving-manual-uploads).
+For instruments in [manual upload mode](#upload-mode), dismissing a detected file tells the watcher not to upload it. Dismissing differs from deleting: the file never reached Data Hub storage, so there’s nothing to restore. A dismissed file stays dismissed, even if the watcher reports it again. See [Manage the watcher fleet](/docs/manage-watchers#approving-manual-uploads).
+
+The watcher reports a path only once, so a different file that the instrument later writes at the same path doesn’t appear on its own. It appears when the watcher reports that path again, which happens after `data-hub-watcher state forget`, or when the watcher starts without its saved record of what it has reported, for example after a reinstall. Data Hub then detects the file as new when its size or creation time differs from the dismissed file’s. On Linux, the modification time stands in for the creation time. The dismissed file stays dismissed.
+
+Because Data Hub compares only size and time, two cases can surprise you:
+
+- A new file the same size as the dismissed one counts as the same file when it keeps the old creation time, so it stays dismissed. On Windows and macOS this happens when the instrument overwrites the file in place. On Windows it can also happen when the file is deleted and written again, or saved through a temporary copy, within about 15 seconds.
+- Copying a folder, for example with Explorer or `xcopy` on Windows or `cp` without `-p` on Linux, gives the copies new times. After you replace an instrument PC or restore its folder from a backup, a new watcher that scans the copied folder reports the files you dismissed as new detected files. Dismiss them again.
 
 ### Soft delete [#soft-delete]
 
