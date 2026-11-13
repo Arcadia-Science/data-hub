@@ -385,7 +385,7 @@
         ]
       },
       {
-        "help": "Start watching for new files.",
+        "help": "Start watching for new files. If the watcher's registration was deleted on Data Hub, a running watcher stops and exits with code 3, and a new one refuses to start. Either way it says to run 'data-hub-watcher init' to register again.",
         "name": "watch",
         "params": [
           {
@@ -450,5 +450,5 @@
     ]
   },
   "prog": "data-hub-watcher",
-  "version": "1.4.2"
+  "version": "1.4.3"
 }
