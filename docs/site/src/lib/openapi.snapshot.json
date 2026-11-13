@@ -1083,7 +1083,7 @@
               "waiting",
               "stale"
             ],
-            "description": "The status Data Hub shows for the watcher. `stale` is worked out when you ask and is never stored. A `watching` or `waiting` watcher is `stale` when its last heartbeat is more than 5 minutes old. A `stopped` watcher stays `stopped`, however old its last heartbeat, unless it stopped for a restart or an update (see `status_reason`): then it is `stale` when its last heartbeat is more than 15 minutes old. The `status` filter on the list endpoint returns the watchers that show that status."
+            "description": "The status Data Hub shows for the watcher. `stale` is worked out when you ask and is never stored. A `watching` or `waiting` watcher is `stale` when its last heartbeat is more than 5 minutes old. A `stopped` watcher stays `stopped`, however old its last heartbeat, unless it stopped for a restart or an update (see `status_reason`): then it is `stale` when its last heartbeat is more than 15 minutes old. A deregistered watcher is always `stopped`. The `status` filter on the list endpoint returns the watchers that show that status."
           },
           "config_yaml": {
             "type": [
@@ -1114,7 +1114,7 @@
               "string",
               "null"
             ],
-            "description": "Why the watcher is `waiting` (for example a missing watch folder), or why it stopped for a restart: `system_shutdown` for Windows shutting down or restarting, `auto_update` for an update. Null in every other case, including a stop that gave no such reason."
+            "description": "Why the watcher is `waiting` (for example a missing watch folder), or why it stopped for a restart: `system_shutdown` for Windows shutting down or restarting, `auto_update` for an update (watcher 1.4.2 will send it). It is the reason of the watcher's last heartbeat, so it stays while `status` reads `stale`. It is null when that heartbeat was any other status, or a stop that gave no such reason."
           },
           "last_heartbeat_at": {
             "type": [
@@ -6558,7 +6558,7 @@
                   "status_reason": {
                     "type": "string",
                     "maxLength": 500,
-                    "description": "Why the watcher is `waiting`, for example a missing watch folder. On a `stopped` heartbeat, `system_shutdown` says the watcher stopped because Windows is shutting down or restarting, and `auto_update` says it stopped to install an update and start again. Data Hub keeps these two reasons on the watcher, keeps the instrument's requested uploads queued for the watcher to upload after it starts again, and cancels them only if no heartbeat arrives for about 15 minutes. After that long without a heartbeat the watcher shows as `stale`. Any other `stopped` heartbeat cancels the requested uploads at once, and its reason is not kept."
+                    "description": "Why the watcher is `waiting`, for example a missing watch folder. On a `stopped` heartbeat, `system_shutdown` says the watcher stopped because Windows is shutting down or restarting (watcher 1.4.1 and later send it), and `auto_update` says it stopped to install an update and start again (watcher 1.4.2 will send it). Data Hub keeps these two reasons on the watcher, keeps the instrument's requested uploads queued for the watcher to upload after it starts again, and cancels them only if no heartbeat arrives for about 15 minutes. After that long without a heartbeat the watcher shows as `stale`. Any other `stopped` heartbeat cancels the requested uploads at once, and its reason is not kept."
                   },
                   "config_revision": {
                     "type": [

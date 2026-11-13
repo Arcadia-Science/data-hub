@@ -43,12 +43,12 @@ What the **Watchers** page shows for each watcher, derived from its most recent 
 | Status           | Meaning                                                                                          |
 | ---------------- | ------------------------------------------------------------------------------------------------ |
 | **Online**       | A heartbeat arrived in the last 5 minutes.                                                        |
-| **Unresponsive** | No heartbeat for more than 5 minutes. The process crashed, the PC is off, or the network is blocking the API. A watcher that stopped for a Windows restart or an update shows **Unresponsive** after 15 minutes instead. |
-| **Stopped**      | The watcher shut down cleanly and said so in its last heartbeat. It keeps showing **Stopped**, however long ago that was, until it starts again. |
+| **Unresponsive** | No heartbeat for more than 5 minutes. The process crashed, the PC is off, or the network is blocking the API. A watcher that stopped for a Windows restart or shutdown shows **Unresponsive** after 15 minutes instead. |
+| **Stopped**      | The watcher shut down cleanly and said so in its last heartbeat. After a stop you chose, such as `data-hub-watcher service stop`, it keeps showing **Stopped**, however long ago that was, until it starts again. After a Windows restart or shutdown, it shows **Stopped** for 15 minutes, then **Unresponsive** if it hasn’t returned. |
 | **Waiting: folder not found** | The watcher is running and sending heartbeats, but its watch folder is missing, so it isn’t watching anything. Watcher 1.4.0 and later. |
 | **Registered**   | The watcher registered but hasn’t sent its first heartbeat yet.                                   |
 
-A watcher that stopped because Windows is restarting or shutting down (watcher 1.4.1 and later), or to install an update (a later watcher version), is expected back. It shows **Stopped**, and hovering over the badge tells you when it starts showing **Unresponsive** if it hasn’t returned: 15 minutes after its last heartbeat. Any other stop, such as `data-hub-watcher service stop` or Ctrl+C, shows **Stopped** until the watcher starts again.
+A watcher that stopped because Windows is restarting or shutting down (watcher 1.4.1 and later) is expected back. It shows **Stopped**, and hovering over the badge tells you when it starts showing **Unresponsive** if it hasn’t returned: 15 minutes after its last heartbeat. Any other stop, such as `data-hub-watcher service stop` or Ctrl+C, shows **Stopped** until the watcher starts again.
 
 An unresponsive watcher keeps its registration and history, so you can read its last events to work out what happened. See [Troubleshoot a watcher](/docs/troubleshoot-a-watcher).
 
