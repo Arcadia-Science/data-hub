@@ -33,6 +33,7 @@ from data_hub_watcher.constants import (
     DEFAULT_CONFIG_DIR,
     FOLDER_CONFIRM_DELAY_SECONDS,
     FOLDER_PROBE_TIMEOUT_SECONDS,
+    MONITOR_RESTART_WINDOW_SECONDS,
     PRUNE_DAYS,
     STOP_BUDGET_SECONDS,
     STOP_FINAL_HEARTBEAT_SECONDS,
@@ -47,7 +48,7 @@ from data_hub_watcher.constants import (
     WATCH_FOLDER_GONE_JOIN_SECONDS,
 )
 from data_hub_watcher.events import EventReporter, EventType, WatcherEvent
-from data_hub_watcher.folder_probe import FolderProbe
+from data_hub_watcher.folder_probe import FolderLook, FolderProbe
 from data_hub_watcher.heartbeat import HeartbeatLoop, WatcherCounters
 from data_hub_watcher.models import (
     ConfigRevisionResponse,
@@ -1059,6 +1060,15 @@ class WatcherSupervisor:
         # The look at the watch folder that the `poll` thread, the uploader and a start
         # make: it runs on its own thread, so a folder on a hung share can't hold them.
         self._probe = FolderProbe(FOLDER_PROBE_TIMEOUT_SECONDS)
+        # `(st_dev, st_ino)` of the folder the running runtime started on (`None` while
+        # waiting, or when the filesystem doesn't say), and when it started watching it
+        # (`time.monotonic()`). A folder with another identity now is another folder:
+        # renamed and made again, or something mounted on it.
+        self._watch_identity: tuple[int, int] | None = None
+        self._watching_since = 0.0
+        # Rebuilds since the last runtime that watched for `MONITOR_RESTART_WINDOW_SECONDS`
+        # without going blind (see `_check_running_folder`).
+        self._blind_rebuilds = 0
         # Runtimes that the move to the waiting state stopped but could not wait out: a
         # thread of theirs was still blocked, on the share, when it gave up on it. Each
         # keeps its state DB open until its threads have exited (`_reap_cut_off`).
@@ -1374,6 +1384,7 @@ class WatcherSupervisor:
         # not even the heartbeat that could deliver the next fix.
         try:
             self._teardown_for_rebuild()
+            self._blind_rebuilds = 0
             if folder_changed(old_inst, new_inst):
                 self._forget_old_folder_uploads()
             self.cfg = new_cfg
@@ -1513,7 +1524,9 @@ class WatcherSupervisor:
         except OSError:
             logger.exception("Could not restore %s", self.config_path)
 
-    def _start_or_wait_on_error(self, *, started_message: str, retry: bool = False) -> None:
+    def _start_or_wait_on_error(
+        self, *, started_message: str, retry: bool = False, already_started: bool = False
+    ) -> None:
         """Start watching, falling back to the waiting state if that fails.
 
         The fallback keeps heartbeats going, so the dashboard shows what
@@ -1524,9 +1537,17 @@ class WatcherSupervisor:
         leaves none behind. A failure for the same reason as the last one
         reported queues no events and logs one line instead of a traceback,
         and each failure pushes the waiting state's next attempt further out.
+
+        *already_started* is set when this rebuilds a runtime of a watcher that was
+        running: if the fallback is the waiting state, it queues no `watcher_started`
+        event, because nothing has resumed.
         """
         try:
-            self._start_watching_or_wait(started_message=started_message, announce_late=retry)
+            self._start_watching_or_wait(
+                started_message=started_message,
+                announce_late=retry,
+                already_started=already_started,
+            )
         except Exception as exc:
             reason = f"could not start watching: {exc}"
             self._start_failures += 1
@@ -1542,7 +1563,9 @@ class WatcherSupervisor:
             else:
                 logger.exception("Could not start watching; trying again in %ds", delay)
             self._teardown_for_rebuild()
-            self._enter_waiting(reason, started_message=started_message)
+            self._enter_waiting(
+                reason, started_message=None if already_started else started_message
+            )
 
     @staticmethod
     def _retry_delay(failures: int) -> float:
@@ -1708,6 +1731,7 @@ class WatcherSupervisor:
         started_message: str,
         report_only_rules: list[Callable[[str, float], bool]] | None = None,
         announce_late: bool = False,
+        already_started: bool = False,
     ) -> None:
         """Build and start a runtime for `self.cfg`, or wait if its folder is missing.
 
@@ -1715,11 +1739,16 @@ class WatcherSupervisor:
         far (see `_report_only_rules`). With *announce_late*, the started
         event is queued after the runtime has started rather than by
         `start_runtime`, so an attempt that fails leaves no event behind.
+        *already_started* is for the rebuild of a runtime of a watcher that was
+        running: when the folder is missing, the waiting state it moves to queues
+        no started event, because nothing has resumed.
         """
         rules = self._report_only_rules if report_only_rules is None else report_only_rules
         look = self._probe.look(self.cfg.instrument.watch_directory)
         if look.problem is not None:
-            self._enter_waiting(look.problem, started_message=started_message)
+            self._enter_waiting(
+                look.problem, started_message=None if already_started else started_message
+            )
             return
         rt = build_runtime(
             client=self.client,
@@ -1752,6 +1781,11 @@ class WatcherSupervisor:
             self._teardown_for_rebuild()
             raise
         self.rt = rt
+        # The folder as it was when it was found fit to watch, before the scan: a folder
+        # swapped during the scan (which can take minutes) then shows as another one at
+        # the next check, and the runtime is rebuilt with a scan of the new one.
+        self._watch_identity = look.identity
+        self._watching_since = time.monotonic()
         if announce_late:
             self.reporter.queue_event(
                 WatcherEvent(event_type=EventType.WATCHER_STARTED, message=started_message)
@@ -1771,6 +1805,7 @@ class WatcherSupervisor:
         A watcher that was already running passes no *started_message*: it has
         started, so the move to waiting queues the error only.
         """
+        self._watch_identity = None
         new_stretch = self._waiting_event_reason is None
         reason_changed = reason != self._waiting_event_reason
         if reason_changed:
@@ -1875,10 +1910,12 @@ class WatcherSupervisor:
         the waiting state always queues. `_check_waiting_folder` starts watching again
         once the folder is back.
 
-        A folder that is there can still leave the watcher blind: watchdog stops
-        watching a folder that was deleted, so one that was deleted and created
-        again before this check is not being watched. The runtime is rebuilt, with
-        the usual wait for uploads, when its file monitor has stopped watching.
+        A folder that is there can still leave the watcher blind, in two ways, and the
+        runtime is then rebuilt, with the usual wait for uploads (`_rebuild_blind_runtime`):
+        watchdog stopped watching it (it stops an emitter whose folder was deleted, and a
+        folder made again at the same path isn't watched), or it is not the folder the
+        runtime started on (`_watch_identity`: renamed, with another made at its path, or
+        something mounted or unmounted there, which watchdog 6.0.0 doesn't report).
         """
         rt = self.rt
         if rt is None or self._stopping():
@@ -1898,22 +1935,72 @@ class WatcherSupervisor:
                 "keeping the runtime",
                 first,
             )
-        if rt.monitor.is_watching():
+        cause = self._blind_cause(rt, look)
+        if cause is None:
+            if (
+                self._blind_rebuilds
+                and time.monotonic() - self._watching_since >= MONITOR_RESTART_WINDOW_SECONDS
+            ):
+                # It has watched for a while since the last rebuild.
+                self._blind_rebuilds = 0
             return
-        logger.warning(
-            "The file monitor has stopped watching %s, although the folder is there (it was "
-            "deleted and created again, or watching failed); watching it anew",
-            path,
-        )
-        self._teardown_for_rebuild()
-        self._start_or_wait_on_error(
-            started_message=f"{self.role} resumed on {self.host}", retry=True
-        )
+        self._rebuild_blind_runtime(cause)
 
     def _move_to_waiting(self, problem: str) -> None:
         logger.info("Watch folder is gone (%s); stopping uploads and the file monitor", problem)
+        self._blind_rebuilds = 0
         self._teardown_for_rebuild(folder_gone=True)
         self._enter_waiting(problem, started_message=None)
+
+    def _blind_cause(self, rt: WatcherRuntime, look: FolderLook) -> str | None:
+        """Why a runtime whose folder is there can't see it, or `None` if it can."""
+        known, now = self._watch_identity, look.identity
+        if known is not None and now is not None and known != now:
+            return "the watch folder is not the one the watcher started on"
+        if not rt.monitor.is_watching():
+            return "the file monitor has stopped watching the folder"
+        return None
+
+    def _rebuild_blind_runtime(self, cause: str) -> None:
+        """Rebuild a runtime that can't see its folder, once, or wait if that doesn't help.
+
+        The first time, the runtime is rebuilt and a `watcher_started` event says the
+        watcher resumed. If that runtime goes blind again before it has watched for
+        `MONITOR_RESTART_WINDOW_SECONDS`, rebuilding again would not help, and would
+        send a heartbeat, an event and the whole start-up scan at every check. (An
+        emitter that dies at once, as watchdog's does on a share that
+        `ReadDirectoryChangesW` doesn't support, would do exactly that.) The watcher then
+        waits with the reason "watch_directory can't be watched", and tries again on the
+        waiting state's backoff (1, 2, 4 and 8 heartbeat intervals, then
+        `WAITING_START_RETRY_MAX_SECONDS`), which the next blind runtime lengthens.
+        """
+        path = self.cfg.instrument.watch_directory
+        if self._blind_rebuilds == 0:
+            logger.warning(
+                "%s, although %s is there; watching it anew (the usual wait for uploads)",
+                cause[0].upper() + cause[1:],
+                path,
+            )
+            self._blind_rebuilds = 1
+            self._teardown_for_rebuild()
+            self._start_or_wait_on_error(
+                started_message=f"{self.role} resumed on {self.host}",
+                retry=True,
+                already_started=True,
+            )
+            return
+        delay = self._retry_delay(self._blind_rebuilds)
+        self._blind_rebuilds += 1
+        logger.warning(
+            "%s again soon after the runtime was rebuilt, so %s can't be watched; waiting, "
+            "and trying again in %ds",
+            cause[0].upper() + cause[1:],
+            path,
+            delay,
+        )
+        self._teardown_for_rebuild()
+        self._enter_waiting(f"watch_directory can't be watched: {path}", started_message=None)
+        self._next_start_attempt = time.monotonic() + delay
 
     def _check_waiting_folder(self) -> None:
         waiting = self._waiting
@@ -1930,6 +2017,7 @@ class WatcherSupervisor:
             # Once the folder is back, try straight away.
             self._start_failures = 0
             self._next_start_attempt = 0.0
+            self._blind_rebuilds = 0
             return
         if time.monotonic() < self._next_start_attempt:
             return

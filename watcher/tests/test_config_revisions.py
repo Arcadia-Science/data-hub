@@ -19,6 +19,7 @@ import time
 from collections.abc import Callable, Iterator
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -27,13 +28,14 @@ import requests
 import yaml
 from watchdog.events import DirDeletedEvent, DirMovedEvent, FileDeletedEvent
 
-from data_hub_watcher import models, runtime
+from data_hub_watcher import folder_probe, models, runtime
 from data_hub_watcher.api_client import DEFAULT_TIMEOUT, ApiError, DataHubClient
 from data_hub_watcher.config_io import save_config
 from data_hub_watcher.constants import (
     DEFAULT_CHECK_INTERVAL_TICKS,
     DEFAULT_IDLE_TICKS_REQUIRED,
     HEARTBEAT_INTERVAL_SECONDS,
+    MONITOR_RESTART_WINDOW_SECONDS,
     STOP_BUDGET_SECONDS,
     SYSTEM_SHUTDOWN_HTTP_TIMEOUT,
     UPGRADE_HANDOFF_TIMEOUT_SECONDS,
@@ -1612,6 +1614,195 @@ class TestWatchFolderVanishesWhileWatching:
         assert sup.rt is None and sup.waiting_reason is not None
 
     # ------------------------------------------------------------------
+    # A runtime that keeps going blind is not rebuilt at every check
+    # ------------------------------------------------------------------
+
+    def test_a_runtime_that_goes_blind_again_at_once_waits_on_the_backoff(
+        self, env: _Env, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("DATA_HUB_WATCHER_HEARTBEAT_INTERVAL_SECONDS", "7")
+        builds: list[int] = []
+        real_build = runtime.build_runtime
+
+        def counting_build(**kwargs: Any) -> Any:
+            builds.append(1)
+            return real_build(**kwargs)
+
+        monkeypatch.setattr(runtime, "build_runtime", counting_build)
+        sup = env.supervisor()
+        sup.start()
+        assert len(builds) == 1
+        # An emitter that dies as soon as it starts, with the folder fine: watchdog stopped
+        # watching, as on a share that `ReadDirectoryChangesW` doesn't support.
+        monkeypatch.setattr(FileMonitor, "is_watching", lambda self: False)
+
+        # The first time, it is rebuilt, and the watcher says it resumed.
+        self._tick(sup)
+        assert len(builds) == 2 and sup.rt is not None
+        assert self._started_messages(self._events(env, sup)) == [
+            "Watcher started on test-host",
+            "Watcher resumed on test-host",
+        ]
+
+        # Blind again straight away: it waits, with the reason, instead of rebuilding again.
+        self._tick(sup)
+        assert len(builds) == 2
+        assert sup.rt is None
+        reason = f"watch_directory can't be watched: {env.watch_dir}"
+        assert sup.waiting_reason == reason
+        payload = env.client.send_heartbeat.call_args.args[1]
+        assert payload["status"] == "waiting" and payload["status_reason"] == reason
+        # One error event, and nothing resumed.
+        events = self._events(env, sup)
+        assert self._unavailable_reasons(events) == [reason]
+        assert len(self._started_messages(events)) == 2
+        # The waiting state's backoff: one heartbeat interval after the first.
+        assert 0 < sup._next_start_attempt - time.monotonic() <= 7
+
+        # Ticks inside the backoff rebuild nothing.
+        self._waiting_tick(sup)
+        self._waiting_tick(sup)
+        assert len(builds) == 2 and sup.rt is None
+
+        # Once it has passed the runtime starts again, goes blind again, and the next wait is
+        # twice as long.
+        sup._next_start_attempt = 0.0
+        self._waiting_tick(sup)
+        assert len(builds) == 3 and sup.rt is not None
+        self._tick(sup)
+        assert sup.rt is None
+        assert 7 < sup._next_start_attempt - time.monotonic() <= 14
+        assert len(builds) == 3
+
+    def test_a_runtime_that_watched_for_a_while_is_rebuilt_again_when_it_goes_blind(
+        self, env: _Env, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        builds: list[int] = []
+        real_build = runtime.build_runtime
+        monkeypatch.setattr(
+            runtime,
+            "build_runtime",
+            lambda **kwargs: builds.append(1) or real_build(**kwargs),
+        )
+        sup = env.supervisor()
+        sup.start()
+        monkeypatch.setattr(FileMonitor, "is_watching", lambda self: False)
+        self._tick(sup)
+        assert len(builds) == 2 and sup._blind_rebuilds == 1
+
+        # The rebuilt runtime watches without trouble for longer than the window.
+        monkeypatch.setattr(FileMonitor, "is_watching", lambda self: True)
+        sup._watching_since -= MONITOR_RESTART_WINDOW_SECONDS
+        self._tick(sup)
+        assert sup._blind_rebuilds == 0
+
+        # So the next time it goes blind it is rebuilt, not made to wait.
+        monkeypatch.setattr(FileMonitor, "is_watching", lambda self: False)
+        self._tick(sup)
+        assert len(builds) == 3
+        assert sup.rt is not None and sup.waiting_reason is None
+
+    def test_a_folder_that_went_away_starts_the_count_again(
+        self, env: _Env, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        sup = env.supervisor()
+        sup.start()
+        monkeypatch.setattr(FileMonitor, "is_watching", lambda self: False)
+        self._tick(sup)
+        assert sup._blind_rebuilds == 1
+
+        shutil.rmtree(env.watch_dir)
+        self._tick(sup)
+        assert sup.waiting_reason is not None and "not found" in sup.waiting_reason
+        assert sup._blind_rebuilds == 0
+
+    # ------------------------------------------------------------------
+    # A folder that was replaced, or mounted over, is not the one being watched
+    # ------------------------------------------------------------------
+
+    def test_a_folder_that_was_renamed_and_made_again_is_rebuilt(
+        self, env: _Env, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # watchdog 6.0.0's inotify emitter ignores IN_MOVE_SELF, so after `mv data data.old
+        # && mkdir data` it goes on watching the renamed folder and nothing says so. Here
+        # the emitter is alive in every case, so only the folder's identity can tell.
+        monkeypatch.setattr(FileMonitor, "is_watching", lambda self: True)
+        sup = env.supervisor()
+        sup.start()
+        old_rt = sup.rt
+        assert old_rt is not None and sup._watch_identity is not None
+
+        env.watch_dir.rename(env.tmp_path / "data.old")
+        env.watch_dir.mkdir()
+        self._tick(sup)
+
+        new_rt = sup.rt
+        assert new_rt is not None and new_rt is not old_rt
+        assert sup.waiting_reason is None
+        # The new runtime is on the new folder.
+        assert sup._watch_identity == (env.watch_dir.stat().st_dev, env.watch_dir.stat().st_ino)
+        assert self._started_messages(self._events(env, sup)) == [
+            "Watcher started on test-host",
+            "Watcher resumed on test-host",
+        ]
+
+    def test_a_folder_that_is_unchanged_is_left_alone(
+        self, env: _Env, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(FileMonitor, "is_watching", lambda self: True)
+        sup = env.supervisor()
+        sup.start()
+        rt = sup.rt
+
+        self._tick(sup)
+        self._tick(sup)
+
+        assert sup.rt is rt
+
+    def test_an_inode_number_of_zero_is_not_told_apart_from_another_folder(
+        self, env: _Env, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Some SMB servers report 0 for every file, so a replaced folder looks the same.
+        monkeypatch.setattr(FileMonitor, "is_watching", lambda self: True)
+        monkeypatch.setattr(
+            folder_probe,
+            "os",
+            SimpleNamespace(stat=lambda _p: SimpleNamespace(st_dev=7, st_ino=0)),
+        )
+        sup = env.supervisor()
+        sup.start()
+        rt = sup.rt
+        assert sup._watch_identity is None
+
+        env.watch_dir.rename(env.tmp_path / "data.old")
+        env.watch_dir.mkdir()
+        self._tick(sup)
+
+        assert sup.rt is rt and sup.waiting_reason is None
+
+    def test_an_identity_that_changes_every_time_is_not_rebuilt_at_every_check(
+        self, env: _Env, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A filesystem whose inode numbers change between calls. The first rebuild can't
+        # help, and the second check makes the watcher wait.
+        monkeypatch.setattr(FileMonitor, "is_watching", lambda self: True)
+        numbers = itertools.count(1000)
+        monkeypatch.setattr(
+            folder_probe,
+            "os",
+            SimpleNamespace(stat=lambda _p: SimpleNamespace(st_dev=7, st_ino=next(numbers))),
+        )
+        sup = env.supervisor()
+        sup.start()
+
+        self._tick(sup)
+        assert sup.rt is not None
+        self._tick(sup)
+
+        assert sup.rt is None
+        assert sup.waiting_reason == f"watch_directory can't be watched: {env.watch_dir}"
+
+    # ------------------------------------------------------------------
     # One failed look is not enough
     # ------------------------------------------------------------------
 
@@ -1670,6 +1861,56 @@ class TestWatchFolderVanishesWhileWatching:
         assert sup.waiting_reason == gone
         # One event, with that reason, and no second one for "not readable".
         assert self._unavailable_reasons(self._events(env, sup)) == [gone]
+
+    # ------------------------------------------------------------------
+    # Nothing resumed, so no "resumed" event
+    # ------------------------------------------------------------------
+
+    def test_a_rebuild_whose_start_fails_queues_no_resumed_event(
+        self, env: _Env, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        sup = env.supervisor()
+        sup.start()
+        monkeypatch.setattr(FileMonitor, "is_watching", lambda self: False)
+
+        def failing_start(_self: FileMonitor) -> None:
+            raise OSError("inotify watch limit reached")
+
+        monkeypatch.setattr(FileMonitor, "start", failing_start)
+
+        self._tick(sup)
+
+        reason = "could not start watching: inotify watch limit reached"
+        assert sup.waiting_reason == reason
+        events = self._events(env, sup)
+        # The watcher started once. The failed rebuild is an error, not a second start.
+        assert self._started_messages(events) == ["Watcher started on test-host"]
+        assert self._unavailable_reasons(events) == [reason]
+
+    def test_a_folder_that_vanishes_during_the_rebuild_queues_no_resumed_event(
+        self, env: _Env, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        sup = env.supervisor()
+        sup.start()
+        monkeypatch.setattr(FileMonitor, "is_watching", lambda self: False)
+        real_teardown = WatcherSupervisor._teardown_for_rebuild
+
+        def teardown_then_lose_the_folder(self_: WatcherSupervisor, **kwargs: Any) -> None:
+            real_teardown(self_, **kwargs)
+            # Gone during the drain, which can take up to two minutes.
+            shutil.rmtree(env.watch_dir)
+
+        monkeypatch.setattr(
+            WatcherSupervisor, "_teardown_for_rebuild", teardown_then_lose_the_folder
+        )
+
+        self._tick(sup)
+
+        assert sup.rt is None
+        assert sup.waiting_reason is not None and "not found" in sup.waiting_reason
+        events = self._events(env, sup)
+        assert self._started_messages(events) == ["Watcher started on test-host"]
+        assert self._unavailable_reasons(events) == [sup.waiting_reason]
 
     # ------------------------------------------------------------------
     # Smaller things

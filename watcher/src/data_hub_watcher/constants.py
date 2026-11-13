@@ -168,6 +168,12 @@ FOLDER_PROBE_TIMEOUT_SECONDS = 10
 # the move cuts off every upload in progress and rescans the folder at the next start.
 # The reason reported is the one of the second look.
 FOLDER_CONFIRM_DELAY_SECONDS = 3
+# A runtime that went blind (watchdog stopped watching its folder, or the folder is
+# not the one it started on) is rebuilt once. If the rebuilt runtime has not been
+# watching this long when it goes blind again, the folder can't be watched, and the
+# watcher waits with that reason and retries on the waiting state's backoff instead of
+# rebuilding, with a heartbeat and a full scan, at every check.
+MONITOR_RESTART_WINDOW_SECONDS = 120
 # While waiting with the watch folder present, a start that keeps failing is
 # retried after 1, 2, 4 and 8 heartbeat intervals, then every 15 minutes, so a
 # persistent failure doesn't rebuild the runtime and log a traceback every
