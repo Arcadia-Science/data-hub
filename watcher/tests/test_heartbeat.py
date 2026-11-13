@@ -304,6 +304,74 @@ class TestHeartbeatStop:
         client.send_heartbeat.assert_not_called()
 
 
+class TestTickDuringAStop:
+    """A tick whose heartbeat is still in flight when a stop gives up on it ends there.
+
+    The stop sends the events and the final heartbeat itself. If the tick went on to flush,
+    it could send `watcher_stopped` out of order with no deadline, or lose it when the process
+    exits, and it would run the updater against a state database the stop may have closed, or
+    start an update in the middle of a stop.
+    """
+
+    @staticmethod
+    def _loop(client: MagicMock, reporter: MagicMock, on_tick: MagicMock) -> HeartbeatLoop:
+        return HeartbeatLoop(
+            client=client,
+            watcher_id="w-test",
+            interval_seconds=0.02,  # type: ignore[arg-type]
+            event_reporter=reporter,
+            instrument_id="inst-1",
+            watch_directory="/tmp/watch",
+            upload_mode="auto",
+            on_tick=on_tick,
+        )
+
+    def test_a_tick_without_a_stop_flushes_and_runs_the_updater(self) -> None:
+        reporter = MagicMock(spec=EventReporter)
+        on_tick = MagicMock()
+        loop = self._loop(MagicMock(), reporter, on_tick)
+
+        loop._tick()
+
+        reporter.flush.assert_called_once_with()
+        on_tick.assert_called_once_with()
+
+    def test_a_tick_that_a_stop_left_behind_sends_and_runs_nothing_after_its_heartbeat(
+        self,
+    ) -> None:
+        client = MagicMock()
+        reporter = MagicMock(spec=EventReporter)
+        on_tick = MagicMock()
+        in_flight = threading.Event()
+        release = threading.Event()
+        statuses: list[str] = []
+
+        def send_heartbeat(_watcher_id: str, payload: dict[str, object], **_kw: object) -> None:
+            statuses.append(str(payload["status"]))
+            # The first is the startup beat. The second is the tick's, held in flight.
+            if len(statuses) == 2:
+                in_flight.set()
+                assert release.wait(10)
+
+        client.send_heartbeat.side_effect = send_heartbeat
+        loop = self._loop(client, reporter, on_tick)
+        loop.start()
+        try:
+            assert in_flight.wait(10), "the tick never sent its heartbeat"
+            reporter.flush.reset_mock()  # The startup beat flushed too.
+
+            # The stop gives up on the tick, which is still waiting for its answer.
+            loop.stop_loop(join_timeout=0.05)
+            assert loop._thread is not None and loop._thread.is_alive()
+        finally:
+            release.set()
+        loop._thread.join(10)
+
+        assert not loop._thread.is_alive()
+        reporter.flush.assert_not_called()
+        on_tick.assert_not_called()
+
+
 class TestSendFinalHeartbeat:
     """A stop with a deadline can't wait for the client's 30 s read timeout.
 

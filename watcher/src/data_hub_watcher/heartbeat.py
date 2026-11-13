@@ -202,6 +202,13 @@ class HeartbeatLoop:
         # Heartbeat first, then flush events — the heartbeat tells the server
         # the watcher is alive, and flushing piggybacks on that liveness signal.
         self._send_heartbeat(status=self._status)
+        if self._stop_event.is_set():
+            # A stop came while the heartbeat was in flight. It sends the events and the final
+            # heartbeat itself, whether it gave up on this tick (see `stop_loop`) or waited for
+            # it. A flush here could send `watcher_stopped` out of order with no deadline, or
+            # lose it at exit, and the updater could be run against a state database that is
+            # closed, or even start an update during the stop.
+            return
         self._event_reporter.flush()
         if self._on_tick is not None:
             self._on_tick()
