@@ -3,6 +3,7 @@
 from __future__ import annotations
 import _thread
 import hashlib
+import itertools
 import signal
 import threading
 import time
@@ -10,15 +11,19 @@ from collections.abc import Callable, Generator, Iterator
 from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import cast
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 import requests
 from requests.adapters import HTTPAdapter
 
 from data_hub_watcher.api_client import ApiError
-from data_hub_watcher.constants import MAX_PENDING_UPLOAD_ATTEMPTS, MAX_QUEUE_FILE_ATTEMPTS
-from data_hub_watcher.events import EventReporter, EventType
+from data_hub_watcher.constants import (
+    MAX_PENDING_UPLOAD_ATTEMPTS,
+    MAX_QUEUE_FILE_ATTEMPTS,
+    UPLOAD_RETRY_MAX,
+)
+from data_hub_watcher.events import EventReporter, EventType, WatcherEvent
 from data_hub_watcher.heartbeat import WatcherCounters
 from data_hub_watcher.models import (
     MultipartPartUrl,
@@ -30,11 +35,15 @@ from data_hub_watcher.models import (
 from data_hub_watcher.run_detector import FileInfo
 from data_hub_watcher.state import StateDB
 from data_hub_watcher.uploader import (
+    CantReadYet,
     Uploader,
     UploadQueueWorker,
+    _cant_read_yet,
     _FileSlice,
     _guess_content_type,
     _PartUrls,
+    _probe_readable,
+    _QueueAttempt,
     _run_workers,
     _Transfer,
     _UploadStopped,
@@ -1464,6 +1473,618 @@ class TestPendingUploads:
 
         [pending] = state_db.pending_uploads()
         assert pending.attempts == 0
+
+
+class _Locker:
+    """Locks a file the way an instrument that keeps it open does, as far as a reader can tell.
+
+    Opening the file raises `PermissionError`, and it can be opened again once it is released.
+    On Windows an instrument does it with exclusive sharing, and on any OS a file whose
+    permissions are fixed later behaves alike, so the tests take the permissions away. A user
+    that can read any file (root) can't be locked out, so the test is skipped for it.
+    """
+
+    def __init__(self) -> None:
+        self._locked: list[Path] = []
+
+    def lock(self, path: Path) -> None:
+        path.chmod(0)
+        self._locked.append(path)
+        try:
+            path.open("rb").close()
+        except PermissionError:
+            return
+        pytest.skip("this user can read a file that has no permissions")
+
+    def release(self, path: Path) -> None:
+        path.chmod(0o644)
+
+    def release_all(self) -> None:
+        for path in self._locked:
+            if path.exists():
+                path.chmod(0o644)
+
+
+@pytest.fixture()
+def locker() -> Iterator[_Locker]:
+    locker = _Locker()
+    try:
+        yield locker
+    finally:
+        locker.release_all()
+
+
+def _events(up: Uploader) -> list[WatcherEvent]:
+    """The events the uploader queued, in order."""
+    return [call.args[0] for call in cast(MagicMock, up._reporter).queue_event.call_args_list]
+
+
+def _cant_read_events(up: Uploader) -> list[WatcherEvent]:
+    return [
+        e
+        for e in _events(up)
+        if e.event_type == EventType.UPLOAD_FAILED and e.message.startswith("Can't read")
+    ]
+
+
+class TestFileThatCantBeReadYet:
+    """A file that is on disk but can't be read yet waits. It is not a failed attempt.
+
+    An instrument may keep a file open with exclusive sharing after its last write. The
+    stability check sees only the size and the time, so the watcher calls the file stable and
+    then can't read it. The upload worker tries the file again on every poll until it can be
+    read, with no time limit, and says so once.
+    """
+
+    @pytest.fixture()
+    def run_dir(self, tmp_path: Path) -> Path:
+        run_dir = tmp_path / "RUN-1"
+        run_dir.mkdir()
+        return run_dir
+
+    @pytest.fixture()
+    def locked(self, run_dir: Path, state_db: StateDB, locker: _Locker) -> Path:
+        """A reported file that can't be read, with its `pending_uploads` row."""
+        path = run_dir / "scan.csv"
+        path.write_text("a,b\n1,2\n")
+        # The run detector records the row with the run report, before the upload starts.
+        state_db.record_report(
+            "RUN-1", [], new_run=False, pending_relative_paths=["RUN-1/scan.csv"]
+        )
+        locker.lock(path)
+        return path
+
+    @staticmethod
+    def _can_upload(mock_client: MagicMock, name: str = "scan.csv") -> None:
+        mock_client.request_upload_url.return_value = _single_presigned(name)
+
+    def test_the_file_waits_without_a_failed_attempt_and_the_others_carry_on(
+        self,
+        uploader: Uploader,
+        mock_client: MagicMock,
+        state_db: StateDB,
+        run_dir: Path,
+        locked: Path,
+    ) -> None:
+        other = run_dir / "other.csv"
+        other.write_text("x")
+        state_db.record_report(
+            "RUN-1", [], new_run=False, pending_relative_paths=["RUN-1/other.csv"]
+        )
+        self._can_upload(mock_client, "other.csv")
+
+        with patch.object(Uploader, "_put_to_presigned_url"):
+            assert uploader.upload_files("RUN-1", [_file_info(locked), _file_info(other)]) == 1
+
+        # The row stays, with no attempt added, and the file is in the waiting collection.
+        assert {p.relative_path: p.attempts for p in state_db.pending_uploads()} == {
+            "RUN-1/scan.csv": 0
+        }
+        assert list(uploader._waiting) == ["RUN-1/scan.csv"]
+        # The locked file asked the server for nothing. Only the other file did.
+        mock_client.request_upload_url.assert_called_once()
+        assert uploader._counters.errors == 0
+        cast(MagicMock, uploader._reporter).report_error.assert_not_called()
+
+    def test_it_is_reported_once_as_an_upload_failure_that_will_be_retried(
+        self, uploader: Uploader, locked: Path
+    ) -> None:
+        uploader.upload_files("RUN-1", [_file_info(locked)])
+
+        [event] = _events(uploader)
+        assert event.event_type == EventType.UPLOAD_FAILED
+        assert event.message == (
+            "Can't read scan.csv yet: another program may have it open. Retrying every minute."
+        )
+        assert event.details["will_retry"] is True
+        assert event.details["relative_path"] == "RUN-1/scan.csv"
+        assert event.details["run_id"] == "RUN-1"
+        assert "Permission denied" in event.details["error"]
+
+    def test_polls_while_it_stays_locked_add_no_event_and_no_request(
+        self, uploader: Uploader, mock_client: MagicMock, state_db: StateDB, locked: Path
+    ) -> None:
+        uploader.upload_files("RUN-1", [_file_info(locked)])
+
+        # Far more polls than any cap, and none of them gives up on the file.
+        for _ in range(25):
+            uploader.retry_waiting_files()
+
+        assert len(_events(uploader)) == 1
+        mock_client.request_upload_url.assert_not_called()
+        assert list(uploader._waiting) == ["RUN-1/scan.csv"]
+        [pending] = state_db.pending_uploads()
+        assert pending.attempts == 0
+        assert uploader._counters.errors == 0
+
+    def test_the_next_poll_after_it_is_released_uploads_it(
+        self,
+        uploader: Uploader,
+        mock_client: MagicMock,
+        state_db: StateDB,
+        locker: _Locker,
+        locked: Path,
+    ) -> None:
+        uploader.upload_files("RUN-1", [_file_info(locked)])
+        uploader.retry_waiting_files()
+        mock_client.mark_file_uploaded.assert_not_called()
+
+        locker.release(locked)
+        self._can_upload(mock_client)
+        with patch.object(Uploader, "_put_to_presigned_url") as put:
+            uploader.retry_waiting_files()
+
+        put.assert_called_once()
+        mock_client.mark_file_uploaded.assert_called_once()
+        assert state_db.pending_uploads() == []
+        assert uploader._waiting == {}
+        # The failure, then the normal upload event.
+        assert [e.event_type for e in _events(uploader)] == [
+            EventType.UPLOAD_FAILED,
+            EventType.FILE_UPLOADED,
+        ]
+        assert uploader._counters.files_uploaded == 1
+
+    def test_a_file_locked_again_after_it_was_uploaded_is_reported_again(
+        self, uploader: Uploader, mock_client: MagicMock, locker: _Locker, locked: Path
+    ) -> None:
+        uploader.upload_files("RUN-1", [_file_info(locked)])
+        locker.release(locked)
+        self._can_upload(mock_client)
+        with patch.object(Uploader, "_put_to_presigned_url"):
+            uploader.retry_waiting_files()
+
+        locker.lock(locked)
+        uploader.upload_files("RUN-1", [_file_info(locked)])
+
+        assert len(_cant_read_events(uploader)) == 2
+
+    def test_a_file_that_fails_for_another_reason_stops_waiting(
+        self, uploader: Uploader, state_db: StateDB, locker: _Locker, locked: Path
+    ) -> None:
+        uploader.upload_files("RUN-1", [_file_info(locked)])
+        locker.release(locked)
+
+        # Readable now, but the upload fails. That was reported when it failed, and the row
+        # stays for the next start, as for any failed upload. It isn't tried every poll.
+        with patch.object(uploader, "_upload_single", return_value=False) as upload:
+            uploader.retry_waiting_files()
+            uploader.retry_waiting_files()
+
+        upload.assert_called_once()
+        assert uploader._waiting == {}
+        [pending] = state_db.pending_uploads()
+        assert pending.attempts == 0
+        assert len(_events(uploader)) == 1
+
+    def test_a_file_locked_after_the_open_check_waits_too(
+        self,
+        uploader: Uploader,
+        mock_client: MagicMock,
+        state_db: StateDB,
+        run_dir: Path,
+    ) -> None:
+        path = run_dir / "scan.csv"
+        path.write_text("a,b\n1,2\n")
+        state_db.record_report(
+            "RUN-1", [], new_run=False, pending_relative_paths=["RUN-1/scan.csv"]
+        )
+        self._can_upload(mock_client)
+
+        # Readable when the watcher checked, and locked by the time the hash opens it.
+        with patch(
+            "data_hub_watcher.uploader.file_digests",
+            side_effect=PermissionError(13, "Permission denied", str(path)),
+        ):
+            assert uploader.upload_files("RUN-1", [_file_info(path)]) == 0
+
+        assert list(uploader._waiting) == ["RUN-1/scan.csv"]
+        [pending] = state_db.pending_uploads()
+        assert pending.attempts == 0
+        # Not the "Hashing failed" event of a real failure, and no error counted.
+        [event] = _events(uploader)
+        assert event.message.startswith("Can't read scan.csv yet")
+        assert uploader._counters.errors == 0
+
+    def test_a_file_that_vanishes_during_the_hash_is_still_a_failure(
+        self, uploader: Uploader, mock_client: MagicMock, tmp_file: Path
+    ) -> None:
+        self._can_upload(mock_client, tmp_file.name)
+
+        def vanishes(path: Path, cancel: threading.Event) -> tuple[str, str]:
+            path.unlink()
+            raise FileNotFoundError(2, "No such file or directory", str(path))
+
+        with patch("data_hub_watcher.uploader.file_digests", side_effect=vanishes):
+            assert uploader._upload_single(tmp_file, "RUN-001") is False
+
+        [event] = _events(uploader)
+        assert event.message == "Hashing failed: test_data.csv"
+        assert uploader._counters.errors == 1
+        assert uploader._waiting == {}
+
+    def test_a_file_that_vanishes_while_it_waits_is_dropped_as_before(
+        self, uploader: Uploader, state_db: StateDB, locked: Path
+    ) -> None:
+        uploader.upload_files("RUN-1", [_file_info(locked)])
+        locked.unlink()
+
+        with patch.object(uploader, "_upload_single") as upload:
+            uploader.retry_waiting_files()
+
+        upload.assert_not_called()
+        assert uploader._waiting == {}
+        assert state_db.pending_uploads() == []
+        report_error = cast(MagicMock, uploader._reporter).report_error
+        report_error.assert_called_once()
+        assert report_error.call_args.args[0] == "pending_upload_missing"
+        assert report_error.call_args.kwargs == {
+            "relative_path": "RUN-1/scan.csv",
+            "run_id": "RUN-1",
+        }
+
+    def test_a_start_up_retry_of_a_locked_file_is_not_an_attempt(
+        self, uploader: Uploader, mock_client: MagicMock, state_db: StateDB, locked: Path
+    ) -> None:
+        for _ in range(MAX_PENDING_UPLOAD_ATTEMPTS + 1):
+            uploader.retry_pending_uploads()
+
+        # Never used up, so it is never given up on.
+        [pending] = state_db.pending_uploads()
+        assert (pending.relative_path, pending.attempts) == ("RUN-1/scan.csv", 0)
+        cast(MagicMock, uploader._reporter).report_error.assert_not_called()
+        assert list(uploader._waiting) == ["RUN-1/scan.csv"]
+        assert len(_cant_read_events(uploader)) == 1
+        mock_client.request_upload_url.assert_not_called()
+
+    def test_a_file_that_a_start_up_retry_found_locked_is_uploaded_once_released(
+        self,
+        uploader: Uploader,
+        mock_client: MagicMock,
+        state_db: StateDB,
+        locker: _Locker,
+        locked: Path,
+    ) -> None:
+        uploader.retry_pending_uploads()
+        locker.release(locked)
+        self._can_upload(mock_client)
+
+        with patch.object(Uploader, "_put_to_presigned_url"):
+            uploader.retry_waiting_files()
+
+        mock_client.mark_file_uploaded.assert_called_once()
+        assert state_db.pending_uploads() == []
+        assert uploader._waiting == {}
+
+    @staticmethod
+    def _queue() -> UploadQueueResponse:
+        return UploadQueueResponse(
+            files=[
+                UploadQueueFile(
+                    id=5,
+                    instrument_id="test-instrument",
+                    run_id="RUN-1",
+                    filename="scan.csv",
+                    relative_path="RUN-1/scan.csv",
+                )
+            ]
+        )
+
+    def test_a_queued_request_stays_queued_while_the_file_is_locked(
+        self, uploader: Uploader, mock_client: MagicMock, locked: Path
+    ) -> None:
+        mock_client.get_upload_queue.return_value = self._queue()
+
+        for _ in range(MAX_QUEUE_FILE_ATTEMPTS + 2):
+            uploader.poll_upload_queue()
+
+        # Not an attempt, so the request is not cancelled after the third poll.
+        mock_client.cancel_upload_request.assert_not_called()
+        assert uploader._queue_attempts == {}
+        mock_client.request_upload_url.assert_not_called()
+        assert uploader._counters.errors == 0
+        cast(MagicMock, uploader._reporter).report_error.assert_not_called()
+        [event] = _events(uploader)
+        assert event.details["will_retry"] is True
+        assert event.details["file_id"] == 5
+
+    def test_a_queued_request_is_uploaded_on_the_poll_after_the_file_is_released(
+        self,
+        uploader: Uploader,
+        mock_client: MagicMock,
+        locker: _Locker,
+        locked: Path,
+    ) -> None:
+        mock_client.get_upload_queue.return_value = self._queue()
+        uploader.poll_upload_queue()
+        uploader.poll_upload_queue()
+
+        locker.release(locked)
+        self._can_upload(mock_client)
+        with patch.object(Uploader, "_put_to_presigned_url"):
+            uploader.poll_upload_queue()
+
+        mock_client.mark_file_uploaded.assert_called_once()
+        mock_client.cancel_upload_request.assert_not_called()
+        assert uploader._queue_attempts == {}
+
+    def test_the_auto_path_and_a_request_for_the_same_file_report_it_once(
+        self, uploader: Uploader, mock_client: MagicMock, locked: Path
+    ) -> None:
+        uploader.upload_files("RUN-1", [_file_info(locked)])
+        mock_client.get_upload_queue.return_value = self._queue()
+
+        uploader.poll_upload_queue()
+
+        assert len(_events(uploader)) == 1
+
+    def test_attempts_a_queued_file_already_used_are_kept(
+        self, uploader: Uploader, mock_client: MagicMock, locked: Path
+    ) -> None:
+        mock_client.get_upload_queue.return_value = self._queue()
+        uploader._queue_attempts[5] = _QueueAttempt(count=2, reason="upload_failed")
+
+        uploader.poll_upload_queue()
+
+        # The locked poll neither adds an attempt nor wipes the earlier ones.
+        assert uploader._queue_attempts[5].count == 2
+        mock_client.cancel_upload_request.assert_not_called()
+
+    def test_an_upload_cut_off_by_a_stop_keeps_the_file_waiting(
+        self,
+        mock_client: MagicMock,
+        state_db: StateDB,
+        tmp_path: Path,
+        locker: _Locker,
+        locked: Path,
+    ) -> None:
+        stop = threading.Event()
+        up = _make_uploader(mock_client, state_db, tmp_path, parallelism=1, stop_event=stop)
+        up.upload_files("RUN-1", [_file_info(locked)])
+        locker.release(locked)
+
+        def cut_off(path: Path, run_id: str) -> bool:
+            stop.set()
+            return False
+
+        with patch.object(up, "_upload_single", side_effect=cut_off):
+            up.retry_waiting_files()
+
+        # Not uploaded, and not a failure: it is still waiting if the runtime lives on.
+        assert list(up._waiting) == ["RUN-1/scan.csv"]
+
+    def test_a_stop_ends_the_retry_before_it_tries_the_file(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path, locked: Path
+    ) -> None:
+        stop = threading.Event()
+        up = _make_uploader(mock_client, state_db, tmp_path, parallelism=1, stop_event=stop)
+        up.upload_files("RUN-1", [_file_info(locked)])
+        stop.set()
+
+        with patch.object(up, "_upload_single") as upload:
+            up.retry_waiting_files()
+
+        upload.assert_not_called()
+        # Still waiting, and still pending, for the next runtime.
+        assert list(up._waiting) == ["RUN-1/scan.csv"]
+        assert [p.relative_path for p in state_db.pending_uploads()] == ["RUN-1/scan.csv"]
+
+    def test_the_worker_retries_on_each_poll_and_a_stop_is_not_delayed(
+        self,
+        mock_client: MagicMock,
+        state_db: StateDB,
+        tmp_path: Path,
+        locker: _Locker,
+        locked: Path,
+    ) -> None:
+        stop = threading.Event()
+        up = _make_uploader(mock_client, state_db, tmp_path, parallelism=1, stop_event=stop)
+        up.upload_files("RUN-1", [_file_info(locked)])
+        mock_client.get_upload_queue.return_value = UploadQueueResponse(files=[])
+        self._can_upload(mock_client)
+        uploaded = threading.Event()
+        mock_client.mark_file_uploaded.side_effect = lambda *a, **k: uploaded.set()
+        # No wait between polls, so the test doesn't wait for them.
+        worker = UploadQueueWorker(up, stop_event=stop, interval_seconds=0)
+
+        with patch.object(Uploader, "_put_to_presigned_url"):
+            worker.start()
+            try:
+                # It polls again and again while the file stays locked: no request, no new event.
+                deadline = time.monotonic() + 5
+                while mock_client.get_upload_queue.call_count < 3:
+                    assert time.monotonic() < deadline
+                    time.sleep(0.01)
+                mock_client.request_upload_url.assert_not_called()
+                assert len(_events(up)) == 1
+
+                locker.release(locked)
+                assert uploaded.wait(timeout=5)
+            finally:
+                started = time.monotonic()
+                assert worker.stop(timeout=5) is True
+                assert time.monotonic() - started < 2
+
+        assert up._waiting == {}
+
+
+class TestCantReadYetChecks:
+    def test_a_file_that_can_be_read_is_fine(self, tmp_file: Path) -> None:
+        assert _probe_readable(tmp_file) is None
+
+    def test_a_missing_file_is_not_one_that_cant_be_read_yet(self, tmp_path: Path) -> None:
+        assert _probe_readable(tmp_path / "gone.csv") is None
+
+    def test_a_folder_is_not_either(self, tmp_path: Path) -> None:
+        assert _probe_readable(tmp_path) is None
+
+    def test_a_file_that_cant_be_opened_is_returned_with_its_error(
+        self, tmp_file: Path, locker: _Locker
+    ) -> None:
+        locker.lock(tmp_file)
+
+        assert isinstance(_probe_readable(tmp_file), PermissionError)
+
+    @pytest.mark.parametrize(
+        "exc", [PermissionError(13, "Permission denied"), OSError(5, "Input/output error")]
+    )
+    def test_an_os_error_for_a_file_that_is_there_counts(
+        self, tmp_file: Path, exc: OSError
+    ) -> None:
+        assert _cant_read_yet(tmp_file, exc) is exc
+
+    def test_an_error_for_a_file_that_is_gone_does_not(self, tmp_path: Path) -> None:
+        error = PermissionError(13, "Permission denied")
+
+        assert _cant_read_yet(tmp_path / "gone.csv", error) is None
+
+    def test_not_found_does_not_count_even_if_the_path_is_there(self, tmp_file: Path) -> None:
+        assert _cant_read_yet(tmp_file, FileNotFoundError(2, "No such file")) is None
+
+    def test_an_error_that_is_not_an_os_error_does_not(self, tmp_file: Path) -> None:
+        assert _cant_read_yet(tmp_file, ValueError("bad")) is None
+
+
+class TestFileLockedDuringTheUpload:
+    """A file that was readable for the hash, then can't be opened for the PUT."""
+
+    @staticmethod
+    def _readable_once_then_locked() -> Callable[[Path], OSError | None]:
+        """A stand-in for `_probe_readable`: the check before the upload passes, later ones fail."""
+        calls = itertools.count()
+
+        def probe(path: Path) -> OSError | None:
+            if next(calls) == 0:
+                return None
+            return PermissionError(13, "Permission denied", str(path))
+
+        return probe
+
+    def test_a_single_put_waits_instead_of_retrying_and_failing(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_file: Path
+    ) -> None:
+        up = _make_uploader(mock_client, state_db, tmp_file.parent, parallelism=1)
+        mock_client.request_upload_url.return_value = _single_presigned(tmp_file.name)
+        # `requests` wraps an error that is raised while it sends the body.
+        wrapped = requests.ConnectionError("Connection aborted.", PermissionError(13, "denied"))
+
+        with (
+            patch(
+                "data_hub_watcher.uploader._probe_readable",
+                side_effect=self._readable_once_then_locked(),
+            ),
+            patch.object(Uploader, "_put_to_presigned_url", side_effect=wrapped) as put,
+            patch.object(Uploader, "_backoff"),
+            pytest.raises(CantReadYet) as raised,
+        ):
+            up._upload_single(tmp_file, "RUN-001")
+
+        assert "Permission denied" in raised.value.error
+        put.assert_called_once()
+        mock_client.mark_file_uploaded.assert_not_called()
+        assert up._counters.errors == 0
+        cast(MagicMock, up._reporter).queue_event.assert_not_called()
+
+    def test_a_multipart_upload_is_aborted_and_waits(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "big.bin"
+        path.write_bytes(bytes(range(16)))
+        up = _make_uploader(mock_client, state_db, tmp_path, parallelism=2)
+        mock_client.request_upload_url.return_value = _multipart_presigned(
+            part_size=4, part_count=4
+        )
+        mock_client.get_part_urls.side_effect = _part_urls
+        wrapped = requests.ConnectionError("Connection aborted.", PermissionError(13, "denied"))
+
+        with (
+            patch(
+                "data_hub_watcher.uploader._probe_readable",
+                side_effect=self._readable_once_then_locked(),
+            ),
+            patch.object(up._s3_session, "put", side_effect=wrapped) as put,
+            patch.object(Uploader, "_part_backoff"),
+            pytest.raises(CantReadYet),
+        ):
+            up._upload_single(path, "RUN-001")
+
+        # Each part worker that started gave up at once, without its other five attempts.
+        assert put.call_count <= 2
+        mock_client.abort_multipart_upload.assert_called_once_with(42, "abc123")
+        mock_client.complete_multipart_upload.assert_not_called()
+        assert up._counters.errors == 0
+        cast(MagicMock, up._reporter).queue_event.assert_not_called()
+
+    def test_a_server_error_is_not_blamed_on_the_file(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "big.bin"
+        path.write_bytes(bytes(range(16)))
+        up = _make_uploader(mock_client, state_db, tmp_path, parallelism=1)
+
+        # The file can't be read, but the error came from the server, not from reading it.
+        with patch(
+            "data_hub_watcher.uploader._probe_readable",
+            return_value=PermissionError(13, "Permission denied"),
+        ):
+            up._raise_if_cant_read(path, ApiError("boom", status_code=500))
+
+    def test_a_put_that_fails_for_another_reason_is_still_a_failure(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_file: Path
+    ) -> None:
+        up = _make_uploader(mock_client, state_db, tmp_file.parent, parallelism=1)
+        mock_client.request_upload_url.return_value = _single_presigned(tmp_file.name)
+
+        with (
+            patch.object(
+                Uploader, "_put_to_presigned_url", side_effect=requests.ConnectionError("reset")
+            ) as put,
+            patch.object(Uploader, "_backoff"),
+        ):
+            assert up._upload_single(tmp_file, "RUN-001") is False
+
+        # The file reads fine, so this is a network failure that is retried and reported.
+        assert put.call_count == UPLOAD_RETRY_MAX
+        assert up._counters.errors == 1
+
+
+class TestWorkerPoll:
+    def test_waiting_files_are_tried_before_the_queue_is_fetched(self) -> None:
+        uploader = MagicMock()
+        worker = UploadQueueWorker(uploader, stop_event=threading.Event())
+
+        worker._poll_once()
+
+        assert uploader.mock_calls == [call.retry_waiting_files(), call.poll_upload_queue()]
+
+    def test_a_failed_retry_of_waiting_files_does_not_stop_the_queue_poll(self) -> None:
+        uploader = MagicMock()
+        uploader.retry_waiting_files.side_effect = RuntimeError("boom")
+        worker = UploadQueueWorker(uploader, stop_event=threading.Event())
+
+        worker._poll_once()
+
+        uploader.poll_upload_queue.assert_called_once_with()
 
 
 class TestSignedUrlRedaction:

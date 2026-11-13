@@ -54,7 +54,7 @@ from data_hub_watcher.self_update import (
     run_upgrade,
 )
 from data_hub_watcher.state import StateDB, clean_forget_prefix
-from data_hub_watcher.uploader import Uploader
+from data_hub_watcher.uploader import CantReadYet, Uploader
 
 logger = logging.getLogger(__name__)
 
@@ -1354,6 +1354,12 @@ def upload(ctx: click.Context, file_path: str | None, run_id: str | None, dry_ru
         click.echo(f"Uploading {fp.name}…")
         try:
             ok = uploader._upload_single(fp, run_id)
+        except CantReadYet as exc:
+            # Nothing waits and retries in a one-shot upload, so say why it stopped.
+            state_db.close()
+            raise click.ClickException(
+                f"Can't read {fp.name} yet: {exc.error}. Try again once it can be read."
+            ) from exc
         except KeyboardInterrupt:
             stop_event.set()
             raise

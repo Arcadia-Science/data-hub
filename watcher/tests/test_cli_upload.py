@@ -22,6 +22,7 @@ from data_hub_watcher.models import (
     UploadQueueResponse,
     WatcherConfig,
 )
+from data_hub_watcher.uploader import CantReadYet
 
 
 @pytest.fixture
@@ -113,6 +114,21 @@ class TestUploadCommand:
 
         assert result.exit_code == 1
         assert _stop_event(uploader_class).is_set()
+
+    def test_a_file_that_cant_be_read_yet_is_reported_without_a_traceback(
+        self, tmp_path: Path, uploader_class: MagicMock
+    ) -> None:
+        file_path = tmp_path / "data" / "RUN001_sample.csv"
+        uploader_class.return_value._upload_single.side_effect = CantReadYet(
+            file_path, "[Errno 13] Permission denied"
+        )
+
+        result = _upload("--file", str(file_path), "--run-id", "RUN001")
+
+        # No traceback: a one-shot upload has nothing that waits and retries, so it says why.
+        assert result.exit_code == 1
+        assert "Can't read RUN001_sample.csv yet: [Errno 13] Permission denied" in result.output
+        assert result.exception is None or isinstance(result.exception, SystemExit)
 
     def test_ctrl_c_during_a_queue_upload_sets_the_stop_event(
         self, tmp_path: Path, uploader_class: MagicMock
