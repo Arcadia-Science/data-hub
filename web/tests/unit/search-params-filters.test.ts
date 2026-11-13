@@ -15,6 +15,7 @@ const noDashboardFilters = {
   include_deleted: false,
   status: [],
   ran_by: null,
+  has_notebook_link: null,
 };
 
 describe("hasActiveFilters", () => {
@@ -36,6 +37,9 @@ describe("hasActiveFilters", () => {
     expect(hasActiveFilters({ ...noDashboardFilters, ran_by: "u1" })).toBe(
       true
     );
+    expect(
+      hasActiveFilters({ ...noDashboardFilters, has_notebook_link: "false" })
+    ).toBe(true);
     expect(
       hasActiveFilters({ ...noDashboardFilters, date_from: "2026-10-01" })
     ).toBe(true);

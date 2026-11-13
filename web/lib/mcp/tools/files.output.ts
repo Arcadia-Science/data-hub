@@ -31,11 +31,18 @@ export const getFileOutputSchema = z.object({
   stalled: z.boolean(),
 });
 
+// True when nobody has claimed the run and it isn't deleted.
+const unclaimedSchema = z.boolean();
+
 export const getFileDownloadUrlOutputSchema = z.object({
   fileId: z.number().int(),
   filename: z.string(),
   downloadUrl: z.string(),
   expiresInSeconds: z.number().int(),
+  // The file's run, for `claim_run`.
+  instrumentId: z.string(),
+  runId: z.string(),
+  unclaimed: unclaimedSchema,
 });
 
 export const getRunArchiveOutputSchema = z.discriminatedUnion("status", [
@@ -48,6 +55,7 @@ export const getRunArchiveOutputSchema = z.discriminatedUnion("status", [
     sizeBytes: z.number().nullable(),
     expiresInSeconds: z.number().int(),
     contentType: z.literal("application/zip"),
+    unclaimed: unclaimedSchema,
   }),
   z.object({
     status: z.literal("building"),
@@ -56,6 +64,7 @@ export const getRunArchiveOutputSchema = z.discriminatedUnion("status", [
     jobId: z.string(),
     retryAfterSeconds: z.number().int(),
     hint: z.string(),
+    unclaimed: unclaimedSchema,
   }),
 ]);
 

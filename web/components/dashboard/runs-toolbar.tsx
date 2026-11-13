@@ -87,6 +87,7 @@ export function RunsToolbar({
       include_deleted: false,
       status: [],
       ran_by: null,
+      has_notebook_link: null,
       page: 1,
     });
   }

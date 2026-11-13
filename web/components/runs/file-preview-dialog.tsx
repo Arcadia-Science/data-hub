@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { LoadingSkeleton } from "@/components/loading-skeleton";
+import { useRunDownloadClaimPrompt } from "@/components/runs/claim-prompt/run-claim-target";
 import { ColonyDataTableView } from "@/components/runs/colony-data-table";
 import { Button } from "@/components/ui/button";
 import {
@@ -48,6 +49,8 @@ export function FilePreviewDialog({
   const currentId = current?.id ?? null;
   const currentKind = current?.kind ?? null;
   const currentCategory = current?.category ?? null;
+  // Shows after the dialog closes; the dialog covers it until then.
+  const promptClaim = useRunDownloadClaimPrompt();
 
   const [result, setResult] = useState<LoadState | null>(null);
   const [page, setPage] = useState(0);
@@ -161,6 +164,7 @@ export function FilePreviewDialog({
                   <a
                     download={current.filename}
                     href={`/api/v1/files/${current.id}/download`}
+                    onClick={promptClaim}
                   >
                     <Download />
                     Download

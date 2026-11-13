@@ -42,7 +42,7 @@ Revoking someone’s access on the Google side, by removing them from your Works
 
 | Role | Can do |
 | --- | --- |
-| **Member** | Sign in to the dashboard; view instruments, runs, files, and the token list; claim runs; comment, and edit or delete their own comments; delete and restore runs; send feedback and see the reports they sent. Cannot create or revoke tokens, confirm or update instruments, or manage other users. |
+| **Member** | Sign in to the dashboard; view instruments, runs, files, and the token list; claim runs; comment, and edit or delete their own comments; add, edit, and remove lab notebook links; delete and restore runs; send feedback and see the reports they sent. Cannot create or revoke tokens, confirm or update instruments, or manage other users. |
 | **Admin** | Everything members can, plus: confirm and update instruments; change watcher configs; create and revoke tokens; promote and demote other users; delete any run comment; review every feedback report; manage **Settings → Integrations**; and set watcher release versions. |
 
 The first admin is bootstrapped from the `ADMIN_EMAILS` environment variable
@@ -86,13 +86,14 @@ Every personal access token carries an array of permission **scopes**. A token-a
 | --- | --- |
 | `instruments:read` | Read instruments, dashboard status, and file patterns |
 | `instruments:write` | Create instruments and edit their configuration |
-| `runs:read` | Read and search runs, their files, comments, and attributions |
+| `runs:read` | Read and search runs, their files, comments, attributions, and lab notebook links |
 | `runs:create` | Create run records |
 | `runs:update` | Update run metadata |
 | `runs:delete` | Soft-delete and restore runs |
 | `runs:reprocess` | Re-run the processing workflow for a run |
 | `runs:upload` | Request presigned S3 URLs to upload files to a run |
 | `runs:comment` | Post run comments as this token, and edit or delete the ones it posted |
+| `runs:link` | Add, edit, and remove lab notebook links on runs |
 | `files:read` | Read file metadata and download files and run archives |
 | `files:create` | Register file records against a run |
 | `files:update` | Update file metadata and upload state |
