@@ -1278,6 +1278,89 @@ class TestRunServiceLoopHappyPath:
         assert not any("Test-only overrides" in w for w in warnings)
 
 
+class TestRunServiceLoopStop:
+    """The loop sees the SCM's stop at once, not when `poll` next times out.
+
+    `poll` waits up to a second for work. Without a wake-up, the loop would see a stop up to a
+    second late, and the uploader would go on starting parts and files until then.
+    """
+
+    @staticmethod
+    def _run_loop_in_a_poll_that_only_a_wake_ends(
+        harness: _LoopHarness, stop_event: threading.Event, system_shutdown: threading.Event
+    ) -> tuple[threading.Thread, list[Any], list[BaseException]]:
+        from data_hub_watcher import runtime
+
+        supervisors: list[Any] = []
+        real_poll = runtime.WatcherSupervisor.poll
+
+        def long_poll(self_: Any, timeout: float = 1.0) -> bool:
+            supervisors.append(self_)
+            # Far longer than the test waits: only a wake-up can end this poll in time.
+            return real_poll(self_, timeout=60.0)
+
+        harness.monkeypatch.setattr(runtime.WatcherSupervisor, "poll", long_poll)
+        errors: list[BaseException] = []
+
+        def run() -> None:
+            try:
+                harness.svc._run_service_loop(stop_event, harness.sm, system_shutdown)
+            except BaseException as exc:
+                errors.append(exc)
+
+        thread = threading.Thread(target=run, daemon=True, name="test-service-loop")
+        thread.start()
+        deadline = time.monotonic() + 10
+        while not supervisors and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert supervisors, "the loop never reached its poll"
+        return thread, supervisors, errors
+
+    def test_setting_the_stop_event_wakes_the_poll(self, harness: _LoopHarness) -> None:
+        stop_event = threading.Event()
+        thread, supervisors, errors = self._run_loop_in_a_poll_that_only_a_wake_ends(
+            harness, stop_event, threading.Event()
+        )
+        try:
+            stop_event.set()
+            thread.join(5)
+            assert not thread.is_alive(), "the loop stayed in its poll after the stop was set"
+        finally:
+            # Frees the loop if the test failed, so it doesn't wait out its 60 s poll.
+            stop_event.set()
+            for supervisor in supervisors:
+                supervisor.wake()
+            thread.join(5)
+
+        assert errors == []
+        assert len(harness.stop_calls) == 1
+        assert harness.stop_calls[0][1] == "Service stopped"
+        assert harness.stop_system_shutdown == [False]
+
+    def test_a_preshutdown_is_still_read_by_the_woken_loop(self, harness: _LoopHarness) -> None:
+        # The service class sets the shutdown mark before the stop event, so the loop that the
+        # stop event wakes reads it.
+        stop_event = threading.Event()
+        system_shutdown = threading.Event()
+        thread, supervisors, errors = self._run_loop_in_a_poll_that_only_a_wake_ends(
+            harness, stop_event, system_shutdown
+        )
+        try:
+            system_shutdown.set()
+            stop_event.set()
+            thread.join(5)
+            assert not thread.is_alive(), "the loop stayed in its poll after the stop was set"
+        finally:
+            stop_event.set()
+            for supervisor in supervisors:
+                supervisor.wake()
+            thread.join(5)
+
+        assert errors == []
+        assert harness.stop_system_shutdown == [True]
+        assert harness.stop_calls[0][1] == "Service stopped: Windows is shutting down"
+
+
 class TestRunServiceLoopFailures:
     def test_registry_read_failure_exits_with_error_log(self, harness: _LoopHarness) -> None:
         def boom() -> tuple[Path, Path]:

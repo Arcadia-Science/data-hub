@@ -744,6 +744,18 @@ def _run_service_loop(
     else:
         logger.info("%s is running", SERVICE_DISPLAY_NAME)
 
+    # ``poll`` blocks for up to a second, so without this the loop would see the SCM's
+    # stop up to a second late, and the uploader would go on starting parts and files
+    # until then. The thread wakes ``poll`` the moment the stop event is set, as the
+    # CLI's signal handler does with ``supervisor.wake()``. It is a daemon thread that
+    # ends with the process. The event is set after ``_system_shutdown`` for a
+    # preshutdown, so the loop reads the right mark once it has woken.
+    def _wake_when_stopped() -> None:
+        stop_event.wait()
+        supervisor.wake()
+
+    threading.Thread(target=_wake_when_stopped, name="service-stop-wake", daemon=True).start()
+
     # Poll until the SCM's stop_event is set (operator-initiated stop, or OS
     # shutdown) or the runtime asks to shut down (the in-process updater
     # finished installing a new wheel and wants the SCM to restart us). Each
@@ -849,10 +861,10 @@ def _create_service_class() -> type | None:
         # Windows waits for the service to stop for the preshutdown timeout, and a wait
         # hint can't raise it: 10 s by default from Windows 10 build 15063, and 180 s
         # before that. So a stop for a system shutdown limits itself to about 8 s on
-        # any build: the service loop notices the stop within a second unless it is
-        # busy with config work, then ``stop_runtime`` has a budget of 7 s. It
-        # cuts uploads off first, joins for at most 1 s each, and sends the events
-        # and the final heartbeat with a short HTTP timeout (constants
+        # any build: the service loop sees the stop as soon as the stop event is set,
+        # unless it is busy with config work, then ``stop_runtime`` has a budget of
+        # 7 s. It cuts uploads off first, joins for at most 1 s each, and sends the
+        # events and the final heartbeat with a short HTTP timeout (constants
         # ``SYSTEM_SHUTDOWN_*``). An upload cut off is retried at the next start.
         # ``service stop`` has a longer limit, ``STOP_BUDGET_SECONDS``.
         def GetAcceptedControls(self) -> int:
