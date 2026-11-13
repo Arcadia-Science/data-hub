@@ -74,9 +74,9 @@ With watcher 1.4.3 and later, the service stops about three minutes after someon
 
 The error is in `watcher.log` and in the Application event log: `This watcher was deregistered on Data Hub, so its registration no longer exists. Run 'data-hub-watcher init' to register it again.` The service sends no `watcher_stopped` event and no final heartbeat, because Data Hub would refuse both.
 
-Starting the service again, including at boot, checks the registration first. If the watcher is still deregistered, the start logs the same error and the service stops with an error. Windows then tries again twice, after about one minute and then about two minutes. After that, it leaves the service stopped.
+Starting the service again, including at boot, checks the registration first. If the watcher is still deregistered, the start logs the same error and the service stops with an error. Windows then tries again, after about one minute and then about two minutes, and after that leaves the service stopped. Those are the two retries Windows allows when the service hasn’t failed in the last 24 hours. A service that failed earlier that day gets fewer.
 
-To use the PC again, run `data-hub-watcher init` on the PC. Then run `data-hub-watcher service start` from an Administrator terminal. See [Troubleshoot a watcher](/docs/troubleshoot-a-watcher#the-watcher-was-deregistered).
+To use the PC again, run `data-hub-watcher init` on the PC. If the instrument was retired, an admin has to reactivate it first, because `init` is refused for a retired instrument (see [Retire an instrument](/docs/retire-an-instrument#reactivate)). Then run `data-hub-watcher service start` from an Administrator terminal. See [Troubleshoot a watcher](/docs/troubleshoot-a-watcher#the-watcher-was-deregistered).
 
 ## Do not run `watch` alongside the service
 

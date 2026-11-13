@@ -922,8 +922,8 @@ def stop_runtime(
     nobody to report to: the server answers the event and the final heartbeat with the
     same 404 as the heartbeats before them. Its stop runs steps 1 to 4 as a Windows
     shutdown does (uploads are cut off first, every join takes at most 1 s) and skips 5
-    and 6. Events that are still queued are dropped, and the state database is closed as
-    in any stop.
+    and 6. The stop itself sends nothing to Data Hub, queued events included, and the
+    state database is closed as in any stop.
 
     Steps 4 to 6 are `_stop_heartbeat_and_report`. In auto mode a file whose upload was
     cut off is uploaded after the next start, from its `pending_uploads` row. A file that

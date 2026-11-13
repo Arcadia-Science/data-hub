@@ -793,9 +793,13 @@ def _run_service_loop(
         raise SystemExit(1)
 
     # A watcher that was deregistered while the service was stopped would run on with
-    # 404s. Refuse to start, like the other start-up refusals: the SCM tries again twice,
-    # a minute and two minutes later, which covers a brief server problem, and then leaves
-    # the service stopped. Any other failure of this check lets the service start as before.
+    # 404s. Refuse to start, like the other start-up refusals, with exit code 1, a failure
+    # for the SCM (unlike the clean stop of a deregistered service that was running). With
+    # the SCM's failure count at 0 it tries again twice, a minute and two minutes later,
+    # which covers a brief server problem, and then leaves the service stopped. The count
+    # starts again at 0 only after 24 hours without a failure (`ResetPeriod` in
+    # `_configure_recovery`), so a service that failed earlier that day gets fewer tries.
+    # Any other failure of this check lets the service start as before.
     if watcher_is_deregistered(client, cfg.watcher_id):
         logger.error(DEREGISTERED_MESSAGE)
         raise SystemExit(1)

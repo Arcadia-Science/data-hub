@@ -42,9 +42,9 @@ Someone deleted the watcher’s registration on Data Hub. This happens when an a
 
 You can find that error in `watcher.log` (see [Where are the logs?](#where-are-the-logs)). On Windows, it is also in the Application event log, and `service status` shows the service as stopped.
 
-The watcher waits for three heartbeats in a row that Data Hub answers with its “not found” reply. At the usual one-minute interval, that is about three minutes, so one wrong answer can’t stop the watcher. Once it has stopped, it uploads nothing and doesn’t come back on its own. Starting it again is refused with the same message. `watch` exits with code 3 when it stops this way.
+The watcher waits for three heartbeats in a row that Data Hub answers with its “deregistered” reply. At the usual one-minute interval, that is about three minutes, so one wrong answer can’t stop the watcher. A different error, including Data Hub saying it has no watcher with that ID, doesn’t stop it. Once it has stopped, it uploads nothing and doesn’t come back on its own. Starting it again is refused with the same message. `watch` exits with code 3 when it stops this way, and when it refuses to start.
 
-To use the PC again, run `data-hub-watcher init` on the PC. This registers a new watcher for the instrument. The PC keeps its upload history, so files that were already uploaded aren’t uploaded again. If `init` reports that the instrument already has an active watcher, see [Instrument already has an active watcher](#instrument-already-has-an-active-watcher). On Windows, then run `data-hub-watcher service start` from an Administrator terminal.
+To use the PC again, run `data-hub-watcher init` on the PC. This registers a new watcher for the instrument. If the instrument was retired, `init` is refused until an admin reactivates the instrument (see [Reactivate](/docs/retire-an-instrument#reactivate)). The PC keeps its upload history, so files that were already uploaded aren’t uploaded again. If `init` reports that the instrument already has an active watcher, see [Instrument already has an active watcher](#instrument-already-has-an-active-watcher). On Windows, then run `data-hub-watcher service start` from an Administrator terminal.
 
 Watchers older than 1.4.3 don’t stop. They keep running and get errors from Data Hub until someone stops them.
 
