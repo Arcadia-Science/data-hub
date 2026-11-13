@@ -58,7 +58,7 @@ A status ping the watcher sends to the API every 60 seconds. It carries the watc
 
 ### Events [#events]
 
-A per-watcher log of lifecycle moments and errors: `watcher_started`, `run_reported`, `file_uploaded`, `update_succeeded`, `upload_requests_cancelled`, and `error` (with a `details.kind` discriminator), among others. Events are batched and flushed on each heartbeat and are visible on the dashboard, which makes them the primary tool for diagnosing a watcher remotely. See [Troubleshoot a watcher](/docs/troubleshoot-a-watcher).
+A per-watcher log of lifecycle moments and errors: `watcher_started`, `run_reported`, `file_uploaded`, `update_succeeded`, and `error` (with a `details.kind` discriminator), among others. Events are batched and flushed on each heartbeat and are visible on the dashboard, which makes them the primary tool for diagnosing a watcher remotely. Data Hub writes some events itself, such as `upload_requests_cancelled`, which it records when someone deletes a run that has requested uploads. See [Troubleshoot a watcher](/docs/troubleshoot-a-watcher).
 
 ### Environment [#environment]
 

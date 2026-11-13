@@ -17,7 +17,7 @@ Each watcher sends a [heartbeat](/docs/concepts#heartbeat) every 60 seconds with
 - **Edited on PC, restart pending**: someone changed `config.yaml` on the PC while the watcher was running, and the watcher hasn’t loaded it yet. See [Edits made on the PC](#edits-on-the-pc).
 - **Last heartbeat**: a stale value is the first sign of a stopped, disconnected, or crashed watcher
 - **Hostname and instrument assignment**
-- **Events**: per-watcher log (`watcher_started`, `run_reported`, `file_uploaded`, `update_*`, `upload_requests_cancelled`, and `error` with a `details.kind` discriminator). Expand an event to read its details. From watcher 1.3.0, a `file_uploaded` event reports `size_bytes`, `part_count`, `prep_seconds` (hashing the file and requesting its upload link), and `upload_seconds` (sending the file to storage). Divide `size_bytes` by `upload_seconds` to get the upload speed.
+- **Events**: per-watcher log (`watcher_started`, `run_reported`, `file_uploaded`, `update_*`, and `error` with a `details.kind` discriminator). Data Hub adds `upload_requests_cancelled`, shown as **Uploads Cancelled**, when someone deletes a run that has requested uploads. Expand an event to read its details. From watcher 1.3.0, a `file_uploaded` event reports `size_bytes`, `part_count`, `prep_seconds` (hashing the file and requesting its upload link), and `upload_seconds` (sending the file to storage). Divide `size_bytes` by `upload_seconds` to get the upload speed.
 
 ![Watchers page listing each watcher with its instrument, hostname, version, status badge, and last heartbeat](/images/watchers-list.webp)
 
@@ -90,7 +90,7 @@ You don’t need to deregister a watcher just because its token was revoked. Re-
 
 When a watcher stops cleanly and shows as **Stopped**, Data Hub cancels its pending requests and the files go back to `detected`, because nothing is left to upload them. Restarting the instrument PC, or a full shutdown, is the exception with watcher 1.4.1 and later: the requests stay queued for the watcher to upload after the PC starts again, and Data Hub cancels them only if no heartbeat arrives for about 15 minutes. See [When the PC restarts or shuts down](/docs/windows-service#when-the-pc-restarts-or-shuts-down).
 
-Deleting a run also cancels the pending requests for that run’s files, and the files go back to `detected`. Data Hub records an `upload_requests_cancelled` event on the instrument’s watcher with the run and the number of files. Restoring the run doesn’t bring the requests back, so request the uploads again. Other runs on the instrument keep their requests.
+Deleting a run also cancels the pending requests for that run’s files, and the files go back to `detected`. Data Hub records an `upload_requests_cancelled` event on the instrument’s watcher with the run and the number of files, and you can filter the event log by **Uploads Cancelled** to find it. That event covers only cancellations caused by deleting a run. The other cancellations in this section, such as a watcher stopping or being removed or a change of watch folder, still show under their own event types. Restoring the run doesn’t bring the requests back, so request the uploads again. Other runs on the instrument keep their requests.
 
 ## Approving manual uploads [#approving-manual-uploads]
 
