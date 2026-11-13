@@ -5,13 +5,14 @@ hung, one stat can block for the SMB timeout (about a minute on Windows) or, on 
 NFS mount, for as long as the server is away. The supervisor's `poll` thread makes that
 look, and it is also the thread that sees a stop, so a look that hangs there makes the
 watcher ignore a stop. `FolderProbe` runs the look on a daemon thread and waits for it
-for a limited time.
+for a limited time, and for less when the caller is told to stop.
 """
 
 from __future__ import annotations
 import logging
 import os
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,6 +21,9 @@ from data_hub_watcher import models
 from data_hub_watcher.constants import FOLDER_PROBE_TIMEOUT_SECONDS
 
 logger = logging.getLogger(__name__)
+
+# How often a caller that can be cancelled looks at whether it has been, while it waits.
+_CANCEL_POLL_SECONDS = 0.1
 
 
 @dataclass(frozen=True)
@@ -32,6 +36,13 @@ class FolderLook:
     # earlier look found. `None` when there is a problem, and when the filesystem doesn't
     # say: some SMB servers report an inode number of 0 for everything.
     identity: tuple[int, int] | None = None
+
+    @property
+    def not_found(self) -> bool:
+        """Whether the problem is that the folder does not exist."""
+        return self.problem is not None and self.problem.startswith(
+            models.WATCH_DIRECTORY_NOT_FOUND
+        )
 
 
 def look_at_folder(path: Path) -> FolderLook:
@@ -98,28 +109,43 @@ class FolderProbe:
         self._lock = threading.Lock()
         self._current: _Look | None = None
 
-    def look(self, path: Path) -> FolderLook:
-        """Look at the folder at *path*. The result has a `problem` when it can't be watched."""
+    def look(
+        self, path: Path, should_cancel: Callable[[], bool] | None = None
+    ) -> FolderLook | None:
+        """Look at the folder at *path*. The result has a `problem` when it can't be watched.
+
+        With *should_cancel*, the wait for the look is in short steps, and ends as soon as
+        it returns `True`. The result is then `None`: the caller is stopping, and a look
+        that wasn't finished says nothing about the folder, so the caller leaves things as
+        they are. The look itself carries on in its thread, for whoever asks next. Without
+        *should_cancel* the result is never `None`.
+        """
+        if should_cancel is not None and should_cancel():
+            return None
         with self._lock:
             current = self._current
             if current is None or current.done.is_set() or current.path != path:
                 current = _Look(path, self._look)
                 self._current = current
                 current.thread.start()
-        if not current.done.wait(self._timeout):
-            if not current.timeout_logged:
-                current.timeout_logged = True
-                logger.warning(
-                    "The watch folder %s did not answer within %ss; treating it as not responding",
-                    path,
-                    self._timeout,
-                )
-            return FolderLook(problem=f"watch_directory not responding: {path}")
+        deadline = time.monotonic() + self._timeout
+        while not current.done.is_set():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                if not current.timeout_logged:
+                    current.timeout_logged = True
+                    logger.warning(
+                        "The watch folder %s did not answer within %ss; "
+                        "treating it as not responding",
+                        path,
+                        self._timeout,
+                    )
+                return FolderLook(problem=f"watch_directory not responding: {path}")
+            if should_cancel is None:
+                current.done.wait(remaining)
+            elif not current.done.wait(min(remaining, _CANCEL_POLL_SECONDS)) and should_cancel():
+                return None
         if current.error is not None:
             raise current.error
         assert current.result is not None
         return current.result
-
-    def problem(self, path: Path) -> str | None:
-        """Why the folder at *path* can't be watched, or `None` when it can."""
-        return self.look(path).problem

@@ -31,8 +31,8 @@ class _Hang:
     def __call__(self, path: Path) -> str | None:
         self.calls.append(path)
         self.threads.append(threading.current_thread())
-        # Longer than the tests wait for a look.
-        self.release.wait(8)
+        # Longer than any test waits for a look, so a look that waited for it would fail.
+        self.release.wait(30)
         return None
 
 
@@ -44,6 +44,13 @@ def hang(monkeypatch: pytest.MonkeyPatch) -> Iterator[_Hang]:
         yield stub
     finally:
         stub.release.set()
+
+
+def _problem(probe: FolderProbe, path: Path) -> str | None:
+    """`probe.look(path).problem`, for a look that is never cancelled."""
+    look = probe.look(path)
+    assert look is not None
+    return look.problem
 
 
 class TestLookAtFolder:
@@ -90,13 +97,15 @@ class TestFolderProbe:
     def test_a_look_that_answers_gives_its_result(self, tmp_path: Path) -> None:
         probe = FolderProbe(5)
 
-        assert probe.problem(tmp_path) is None
-        assert probe.problem(tmp_path / "gone") == f"watch_directory not found: {tmp_path / 'gone'}"
+        assert _problem(probe, tmp_path) is None
+        assert (
+            _problem(probe, tmp_path / "gone") == f"watch_directory not found: {tmp_path / 'gone'}"
+        )
 
     def test_the_look_runs_on_its_own_thread(self, tmp_path: Path, hang: _Hang) -> None:
         hang.release.set()
 
-        FolderProbe(5).problem(tmp_path)
+        _problem(FolderProbe(5), tmp_path)
 
         assert hang.threads and hang.threads[0] is not threading.current_thread()
         assert hang.threads[0].daemon
@@ -117,9 +126,9 @@ class TestFolderProbe:
     ) -> None:
         probe = FolderProbe(0.2)
 
-        first = probe.problem(tmp_path)
-        second = probe.problem(tmp_path)
-        third = probe.problem(tmp_path)
+        first = _problem(probe, tmp_path)
+        second = _problem(probe, tmp_path)
+        third = _problem(probe, tmp_path)
 
         assert first == second == third == f"watch_directory not responding: {tmp_path}"
         # One blocked thread for three looks, not one each.
@@ -130,13 +139,13 @@ class TestFolderProbe:
     ) -> None:
         probe = FolderProbe(10)
         results: list[str | None] = []
-        first = threading.Thread(target=lambda: results.append(probe.problem(tmp_path)))
+        first = threading.Thread(target=lambda: results.append(_problem(probe, tmp_path)))
         first.start()
         _wait_for(lambda: len(hang.calls) == 1)
         threading.Timer(0.2, hang.release.set).start()
 
         # The first look is still running when this one asks.
-        results.append(probe.problem(tmp_path))
+        results.append(_problem(probe, tmp_path))
         first.join(5)
 
         assert results == [None, None]
@@ -145,12 +154,13 @@ class TestFolderProbe:
     def test_once_the_hung_look_has_finished_the_next_one_starts_afresh(
         self, tmp_path: Path, hang: _Hang
     ) -> None:
-        probe = FolderProbe(0.2)
-        assert probe.problem(tmp_path) is not None
+        # The timeout is long enough for the look that has to succeed, on a slow machine.
+        probe = FolderProbe(2)
+        assert _problem(probe, tmp_path) is not None
         hang.release.set()
         _wait_for(lambda: not hang.threads[0].is_alive())
 
-        assert probe.problem(tmp_path) is None
+        assert _problem(probe, tmp_path) is None
         assert len(hang.calls) == 2
 
     def test_a_hung_look_at_one_folder_does_not_block_a_look_at_another(
@@ -162,16 +172,24 @@ class TestFolderProbe:
 
         def look(path: Path) -> str | None:
             if path == hung_path:
-                release.wait(8)
+                release.wait(30)
             return real(path)
 
         monkeypatch.setattr(models, "watch_directory_problem", look)
-        probe = FolderProbe(0.2)
+        # Long enough for the look at the other folder to answer on a slow machine.
+        probe = FolderProbe(2)
         try:
-            assert probe.problem(hung_path) == f"watch_directory not responding: {hung_path}"
-            assert probe.problem(tmp_path) is None
+            assert _problem(probe, hung_path) == f"watch_directory not responding: {hung_path}"
+            assert _problem(probe, tmp_path) is None
         finally:
             release.set()
+
+    def test_a_look_with_a_cancel_that_never_fires_gives_its_result(self, tmp_path: Path) -> None:
+        probe = FolderProbe(5)
+
+        look = probe.look(tmp_path, lambda: False)
+
+        assert look is not None and look.problem is None
 
     def test_an_error_in_the_look_is_raised_to_the_thread_that_asked(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -182,7 +200,7 @@ class TestFolderProbe:
         monkeypatch.setattr(models, "watch_directory_problem", broken)
 
         with pytest.raises(ValueError, match="embedded null byte"):
-            FolderProbe(5).problem(tmp_path)
+            _problem(FolderProbe(5), tmp_path)
 
     def test_several_threads_can_ask_at_once(self, tmp_path: Path) -> None:
         probe = FolderProbe(5)
@@ -190,7 +208,7 @@ class TestFolderProbe:
         lock = threading.Lock()
 
         def ask() -> None:
-            answer = probe.problem(tmp_path)
+            answer = _problem(probe, tmp_path)
             with lock:
                 results.append(answer)
 
@@ -201,6 +219,70 @@ class TestFolderProbe:
             thread.join(10)
 
         assert results == [None] * 8
+
+
+class TestCancel:
+    """A caller that is stopping doesn't wait for the look (watcher 1.4.3).
+
+    The supervisor's `poll` thread must see a stop within moments, and so must an upload
+    thread, so the wait for a look ends when the caller says it is cancelled.
+    """
+
+    def test_a_look_that_hangs_ends_within_a_second_of_the_cancel(
+        self, tmp_path: Path, hang: _Hang
+    ) -> None:
+        # A timeout far past the test, so the cancel is what ends the wait.
+        probe = FolderProbe(30)
+        cancel = threading.Event()
+        threading.Timer(0.3, cancel.set).start()
+
+        started = time.monotonic()
+        look = probe.look(tmp_path, cancel.is_set)
+
+        assert look is None
+        assert 0.25 <= time.monotonic() - started < 2
+
+    def test_a_cancel_that_has_already_fired_starts_no_look(
+        self, tmp_path: Path, hang: _Hang
+    ) -> None:
+        probe = FolderProbe(30)
+
+        assert probe.look(tmp_path, lambda: True) is None
+
+        assert hang.calls == []
+
+    def test_a_cancelled_look_is_left_running_for_the_next_one(
+        self, tmp_path: Path, hang: _Hang
+    ) -> None:
+        probe = FolderProbe(0.2)
+        assert probe.look(tmp_path, lambda: False) == FolderLook(
+            problem=f"watch_directory not responding: {tmp_path}"
+        )
+        cancel = threading.Event()
+        cancel.set()
+        assert probe.look(tmp_path, cancel.is_set) is None
+
+        # Not started again: the look that is blocked is the one the next caller waits for.
+        assert _problem(probe, tmp_path) is not None
+        assert len(hang.calls) == 1
+
+
+class TestNotFound:
+    def test_a_missing_folder_is_not_found(self, tmp_path: Path) -> None:
+        assert look_at_folder(tmp_path / "gone").not_found
+
+    def test_a_folder_that_is_there_is_not_a_not_found(self, tmp_path: Path) -> None:
+        assert not look_at_folder(tmp_path).not_found
+
+    def test_other_problems_are_not_a_not_found(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        for problem in (
+            f"watch_directory is not a folder: {tmp_path}",
+            f"watch_directory is not readable: {tmp_path} (Access is denied)",
+            f"watch_directory not responding: {tmp_path}",
+        ):
+            assert not FolderLook(problem=problem).not_found
 
 
 def _wait_for(condition: Any, timeout: float = 5.0) -> None:

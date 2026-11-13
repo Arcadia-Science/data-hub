@@ -287,14 +287,16 @@ def build_runtime(
     uploading (see :class:`FileMonitor`), and *config_revision* /
     *on_config_revision* connect the heartbeat to the config-revision check.
     *request_folder_check* asks the supervisor to check the watch folder. It is
-    called on every heartbeat tick, after the updater's, and when watchdog reports
-    the folder itself deleted or moved. Both run on other threads than the
-    supervisor's, so it must only note the request and return: the supervisor does
-    the check on its own thread. *folder_probe* is the supervisor's bounded look at the
-    watch folder. The uploader asks it, before it drops a pending upload or counts a
-    failed attempt for a file it can't find, whether the folder itself is gone, and if
-    it is, calls *request_folder_check* and counts nothing. *should_stop* tells the
-    file monitor's initial scan to end early (see :class:`FileMonitor`).
+    called on every heartbeat tick, after the updater's, when watchdog reports
+    the folder itself deleted or moved, and when the uploader finds the folder itself
+    unavailable. All run on other threads than the supervisor's, so it must only note
+    the request and return: the supervisor does the check on its own thread.
+    *folder_probe* is the supervisor's bounded look at the watch folder. The uploader
+    asks it, before it drops a pending upload or counts a failed attempt for a file it
+    can't find, whether the folder itself is gone, and if it is, calls
+    *request_folder_check* and counts nothing. *should_stop* tells the file monitor's
+    initial scan to end early (see :class:`FileMonitor`), and ends the uploader's look
+    at the folder.
     """
     if not cfg.watcher_id:
         raise ValueError("cfg.watcher_id must be set before building the runtime")
@@ -341,11 +343,20 @@ def build_runtime(
     # in-flight upload's backoff and abort between queued files.
     upload_stop_event = threading.Event()
 
+    def _stopping() -> bool:
+        return upload_stop_event.is_set() or (should_stop is not None and should_stop())
+
     def _watch_folder_unavailable() -> bool:
         # Asked from the upload threads, so the look is the bounded one: a hung share
-        # can't hold an upload thread for as long as the share takes to answer.
+        # can't hold an upload thread for as long as the share takes to answer. It also
+        # ends at once on a stop, which `Uploader.abort` can't do for a thread that waits
+        # for it. A look that a stop ended says nothing about the folder, and the file
+        # isn't missing either, so the answer is the same as for a folder that is gone.
         assert folder_probe is not None
-        if folder_probe.problem(inst.watch_directory) is None:
+        look = folder_probe.look(inst.watch_directory, _stopping)
+        if look is None:
+            return True
+        if look.problem is None:
             return False
         if request_folder_check is not None:
             request_folder_check()
@@ -930,6 +941,38 @@ class _WaitingMode:
     reason: str
     heartbeat: HeartbeatLoop
     updater: Updater
+    # The reason the waiting state was entered with. `reason` follows the looks at the folder
+    # while waiting, and goes back to this one when a look finds nothing wrong but the wait
+    # is not over (a start that failed, a backoff).
+    entry_reason: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.entry_reason:
+            self.entry_reason = self.reason
+
+
+@dataclass
+class _CutOffRuntime:
+    """A runtime that the move to the waiting state stopped but could not wait out.
+
+    A thread of it was still blocked, on the share, when the move gave up on it. Its state
+    DB stays open until the threads have exited (`WatcherSupervisor._reap_cut_off`).
+    *folder* is the watch folder it was on: only a runtime that starts on the same folder
+    has to wait for these threads.
+    """
+
+    rt: WatcherRuntime
+    folder: Path
+
+
+@dataclass(frozen=True)
+class _BlindCause:
+    """Why a runtime whose folder is there can't see it."""
+
+    # A clause that starts with a lower-case letter, for a log line.
+    text: str
+    # Whether watchdog is still watching and only the folder's identity says it is blind.
+    identity_only: bool = False
 
 
 def _any_rule(
@@ -1066,13 +1109,18 @@ class WatcherSupervisor:
         # renamed and made again, or something mounted on it.
         self._watch_identity: tuple[int, int] | None = None
         self._watching_since = 0.0
+        # Set when the folder's identity changed twice within `MONITOR_RESTART_WINDOW_SECONDS`
+        # with watchdog still watching: a filesystem that doesn't give a folder a lasting
+        # identity. The identity is not compared again until a config change or a restart.
+        self._identity_untrusted = False
         # Rebuilds since the last runtime that watched for `MONITOR_RESTART_WINDOW_SECONDS`
         # without going blind (see `_check_running_folder`).
         self._blind_rebuilds = 0
-        # Runtimes that the move to the waiting state stopped but could not wait out: a
-        # thread of theirs was still blocked, on the share, when it gave up on it. Each
-        # keeps its state DB open until its threads have exited (`_reap_cut_off`).
-        self._cut_off: list[WatcherRuntime] = []
+        # Looks in a row that found a problem, while waiting (see `_check_waiting_folder`).
+        self._waiting_problem_looks = 0
+        # Runtimes that a bounded teardown stopped but could not wait out (see
+        # `_CutOffRuntime`).
+        self._cut_off: list[_CutOffRuntime] = []
         # Whether this process has checked the post-upgrade marker yet. Only
         # the first runtime or waiting state may (see `report_upgrade_outcome`).
         self._upgrade_marker_checked = False
@@ -1263,6 +1311,8 @@ class WatcherSupervisor:
                 deadline=_stop_deadline(system_shutdown),
             )
             self._waiting = None
+        # The state DB of a runtime that was cut off, once its threads have exited.
+        self._reap_cut_off()
         if self._state is not None:
             self._state.close()
 
@@ -1383,8 +1433,15 @@ class WatcherSupervisor:
         # an error after the old loops stopped would leave nothing running,
         # not even the heartbeat that could deliver the next fix.
         try:
+            if not folder_changed(old_inst, new_inst):
+                # The same folder: no runtime starts next to a thread that an earlier move
+                # to the waiting state left blocked on it. A changed folder has no such
+                # wait, because those threads can't touch the new one, and
+                # `_forget_old_folder_uploads` drops their rows.
+                self._wait_for_cut_off_uploads(old_inst.watch_directory)
             self._teardown_for_rebuild()
             self._blind_rebuilds = 0
+            self._identity_untrusted = False
             if folder_changed(old_inst, new_inst):
                 self._forget_old_folder_uploads()
             self.cfg = new_cfg
@@ -1744,10 +1801,22 @@ class WatcherSupervisor:
         no started event, because nothing has resumed.
         """
         rules = self._report_only_rules if report_only_rules is None else report_only_rules
-        look = self._probe.look(self.cfg.instrument.watch_directory)
+        folder = self.cfg.instrument.watch_directory
+        # The look is bounded (`FolderProbe`) but is not cut short by a stop: this is the
+        # start of a runtime, which has nothing yet that `stop` could stop instead.
+        look = self._probe.look(folder)
+        assert look is not None
         if look.problem is not None:
             self._enter_waiting(
                 look.problem, started_message=None if already_started else started_message
+            )
+            return
+        if self._cut_off_on(folder):
+            # Not next to threads that are still stuck on this folder. `_check_waiting_folder`
+            # starts the runtime once they have exited.
+            self._enter_waiting(
+                self._cut_off_reason(folder),
+                started_message=None if already_started else started_message,
             )
             return
         rt = build_runtime(
@@ -1784,7 +1853,7 @@ class WatcherSupervisor:
         # The folder as it was when it was found fit to watch, before the scan: a folder
         # swapped during the scan (which can take minutes) then shows as another one at
         # the next check, and the runtime is rebuilt with a scan of the new one.
-        self._watch_identity = look.identity
+        self._watch_identity = None if self._identity_untrusted else look.identity
         self._watching_since = time.monotonic()
         if announce_late:
             self.reporter.queue_event(
@@ -1806,6 +1875,7 @@ class WatcherSupervisor:
         started, so the move to waiting queues the error only.
         """
         self._watch_identity = None
+        self._waiting_problem_looks = 0
         new_stretch = self._waiting_event_reason is None
         reason_changed = reason != self._waiting_event_reason
         if reason_changed:
@@ -1880,11 +1950,20 @@ class WatcherSupervisor:
         """Ask the `poll` thread to check the watch folder.
 
         Called from other threads: the heartbeat thread on every tick, watchdog's thread
-        when it reports the watch folder deleted or moved, and an upload thread that
-        can't find a file.
+        when it reports the watch folder deleted or moved, and an upload thread whose look
+        at the folder, made because it can't find a file, finds the folder itself
+        unavailable.
         """
         self._folder_check_due.set()
         self._wake.set()
+
+    def _look_at_folder(self) -> FolderLook | None:
+        """The bounded look at the watch folder, or `None` when a stop ended it.
+
+        A stop ends the wait for the look within a fraction of a second (see
+        `FolderProbe.look`), and the caller then leaves everything as it is.
+        """
+        return self._probe.look(self.cfg.instrument.watch_directory, self._stopping)
 
     def _check_folder(self) -> None:
         if self._waiting is not None:
@@ -1895,13 +1974,14 @@ class WatcherSupervisor:
     def _check_running_folder(self) -> None:
         """Move a running watcher to the waiting state when its watch folder is gone.
 
-        The look at the folder is `FolderProbe`'s, so a share that has hung can't hold
-        this thread, which is the one that sees a stop: a look that takes too long counts
-        as a problem ("not responding"). One failed look is not enough. A second one,
-        `FOLDER_CONFIRM_DELAY_SECONDS` later, has to find a problem too, and its reason
-        is the one reported. A share that drops for a moment, or a folder that is still
-        being deleted (on Windows its first look can find it "not readable" before it is
-        "not found"), costs the watcher nothing.
+        The look at the folder is `FolderProbe`'s, so a share that has hung can't hold this
+        thread, which is the one that sees a stop: a look that takes too long counts as a
+        problem ("not responding"), and a stop ends the wait for it, and for the second
+        look and the move below, which then leave the runtime to `stop`. One failed look is
+        not enough. A second one, `FOLDER_CONFIRM_DELAY_SECONDS` later, has to find a
+        problem too, and its reason is the one reported. A share that drops for a moment, or
+        a folder that is still being deleted (on Windows its first look can find it "not
+        readable" before it is "not found"), costs the watcher nothing.
 
         On a confirmed problem the runtime is torn down as for a config rebuild, but
         with short waits (see `_teardown_for_rebuild`), and the heartbeat then reports
@@ -1911,7 +1991,7 @@ class WatcherSupervisor:
         once the folder is back.
 
         A folder that is there can still leave the watcher blind, in two ways, and the
-        runtime is then rebuilt, with the usual wait for uploads (`_rebuild_blind_runtime`):
+        runtime is then rebuilt, with the same short waits (`_rebuild_blind_runtime`):
         watchdog stopped watching it (it stops an emitter whose folder was deleted, and a
         folder made again at the same path isn't watched), or it is not the folder the
         runtime started on (`_watch_identity`: renamed, with another made at its path, or
@@ -1920,21 +2000,29 @@ class WatcherSupervisor:
         rt = self.rt
         if rt is None or self._stopping():
             return
-        path = self.cfg.instrument.watch_directory
-        look = self._probe.look(path)
+        # Threads that a bounded teardown left behind, on another folder than this one.
+        self._reap_cut_off()
+        look = self._look_at_folder()
+        if look is None:
+            return
         if look.problem is not None:
             first = look.problem
             if self._stop_requested.wait(FOLDER_CONFIRM_DELAY_SECONDS):
                 return
-            look = self._probe.look(path)
+            look = self._look_at_folder()
+            if look is None:
+                return
             if look.problem is not None:
-                self._move_to_waiting(look.problem)
+                if not self._stopping():
+                    self._move_to_waiting(look.problem)
                 return
             logger.info(
                 "The watch folder was unavailable a moment ago (%s) and is there again; "
                 "keeping the runtime",
                 first,
             )
+        if self._stopping():
+            return
         cause = self._blind_cause(rt, look)
         if cause is None:
             if (
@@ -1948,125 +2036,189 @@ class WatcherSupervisor:
 
     def _move_to_waiting(self, problem: str) -> None:
         logger.info("Watch folder is gone (%s); stopping uploads and the file monitor", problem)
+        if not self._teardown_for_rebuild(
+            bounded=True, drain_timeout=WATCH_FOLDER_GONE_DRAIN_TIMEOUT_SECONDS
+        ):
+            # A stop arrived. The runtime is left running, for `stop` to stop.
+            return
         self._blind_rebuilds = 0
-        self._teardown_for_rebuild(folder_gone=True)
         self._enter_waiting(problem, started_message=None)
 
-    def _blind_cause(self, rt: WatcherRuntime, look: FolderLook) -> str | None:
-        """Why a runtime whose folder is there can't see it, or `None` if it can."""
+    def _blind_cause(self, rt: WatcherRuntime, look: FolderLook) -> _BlindCause | None:
+        """Why a runtime whose folder is there can't see it, or `None` if it can.
+
+        A monitor that has stopped watching comes first: it is the one cause that a rebuild
+        can fail to fix for good (see `_rebuild_blind_runtime`). A folder with another
+        identity is blind only for a runtime that watchdog still watches.
+        """
+        if not rt.monitor.is_watching():
+            return _BlindCause("the file monitor has stopped watching the folder")
         known, now = self._watch_identity, look.identity
         if known is not None and now is not None and known != now:
-            return "the watch folder is not the one the watcher started on"
-        if not rt.monitor.is_watching():
-            return "the file monitor has stopped watching the folder"
+            return _BlindCause(
+                "the watch folder is not the one the watcher started on "
+                f"(it was {_describe_identity(known)}, it is now {_describe_identity(now)})",
+                identity_only=True,
+            )
         return None
 
-    def _rebuild_blind_runtime(self, cause: str) -> None:
-        """Rebuild a runtime that can't see its folder, once, or wait if that doesn't help.
+    def _rebuild_blind_runtime(self, cause: _BlindCause) -> None:
+        """Rebuild a runtime that can't see its folder, once, or give up on what doesn't help.
 
         The first time, the runtime is rebuilt and a `watcher_started` event says the
-        watcher resumed. If that runtime goes blind again before it has watched for
+        watcher resumed. The rebuild is bounded like the move to the waiting state: the
+        upload threads of a folder whose filesystem has hung can't be waited for for good
+        (see `_teardown_for_rebuild`).
+
+        If that runtime goes blind again before it has watched for
         `MONITOR_RESTART_WINDOW_SECONDS`, rebuilding again would not help, and would
-        send a heartbeat, an event and the whole start-up scan at every check. (An
-        emitter that dies at once, as watchdog's does on a share that
-        `ReadDirectoryChangesW` doesn't support, would do exactly that.) The watcher then
-        waits with the reason "watch_directory can't be watched", and tries again on the
-        waiting state's backoff (1, 2, 4 and 8 heartbeat intervals, then
-        `WAITING_START_RETRY_MAX_SECONDS`), which the next blind runtime lengthens.
+        send a heartbeat, an event and the whole start-up scan at every check:
+
+        * When watchdog has stopped watching, which an emitter does at once on a share
+          that `ReadDirectoryChangesW` doesn't support, the folder can't be watched. The
+          watcher waits with the reason "watch_directory can't be watched", and tries
+          again on the waiting state's backoff (1, 2, 4 and 8 heartbeat intervals, then
+          `WAITING_START_RETRY_MAX_SECONDS`), which the next blind runtime lengthens.
+        * When only the folder's identity changed, watchdog is watching, and live uploads
+          must not stop for a filesystem that gives a folder no lasting identity (FUSE
+          mounts without `use_ino`, SMB or virtual drives without persistent file IDs).
+          The watcher keeps the runtime, and stops comparing the identity until a config
+          change or a restart.
         """
         path = self.cfg.instrument.watch_directory
+        sentence = cause.text[0].upper() + cause.text[1:]
         if self._blind_rebuilds == 0:
-            logger.warning(
-                "%s, although %s is there; watching it anew (the usual wait for uploads)",
-                cause[0].upper() + cause[1:],
-                path,
-            )
+            logger.warning("%s, although %s is there; watching it anew", sentence, path)
+            if not self._teardown_for_rebuild(bounded=True):
+                return
             self._blind_rebuilds = 1
-            self._teardown_for_rebuild()
             self._start_or_wait_on_error(
                 started_message=f"{self.role} resumed on {self.host}",
                 retry=True,
                 already_started=True,
             )
             return
+        if cause.identity_only:
+            logger.warning(
+                "%s again soon after the runtime was rebuilt, with the file monitor still "
+                "watching it. The filesystem of %s doesn't seem to give the folder a lasting "
+                "identity, so the watcher stops comparing it and keeps watching. A config "
+                "change or a restart compares it again",
+                sentence,
+                path,
+            )
+            self._identity_untrusted = True
+            self._watch_identity = None
+            return
         delay = self._retry_delay(self._blind_rebuilds)
-        self._blind_rebuilds += 1
         logger.warning(
             "%s again soon after the runtime was rebuilt, so %s can't be watched; waiting, "
             "and trying again in %ds",
-            cause[0].upper() + cause[1:],
+            sentence,
             path,
             delay,
         )
-        self._teardown_for_rebuild()
+        if not self._teardown_for_rebuild(bounded=True):
+            return
+        self._blind_rebuilds += 1
         self._enter_waiting(f"watch_directory can't be watched: {path}", started_message=None)
         self._next_start_attempt = time.monotonic() + delay
 
     def _check_waiting_folder(self) -> None:
+        """Start watching again when the folder can be listed, and say what the wait is for.
+
+        A look that finds a problem becomes the waiting reason, and a look that doesn't puts
+        back the reason the state was entered with, when the wait is not over. The backoff
+        of a start that keeps failing, or of a runtime that keeps going blind, is reset
+        only once the folder is known to have been away: a "not found", or a problem in two
+        looks in a row. A share that is slow once doesn't make the next start immediate.
+        """
         waiting = self._waiting
-        if waiting is None:
+        if waiting is None or self._stopping():
             return
-        problem = self._probe.problem(self.cfg.instrument.watch_directory)
-        if problem is not None:
-            if problem != waiting.reason:
-                # For example the folder went away while starts were failing.
-                logger.warning("%s. Still waiting.", problem)
-                waiting.reason = problem
-                waiting.heartbeat.set_status_reason(problem)
-                self._report_waiting_reason(problem)
-            # Once the folder is back, try straight away.
-            self._start_failures = 0
-            self._next_start_attempt = 0.0
-            self._blind_rebuilds = 0
+        look = self._look_at_folder()
+        if look is None:
             return
+        folder = self.cfg.instrument.watch_directory
+        if look.problem is not None:
+            self._change_waiting_reason(look.problem)
+            self._waiting_problem_looks += 1
+            if look.not_found or self._waiting_problem_looks >= 2:
+                # Once the folder is back, try straight away.
+                self._start_failures = 0
+                self._next_start_attempt = 0.0
+                self._blind_rebuilds = 0
+            return
+        self._waiting_problem_looks = 0
         if time.monotonic() < self._next_start_attempt:
+            self._change_waiting_reason(waiting.entry_reason)
             return
-        if not self._reap_cut_off():
-            logger.warning(
-                "Watch folder %s is available, but threads of the uploads that its loss "
-                "cut off are still stopping; starting to watch once they have",
-                self.cfg.instrument.watch_directory,
-            )
+        if self._cut_off_on(folder):
+            self._change_waiting_reason(self._cut_off_reason(folder))
             return
-        logger.info(
-            "Watch folder %s is available; starting to watch",
-            self.cfg.instrument.watch_directory,
-        )
+        if self._stopping():
+            return
+        logger.info("Watch folder %s is available; starting to watch", folder)
         self._teardown_for_rebuild()
         self._start_or_wait_on_error(
             started_message=f"{self.role} resumed on {self.host}", retry=True
         )
 
-    def _teardown_for_rebuild(self, *, folder_gone: bool = False) -> None:
+    def _change_waiting_reason(self, reason: str) -> None:
+        """Say another reason for the wait, in the log, the heartbeat and an error event."""
+        waiting = self._waiting
+        if waiting is None or reason == waiting.reason:
+            return
+        logger.warning("%s. Still waiting.", reason)
+        waiting.reason = reason
+        waiting.heartbeat.set_status_reason(reason)
+        if reason != self._waiting_event_reason:
+            self._report_waiting_reason(reason)
+
+    @staticmethod
+    def _cut_off_reason(folder: Path) -> str:
+        return f"uploads stuck on {folder} have not ended"
+
+    def _teardown_for_rebuild(
+        self, *, bounded: bool = False, drain_timeout: float | None = None
+    ) -> bool:
         """Stop the running loops without reporting the watcher as stopped.
 
-        Returns only once every upload thread of the old runtime has exited
-        (see `_stop_upload_threads`), so its state DB is closed with nothing
-        left to write to it, and the next runtime never uploads alongside it. That
-        includes the threads that an earlier move to the waiting state left behind.
+        Without *bounded* it returns only once every upload thread of the old runtime has
+        exited (see `_stop_upload_threads`), so its state DB is closed with nothing left
+        to write to it, and the next runtime never uploads alongside it. A stop doesn't end
+        that wait, and the result is always `True`.
 
-        *folder_gone* is the move to the waiting state because the watch folder is gone
-        (`_move_to_waiting`), which is bounded where a dead share could hold it:
+        *bounded* is for the move to the waiting state because the watch folder is gone
+        (`_move_to_waiting`) and for a rebuild because the folder can't be seen
+        (`_rebuild_blind_runtime`). A dead share can hold a thread that nothing can end,
+        and the thread that tears down is the one that sees a stop, so:
 
-        * Uploads in progress get `WATCH_FOLDER_GONE_DRAIN_TIMEOUT_SECONDS` to finish, not
-          the `CONFIG_APPLY_DRAIN_TIMEOUT_SECONDS` of a config rebuild.
+        * Uploads in progress get *drain_timeout* (`CONFIG_APPLY_DRAIN_TIMEOUT_SECONDS`
+          unless given) to finish. The move gives them
+          `WATCH_FOLDER_GONE_DRAIN_TIMEOUT_SECONDS`.
         * Past that they are cut off (`Uploader.abort`), which a thread blocked reading
           the dead share doesn't see. The wait for the threads, the stop of the file
           monitor's observer and the wait for a heartbeat tick in progress then get
           `WATCH_FOLDER_GONE_JOIN_SECONDS` each.
         * A thread that is still running after that is left behind, and the runtime's
-          state DB stays open (`_cut_off`). The next runtime waits for those threads
-          (`_check_waiting_folder`).
+          state DB stays open (`_cut_off`). A runtime that starts on the same folder waits
+          for those threads (`_check_waiting_folder`).
         * The events the old runtime queued are flushed with the same limit.
+        * Every wait ends on a stop. The teardown then stops where it is and returns
+          `False`, with the runtime still in `self.rt`: `stop` stops it, and cuts its
+          uploads off within its own budget. A runtime that is partly stopped is stopped
+          again, which is harmless.
 
         The `UpgradeHandoff` stays as it is: the supervisor owns it, and the next
         runtime's updater is given it.
         """
-        self._wait_for_cut_off_uploads()
         rt, self.rt = self.rt, None
         if rt is not None:
-            if folder_gone:
-                self._tear_down_bounded(rt)
+            if bounded:
+                if not self._tear_down_bounded(rt, drain_timeout):
+                    self.rt = rt
+                    return False
             else:
                 _stop_upload_threads(rt)
                 rt.heartbeat.stop(send_stopped=False)
@@ -2075,61 +2227,144 @@ class WatcherSupervisor:
         waiting, self._waiting = self._waiting, None
         if waiting is not None:
             waiting.heartbeat.stop(send_stopped=False)
+        return True
 
-    def _tear_down_bounded(self, rt: WatcherRuntime) -> None:
-        """The part of `_teardown_for_rebuild(folder_gone=True)` that stops *rt*."""
+    def _tear_down_bounded(self, rt: WatcherRuntime, drain_timeout: float | None) -> bool:
+        """The part of a bounded `_teardown_for_rebuild` that stops *rt*.
+
+        Returns `False` when a stop ended it, with *rt* still the supervisor's to stop.
+        """
+        stopping = self._stopping
+        if stopping():
+            return False
         uploads_done = _stop_upload_threads(
             rt,
-            drain_timeout=WATCH_FOLDER_GONE_DRAIN_TIMEOUT_SECONDS,
+            drain_timeout=drain_timeout,
             cut_off_timeout=WATCH_FOLDER_GONE_JOIN_SECONDS,
             observer_timeout=WATCH_FOLDER_GONE_JOIN_SECONDS,
+            should_stop=stopping,
         )
-        heartbeat_done = rt.heartbeat.stop_loop(join_timeout=WATCH_FOLDER_GONE_JOIN_SECONDS)
+        if stopping():
+            return False
+        heartbeat_done = _wait_for(
+            lambda step: rt.heartbeat.stop_loop(join_timeout=step),
+            WATCH_FOLDER_GONE_JOIN_SECONDS,
+            stopping,
+        )
+        if stopping():
+            return False
         rt.reporter.flush(deadline=time.monotonic() + WATCH_FOLDER_GONE_JOIN_SECONDS)
         if uploads_done and heartbeat_done:
             rt.state_db.close()
-            return
-        logger.warning(
-            "Moving to the waiting state without waiting for %s to stop: its threads are "
-            "blocked, probably on the watch folder's share. A new runtime starts once they "
-            "have exited",
-            "the uploads" if not uploads_done else "a heartbeat tick",
-        )
-        self._cut_off.append(rt)
+            return True
+        if not uploads_done:
+            logger.warning(
+                "Not waiting any longer for the upload threads of the old runtime to exit: "
+                "they are blocked, probably on the watch folder's share. A new runtime starts "
+                "on this folder once they have exited"
+            )
+        else:
+            logger.warning(
+                "Not waiting any longer for the old runtime's heartbeat tick to end: it is "
+                "blocked, probably on a request to Data Hub. A new runtime starts on this "
+                "folder once it has ended"
+            )
+        self._cut_off.append(_CutOffRuntime(rt, self.cfg.instrument.watch_directory))
+        return True
 
-    def _reap_cut_off(self) -> bool:
+    def _reap_cut_off(self) -> None:
         """Close the state DB of each cut-off runtime whose threads have exited.
 
-        Returns whether none is left.
+        Logs nothing, so it can be asked at every check and every step of a wait.
         """
-        remaining: list[WatcherRuntime] = []
-        for rt in self._cut_off:
-            worker_done = rt.upload_worker is None or rt.upload_worker.stop(timeout=0)
-            monitor_done = rt.monitor.join(timeout=0)
-            if worker_done and monitor_done and rt.heartbeat.has_exited():
+        remaining: list[_CutOffRuntime] = []
+        for cut_off in self._cut_off:
+            rt = cut_off.rt
+            if (
+                (rt.upload_worker is None or rt.upload_worker.has_exited())
+                and rt.monitor.has_exited()
+                and rt.heartbeat.has_exited()
+            ):
                 rt.state_db.close()
             else:
-                remaining.append(rt)
+                remaining.append(cut_off)
         self._cut_off = remaining
-        return not remaining
 
-    def _wait_for_cut_off_uploads(self) -> None:
-        """Wait for the threads that an earlier move to the waiting state left behind.
+    def _cut_off_on(self, folder: Path) -> bool:
+        """Whether a runtime that was cut off on *folder* still has a thread running."""
+        self._reap_cut_off()
+        return any(cut_off.folder == folder for cut_off in self._cut_off)
 
-        For a rebuild that is not that move (a config change): like the rest of its
-        teardown, it doesn't start the next runtime next to old upload threads. A stop
-        ends the wait.
+    def _wait_for_cut_off_uploads(self, folder: Path) -> None:
+        """Wait, for a while, for the threads that an earlier cut-off left behind on *folder*.
+
+        For a config change that keeps the folder: the next runtime doesn't start next to
+        a thread of the old one that may still read the same files. The wait is
+        `CONFIG_APPLY_DRAIN_TIMEOUT_SECONDS`, like the drain of a rebuild, and ends on a
+        stop. It logs every `_CUT_OFF_LOG_INTERVAL_SECONDS`. If a thread is still there
+        when the wait is over, the config is applied all the same and the start waits,
+        with a reason (`_start_watching_or_wait`), until the thread has exited.
         """
-        while not self._reap_cut_off():
+        if not self._cut_off_on(folder):
+            return
+        started = time.monotonic()
+        give_up_at = started + CONFIG_APPLY_DRAIN_TIMEOUT_SECONDS
+        next_log = started + _CUT_OFF_LOG_INTERVAL_SECONDS
+        logger.warning(
+            "Threads of uploads that were cut off on %s are still running; waiting up to %ss "
+            "for them before the new config starts",
+            folder,
+            CONFIG_APPLY_DRAIN_TIMEOUT_SECONDS,
+        )
+        while self._cut_off_on(folder):
             if self._stopping():
                 return
-            time.sleep(_CUT_OFF_JOIN_STEP_SECONDS)
+            now = time.monotonic()
+            if now >= give_up_at:
+                logger.warning(
+                    "Threads of uploads that were cut off on %s are still running. The new "
+                    "config starts once they have exited",
+                    folder,
+                )
+                return
+            if now >= next_log:
+                logger.warning(
+                    "Still waiting for threads of uploads that were cut off on %s to exit",
+                    folder,
+                )
+                next_log = now + _CUT_OFF_LOG_INTERVAL_SECONDS
+            self._stop_requested.wait(_WAIT_STEP_SECONDS)
 
 
-# How often a rebuild that cut its uploads off checks that their threads have
-# exited, and how often it logs while it keeps waiting.
-_CUT_OFF_JOIN_STEP_SECONDS = 0.5
+def _describe_identity(identity: tuple[int, int]) -> str:
+    device, inode = identity
+    return f"device {device} inode {inode}"
+
+
+# How often a wait that can be ended by a stop looks for one, and for the thread it waits for.
+_WAIT_STEP_SECONDS = 0.25
+# How often the waits for threads that outlived a cut-off log that they go on
+# (`_stop_upload_threads` and `WatcherSupervisor._wait_for_cut_off_uploads`).
 _CUT_OFF_LOG_INTERVAL_SECONDS = 60
+
+
+def _wait_for(
+    join: Callable[[float], bool],
+    timeout: float,
+    should_stop: Callable[[], bool] | None = None,
+) -> bool:
+    """Call *join* with a short wait until it returns `True`, for at most *timeout* seconds.
+
+    *join* waits up to the seconds it is given and says whether what it waits for is done,
+    as `Thread.join` followed by `is_alive` does. Returns whether it was done. A *should_stop*
+    that returns `True` ends the wait early, within `_WAIT_STEP_SECONDS`.
+    """
+    until = time.monotonic() + timeout
+    while True:
+        if join(min(_WAIT_STEP_SECONDS, _left(until))):
+            return True
+        if _left(until) <= 0 or (should_stop is not None and should_stop()):
+            return False
 
 
 def _stop_upload_threads(
@@ -2138,6 +2373,7 @@ def _stop_upload_threads(
     drain_timeout: float | None = None,
     cut_off_timeout: float | None = None,
     observer_timeout: float = 5.0,
+    should_stop: Callable[[], bool] | None = None,
 ) -> bool:
     """Stop *rt*'s upload worker and file monitor, and wait for both to exit.
 
@@ -2158,18 +2394,30 @@ def _stop_upload_threads(
     Returns `True` once both have exited. With a *cut_off_timeout*, the wait after the
     cut-off ends then, and this returns `False` if a thread is still running: a thread
     blocked reading a share that has hung doesn't see the cut-off. *observer_timeout* is
-    the limit of the monitor's observer stop (see `FileMonitor.stop`).
+    the limit of the monitor's observer stop (see `FileMonitor.stop`). A *should_stop*
+    that returns `True` ends every wait here, the drain and the one after the cut-off
+    included, and this returns `False` right away: the caller is stopping, and leaves the
+    threads to the stop, which cuts them off itself.
     """
     if drain_timeout is None:
         drain_timeout = CONFIG_APPLY_DRAIN_TIMEOUT_SECONDS
     deadline = time.monotonic() + drain_timeout
     worker = rt.upload_worker
-    worker_done = worker.stop(timeout=drain_timeout) if worker is not None else True
+    rt.uploader.request_stop()
+    worker_done = True
+    if worker is not None:
+        worker_done = _wait_for(lambda step: worker.stop(timeout=step), drain_timeout, should_stop)
+    if not worker_done and should_stop is not None and should_stop():
+        return False
     monitor_done = rt.monitor.stop(
-        timeout=max(1.0, deadline - time.monotonic()), observer_timeout=observer_timeout
+        timeout=0.0, observer_timeout=observer_timeout, should_cancel=should_stop
     )
+    if not monitor_done:
+        monitor_done = _wait_for(rt.monitor.join, max(1.0, _left(deadline)), should_stop)
     if worker_done and monitor_done:
         return True
+    if should_stop is not None and should_stop():
+        return False
     logger.warning(
         "Uploads were still running after %ss; cutting them off. The runtime that "
         "follows retries them, unless the new config moves the watch folder.",
@@ -2180,11 +2428,13 @@ def _stop_upload_threads(
     next_log = time.monotonic() + _CUT_OFF_LOG_INTERVAL_SECONDS
     while True:
         if not worker_done and worker is not None:
-            worker_done = worker.stop(timeout=_CUT_OFF_JOIN_STEP_SECONDS)
+            worker_done = worker.stop(timeout=_WAIT_STEP_SECONDS)
         if not monitor_done:
-            monitor_done = rt.monitor.join(timeout=_CUT_OFF_JOIN_STEP_SECONDS)
+            monitor_done = rt.monitor.join(timeout=_WAIT_STEP_SECONDS)
         if worker_done and monitor_done:
             return True
+        if should_stop is not None and should_stop():
+            return False
         if give_up_at is not None and time.monotonic() >= give_up_at:
             return False
         if time.monotonic() >= next_log:
