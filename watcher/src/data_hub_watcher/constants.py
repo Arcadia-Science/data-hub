@@ -81,10 +81,11 @@ SYSTEM_SHUTDOWN_STATUS_REASON = "system_shutdown"
 # watcher as Unresponsive if it hasn't come back after 15 minutes. The server's
 # `AUTO_UPDATE_STATUS_REASON` must say the same.
 AUTO_UPDATE_STATUS_REASON = "auto_update"
-# How long the updater remembers that it handed an upgrade to the Windows upgrade
-# worker. The worker stops the service within seconds, so a service still running
-# after this long was not stopped by it. Until then the updater dispatches nothing
-# else, and a stop is sent as `auto_update`.
+# How long the watcher remembers that it handed an upgrade to the Windows upgrade
+# worker (`UpgradeHandoff`). The worker stops the service within seconds, so a service
+# still running after this long was not stopped by it. For this long the updater
+# dispatches nothing else. The first heartbeat tick after it ends the hand-off, and a
+# stop that begins before then is sent as `auto_update`.
 UPGRADE_HANDOFF_TIMEOUT_SECONDS = 600
 # Windows waits for the service to stop, at a restart or a shutdown, for the
 # preshutdown timeout: 10 s by default from Windows 10 build 15063 and 180 s

@@ -60,6 +60,7 @@ from data_hub_watcher.run_detector import RunDetector
 from data_hub_watcher.state import CONFIG_REVISION_UNSENT_RESULT_META_KEY, StateDB
 from data_hub_watcher.updater import (
     Updater,
+    UpgradeHandoff,
     evaluate_upgrade_marker,
     updater_config_from_overrides,
 )
@@ -248,6 +249,7 @@ def build_runtime(
     reporter: EventReporter | None = None,
     shutdown_event: threading.Event | None = None,
     upgrade_restart_event: threading.Event | None = None,
+    upgrade_handoff: UpgradeHandoff | None = None,
     report_only: Callable[[str, float], bool] | None = None,
     config_revision: Callable[[], int | None] | None = None,
     on_config_revision: Callable[[int | None], None] | None = None,
@@ -267,8 +269,9 @@ def build_runtime(
     :class:`WatcherRuntime` for why.
 
     The remaining keyword arguments let :class:`WatcherSupervisor` rebuild the
-    runtime in place: *reporter* and the two events are shared across
-    rebuilds, *report_only* marks files for the first scan to report without
+    runtime in place: *reporter*, the two events and *upgrade_handoff* (what the
+    updater remembers of an upgrade it handed to the Windows worker) are shared
+    across rebuilds, *report_only* marks files for the first scan to report without
     uploading (see :class:`FileMonitor`), and *config_revision* /
     *on_config_revision* connect the heartbeat to the config-revision check.
     """
@@ -308,6 +311,7 @@ def build_runtime(
         config_dir=effective_config_dir,
         request_upgrade_restart=request_upgrade_restart,
         updater_cfg=updater_config_from_overrides(),
+        handoff=upgrade_handoff,
     )
 
     is_auto = inst.upload_mode == "auto"
@@ -842,6 +846,7 @@ class WatcherSupervisor:
         config_dir: Path | None = None,
         role: str,
         host: str,
+        upgrade_handoff: UpgradeHandoff | None = None,
     ) -> None:
         if not cfg.watcher_id:
             raise ValueError("cfg.watcher_id must be set before starting the watcher")
@@ -858,6 +863,9 @@ class WatcherSupervisor:
         self.reporter = EventReporter(client, self.watcher_id)
         self.shutdown_event = threading.Event()
         self.upgrade_restart_event = threading.Event()
+        # What the updater remembers of an upgrade it handed to the Windows worker.
+        # Every updater this supervisor builds gets it, so a rebuilt runtime keeps it.
+        self._handoff = upgrade_handoff if upgrade_handoff is not None else UpgradeHandoff()
         self.rt: WatcherRuntime | None = None
         self._waiting: _WaitingMode | None = None
         # Opened in `start`. Separate from each runtime's own `StateDB` handle
@@ -1005,12 +1013,16 @@ class WatcherSupervisor:
 
         Otherwise the heartbeat is marked as an update stop, with
         `AUTO_UPDATE_STATUS_REASON`, when an in-process update was installed or an
-        upgrade was handed to the Windows worker (`Updater.upgrade_handed_off`). A
-        stop the operator asked for (*operator_stop*, Ctrl+C in the CLI) is never
-        marked, even with an update in progress.
+        upgrade was handed to the Windows worker (`UpgradeHandoff`). A stop the
+        operator asked for (*operator_stop*, Ctrl+C in the CLI) is never marked, even
+        with an update in progress.
+
+        The updater is frozen first, and the reason is chosen once, here: a tick that
+        runs during the rest of the stop can't dispatch an update or end the hand-off.
         """
+        handed_off = self._handoff.begin_stop()
         stop_reason = self._final_stop_reason(
-            system_shutdown=system_shutdown, operator_stop=operator_stop
+            system_shutdown=system_shutdown, operator_stop=operator_stop, handed_off=handed_off
         )
         if self.rt is not None:
             stop_runtime(
@@ -1032,8 +1044,13 @@ class WatcherSupervisor:
         if self._state is not None:
             self._state.close()
 
-    def _final_stop_reason(self, *, system_shutdown: bool, operator_stop: bool) -> str | None:
-        """The `status_reason` for the final `stopped` heartbeat, or `None`."""
+    def _final_stop_reason(
+        self, *, system_shutdown: bool, operator_stop: bool, handed_off: bool
+    ) -> str | None:
+        """The `status_reason` for the final `stopped` heartbeat, or `None`.
+
+        *handed_off* is what `UpgradeHandoff.begin_stop` returned.
+        """
         if system_shutdown:
             return SYSTEM_SHUTDOWN_STATUS_REASON
         if operator_stop:
@@ -1041,14 +1058,7 @@ class WatcherSupervisor:
         if self.classify_shutdown().is_upgrade_restart:
             # An in-process update was installed and the process is exiting to load it.
             return AUTO_UPDATE_STATUS_REASON
-        updater = (
-            self.rt.updater
-            if self.rt is not None
-            else self._waiting.updater
-            if self._waiting is not None
-            else None
-        )
-        if updater is not None and updater.upgrade_handed_off():
+        if handed_off:
             # The Windows upgrade worker is stopping this service to install an update.
             return AUTO_UPDATE_STATUS_REASON
         return None
@@ -1498,6 +1508,7 @@ class WatcherSupervisor:
             reporter=self.reporter,
             shutdown_event=self.shutdown_event,
             upgrade_restart_event=self.upgrade_restart_event,
+            upgrade_handoff=self._handoff,
             report_only=_any_rule(rules),
             config_revision=lambda: self._applied,
             on_config_revision=self._on_heartbeat_revision,
@@ -1553,6 +1564,7 @@ class WatcherSupervisor:
                 self.shutdown_event, self.upgrade_restart_event
             ),
             updater_cfg=updater_config_from_overrides(),
+            handoff=self._handoff,
         )
 
         def on_tick() -> None:
@@ -1635,6 +1647,9 @@ class WatcherSupervisor:
         Returns only once every upload thread of the old runtime has exited
         (see `_stop_upload_threads`), so its state DB is closed with nothing
         left to write to it, and the next runtime never uploads alongside it.
+
+        The `UpgradeHandoff` stays as it is: the supervisor owns it, and the next
+        runtime's updater is given it.
         """
         rt, self.rt = self.rt, None
         if rt is not None:

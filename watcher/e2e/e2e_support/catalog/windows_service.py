@@ -276,7 +276,7 @@ TRANSITIONS: tuple[Transition, ...] = (
         MACHINE,
         "service.upgrade->worker_dispatch_once",
         "One upgrade is dispatched to the worker once: the server sees one `update_started` for "
-        "it. After `_apply_via_worker` has triggered the task, the updater remembers "
+        "it. After `_apply_via_worker` has triggered the task, the watcher remembers "
         "the hand-off for 10 minutes and its update checks dispatch nothing, so with a check on "
         "every heartbeat no tick dispatches the upgrade again before the worker has stopped the "
         "service. The test checks on every heartbeat (1 s) and holds an upload in flight across "

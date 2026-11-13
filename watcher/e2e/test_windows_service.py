@@ -1157,10 +1157,10 @@ def test_an_upgrade_is_dispatched_to_the_worker_once(
         + ", ".join(str(e.timestamp) for e in dispatches)
     )
 
-    # The worker's `Stop-Service` is an ordinary stop for the service loop, so the mark comes from
-    # the updater's memory of the hand-off: the old service's final heartbeat says the stop is for
-    # an update. It is read from the request, because the new service's first heartbeat has
-    # cleared the reason on the watcher's row.
+    # The worker's `Stop-Service` is an ordinary stop for the service loop, so the mark comes
+    # from the supervisor's memory of the hand-off: the old service's final heartbeat says the
+    # stop is for an update. It is read from the request, because the new service's first
+    # heartbeat has cleared the reason on the watcher's row.
     assert [b.get("status_reason") for b in stopped_heartbeats(proxy)] == ["auto_update"]
 
 
