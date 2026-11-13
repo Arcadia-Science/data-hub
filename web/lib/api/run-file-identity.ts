@@ -1,10 +1,15 @@
 // Decides the stored name for a file a watcher reports into a run.
-// A run holds one active row per filename. Watchers at 1.1.0 or newer
-// store a later copy from another folder as `<stem>~<hash>.<ext>`.
+// A run holds one active row per filename and one per path. Watchers at 1.1.0
+// or newer store a later copy from another folder as `<stem>~<hash>.<ext>`.
 // Older watchers still upload by the bare name, so callers keep the old insert.
+//
+// A dismissed row (`deleted_at` set) holds neither its name nor its path. A
+// file reported at a dismissed row's path is stored as a new row when its size
+// or creation time differs from that row's, and skipped when both match,
+// because a watcher that forgot the file reports the same one again.
 
 import { createHash } from "node:crypto";
-import { and, eq, inArray, isNull, or, type SQL } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, or, type SQL } from "drizzle-orm";
 import { touchRuns } from "@/lib/api/touch-runs";
 import type { DbExecutor } from "@/lib/db";
 import { files } from "@/lib/db/schema";
@@ -24,6 +29,13 @@ export interface StoredRunFile {
   relativePath: string | null;
 }
 
+// What a dismissed row records about the file that was dismissed.
+export interface DismissedRunFile {
+  fileCreatedAt: Date | null;
+  relativePath: string;
+  sizeBytes: number | null;
+}
+
 export interface ReportedFile {
   file_created_at?: string;
   filename: string;
@@ -33,7 +45,9 @@ export interface ReportedFile {
 
 export type RunFileResolution =
   | { action: "existing"; fileId: number | null; filename: string }
-  | { action: "insert"; filename: string };
+  | { action: "insert"; filename: string }
+  // The same file as a dismissed row at this path. Nothing to store.
+  | { action: "dismissed" };
 
 interface NameClaim {
   fileId: number | null;
@@ -71,6 +85,53 @@ export function taggedFilename(
   return `${filename.slice(0, dot)}~${hash}${filename.slice(dot)}`;
 }
 
+/**
+ * Whether `incoming` is the file a dismissed row stands for. They are the same
+ * file unless the size or the creation time differs. A value that one side
+ * doesn't have (a row from before the watcher reported creation times, or a
+ * report without a size) can't show a difference, so only the values both sides
+ * have are compared. Creation times compare as milliseconds, the way a stored
+ * value comes back: the watcher reports microseconds, and `new Date` drops them
+ * before the first insert as well as before this check.
+ *
+ * Callers pass a row at the same path. The path isn't compared here.
+ */
+export function isSameAsDismissed(
+  incoming: Pick<IncomingRunFile, "fileCreatedAt" | "sizeBytes">,
+  dismissed: Pick<DismissedRunFile, "fileCreatedAt" | "sizeBytes">
+): boolean {
+  if (
+    incoming.sizeBytes != null &&
+    dismissed.sizeBytes != null &&
+    incoming.sizeBytes !== dismissed.sizeBytes
+  ) {
+    return false;
+  }
+  if (
+    incoming.fileCreatedAt &&
+    dismissed.fileCreatedAt &&
+    incoming.fileCreatedAt.getTime() !== dismissed.fileCreatedAt.getTime()
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function groupDismissedByPath(
+  dismissed: DismissedRunFile[]
+): Map<string, DismissedRunFile[]> {
+  const byPath = new Map<string, DismissedRunFile[]>();
+  for (const row of dismissed) {
+    const atPath = byPath.get(row.relativePath);
+    if (atPath) {
+      atPath.push(row);
+    } else {
+      byPath.set(row.relativePath, [row]);
+    }
+  }
+  return byPath;
+}
+
 function chooseFilename(
   incoming: IncomingRunFile,
   byName: Map<string, NameClaim>
@@ -91,16 +152,22 @@ function chooseFilename(
 
 /**
  * Pure decision for one report batch. `existing` is the active rows that
- * already use one of these paths or names. Results line up with `incoming`.
+ * already use one of these paths or names. `dismissed` is the dismissed rows at
+ * these paths: a file that no active row has is skipped when it is the same as
+ * any of them (see `isSameAsDismissed`). Results line up with `incoming`.
  * A name claimed by an earlier item in the batch counts, so two copies
- * reported together don't both try to take the plain name.
+ * reported together don't both try to take the plain name. A skipped file
+ * claims nothing, and a dismissed row never claims a name, so a new file may
+ * take the name of the file that was dismissed.
  */
 export function decideStoredNames(
   incoming: IncomingRunFile[],
-  existing: StoredRunFile[]
+  existing: StoredRunFile[],
+  dismissed: DismissedRunFile[] = []
 ): RunFileResolution[] {
   const byPath = new Map<string, NameClaim>();
   const byName = new Map<string, NameClaim>();
+  const dismissedByPath = groupDismissedByPath(dismissed);
 
   for (const row of existing) {
     const claim: NameClaim = {
@@ -135,6 +202,14 @@ export function decideStoredNames(
         fileId: owner.fileId,
         filename: owner.filename,
       };
+    }
+
+    if (
+      dismissedByPath
+        .get(file.relativePath)
+        ?.some((row) => isSameAsDismissed(file, row))
+    ) {
+      return { action: "dismissed" as const };
     }
 
     const claim: NameClaim = {
@@ -189,6 +264,34 @@ async function loadMatchingFiles(
     );
 }
 
+// Dismissed rows at the given paths, for a whole batch in one query.
+async function loadDismissedFiles(
+  executor: DbExecutor,
+  instrumentRunId: string,
+  paths: string[]
+): Promise<DismissedRunFile[]> {
+  if (paths.length === 0) {
+    return [];
+  }
+  const rows = await executor
+    .select({
+      relativePath: files.relativePath,
+      sizeBytes: files.sizeBytes,
+      fileCreatedAt: files.fileCreatedAt,
+    })
+    .from(files)
+    .where(
+      and(
+        eq(files.instrumentRunId, instrumentRunId),
+        isNotNull(files.deletedAt),
+        inArray(files.relativePath, paths)
+      )
+    );
+  return rows.flatMap((row) =>
+    row.relativePath ? [{ ...row, relativePath: row.relativePath }] : []
+  );
+}
+
 export async function resolveRunFiles(
   executor: DbExecutor,
   instrumentRunId: string,
@@ -206,6 +309,24 @@ export async function resolveRunFiles(
     names
   );
   let decisions = decideStoredNames(incoming, existing);
+
+  // A file that no active row has may be one that was dismissed. Only then
+  // look at the dismissed rows, so a re-report of known files costs nothing.
+  const newPaths = [
+    ...new Set(
+      incoming
+        .filter((_, index) => decisions[index]?.action === "insert")
+        .map((file) => file.relativePath)
+    ),
+  ];
+  const dismissed = await loadDismissedFiles(
+    executor,
+    instrumentRunId,
+    newPaths
+  );
+  if (dismissed.length > 0) {
+    decisions = decideStoredNames(incoming, existing, dismissed);
+  }
 
   // The short hash isn't one of the names we queried. Load any row that
   // already uses a chosen name so a re-report maps back to it instead of
@@ -231,7 +352,7 @@ export async function resolveRunFiles(
   if (extra.length === 0) {
     return decisions;
   }
-  decisions = decideStoredNames(incoming, [...existing, ...extra]);
+  decisions = decideStoredNames(incoming, [...existing, ...extra], dismissed);
   return decisions;
 }
 
@@ -280,7 +401,8 @@ async function insertResolved(
  *
  * `renameDuplicates` is true only for watchers that can upload the renamed
  * file. For older watchers the insert is unchanged: a second file with a
- * name already in the run is skipped by the filename unique index.
+ * name already in the run is skipped by the filename unique index. Both kinds
+ * leave out a file that a dismissed row at its path stands for.
  */
 export async function recordDetectedFiles(
   executor: DbExecutor,
@@ -330,11 +452,29 @@ export async function recordDetectedFiles(
       insertedAny = insertedAny || retried.size > 0;
     }
   } else {
+    // The path index no longer holds a dismissed file's path, so leave out
+    // the files a dismissed row stands for, as the resolver does.
+    const dismissedByPath = groupDismissedByPath(
+      await loadDismissedFiles(
+        executor,
+        instrumentRunId,
+        reported.map((file) => file.relative_path)
+      )
+    );
+    const fresh = reported.filter(
+      (file) =>
+        !dismissedByPath
+          .get(file.relative_path)
+          ?.some((row) => isSameAsDismissed(toIncoming(file), row))
+    );
+    if (fresh.length === 0) {
+      return;
+    }
     const now = new Date();
     const inserted = await executor
       .insert(files)
       .values(
-        reported.map((file) => ({
+        fresh.map((file) => ({
           instrumentRunId,
           relativePath: file.relative_path,
           filename: file.filename,

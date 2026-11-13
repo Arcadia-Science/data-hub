@@ -117,7 +117,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     return apiError(
       409,
       CONFLICT,
-      `Cannot store a file for '${relativePath}'. A dismissed file may already use that path.`
+      `Cannot store a file for '${relativePath}'. The same file was dismissed at that path.`
     );
   }
 
@@ -245,6 +245,8 @@ async function loadActiveFile(id: number) {
   return row ?? null;
 }
 
+// Returns null for the file a dismissed row at this path stands for, so the
+// route refuses it. A different file at that path gets a row of its own.
 // A conflict means another request stored this path first. Deciding
 // again reuses that row, or takes the folder-hash name.
 async function findOrCreateByPath(
@@ -275,6 +277,9 @@ async function findOrCreateByPath(
   };
 
   let [decision] = await resolveRunFiles(db, instrumentRunId, [incoming]);
+  if (decision?.action === "dismissed") {
+    return null;
+  }
   if (decision?.action === "existing" && decision.fileId != null) {
     return await loadActiveFile(decision.fileId);
   }

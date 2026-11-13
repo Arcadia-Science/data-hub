@@ -764,7 +764,9 @@ export const files = pgTable(
     // `20260325_data_file_1.csv` or `20260325_testing/data_file_1.csv`). For
     // Lambda-created files this is set to `filename` so both writers dedup
     // against the same `(instrument_run_id, relative_path)` partial unique
-    // index. May be NULL for very old rows predating that contract.
+    // index, which covers active rows only. A dismissed row keeps its path
+    // while a different file reported there gets a row of its own. May be NULL
+    // for very old rows predating that contract.
     relativePath: text("relative_path"),
     // NULL until the file is uploaded to S3.
     s3Bucket: text("s3_bucket"),
@@ -863,9 +865,14 @@ export const files = pgTable(
     }),
   },
   (file) => [
-    uniqueIndex("uq_files_instrument_run_id_relative_path")
+    // Paths are unique per active row within a run, like filenames below. A
+    // dismissed file (`deleted_at` set) gives up its path, so a different
+    // file that a watcher later finds there can be stored.
+    uniqueIndex("uq_files_active_instrument_run_id_relative_path")
       .on(file.instrumentRunId, file.relativePath)
-      .where(sql`${file.relativePath} is not null`),
+      .where(
+        sql`${file.relativePath} is not null and ${file.deletedAt} is null`
+      ),
     // Shared dedup key between watcher and Lambda writers: filenames are
     // unique per active row within a run. The watcher's request-upload-url
     // already keys lookups on (instrument_run_id, filename); this index
