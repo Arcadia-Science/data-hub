@@ -58,7 +58,7 @@ A status ping the watcher sends to the API every 60 seconds. It carries the watc
 
 ### Events [#events]
 
-A per-watcher log of lifecycle moments and errors: `watcher_started`, `run_reported`, `file_uploaded`, `update_succeeded`, and `error` (with a `details.kind` discriminator), among others. Events are batched and flushed on each heartbeat and are visible on the dashboard, which makes them the primary tool for diagnosing a watcher remotely. See [Troubleshoot a watcher](/docs/troubleshoot-a-watcher).
+A per-watcher log of lifecycle moments and errors: `watcher_started`, `run_reported`, `file_uploaded`, `update_succeeded`, `upload_requests_cancelled`, and `error` (with a `details.kind` discriminator), among others. Events are batched and flushed on each heartbeat and are visible on the dashboard, which makes them the primary tool for diagnosing a watcher remotely. See [Troubleshoot a watcher](/docs/troubleshoot-a-watcher).
 
 ### Environment [#environment]
 
@@ -140,7 +140,7 @@ For instruments in [manual upload mode](#upload-mode), dismissing a detected fil
 
 ### Soft delete [#soft-delete]
 
-Data Hub marks things deleted rather than erasing them, so history survives for auditing. Deleting a run hides it from run lists without removing its stored files, and **Show deleted runs** brings it back into view. Deregistering a watcher keeps its events and heartbeats. Anyone signed in can restore a deleted run from the run page.
+Data Hub marks things deleted rather than erasing them, so history survives for auditing. Deleting a run hides it from run lists without removing its stored files, and **Show deleted runs** brings it back into view. It also cancels any uploads that were requested for the run’s files, and restoring the run doesn’t bring them back. Deregistering a watcher keeps its events and heartbeats. Anyone signed in can restore a deleted run from the run page.
 
 ## People and access [#people-and-access]
 
