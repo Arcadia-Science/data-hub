@@ -43,8 +43,10 @@ a database migration. Known ``kind`` values, with their per-kind
   doesn't flood the queue. ``details = {"kind", "relative_path"}``.
 * ``events_dropped`` -- synthetic event prepended to the next
   successful batch after events were dropped: the oldest ones when the
-  queue was full, or a batch that the server refused (a 4xx) or that
-  wasn't saved and failed to send.
+  queue was full, a batch that the server refused (a 4xx), a saved batch
+  that failed ``MAX_FAILED_FLUSHES`` flushes in a way that may have
+  reached the server (a 500 or a read timeout), or a batch that wasn't
+  saved and failed to send.
   ``details = {"kind", "dropped_count", "since"}``.
 * ``heartbeat_recovered`` -- emitted on the first successful heartbeat
   after one or more consecutive failures.
@@ -121,6 +123,42 @@ FLUSH_RETRY_BASE_DELAY = 1.0
 # once it has waited its delay.
 FLUSH_RETRY_MIN_SECONDS = 1.0
 
+# A saved batch that fails a flush in a way that may have reached the server (a 500 or
+# another 5xx, or a read timeout) is dropped, and counted in `events_dropped`, when its
+# events have been in this many failed flushes. A batch that the server rejects on every
+# try (a 500 on a value the database refuses) would otherwise stay at the front of the queue
+# and keep every later event from being sent, and a read timeout from a server that stores
+# the batch would send it again at every tick.
+MAX_FAILED_FLUSHES = 3
+
+# The answers that say the server, or a gateway in front of it, can't take requests now:
+# bad gateway, service unavailable, gateway timeout.
+_UNAVAILABLE_STATUSES = frozenset({502, 503, 504})
+
+
+def _nothing_reached_the_server(exc: Exception | None) -> bool:
+    """Whether a failed events request never got to the events route, so it stored nothing.
+
+    A connection failure (status 0 without a read timeout) and an answer that says the
+    server is unavailable (`_UNAVAILABLE_STATUSES`) are that. A batch that fails this way
+    is kept for as long as it takes: nothing was stored, and a later flush can't store it
+    twice.
+    """
+    return (
+        isinstance(exc, ApiError)
+        and not exc.read_timed_out
+        and (exc.status_code == 0 or exc.status_code in _UNAVAILABLE_STATUSES)
+    )
+
+
+def _worth_retrying(exc: Exception | None) -> bool:
+    """Whether another request could succeed where this one failed.
+
+    Only a connection error, a read timeout or a 5xx could. A 4xx fails the same way again,
+    and an error raised after a 2xx answer means the server stored the batch.
+    """
+    return isinstance(exc, ApiError) and exc.is_transient
+
 
 def _safe_to_replay(exc: Exception | None) -> bool:
     """Whether a failed events request can be sent again without the server storing it twice.
@@ -131,7 +169,7 @@ def _safe_to_replay(exc: Exception | None) -> bool:
     slow to answer. Neither is a 4xx, which would fail again, or an error raised after a
     2xx answer, which means the server did store it.
     """
-    return isinstance(exc, ApiError) and not exc.read_timed_out and exc.is_transient
+    return _worth_retrying(exc) and not (isinstance(exc, ApiError) and exc.read_timed_out)
 
 
 class EventType(str, Enum):
@@ -183,6 +221,10 @@ class _Queued:
     # A send that already has the entry in flight uses it to take the drop back if the server
     # then takes the entry (see `EventReporter._acknowledge`).
     dropped: bool = False
+    # How many flushes this entry has been in that failed in a way that may have reached the
+    # server (see `MAX_FAILED_FLUSHES`). Not saved: an entry loaded after a restart starts
+    # again at 0.
+    failed_flushes: int = 0
 
 
 def _event_from_json(raw: str) -> WatcherEvent | None:
@@ -218,6 +260,9 @@ class EventReporter:
     * With a store attached (:meth:`attach_store`), every queued event is also saved in
       the state database until the server has it. A kill, or a batch that can't be sent
       for now, loses nothing: what is saved is sent after the restart or on the next flush.
+      "For now" is bounded where the failure may have reached the server (see
+      `_give_up_on`), so a batch that the server fails on every time can't block the
+      events behind it for good.
 
     How the queue and the store stay one list
     -----------------------------------------
@@ -444,11 +489,16 @@ class EventReporter:
         leaves a retry time to run. It makes no attempt once the deadline has passed, and
         waits for a flush that is running only until then.
 
-        A batch that fails on a connection error, a read timeout or a 5xx stays queued if it
-        is saved, and the next flush sends it again. Anything else is dropped and counted:
-        a batch that isn't saved, one that the server refused with a 4xx, which would fail
-        again and keep every later event from being sent, and one whose answer couldn't be
-        read after a 2xx, which the server stored.
+        A saved batch that fails stays queued, and the next flush sends it again, as long as
+        nothing reached the server: a connection failure (not a read timeout) or a 502, 503
+        or 504 keeps it for good. A 500 or any other 5xx, and a read timeout, keep it too, but
+        its events are dropped and counted once they have been in `MAX_FAILED_FLUSHES` failed
+        flushes, so a batch that the server can't store, or stores and is slow to answer, is
+        not sent over and over. Anything else is dropped and counted at once: a batch that
+        isn't saved, one that the server refused with a 4xx, which would fail again and keep
+        every later event from being sent, and one whose answer couldn't be read after a 2xx,
+        which the server stored. Only a connection error, a read timeout or a 5xx is retried
+        within the flush.
         """
         if deadline is not None and time.monotonic() >= deadline:
             return
@@ -542,7 +592,7 @@ class EventReporter:
                 return None, attempts
             except (ApiError, Exception) as exc:
                 last_exc = exc
-            if attempts >= FLUSH_RETRY_MAX:
+            if attempts >= FLUSH_RETRY_MAX or not _worth_retrying(last_exc):
                 break
             if deadline is not None and not _safe_to_replay(last_exc):
                 break
@@ -577,26 +627,53 @@ class EventReporter:
             self._dropped_since = None
 
     def _give_up_on(self, batch: list[_Queued], exc: Exception, attempts: int, sent: int) -> None:
-        """A batch failed all its attempts: keep the entries that are saved, drop the others.
+        """A batch failed all its attempts: keep or drop its entries, as the failure says.
 
-        Only a failure that may pass (no answer, or a 5xx) keeps a saved entry, in the queue
-        and in the store, for the next flush. The synthetic prefix isn't counted — the prior
-        drops it represents are still tracked in ``_dropped_count`` and the next successful
-        flush surfaces them.
+        What happens to the entries of the batch depends on how it failed:
+
+        * Nothing reached the server (a connection failure, or a 502, 503 or 504): the saved
+          entries stay in the queue and in the store, for as long as it takes.
+        * It may have reached the server (a 500 or another 5xx, or a read timeout): the saved
+          entries stay, but each is counted as having been in a failed flush, and one that has
+          been in `MAX_FAILED_FLUSHES` is dropped.
+        * Anything else (a 4xx, or an error after a 2xx answer, which means the server stored
+          the batch): the entries are dropped, because a retry would fail again or store them
+          twice, and every later event would wait behind them.
+
+        An entry that isn't saved is always dropped. The synthetic prefix isn't counted: the
+        prior drops it represents are still tracked in ``_dropped_count`` and the next
+        successful flush surfaces them.
         """
-        may_pass = isinstance(exc, ApiError) and exc.is_transient
+        reached_nothing = _nothing_reached_the_server(exc)
+        may_have_reached = not reached_nothing and _worth_retrying(exc)
         with self._lock:
-            doomed = [entry for entry in batch if not (may_pass and entry.row_id is not None)]
+            doomed: list[_Queued] = []
+            for entry in batch:
+                if entry.row_id is None:
+                    drop = True
+                elif reached_nothing:
+                    drop = False
+                elif may_have_reached:
+                    entry.failed_flushes += 1
+                    drop = entry.failed_flushes >= MAX_FAILED_FLUSHES
+                else:
+                    drop = True
+                if drop:
+                    doomed.append(entry)
             removed = self._remove(doomed)
             for entry in removed:
                 entry.dropped = True
             if removed:
                 self._note_drop(len(removed))
                 self._delete_rows(entry.row_id for entry in removed)
+            # Counted from the queue, so an entry that the cap dropped while the request was
+            # in flight, or that `detach_store` took out, isn't one of the kept.
+            queued = set(self._queue)
+            kept = sum(1 for entry in batch if entry in queued)
         logger.warning(
             "Failed to flush %d event(s) after %d attempt(s): %s%s",
             sent,
             attempts,
             exc,
-            "; the saved ones stay queued" if len(removed) < len(batch) else "",
+            f"; {kept} saved event(s) stay queued" if kept else "",
         )

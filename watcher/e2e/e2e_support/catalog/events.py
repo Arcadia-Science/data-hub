@@ -26,16 +26,25 @@ TRANSITIONS: tuple[Transition, ...] = (
     covered(
         MACHINE,
         "reporter.flush->failed_batch_kept",
-        "A flush that fails all three attempts on a connection error or a 5xx (503 on the "
-        "events route) keeps its batch in the state database, the watcher keeps running, and "
-        "the next flush sends it. Nothing is reported as dropped.",
+        "A flush that gets no answer from the server (a connection error, or a 502, 503 or "
+        "504, shown with a 503 on the events route) keeps its batch in the state database for "
+        "as long as it takes, however many flushes fail. The watcher keeps running, and the "
+        "next flush that gets through sends the batch. Nothing is reported as dropped.",
+    ),
+    covered(
+        MACHINE,
+        "reporter.flush->failing_batch_dropped",
+        "A batch that fails in a way that may have reached the server (a 500 on the events "
+        "route; a read timeout is the other) is kept for the next flush, and dropped when its "
+        "events have been in three failed flushes, so a batch that the server can't store "
+        "doesn't keep every later event from being sent. The watcher keeps running.",
     ),
     covered(
         MACHINE,
         "reporter.flush->refused_batch_dropped",
-        "A batch that the server refuses with a 4xx (400 on the events route) on all three "
-        "attempts is dropped, so it can't keep every later event from being sent, and the "
-        "watcher keeps running.",
+        "A batch that the server refuses with a 4xx (400 on the events route) is sent once "
+        "and dropped, not retried and not kept, so it can't keep every later event from being "
+        "sent. The watcher keeps running.",
     ),
     covered(
         MACHINE,

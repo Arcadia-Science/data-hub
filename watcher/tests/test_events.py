@@ -30,6 +30,7 @@ from data_hub_watcher.constants import SYSTEM_SHUTDOWN_HTTP_TIMEOUT
 from data_hub_watcher.events import (
     FLUSH_RETRY_MAX,
     MAX_EVENTS_PER_REQUEST,
+    MAX_FAILED_FLUSHES,
     EventReporter,
     EventType,
     WatcherEvent,
@@ -142,6 +143,30 @@ class TestFlushRetry:
         # double-counted.
         assert reporter._dropped_count == 2
         assert reporter._dropped_since is not None
+
+    @pytest.mark.parametrize(
+        "failure",
+        [
+            ApiError("bad request", status_code=400),
+            ApiError("forbidden", status_code=403),
+            ApiError("too large", status_code=413),
+            ValueError("the reply was not JSON"),
+        ],
+        ids=["400", "403", "413", "unreadable-reply"],
+    )
+    def test_a_failure_that_would_repeat_is_sent_once(
+        self, reporter: EventReporter, client: MagicMock, failure: Exception
+    ) -> None:
+        # A 4xx fails the same way each time, and after a 2xx answer the server has the batch.
+        reporter.queue_event(WatcherEvent(event_type=EventType.WATCHER_STARTED, message="hi"))
+        client.send_events.side_effect = failure
+
+        with patch("data_hub_watcher.events.time.sleep") as sleep:
+            reporter.flush()
+
+        assert client.send_events.call_count == 1
+        sleep.assert_not_called()
+        assert reporter._dropped_count == 1
 
     def test_a_flush_without_a_deadline_keeps_the_clients_timeout(
         self, reporter: EventReporter, client: MagicMock
@@ -655,23 +680,235 @@ class TestSavedEvents:
         "failure",
         [
             ApiError("Connection error: refused", status_code=0),
-            ApiError("Request timed out", status_code=0, read_timed_out=True),
             ApiError("bad gateway", status_code=502),
+            ApiError("unavailable", status_code=503),
+            ApiError("gateway timeout", status_code=504),
         ],
-        ids=["connection-error", "read-timeout", "502"],
+        ids=["connection-error", "502", "503", "504"],
     )
-    def test_a_failure_that_may_pass_keeps_the_batch(
+    def test_a_batch_is_kept_for_as_long_as_nothing_reaches_the_server(
         self, saving: EventReporter, client: MagicMock, state: StateDB, failure: ApiError
     ) -> None:
         saving.queue_event(_event(1))
         client.send_events.side_effect = failure
 
         with patch("data_hub_watcher.events.time.sleep"):
-            saving.flush(deadline=time.monotonic() + 60)
+            for _ in range(5 * MAX_FAILED_FLUSHES):
+                saving.flush()
 
+        # Nothing was stored, so no number of failed flushes can store it twice, or drop it.
+        assert client.send_events.call_count == 5 * MAX_FAILED_FLUSHES * FLUSH_RETRY_MAX
         assert _saved(state) == ["run-1"]
         assert len(saving._queue) == 1
         assert saving._dropped_count == 0
+
+        # It is delivered, once, when the server is back.
+        client.send_events.reset_mock(side_effect=True)
+        saving.flush()
+        assert _sent_batches(client) == [["run-1"]]
+        assert _saved(state) == []
+        assert saving._dropped_count == 0
+
+    def test_a_batch_kept_across_a_restart_is_delivered_when_the_server_is_back(
+        self, tmp_path: Path, client: MagicMock
+    ) -> None:
+        path = tmp_path / "state.db"
+        client.send_events.side_effect = ApiError("Connection error: refused", status_code=0)
+        for start in range(3):  # three starts of the watcher, with the server down at each
+            db = StateDB(path)
+            try:
+                reporter = EventReporter(client, watcher_id="w-test")
+                reporter.attach_store(db)
+                reporter.queue_event(_event(start))
+                with patch("data_hub_watcher.events.time.sleep"):
+                    for _ in range(2 * MAX_FAILED_FLUSHES):
+                        reporter.flush()
+                reporter.detach_store()
+            finally:
+                db.close()
+
+        client.send_events.reset_mock(side_effect=True)
+        db = StateDB(path)
+        try:
+            reporter = EventReporter(client, watcher_id="w-test")
+            reporter.attach_store(db)
+            reporter.flush()
+            assert _sent_batches(client) == [["run-0", "run-1", "run-2"]]
+            assert db.pending_events("w-test") == []
+        finally:
+            db.close()
+
+    @pytest.mark.parametrize(
+        "failure",
+        [
+            ApiError("internal error", status_code=500),
+            ApiError("not implemented", status_code=501),
+            ApiError("Request timed out", status_code=0, read_timed_out=True),
+        ],
+        ids=["500", "501", "read-timeout"],
+    )
+    def test_a_batch_that_may_have_reached_the_server_is_kept_for_a_few_flushes_then_dropped(
+        self, saving: EventReporter, client: MagicMock, state: StateDB, failure: ApiError
+    ) -> None:
+        saving.queue_event(_event(1))
+        client.send_events.side_effect = failure
+
+        with patch("data_hub_watcher.events.time.sleep"):
+            for _ in range(MAX_FAILED_FLUSHES - 1):
+                saving.flush()
+                assert _saved(state) == ["run-1"]
+                assert saving._dropped_count == 0
+            saving.flush()
+
+        assert _saved(state) == []
+        assert len(saving._queue) == 0
+        assert saving._dropped_count == 1
+
+    def test_a_batch_that_gets_a_500_every_time_does_not_hold_up_the_events_after_it(
+        self, saving: EventReporter, client: MagicMock, state: StateDB
+    ) -> None:
+        # The server fails whenever one event is in the batch (a value that the database
+        # refuses, say) and stores any other batch. The poison event is the oldest, with 129
+        # events behind it: the first request holds it and 99 of them.
+        stored: list[str] = []
+
+        def server(_watcher_id: str, events: list[dict[str, Any]], **_kwargs: Any) -> None:
+            if any(e["message"] == "POISON" for e in events):
+                raise ApiError("Internal server error", status_code=500)
+            stored.extend(e["message"] for e in events)
+
+        client.send_events.side_effect = server
+        saving.queue_event(WatcherEvent(event_type=EventType.ERROR, message="POISON"))
+        for i in range(129):
+            saving.queue_event(_event(i))
+
+        with patch("data_hub_watcher.events.time.sleep"):
+            for flushes in range(1, MAX_FAILED_FLUSHES):
+                saving.flush()
+                assert len(_saved(state)) == 130, f"dropped too early, after {flushes}"
+            saving.flush()
+            # The batch of 100 is dropped and counted. The 30 behind it are untouched.
+            assert len(_saved(state)) == 30
+            assert saving._dropped_count == 100
+            assert stored == []
+
+            saving.flush()
+
+        assert stored[0].startswith("Dropped 100 watcher event(s)")
+        assert stored[1:] == [f"run-{i}" for i in range(99, 129)]
+        assert _saved(state) == []
+        assert len(saving._queue) == 0
+        assert saving._dropped_count == 0
+
+    def test_failed_flushes_are_counted_per_event_and_not_forgotten_by_a_gateway_error(
+        self, saving: EventReporter, client: MagicMock, state: StateDB
+    ) -> None:
+        saving.queue_event(_event(1))
+        server_error = ApiError("internal error", status_code=500)
+        unavailable = ApiError("unavailable", status_code=503)
+        # Three flushes that may have reached the server, with some that didn't between them.
+        outcomes = [server_error, unavailable, unavailable, server_error, unavailable]
+
+        with patch("data_hub_watcher.events.time.sleep"):
+            for failure in outcomes:
+                client.send_events.side_effect = failure
+                saving.flush()
+            assert _saved(state) == ["run-1"]
+            assert saving._dropped_count == 0
+
+            client.send_events.side_effect = server_error
+            saving.flush()
+
+        assert _saved(state) == []
+        assert saving._dropped_count == 1
+
+    def test_an_event_that_arrives_after_a_failed_flush_has_its_own_count(
+        self, saving: EventReporter, client: MagicMock, state: StateDB
+    ) -> None:
+        # The count is the event's own, not the batch's: the first event has been in one
+        # failed flush when the second is queued, so it is in three by the end and the second
+        # in two.
+        saving.queue_event(_event(1))
+        client.send_events.side_effect = ApiError("internal error", status_code=500)
+        with patch("data_hub_watcher.events.time.sleep"):
+            saving.flush()
+            saving.queue_event(_event(2))
+            for _ in range(MAX_FAILED_FLUSHES - 1):
+                saving.flush()
+            assert _saved(state) == ["run-2"]
+
+            client.send_events.side_effect = None
+            saving.flush()
+
+        assert _sent_batches(client)[-1][0].startswith("Dropped 1 watcher event(s)")
+        assert _sent_batches(client)[-1][1:] == ["run-2"]
+        assert _saved(state) == []
+
+    def test_a_batch_that_times_out_every_time_is_sent_a_bounded_number_of_times(
+        self, saving: EventReporter, client: MagicMock, state: StateDB
+    ) -> None:
+        # A slow server that stores each request it gets and answers after the timeout. Each
+        # flush without a deadline sends the batch `FLUSH_RETRY_MAX` times, and the batch is
+        # dropped after `MAX_FAILED_FLUSHES` flushes. It used to be sent again at every tick.
+        stored: list[str] = []
+
+        def slow_but_saving(_watcher_id: str, events: list[dict[str, Any]], **_kwargs: Any) -> None:
+            stored.extend(e["message"] for e in events)
+            raise ApiError("Request timed out", status_code=0, read_timed_out=True)
+
+        client.send_events.side_effect = slow_but_saving
+        saving.queue_event(_event(1))
+
+        with patch("data_hub_watcher.events.time.sleep"):
+            for _ in range(MAX_FAILED_FLUSHES):
+                saving.flush()
+
+        assert stored == ["run-1"] * (MAX_FAILED_FLUSHES * FLUSH_RETRY_MAX)
+        assert _saved(state) == []
+        assert saving._dropped_count == 1
+
+        # The server answers in time again: only the report of the drop is left to send.
+        stored.clear()
+        client.send_events.side_effect = lambda _w, events, **_k: stored.extend(
+            e["message"] for e in events
+        )
+        saving.flush()
+        saving.flush()
+        assert stored == ["Dropped 1 watcher event(s) due to API errors"]
+
+    def test_a_flush_with_a_deadline_sends_a_batch_that_times_out_once(
+        self, saving: EventReporter, client: MagicMock, state: StateDB
+    ) -> None:
+        # The stop's flush: no retry after a read timeout, and the batch waits for the next start.
+        saving.queue_event(_event(1))
+        client.send_events.side_effect = ApiError("timed out", status_code=0, read_timed_out=True)
+
+        with patch("data_hub_watcher.events.time.sleep"):
+            saving.flush(deadline=time.monotonic() + 60)
+
+        assert client.send_events.call_count == 1
+        assert _saved(state) == ["run-1"]
+
+    def test_the_failed_flush_count_is_not_saved_across_a_restart(
+        self, tmp_path: Path, client: MagicMock
+    ) -> None:
+        path = tmp_path / "state.db"
+        client.send_events.side_effect = ApiError("internal error", status_code=500)
+        for _ in range(3):
+            db = StateDB(path)
+            try:
+                reporter = EventReporter(client, watcher_id="w-test")
+                reporter.attach_store(db)
+                if not db.pending_events("w-test"):
+                    reporter.queue_event(_event(1))
+                with patch("data_hub_watcher.events.time.sleep"):
+                    for _ in range(MAX_FAILED_FLUSHES - 1):
+                        reporter.flush()
+                reporter.detach_store()
+                # Still saved: each process makes only two failed flushes of three.
+                assert len(db.pending_events("w-test")) == 1
+            finally:
+                db.close()
 
     @pytest.mark.parametrize(
         "failure",
@@ -897,3 +1134,48 @@ class TestSavedEvents:
         # Memory only, so a batch that can't be sent is dropped and counted, as it always was.
         assert len(reporter._queue) == 0
         assert reporter._dropped_count == 1
+
+    def test_the_log_says_how_many_saved_events_stay_queued(
+        self,
+        saving: EventReporter,
+        client: MagicMock,
+        state: StateDB,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        with patch.object(state, "add_pending_event", side_effect=sqlite3.OperationalError("full")):
+            saving.queue_event(_event(1))  # not saved, so dropped
+        saving.queue_event(_event(2))
+        saving.queue_event(_event(3))
+        client.send_events.side_effect = ApiError("down", status_code=503)
+
+        with patch("data_hub_watcher.events.time.sleep"), caplog.at_level("WARNING"):
+            saving.flush()
+
+        assert "; 2 saved event(s) stay queued" in caplog.text
+
+    def test_the_log_does_not_say_events_stay_queued_when_the_cap_dropped_them_meanwhile(
+        self,
+        client: MagicMock,
+        state: StateDB,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        # The server refuses a batch of three while a burst pushes two of its events out of
+        # the queue. Only one of the three was still queued to be dropped, and none is kept.
+        reporter = EventReporter(client, watcher_id="w-test", max_queue_size=3)
+        reporter.attach_store(state)
+        for i in range(3):
+            reporter.queue_event(_event(i))
+
+        def refuse_after_a_burst(*_args: Any, **_kwargs: Any) -> None:
+            reporter.queue_event(_event(3))
+            reporter.queue_event(_event(4))
+            raise ApiError("bad request", status_code=400)
+
+        client.send_events.side_effect = refuse_after_a_burst
+
+        with caplog.at_level("WARNING"):
+            reporter.flush()
+
+        assert "stay queued" not in caplog.text
+        assert _saved(state) == ["run-3", "run-4"]
+        assert [e.event.message for e in reporter._queue] == ["run-3", "run-4"]
