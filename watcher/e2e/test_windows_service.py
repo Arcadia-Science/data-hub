@@ -1194,15 +1194,6 @@ def test_a_config_that_does_not_load_is_logged_in_the_service_log(watcher: Watch
         )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=KnownBugStillPresent,
-    reason=(
-        "ENG-2128: a file that is locked after its last write counts as "
-        "stable (stability reads only the size and time), then reading it for the upload hits "
-        "a sharing violation, and the file is tried again only at the next start"
-    ),
-)
 @pytest.mark.covers("file.locked->uploaded_after_release")
 def test_a_file_that_stays_locked_after_its_last_write_is_uploaded_once_it_is_released(
     watcher: WatcherFactory, server: ServerView, watch_dir: Path, instrument_id: str
@@ -1225,11 +1216,10 @@ def test_a_file_that_stays_locked_after_its_last_write_is_uploaded_once_it_is_re
         with pytest.raises(PermissionError):
             target.read_bytes()
 
-    # PROPOSED: released, the file is uploaded, without a restart of the service.
-    with known_bug():
-        server.wait_for_uploaded(
-            instrument_id, "RUN001", "RUN001/scan.csv", content=bytes(writer.content), timeout=30
-        )
+    # Released, the file is uploaded, without a restart of the service.
+    server.wait_for_uploaded(
+        instrument_id, "RUN001", "RUN001/scan.csv", content=bytes(writer.content), timeout=30
+    )
 
 
 @pytest.mark.covers("service.system_shutdown->clean_stop")

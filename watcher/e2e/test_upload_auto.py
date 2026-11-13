@@ -30,10 +30,18 @@ from data_hub_watcher import testing_overrides
 from e2e_support.admin import Admin
 from e2e_support.drivers import WatcherDriver
 from e2e_support.factory import WatcherFactory
-from e2e_support.files import LARGE, SMALL, payload, write_file, write_run
+from e2e_support.files import (
+    LARGE,
+    SMALL,
+    make_readable,
+    make_unreadable,
+    payload,
+    write_file,
+    write_run,
+)
 from e2e_support.proxy_helpers import wait_for_answer
 from e2e_support.server import ServerView
-from e2e_support.waiting import KnownBugStillPresent, known_bug, wait_until
+from e2e_support.waiting import KnownBugStillPresent, known_bug, stays_true, wait_until
 
 pytestmark = pytest.mark.e2e
 
@@ -927,6 +935,59 @@ def test_pending_upload_for_a_file_that_vanished_is_dropped_at_the_next_start(
     still = server.file(instrument_id, RUN, SMALL_PATH)
     assert still is not None and still.status == "detected"
     assert s3_puts(proxy) == []
+
+
+@pytest.mark.platforms("cli")
+@pytest.mark.covers("upload.unreadable_file->uploaded_after_release")
+def test_a_file_that_cannot_be_read_yet_waits_and_is_uploaded_once_it_can_be_read(
+    watcher: WatcherFactory,
+    server: ServerView,
+    proxy: FaultProxy,
+    instrument_id: str,
+    watch_dir: Path,
+) -> None:
+    pc = watcher()
+    start_watching(pc, server)
+
+    # A file the watcher can see but can't open. It is stable, so the run is reported, and then
+    # the read for the upload fails. (The Windows service suite does it with a file that a writer
+    # keeps open.)
+    target = watch_dir / RUN / "small.csv"
+    content = write_file(target, SMALL)
+    make_unreadable(target)
+
+    # That is one event that says it will be retried, not a failed attempt.
+    waiting = server.wait_for_event(
+        pc.watcher_id, event_type="upload_failed", message_contains="Can't read small.csv yet"
+    )
+    assert waiting.details["will_retry"] is True
+    assert waiting.details["relative_path"] == SMALL_PATH
+    assert waiting.details["run_id"] == RUN
+    row = server.file(instrument_id, RUN, SMALL_PATH)
+    assert row is not None and row.status == "detected"
+    assert pending(pc) == [(SMALL_PATH, RUN, 0)]
+
+    # The queue polls every 2 s here. Several polls find the file still unreadable, and leave it
+    # alone: no request to the server, no new event, and no attempt used up.
+    stays_true(
+        lambda: (
+            len(server.events(pc.watcher_id, event_type="upload_failed")) == 1
+            and not calls(proxy, "POST", "/request-upload-url")
+            and pending(pc) == [(SMALL_PATH, RUN, 0)]
+        ),
+        7,
+        lambda: server.dump(pc.watcher_id, instrument_id),
+        what="the watcher to leave the unreadable file alone",
+    )
+
+    # Once the file can be read, the next poll uploads it. Nothing is restarted.
+    make_readable(target)
+    server.wait_for_uploaded(instrument_id, RUN, SMALL_PATH, content=content)
+    wait_for_pending(pc, [])
+    assert recorded_uploads(pc) == [SMALL_PATH]
+    uploaded = server.wait_for_event(pc.watcher_id, event_type="file_uploaded")
+    assert uploaded.details["sha256"] == hashlib.sha256(content).hexdigest()
+    assert len(server.events(pc.watcher_id, event_type="upload_failed")) == 1
 
 
 @pytest.mark.covers("upload.crash_after_report->retried_after_restart")

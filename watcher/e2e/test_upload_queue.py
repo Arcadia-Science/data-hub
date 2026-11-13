@@ -25,7 +25,7 @@ from data_hub_watcher import testing_overrides
 from e2e_support.admin import Admin
 from e2e_support.drivers import WatcherDriver
 from e2e_support.factory import WatcherFactory
-from e2e_support.files import LARGE, SMALL, write_file, write_run
+from e2e_support.files import LARGE, SMALL, make_readable, make_unreadable, write_file, write_run
 from e2e_support.proxy_helpers import silence_heartbeats
 from e2e_support.server import FileRow, ServerView
 from e2e_support.waiting import KnownBugStillPresent, known_bug, stays_true, wait_until
@@ -731,6 +731,51 @@ def test_queued_file_whose_upload_keeps_failing_is_cancelled_after_three_polls(
     failed = server.events(pc.watcher_id, event_type="upload_failed")
     assert [e.message for e in failed] == ["Presigned URL request failed: a.csv"] * 3
     assert s3_puts(proxy) == []
+
+
+@pytest.mark.platforms("cli")
+@pytest.mark.covers("queue.unreadable_file->stays_queued_until_readable")
+def test_a_requested_file_that_cannot_be_read_yet_stays_requested_and_uploads_once_it_can(
+    watcher: WatcherFactory,
+    server: ServerView,
+    proxy: FaultProxy,
+    admin: Admin,
+    instrument_id: str,
+    watch_dir: Path,
+) -> None:
+    pc = manual_watcher(watcher, server)
+    a = detect_run(server, instrument_id, watch_dir, RUN, {"a.csv": SMALL})["a.csv"]
+    target = watch_dir / RUN / "a.csv"
+    make_unreadable(target)
+
+    admin.request_upload(instrument_id, RUN, [a.row.id]).raise_for_status()
+    waiting = server.wait_for_event(
+        pc.watcher_id, event_type="upload_failed", message_contains="Can't read a.csv yet"
+    )
+    assert waiting.details["will_retry"] is True
+    assert waiting.details["file_id"] == a.row.id
+
+    # More polls than the three that cancel a request whose upload keeps failing (one a second
+    # here). The file can't be read, which is not a failed attempt: it stays requested, the
+    # server is asked for nothing, and there is no cancellation and no second event.
+    stays_true(
+        lambda: (
+            statuses(server, instrument_id, RUN)["a.csv"] == "upload_requested"
+            and queue_ids(server, pc) == {a.row.id}
+            and not calls(proxy, "POST", PRESIGN)
+            and not server.events(
+                pc.watcher_id, event_type="error", kind="upload_request_cancelled"
+            )
+            and len(server.events(pc.watcher_id, event_type="upload_failed")) == 1
+        ),
+        6,
+        lambda: server.dump(pc.watcher_id, instrument_id),
+        what="the request to stay queued while the file can't be read",
+    )
+
+    make_readable(target)
+    server.wait_for_uploaded(instrument_id, RUN, f"{RUN}/a.csv", content=a.content)
+    assert len(server.events(pc.watcher_id, event_type="upload_failed")) == 1
 
 
 @pytest.mark.covers(

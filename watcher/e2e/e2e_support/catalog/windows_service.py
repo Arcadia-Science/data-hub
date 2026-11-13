@@ -133,17 +133,18 @@ TRANSITIONS: tuple[Transition, ...] = (
         "reported and uploaded once the writer closes it.",
         platforms=SERVICE,
     ),
-    xfail_bug(
+    covered(
         MACHINE,
         "file.locked->uploaded_after_release",
-        "PROPOSED — confirm intent: a file that an instrument keeps open with exclusive "
-        "sharing after its last write is uploaded once the instrument releases it, without "
-        "a restart of the watcher. Today the file counts as stable after the stability "
-        "period (stability reads only the size and the modification time, which stopped "
-        "changing), then reading it for the upload hits a sharing violation, and the file "
-        "is tried again only at the next start. The test uses `ExclusiveWriter`, which "
-        "writes once and holds the file past the stability period.",
-        "ENG-2128",
+        "A file that an instrument keeps open with exclusive sharing after its last write "
+        "is uploaded once the instrument releases it, without a restart of the watcher. "
+        "The file counts as stable after the stability period (stability reads only the "
+        "size and the modification time, which stopped changing), so the run is reported. "
+        "Reading it for the upload hits a sharing violation, which is not a failed "
+        "attempt: the watcher queues one `upload_failed` event that says it will retry, "
+        "and the upload worker tries the file again on each poll until it can be read. "
+        "The test uses `ExclusiveWriter`, which writes once and holds the file past the "
+        "stability period.",
         platforms=SERVICE,
     ),
     covered(
