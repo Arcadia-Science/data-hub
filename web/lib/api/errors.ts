@@ -15,6 +15,14 @@ export const WATCHER_OFFLINE = "WATCHER_OFFLINE";
 // Paired with HTTP 413. A watcher that cannot split an upload would send
 // the whole file in one request, which S3 rejects above 5 GiB.
 export const PAYLOAD_TOO_LARGE = "PAYLOAD_TOO_LARGE";
+// Paired with HTTP 404. Returned by the heartbeat route and `GET /watchers/{id}`
+// when the watcher's row exists but was deregistered (soft-deleted), and the
+// caller is one that may act for the watcher. A row that does not exist keeps
+// `NOT_FOUND`, so a watcher stops for good only when its registration was
+// deleted on purpose, not when rows went missing from the database. The watcher
+// CLI stops on this string: keep it equal to `WATCHER_DEREGISTERED_ERROR_CODE`
+// in `watcher/src/data_hub_watcher/constants.py`.
+export const WATCHER_DEREGISTERED = "WATCHER_DEREGISTERED";
 export function apiError(
   status: number,
   code: string,
