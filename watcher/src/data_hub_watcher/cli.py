@@ -1167,6 +1167,19 @@ def config_path_cmd(ctx: click.Context) -> None:
 # ---------------------------------------------------------------------------
 
 
+class DeregisteredStartError(click.ClickException):
+    """A start that is refused because the watcher's registration was deleted on Data Hub.
+
+    It exits with `DEREGISTERED_EXIT_CODE`, as a running watcher that finds out does, and
+    not with the 1 of any other `ClickException`. 1 is also the code of "an update was
+    installed, start again", so a systemd unit that restarts the watcher on 1 and lists 3 in
+    `RestartPreventExitStatus` would restart a deregistered watcher in a loop, from every
+    boot until someone runs `init`.
+    """
+
+    exit_code = DEREGISTERED_EXIT_CODE
+
+
 @cli.command()
 @click.option("--dry-run", is_flag=True, help="Validate and log but don't start monitoring.")
 @click.pass_context
@@ -1174,8 +1187,8 @@ def watch(ctx: click.Context, dry_run: bool) -> None:
     """Start watching for new files.
 
     If the watcher's registration was deleted on Data Hub, a running watcher stops and
-    exits with code 3, and a new one refuses to start. Either way it says to run
-    'data-hub-watcher init' to register again.
+    exits with code 3, and one that is started refuses to start and exits with code 3 as
+    well. Either way it says to run 'data-hub-watcher init' to register again.
     """
     cfg, client, path = _load_and_client(ctx)
     inst = cfg.instrument
@@ -1197,10 +1210,11 @@ def watch(ctx: click.Context, dry_run: bool) -> None:
         )
 
     # A watcher that was deregistered while it was stopped would run on with 404s, so it
-    # refuses to start and says how to register it again. Any other failure of this check
-    # lets the watcher start as before.
+    # refuses to start and says how to register it again. It exits with the code of a
+    # deregistered stop, so a systemd unit with `RestartPreventExitStatus=3` doesn't start it
+    # in a loop. Any other failure of this check lets the watcher start as before.
     if watcher_is_deregistered(client, cfg.watcher_id):
-        raise click.ClickException(DEREGISTERED_MESSAGE)
+        raise DeregisteredStartError(DEREGISTERED_MESSAGE)
 
     # Step 2 (dry-run only): sync config checksum without a reporter
     # so dry-run still validates the API path. The watch path defers

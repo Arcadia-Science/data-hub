@@ -91,8 +91,10 @@ TRANSITIONS: tuple[Transition, ...] = (
         MACHINE,
         "startup.deregistered->refused",
         "Starting a watcher whose registration was deleted is refused, with a message that says "
-        "to run `init` again. This covers `watch`, `watch --dry-run` and the service. `watch` "
-        "exits 1. A service start that is refused also exits 1, so the SCM's recovery restarts "
-        "it twice before it stays down.",
+        "to run `init` again. The end-to-end tests start `watch` and, on Windows, the service "
+        "(`watch --dry-run` is checked by unit tests only). `watch` exits with code 3, the code "
+        "of a deregistered stop, so a systemd unit with `RestartPreventExitStatus=3` does not "
+        "start it in a loop. A service start that is refused exits with a failure, so the SCM's "
+        "recovery restarts it before it stays down.",
     ),
 )

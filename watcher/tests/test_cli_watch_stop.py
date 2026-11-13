@@ -167,8 +167,9 @@ def _plain_not_found() -> ApiError:
 
 class TestWatchDeregistered:
     def test_the_exit_code_is_its_own(self) -> None:
-        # Not 0 (a stop that was asked for) and not 1 (an update was installed, or a refused
-        # start), so a wrapper script can tell that starting the watcher again won't help.
+        # Not 0 (a stop that was asked for) and not 1 (an update was installed, so start again),
+        # so a wrapper script or a systemd unit (`RestartPreventExitStatus=3`) can tell that
+        # starting the watcher again won't help.
         assert DEREGISTERED_EXIT_CODE not in (0, 1)
         assert DEREGISTERED_EXIT_CODE == 3
 
@@ -204,7 +205,10 @@ class TestWatchRefusesADeregisteredWatcher:
 
         result = watch_until("ctrl_c")
 
-        assert result.exit_code == 1, result.output
+        # The code of a deregistered stop, and not the 1 of "an update was installed, start
+        # again": a systemd unit with `RestartPreventExitStatus=3` would otherwise restart a
+        # deregistered watcher in a loop after every reboot.
+        assert result.exit_code == DEREGISTERED_EXIT_CODE, result.output
         assert DEREGISTERED_MESSAGE in " ".join(result.output.split())
         assert "data-hub-watcher init" in result.output
         # Nothing was built or synced.
@@ -221,7 +225,7 @@ class TestWatchRefusesADeregisteredWatcher:
         # The fixture has set up the stubs, and `watch_until` is not needed for the run.
         result = CliRunner().invoke(cli_module.cli, ["watch", "--dry-run"])
 
-        assert result.exit_code == 1, result.output
+        assert result.exit_code == DEREGISTERED_EXIT_CODE, result.output
         assert DEREGISTERED_MESSAGE in " ".join(result.output.split())
         client.get_config_checksum.assert_not_called()
 
@@ -234,6 +238,18 @@ class TestWatchRefusesADeregisteredWatcher:
         names = [call[0] for call in client.method_calls]
         assert names.index("get_instrument") < names.index("get_watcher")
         assert len(_FakeSupervisor.instances) == 1
+
+    def test_any_other_refused_start_still_exits_with_1(
+        self, watch_until: Callable[[str], Result], client: MagicMock
+    ) -> None:
+        # The deregistered code is for a deregistered watcher only. A pending instrument is
+        # refused the ordinary way.
+        client.get_instrument.return_value = MagicMock(status="pending")
+
+        result = watch_until("ctrl_c")
+
+        assert result.exit_code == 1, result.output
+        assert DEREGISTERED_MESSAGE not in " ".join(result.output.split())
 
     @pytest.mark.parametrize(
         "error",

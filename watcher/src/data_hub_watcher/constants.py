@@ -87,12 +87,13 @@ DEREGISTERED_MESSAGE = (
     "This watcher was deregistered on Data Hub, so its registration no longer exists. "
     "Run 'data-hub-watcher init' to register it again."
 )
-# The exit code of `data-hub-watcher watch` when it stops because it was deregistered. It
-# differs from 0 (a stop that was asked for) and from 1 (an update was installed and the
-# watcher has to start again, which is also what a refused start-up returns), so a wrapper
-# script can tell that restarting the watcher won't help. The Windows service exits 0 for
-# it instead, so that the SCM's recovery actions, which restart a service that fails, leave
-# it stopped.
+# The exit code of `data-hub-watcher watch` when it stops, or refuses to start, because the
+# watcher was deregistered. It differs from 0 (a stop that was asked for) and from 1 (an update
+# was installed and the watcher has to start again, which is also what a start that fails for
+# another reason returns), so a wrapper script or a systemd unit (`RestartPreventExitStatus=3`)
+# can tell that restarting the watcher won't help until `init` has run. The Windows service
+# exits 0 for a stop of this kind instead, so that the SCM's recovery actions, which restart a
+# service that fails, leave it stopped. Its refused start exits 1, so that the SCM tries again.
 DEREGISTERED_EXIT_CODE = 3
 # The `status_reason` on the final `stopped` heartbeat when the stop was caused by
 # Windows shutting down or restarting. A server that knows the value keeps the

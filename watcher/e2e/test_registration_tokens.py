@@ -6,9 +6,9 @@ token, deregisters a watcher or retires the instrument, or a request arrives wit
 token. The transitions are in ``catalog/registration_tokens.py``.
 
 The last tests are about a watcher whose registration was deleted: it stops, and a start is
-refused. Under the CLI that is a failure exit. Under the Windows service it is a stop that stays
-stopped (see ``catalog/registration_tokens.py``), so the exit code is checked by a test of its
-own that is marked ``platforms("cli")``.
+refused. Under the CLI both exit with code 3. Under the Windows service the stop is a clean one
+that stays stopped (see ``catalog/registration_tokens.py``), so the exit codes are checked by
+tests of their own that are marked ``platforms("cli")``.
 """
 
 from __future__ import annotations
@@ -498,8 +498,7 @@ def test_a_deregistered_watcher_exits_with_a_failure_code(
         pc.log_tail,
         what="the deregistered watcher to exit",
     )
-    # Its own code, not 0 (a stop that was asked for) and not 1 (a restart for an update, or a
-    # refused start).
+    # Its own code, not 0 (a stop that was asked for) and not 1 (a restart for an update).
     assert pc.exit_code == DEREGISTERED_EXIT_CODE, f"the watcher exited with {pc.exit_code}"
 
 
@@ -520,3 +519,26 @@ def test_starting_with_a_deregistered_watcher_refuses_and_says_to_run_init(
     )
     assert pc.exit_code not in (None, 0), f"the watcher exited with {pc.exit_code}"
     assert re.search(r"\binit\b", pc.log_text()), "the refusal does not say to run init"
+
+
+# The CLI refuses with the code of a deregistered stop, not the 1 of "an update was installed,
+# start again", so a systemd unit with `RestartPreventExitStatus=3` doesn't start a deregistered
+# watcher in a loop after every reboot. (A service start that is refused exits with a failure
+# on purpose, so that the SCM retries.)
+@pytest.mark.platforms("cli")
+@pytest.mark.covers("startup.deregistered->refused")
+def test_a_refused_start_exits_with_the_deregistered_code(
+    watcher: WatcherFactory, admin: Admin
+) -> None:
+    pc = watcher()
+    admin.deregister_watcher(pc.watcher_id).raise_for_status()
+
+    pc.start(wait_ready=False)
+
+    wait_until(
+        lambda: not pc.is_running(),
+        REACTION_SECONDS,
+        pc.log_tail,
+        what="the watcher to refuse to start",
+    )
+    assert pc.exit_code == DEREGISTERED_EXIT_CODE, f"the watcher exited with {pc.exit_code}"
