@@ -246,6 +246,7 @@ vi.mock("@/lib/api/instrument-runs", () => ({
       }
       return null;
     }),
+  normalizeRunId: (runId: string) => runId.trim(),
   lookupRunUuidsByNaturalKeys: vi
     .fn()
     .mockImplementation((_instId: string, runIds: string[]) => {

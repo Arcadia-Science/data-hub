@@ -118,6 +118,14 @@ export async function getAttributionsByRunIds(
 // patch, delete, and child-resource endpoints.
 // ---------------------------------------------------------------------------
 
+// Creating a run trims its run ID, so a run is never stored with a space at
+// either end. Every lookup trims the ID it is given in the same way. Without
+// that, a caller that sends ` RUN1 ` would create `RUN1` and then get 404 for
+// ` RUN1 `.
+export function normalizeRunId(runId: string): string {
+  return runId.trim();
+}
+
 // API URLs use human-readable natural keys (e.g., "spectramax-id3-plate-reader"
 // + "2026-03-26_experiment") rather than the internal UUID surrogate PK. This
 // function resolves that pair to a full run row with the instrument display name.
@@ -128,11 +136,17 @@ export async function getAttributionsByRunIds(
 // `getInstrumentById`.
 //
 // `runId` is the real run ID. Route handlers already receive it decoded, and
-// pages decode it first with `decodePageParam`.
+// pages decode it first with `decodePageParam`. Spaces at the start or end are
+// ignored (see `normalizeRunId`), and an ID that is only spaces finds nothing.
 export const lookupRunByNaturalKey = cache(async function lookupRunByNaturalKey(
   instrumentId: string,
   runId: string
 ) {
+  const wantedRunId = normalizeRunId(runId);
+  if (wantedRunId === "") {
+    return null;
+  }
+
   const [row] = await db
     .select({
       id: instrumentRuns.id,
@@ -167,7 +181,7 @@ export const lookupRunByNaturalKey = cache(async function lookupRunByNaturalKey(
     .where(
       and(
         eq(instrumentRuns.instrumentId, instrumentId),
-        eq(instrumentRuns.runId, runId)
+        eq(instrumentRuns.runId, wantedRunId)
       )
     )
     .limit(1);
@@ -207,12 +221,18 @@ export const lookupRunByNaturalKey = cache(async function lookupRunByNaturalKey(
   };
 });
 
-/** Natural runId → internal UUID for one instrument. Missing IDs are omitted. */
+/**
+ * Natural runId → internal UUID for one instrument. Missing IDs are omitted.
+ * The IDs are matched with `normalizeRunId`, so the map's keys are the stored
+ * run IDs. Look an ID up with `normalizeRunId(id)`.
+ */
 export async function lookupRunUuidsByNaturalKeys(
   instrumentId: string,
   runIds: string[]
 ): Promise<Map<string, string>> {
-  const unique = [...new Set(runIds)];
+  const unique = [...new Set(runIds.map(normalizeRunId))].filter(
+    (runId) => runId !== ""
+  );
   if (unique.length === 0) {
     return new Map();
   }

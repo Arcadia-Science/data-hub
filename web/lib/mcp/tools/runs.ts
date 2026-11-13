@@ -11,6 +11,7 @@ import {
   getRunFilesPage,
   lookupRunByNaturalKey,
   lookupRunUuidsByNaturalKeys,
+  normalizeRunId,
   type RunAttribution,
 } from "@/lib/api/instrument-runs";
 import { claimRuns, unclaimRuns } from "@/lib/api/run-attributions";
@@ -241,7 +242,7 @@ export function registerRunTools(server: McpServer) {
         return errorResult("Authenticated user not available on this session.");
       }
 
-      const uniqueRunIds = [...new Set(runIds)];
+      const uniqueRunIds = [...new Set(runIds.map(normalizeRunId))];
       const found = await lookupRunUuidsByNaturalKeys(
         instrumentId,
         uniqueRunIds
