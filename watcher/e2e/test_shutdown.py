@@ -343,7 +343,7 @@ def test_a_watcher_started_again_after_a_kill_resumes_without_reporting_twice(
 
 
 # ---------------------------------------------------------------------------
-# Known bugs: the intended behavior, until they are fixed
+# A stop in a hurry: no new uploads, the event first, a bounded time
 # ---------------------------------------------------------------------------
 
 
@@ -434,6 +434,11 @@ def test_a_stop_completes_within_thirty_seconds_even_if_the_server_stops_answeri
     # The stop is limited to 25 s, so the process is gone within 30 s of the request. A test that
     # outlasts that leaves the watcher to the driver, which stops it for good when the test ends.
     pc.wait_exit(30)
+
+
+# ---------------------------------------------------------------------------
+# Known bugs: the intended behavior, until they are fixed
+# ---------------------------------------------------------------------------
 
 
 @pytest.mark.xfail(
