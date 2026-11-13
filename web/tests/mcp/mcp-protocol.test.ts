@@ -490,6 +490,7 @@ vi.mock("@/lib/api/files", () => ({
         ok: true,
         contentType: MOCK_FILE.contentType,
         filename: MOCK_FILE.filename,
+        runUuid: MOCK_FILE.instrumentRunId,
         s3Bucket: MOCK_FILE.s3Bucket,
         s3Key: MOCK_FILE.s3Key,
       };
@@ -523,6 +524,18 @@ vi.mock("@/lib/api/run-archive", () => ({
     archiveBucket: "test-archives",
     archiveKey: "runs/test-plate-reader/run-1/abc.zip",
     runId: "run-1",
+    unclaimed: true,
+  }),
+}));
+
+// Claim status for `get_file_download_url`. `claimRuns` and `unclaimRuns`
+// stay real and write through the stubbed Drizzle client above.
+vi.mock("@/lib/api/run-attributions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api/run-attributions")>()),
+  getRunClaimStatus: vi.fn().mockResolvedValue({
+    instrumentId: "test-plate-reader",
+    runId: "run-1",
+    unclaimed: true,
   }),
 }));
 
@@ -1510,10 +1523,44 @@ describe("MCP Protocol (in-memory)", () => {
       filename: string;
       downloadUrl: string;
       expiresInSeconds: number;
+      instrumentId: string;
+      runId: string;
+      unclaimed: boolean;
     };
     expect(parsed.fileId).toBe(42);
     expect(parsed.downloadUrl).toContain("s3.example.com");
     expect(parsed.expiresInSeconds).toBeGreaterThan(0);
+    expect(parsed.instrumentId).toBe("test-plate-reader");
+    expect(parsed.runId).toBe("run-1");
+    expect(parsed.unclaimed).toBe(true);
+  });
+
+  it("get_file_download_url says when someone has claimed the file's run", async () => {
+    const { getRunClaimStatus } = await import("@/lib/api/run-attributions");
+    vi.mocked(getRunClaimStatus).mockResolvedValueOnce({
+      instrumentId: "test-plate-reader",
+      runId: "run-1",
+      unclaimed: false,
+    });
+    const result = await client.callTool({
+      name: "get_file_download_url",
+      arguments: { fileId: 42 },
+    });
+    expect(result.isError).toBeFalsy();
+    expectStructuredMatchesText(result);
+    expect(
+      (parseText(result.content) as { unclaimed: boolean }).unclaimed
+    ).toBe(false);
+  });
+
+  it("get_file_download_url reports not found when the run is gone", async () => {
+    const { getRunClaimStatus } = await import("@/lib/api/run-attributions");
+    vi.mocked(getRunClaimStatus).mockResolvedValueOnce(null);
+    const result = await client.callTool({
+      name: "get_file_download_url",
+      arguments: { fileId: 42 },
+    });
+    expect(result.isError).toBe(true);
   });
 
   it("get_run_archive returns a presigned URL on cache hit", async () => {
@@ -1536,6 +1583,7 @@ describe("MCP Protocol (in-memory)", () => {
     expect(parsed.filename).toBe("run-1.zip");
     expect(parsed.expiresInSeconds).toBe(900);
     expect(parsed.contentType).toBe("application/zip");
+    expect((parsed as { unclaimed?: boolean }).unclaimed).toBe(true);
   });
 
   it("get_run_archive returns a job and retry hint while building", async () => {
@@ -1545,6 +1593,7 @@ describe("MCP Protocol (in-memory)", () => {
       status: "building",
       jobId: "job-abc",
       runId: "run-1",
+      unclaimed: false,
       ownsBuild: true,
       retryAfterSeconds: 5,
     });
@@ -1565,6 +1614,7 @@ describe("MCP Protocol (in-memory)", () => {
     expect(parsed.jobId).toBe("job-abc");
     expect(parsed.retryAfterSeconds).toBe(5);
     expect(parsed.hint).toMatch(/get_run_archive/);
+    expect((parsed as { unclaimed?: boolean }).unclaimed).toBe(false);
   });
 
   // The tool names the run by the stored ID that `prepareRunArchive` found,
@@ -1583,6 +1633,7 @@ describe("MCP Protocol (in-memory)", () => {
       status: "building",
       jobId: "job-abc",
       runId: "run-1",
+      unclaimed: false,
       ownsBuild: true,
       retryAfterSeconds: 5,
     });

@@ -83,6 +83,8 @@ describe("prepareRunArchive", () => {
       id: "run-uuid",
       instrumentId: "inst",
       runId: "RUN1",
+      deletedAt: null,
+      attributions: [],
     });
     headS3Object.mockResolvedValue({ exists: true, sizeBytes: 10 });
     getPresignedDownloadUrl.mockResolvedValue("https://example.test/zip");
@@ -151,5 +153,28 @@ describe("prepareRunArchive", () => {
     const without = await readyArchive("RUN1");
 
     expect(withSpaces.archiveKey).toBe(without.archiveKey);
+  });
+
+  // `get_run_archive` passes this on so the assistant can offer `claim_run`.
+  it("says whether the run is unclaimed, counting a deleted run as claimed", async () => {
+    expect((await readyArchive("RUN1")).unclaimed).toBe(true);
+
+    lookupRunByNaturalKey.mockResolvedValue({
+      id: "run-uuid",
+      instrumentId: "inst",
+      runId: "RUN1",
+      deletedAt: null,
+      attributions: [{ userId: "user-alice" }],
+    });
+    expect((await readyArchive("RUN1")).unclaimed).toBe(false);
+
+    lookupRunByNaturalKey.mockResolvedValue({
+      id: "run-uuid",
+      instrumentId: "inst",
+      runId: "RUN1",
+      deletedAt: new Date("2026-01-01T00:00:00.000Z"),
+      attributions: [],
+    });
+    expect((await readyArchive("RUN1")).unclaimed).toBe(false);
   });
 });

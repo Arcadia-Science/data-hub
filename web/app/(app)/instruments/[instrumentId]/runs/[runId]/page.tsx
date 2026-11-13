@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next/types";
 import { Suspense } from "react";
 import { SignInRequired } from "@/components/auth/sign-in-required";
+import { RunClaimTargetProvider } from "@/components/runs/claim-prompt/run-claim-target";
 import { RestReportDataSourceProvider } from "@/components/runs/report-data-source-provider";
 import { RunAttributionsSection } from "@/components/runs/run-attributions-section";
 import { RunCommentsSection } from "@/components/runs/run-comments-section";
@@ -232,47 +233,53 @@ async function RunDetailContentBody({
   return (
     <RestReportDataSourceProvider instrumentId={instrumentId} runId={runId}>
       <WatcherStatusProvider isWatcherOnline={isWatcherOnline}>
-        <RunDetailVariant
-          attributionsSlot={
-            <RunAttributionsSection
-              attributions={run.attributions}
-              instrumentId={run.instrumentId}
-              runId={run.runId}
-            />
-          }
-          auntyPlate={auntyPlate}
-          fileStats={fileStats}
-          files={filesPage.data}
-          filesDownloadableCount={filesPage.downloadableCount}
-          filesPagination={filesPage.pagination}
-          instrumentId={instrumentId}
-          qpcrMeltingPlate={qpcrMeltingPlate}
-          reportFiles={reportFiles}
-          reportItems={reportItems}
-          run={run}
-          runId={runId}
-          runNavSlot={
-            <RunNav
-              next={
-                adjacentRuns.nextRunId
-                  ? {
-                      href: toRunHref(adjacentRuns.nextRunId),
-                      runId: adjacentRuns.nextRunId,
-                    }
-                  : null
-              }
-              previous={
-                adjacentRuns.previousRunId
-                  ? {
-                      href: toRunHref(adjacentRuns.previousRunId),
-                      runId: adjacentRuns.previousRunId,
-                    }
-                  : null
-              }
-            />
-          }
-          wellData={wellData}
-        />
+        <RunClaimTargetProvider
+          instrumentId={run.instrumentId}
+          runId={run.runId}
+          unclaimed={run.attributions.length === 0 && run.deletedAt === null}
+        >
+          <RunDetailVariant
+            attributionsSlot={
+              <RunAttributionsSection
+                attributions={run.attributions}
+                instrumentId={run.instrumentId}
+                runId={run.runId}
+              />
+            }
+            auntyPlate={auntyPlate}
+            fileStats={fileStats}
+            files={filesPage.data}
+            filesDownloadableCount={filesPage.downloadableCount}
+            filesPagination={filesPage.pagination}
+            instrumentId={instrumentId}
+            qpcrMeltingPlate={qpcrMeltingPlate}
+            reportFiles={reportFiles}
+            reportItems={reportItems}
+            run={run}
+            runId={runId}
+            runNavSlot={
+              <RunNav
+                next={
+                  adjacentRuns.nextRunId
+                    ? {
+                        href: toRunHref(adjacentRuns.nextRunId),
+                        runId: adjacentRuns.nextRunId,
+                      }
+                    : null
+                }
+                previous={
+                  adjacentRuns.previousRunId
+                    ? {
+                        href: toRunHref(adjacentRuns.previousRunId),
+                        runId: adjacentRuns.previousRunId,
+                      }
+                    : null
+                }
+              />
+            }
+            wellData={wellData}
+          />
+        </RunClaimTargetProvider>
       </WatcherStatusProvider>
     </RestReportDataSourceProvider>
   );

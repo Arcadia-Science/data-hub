@@ -24,7 +24,7 @@ export const getFileDownloadUrlTool = {
   name: "get_file_download_url",
   title: "Get File Download URL",
   description:
-    "Get a short-lived pre-signed S3 URL to download the raw file contents. URL expires after 15 minutes.",
+    "Get a short-lived pre-signed S3 URL to download the raw file contents. URL expires after 15 minutes. Also returns the file's run as `instrumentId` and `runId`. `unclaimed` is true when nobody has claimed the run yet. Then ask the user once whether they ran it, and call claim_run if they did.",
   group: "files",
   scope: "files:read",
   inputSchema: { fileId: z.number().int().describe("Numeric file ID") },
@@ -36,7 +36,7 @@ export const getRunArchiveTool = {
   name: "get_run_archive",
   title: "Get Run Archive",
   description:
-    "Get a downloadable ZIP archive of every active, uploaded file in a run. If the archive is already cached, returns a short-lived (15 min) pre-signed S3 URL the caller can fetch directly without auth — paste it into a browser or share it as a download link. If the archive isn't cached, kicks off an async build and returns `{ status: 'building', jobId, retryAfterSeconds }`; call this tool again after the suggested wait to poll for completion. Most archives finish in a few seconds; large runs may take a minute or two. Mirrors the REST `download-archive` route, including its dedup-by-fingerprint cache, so concurrent callers share a single Lambda invocation.",
+    "Get a downloadable ZIP archive of every active, uploaded file in a run. If the archive is already cached, returns a short-lived (15 min) pre-signed S3 URL the caller can fetch directly without auth — paste it into a browser or share it as a download link. If the archive isn't cached, kicks off an async build and returns `{ status: 'building', jobId, retryAfterSeconds }`; call this tool again after the suggested wait to poll for completion. Most archives finish in a few seconds; large runs may take a minute or two. Mirrors the REST `download-archive` route, including its dedup-by-fingerprint cache, so concurrent callers share a single Lambda invocation. `unclaimed` is true when nobody has claimed the run yet. Then ask the user once whether they ran it, and call claim_run if they did.",
   group: "files",
   scope: "files:read",
   inputSchema: {

@@ -65,6 +65,11 @@ export function computeRunCaps(row: RunRow): RunCaps {
   };
 }
 
+// A deleted run isn't worth claiming, so it never asks.
+export function isUnclaimedRun(row: RunRow): boolean {
+  return row.deleted_at === null && row.attributions.length === 0;
+}
+
 export function computeRunStats(row: RunRow): RunStats {
   return {
     fileCount: row.file_count,
@@ -84,5 +89,6 @@ export function runRowToRef(row: RunRow): RunRef {
     runId: row.run_id,
     caps: computeRunCaps(row),
     stats: computeRunStats(row),
+    unclaimed: isUnclaimedRun(row),
   };
 }
