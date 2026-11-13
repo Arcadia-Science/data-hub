@@ -134,10 +134,10 @@ class HeartbeatLoop:
 
         *stop_reason* is the `status_reason` of that heartbeat:
         `SYSTEM_SHUTDOWN_STATUS_REASON` when Windows is shutting down or restarting,
-        `AUTO_UPDATE_STATUS_REASON` when the watcher stops to install an update. The
-        server then keeps the instrument's requested uploads queued for the watcher
-        to upload once it starts again, instead of cancelling them as it does for
-        any other stop.
+        `AUTO_UPDATE_STATUS_REASON` when the watcher stops to install an automatic
+        update. The server then keeps the instrument's requested uploads queued for
+        the watcher to upload once it starts again, instead of cancelling them as it
+        does for any other stop.
 
         *deadline* (a `time.monotonic()` value) is for a stop that has little time, as
         when Windows is shutting down. The wait for a heartbeat in progress is at most

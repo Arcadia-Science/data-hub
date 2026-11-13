@@ -113,7 +113,7 @@ const TOOLTIP_STATUSES = new Set<WatcherBadgeStatus>(["offline", "stale"]);
 
 const RESTART_STOP_LEAD: Record<RestartStopReason, string> = {
   [SYSTEM_SHUTDOWN_STATUS_REASON]: "Stopped for a Windows restart or shutdown.",
-  [AUTO_UPDATE_STATUS_REASON]: "Stopped to install an update.",
+  [AUTO_UPDATE_STATUS_REASON]: "Stopped to install an automatic update.",
 };
 
 export function WatcherStatusBadge({

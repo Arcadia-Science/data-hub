@@ -10,8 +10,9 @@
 export const SYSTEM_SHUTDOWN_STATUS_REASON = "system_shutdown";
 
 // The `status_reason` on the `stopped` heartbeat of a watcher that stops to
-// install an update and start again. A watcher that sends it is expected back
-// like one that stopped for a restart. Watcher 1.4.2 and later send it.
+// install an automatic update and start again. A watcher that sends it is
+// expected back like one that stopped for a restart. Watcher 1.4.2 and later
+// send it.
 export const AUTO_UPDATE_STATUS_REASON = "auto_update";
 
 // The reasons of a stop after which the watcher is expected back. A watcher

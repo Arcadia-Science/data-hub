@@ -700,7 +700,7 @@ def stop_runtime(
     """Shut everything down in reverse order and flush pending events.
 
     *stop_reason* is the `status_reason` of the final `stopped` heartbeat, for a
-    stop to install an update (see `HeartbeatLoop.stop`).
+    stop to install an automatic update (see `HeartbeatLoop.stop`).
 
     *system_shutdown* marks the final `stopped` heartbeat as caused by Windows
     shutting down, in place of *stop_reason*, and limits the stop to

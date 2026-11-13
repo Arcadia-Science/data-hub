@@ -76,8 +76,8 @@ HEARTBEAT_INTERVAL_SECONDS = 60
 # starts again. The server's `SYSTEM_SHUTDOWN_STATUS_REASON` must say the same.
 SYSTEM_SHUTDOWN_STATUS_REASON = "system_shutdown"
 # The `status_reason` on the final `stopped` heartbeat when the watcher stops to
-# install an update and starts again. A server that knows the value keeps the
-# instrument's requested uploads queued, as for a system shutdown, and shows the
+# install an automatic update and starts again. A server that knows the value keeps
+# the instrument's requested uploads queued, as for a system shutdown, and shows the
 # watcher as Unresponsive if it hasn't come back after 15 minutes. The server's
 # `AUTO_UPDATE_STATUS_REASON` must say the same.
 AUTO_UPDATE_STATUS_REASON = "auto_update"

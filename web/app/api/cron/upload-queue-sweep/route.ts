@@ -9,8 +9,9 @@ import { files, instrumentRuns, watchers } from "@/lib/db/schema";
 // `upload_requested` once their instrument has had no online watcher for longer
 // than the grace window. Catches ungraceful watcher death (no `stopped`
 // heartbeat ever arrives), which the request-upload guard and heartbeat hook
-// can't, and a watcher that stopped for a restart or an update and didn't come
-// back (the heartbeat route keeps the queue after that `stopped` heartbeat).
+// can't, and a watcher that stopped for a restart or an automatic update and
+// didn't come back (the heartbeat route keeps the queue after that `stopped`
+// heartbeat).
 // Triggered by Vercel Cron (`web/vercel.json`), authed via `CRON_SECRET`.
 
 export async function GET(request: NextRequest) {

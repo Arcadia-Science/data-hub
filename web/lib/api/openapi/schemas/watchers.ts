@@ -43,11 +43,12 @@ export const heartbeatBody = z.object({
   // Why the watcher is `waiting`, for example a missing watch folder. On a
   // `stopped` heartbeat, `system_shutdown` says Windows is shutting down or
   // restarting (watcher 1.4.1 and later send it), and `auto_update` says the
-  // watcher is stopping to install an update (watcher 1.4.2 and later send it).
-  // The route stores a reason for `waiting` and for those two stops only.
+  // watcher is stopping to install an automatic update (watcher 1.4.2 and
+  // later send it). The route stores a reason for `waiting` and for those two
+  // stops only.
   status_reason: z.string().max(500).optional().openapi({
     description:
-      "Why the watcher is `waiting`, for example a missing watch folder. On a `stopped` heartbeat, `system_shutdown` says the watcher stopped because Windows is shutting down or restarting (watcher 1.4.1 and later send it), and `auto_update` says it stopped to install an update and start again (watcher 1.4.2 and later send it). Data Hub keeps these two reasons on the watcher, keeps the instrument's requested uploads queued for the watcher to upload after it starts again, and cancels them only if no heartbeat arrives for about 15 minutes. After that long without a heartbeat the watcher shows as `stale`. Any other `stopped` heartbeat cancels the requested uploads at once, and its reason is not kept.",
+      "Why the watcher is `waiting`, for example a missing watch folder. On a `stopped` heartbeat, `system_shutdown` says the watcher stopped because Windows is shutting down or restarting (watcher 1.4.1 and later send it), and `auto_update` says it stopped to install an automatic update and start again (watcher 1.4.2 and later send it). Data Hub keeps these two reasons on the watcher, keeps the instrument's requested uploads queued for the watcher to upload after it starts again, and cancels them only if no heartbeat arrives for about 15 minutes. After that long without a heartbeat the watcher shows as `stale`. Any other `stopped` heartbeat cancels the requested uploads at once, and its reason is not kept.",
   }),
   // The highest config revision this watcher has applied.
   config_revision: z.number().int().nonnegative().nullable().optional(),
@@ -89,7 +90,7 @@ export const watcherDetail = z
     applied_config_revision: z.number().int().nullable().optional(),
     status_reason: z.string().nullable().optional().openapi({
       description:
-        "Why the watcher is `waiting` (for example a missing watch folder), or why it stopped for a restart: `system_shutdown` for Windows shutting down or restarting, `auto_update` for an update (watcher 1.4.2 and later send it). It is the reason of the watcher's last heartbeat, so it stays while `status` reads `stale`. It is null when that heartbeat was any other status, or a stop that gave no such reason.",
+        "Why the watcher is `waiting` (for example a missing watch folder), or why it stopped for a restart: `system_shutdown` for Windows shutting down or restarting, `auto_update` for an automatic update (watcher 1.4.2 and later send it). It is the reason of the watcher's last heartbeat, so it stays while `status` reads `stale`. It is null when that heartbeat was any other status, or a stop that gave no such reason.",
     }),
     last_heartbeat_at: isoDateTime.nullable(),
     created_at: isoDateTime,
