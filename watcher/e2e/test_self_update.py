@@ -37,6 +37,7 @@ from e2e_support.admin import Admin
 from e2e_support.drivers import WatcherDriver
 from e2e_support.factory import WatcherFactory
 from e2e_support.files import SMALL, write_file, write_run
+from e2e_support.proxy_helpers import stopped_heartbeats
 from e2e_support.server import ServerView, WatcherRow
 from e2e_support.waiting import wait_until
 
@@ -124,12 +125,9 @@ def update_event_sequence(server: ServerView, pc: WatcherDriver) -> list[str]:
     """The update events in order, with a repeat of the same event counted once.
 
     A scenario that asks "did it start, then succeed?" must not depend on how many times the
-    start was announced. Under the Windows service the updater that hands an install to the
-    worker doesn't mark the upgrade as in progress (the in-process path does), so a check on
-    the next heartbeat can dispatch it again before the worker has stopped the service, and the
-    server sees more than one ``update_started``. That is a bug of its own, shown by
-    ``service.upgrade->worker_dispatch_once`` in ``test_windows_service.py``; the scenarios
-    here are about the upgrade, and compare this sequence.
+    start was announced. ``service.upgrade->worker_dispatch_once`` in ``test_windows_service.py`` is
+    the scenario that counts the repeats; the scenarios here are about the upgrade, and compare
+    this sequence.
     """
     kinds = update_events(server, pc)
     return [kind for index, kind in enumerate(kinds) if index == 0 or kinds[index - 1] != kind]
@@ -241,11 +239,16 @@ def test_mandatory_release_installs_and_restarts_into_the_new_version(
 
 
 @pytest.mark.platforms("cli")  # Under the service, the upgrade worker stops it instead.
-@pytest.mark.covers("selfupdate.installed->exit_for_restart", "event.watcher_stopped->emitted")
+@pytest.mark.covers(
+    "selfupdate.installed->exit_for_restart",
+    "selfupdate.stopped->auto_update_reason_sent",
+    "event.watcher_stopped->emitted",
+)
 def test_an_installed_update_ends_the_process_with_exit_code_one_for_its_supervisor(
     watcher: WatcherFactory,
     server: ServerView,
     admin: Admin,
+    proxy: FaultProxy,
     package_index: LocalPackageIndex,
     bumped_wheel: Path,
     bumped_version: str,
@@ -269,6 +272,12 @@ def test_an_installed_update_ends_the_process_with_exit_code_one_for_its_supervi
     assert pc.installed_version() == bumped_version
     assert server.watcher(pc.watcher_id).watcher_version == current_version  # not restarted yet
     assert not pc.is_running()
+
+    # The final heartbeat says the stop is for an update, which is what keeps the instrument's
+    # requested uploads queued for the restarted watcher. The server keeps the reason on the
+    # row while the watcher is down.
+    assert [b.get("status_reason") for b in stopped_heartbeats(proxy)] == ["auto_update"]
+    assert server.watcher(pc.watcher_id).status_reason == "auto_update"
 
 
 @pytest.mark.covers("selfupdate.mandatory->rollback_installed")

@@ -28,6 +28,7 @@ import yaml
 from data_hub_watcher import config_io, testing_overrides
 from data_hub_watcher.api_client import DEFAULT_TIMEOUT, ApiError, DataHubClient
 from data_hub_watcher.constants import (
+    AUTO_UPDATE_STATUS_REASON,
     CONFIG_APPLY_DRAIN_TIMEOUT_SECONDS,
     DEFAULT_CONFIG_DIR,
     PRUNE_DAYS,
@@ -37,6 +38,7 @@ from data_hub_watcher.constants import (
     STOP_RESERVE_SECONDS,
     SYSTEM_SHUTDOWN_HTTP_TIMEOUT,
     SYSTEM_SHUTDOWN_JOIN_SECONDS,
+    SYSTEM_SHUTDOWN_STATUS_REASON,
     SYSTEM_SHUTDOWN_STOP_BUDGET_SECONDS,
     WAITING_START_RETRY_MAX_SECONDS,
 )
@@ -62,6 +64,7 @@ from data_hub_watcher.run_detector import RunDetector
 from data_hub_watcher.state import CONFIG_REVISION_UNSENT_RESULT_META_KEY, StateDB
 from data_hub_watcher.updater import (
     Updater,
+    UpgradeHandoff,
     evaluate_upgrade_marker,
     updater_config_from_overrides,
 )
@@ -250,6 +253,7 @@ def build_runtime(
     reporter: EventReporter | None = None,
     shutdown_event: threading.Event | None = None,
     upgrade_restart_event: threading.Event | None = None,
+    upgrade_handoff: UpgradeHandoff | None = None,
     report_only: Callable[[str, float], bool] | None = None,
     config_revision: Callable[[], int | None] | None = None,
     on_config_revision: Callable[[int | None], None] | None = None,
@@ -269,8 +273,9 @@ def build_runtime(
     :class:`WatcherRuntime` for why.
 
     The remaining keyword arguments let :class:`WatcherSupervisor` rebuild the
-    runtime in place: *reporter* and the two events are shared across
-    rebuilds, *report_only* marks files for the first scan to report without
+    runtime in place: *reporter*, the two events and *upgrade_handoff* (what the
+    updater remembers of an upgrade it handed to the Windows worker) are shared
+    across rebuilds, *report_only* marks files for the first scan to report without
     uploading (see :class:`FileMonitor`), and *config_revision* /
     *on_config_revision* connect the heartbeat to the config-revision check.
     """
@@ -310,6 +315,7 @@ def build_runtime(
         config_dir=effective_config_dir,
         request_upgrade_restart=request_upgrade_restart,
         updater_cfg=updater_config_from_overrides(),
+        handoff=upgrade_handoff,
     )
 
     is_auto = inst.upload_mode == "auto"
@@ -736,13 +742,17 @@ def _stop_heartbeat_and_report(
     *,
     stopped_message: str,
     system_shutdown: bool,
+    stop_reason: str | None,
     deadline: float,
 ) -> None:
     """Stop the heartbeat loop, then send the `watcher_stopped` event, then the final heartbeat.
 
     The steps of every stop that come after the uploads have stopped or been cut off,
     shared by a running watcher and one that is waiting for its folder. *deadline* (a
-    `time.monotonic()` value) is when the stop must be done.
+    `time.monotonic()` value) is when the stop must be done. *stop_reason* is the
+    `status_reason` of the final heartbeat (see `HeartbeatLoop.send_final_heartbeat`).
+    *system_shutdown* only chooses the shorter waits below: the caller has already made
+    `SYSTEM_SHUTDOWN_STATUS_REASON` the *stop_reason* of a Windows shutdown.
 
     * The wait for a heartbeat in progress ends `STOP_RESERVE_SECONDS` before the
       deadline, but is never shorter than `STOP_MIN_WAIT_SECONDS`. A tick that is still
@@ -771,12 +781,16 @@ def _stop_heartbeat_and_report(
     final_heartbeat_share = min(STOP_FINAL_HEARTBEAT_SECONDS, _left(deadline) / 2)
     reporter.flush(deadline=deadline - final_heartbeat_share, timeout_cap=http_timeout)
     heartbeat.send_final_heartbeat(
-        system_shutdown=system_shutdown, deadline=deadline, timeout_cap=http_timeout
+        stop_reason=stop_reason, deadline=deadline, timeout_cap=http_timeout
     )
 
 
 def stop_runtime(
-    rt: WatcherRuntime, *, stopped_message: str, system_shutdown: bool = False
+    rt: WatcherRuntime,
+    *,
+    stopped_message: str,
+    system_shutdown: bool = False,
+    stop_reason: str | None = None,
 ) -> None:
     """Shut everything down in reverse order and flush pending events.
 
@@ -794,19 +808,23 @@ def stop_runtime(
     4. The heartbeat loop stops. It keeps ticking until this step, so the server doesn't
        see a gap in heartbeats while an upload finishes.
     5. The `watcher_stopped` event is sent.
-    6. The final `stopped` heartbeat is sent. *system_shutdown* marks it as caused by
-       Windows shutting down (see `HeartbeatLoop.send_final_heartbeat`).
+    6. The final `stopped` heartbeat is sent. *stop_reason* is its `status_reason`, for a
+       stop to install an automatic update (`AUTO_UPDATE_STATUS_REASON`, see
+       `HeartbeatLoop.send_final_heartbeat`). *system_shutdown* marks it as caused by
+       Windows shutting down, with `SYSTEM_SHUTDOWN_STATUS_REASON` in place of
+       *stop_reason*.
     7. The state database is closed, unless a thread that uploads is still running.
 
     Steps 4 to 6 are `_stop_heartbeat_and_report`. In auto mode a file whose upload was
     cut off is uploaded after the next start, from its `pending_uploads` row. A file that
     someone requested is cancelled by the plain `stopped` heartbeat of a normal stop, and
-    has to be requested again. A stop for a Windows restart (*system_shutdown*) keeps the
-    requests queued, and so will a stop for an update once the watcher marks that one
-    (`RESTART_STOP_REASONS` in `web/lib/api/watcher-status.ts`).
+    has to be requested again. A stop for a Windows restart (*system_shutdown*) and a stop
+    for an update (*stop_reason* `AUTO_UPDATE_STATUS_REASON`, from watcher 1.4.2) keep the
+    requests queued (`RESTART_STOP_REASONS` in `web/lib/api/watcher-status.ts`).
     """
     deadline = _stop_deadline(system_shutdown)
     if system_shutdown:
+        stop_reason = SYSTEM_SHUTDOWN_STATUS_REASON
         # The stability checker can be uploading a file on its own thread. Cut that
         # off, and the worker's uploads with it, before any join, so each join below
         # is short: with no time to wait for the parts in flight, they are cut off
@@ -831,7 +849,7 @@ def stop_runtime(
     # upload URL, so none of them holds the process open past this point. In auto mode
     # that file is retried at the next start, from ``pending_uploads``. A requested file
     # is not, after a normal stop: the server cancels it with the `stopped` heartbeat.
-    # Only a stop for a Windows restart leaves it queued.
+    # Only a stop for a Windows restart or for an update leaves it queued.
     if not upload_worker_stopped:
         logger.warning(
             "Upload worker still running at shutdown; leaving the state DB "
@@ -847,6 +865,7 @@ def stop_runtime(
         rt.reporter,
         stopped_message=stopped_message,
         system_shutdown=system_shutdown,
+        stop_reason=stop_reason,
         deadline=deadline,
     )
     if upload_worker_stopped and monitor_stopped:
@@ -936,6 +955,7 @@ class WatcherSupervisor:
         config_dir: Path | None = None,
         role: str,
         host: str,
+        upgrade_handoff: UpgradeHandoff | None = None,
     ) -> None:
         if not cfg.watcher_id:
             raise ValueError("cfg.watcher_id must be set before starting the watcher")
@@ -952,6 +972,9 @@ class WatcherSupervisor:
         self.reporter = EventReporter(client, self.watcher_id)
         self.shutdown_event = threading.Event()
         self.upgrade_restart_event = threading.Event()
+        # What the updater remembers of an upgrade it handed to the Windows worker.
+        # Every updater this supervisor builds gets it, so a rebuilt runtime keeps it.
+        self._handoff = upgrade_handoff if upgrade_handoff is not None else UpgradeHandoff()
         self.rt: WatcherRuntime | None = None
         self._waiting: _WaitingMode | None = None
         # Opened in `start`. Separate from each runtime's own `StateDB` handle
@@ -1085,15 +1108,41 @@ class WatcherSupervisor:
             )
         return ShutdownReason(is_upgrade_restart=False, stopped_message=f"{self.role} stopped")
 
-    def stop(self, *, stopped_message: str, system_shutdown: bool = False) -> None:
+    def stop(
+        self,
+        *,
+        stopped_message: str,
+        system_shutdown: bool = False,
+        operator_stop: bool = False,
+    ) -> None:
         """Stop whatever is running and flush events.
 
         Every stop finishes within `STOP_BUDGET_SECONDS`. *system_shutdown* marks the final
         `stopped` heartbeat as caused by Windows shutting down, and limits the stop to
         about 7 s (see `stop_runtime`).
+
+        Otherwise the heartbeat is marked as an update stop, with
+        `AUTO_UPDATE_STATUS_REASON`, when an in-process update was installed or an
+        upgrade was handed to the Windows worker (`UpgradeHandoff`). A stop the
+        operator asked for (*operator_stop*, Ctrl+C in the CLI) is never marked, even
+        with an update in progress.
+
+        The updater is frozen first, and the reason is chosen once, here, before the
+        stop begins to wind anything down: the heartbeat loop keeps ticking while uploads
+        finish, and a tick that runs during the rest of the stop can't dispatch an update
+        or end the hand-off.
         """
+        handed_off = self._handoff.begin_stop()
+        stop_reason = self._final_stop_reason(
+            system_shutdown=system_shutdown, operator_stop=operator_stop, handed_off=handed_off
+        )
         if self.rt is not None:
-            stop_runtime(self.rt, stopped_message=stopped_message, system_shutdown=system_shutdown)
+            stop_runtime(
+                self.rt,
+                stopped_message=stopped_message,
+                system_shutdown=system_shutdown,
+                stop_reason=stop_reason,
+            )
             self.rt = None
         elif self._waiting is not None:
             # Only the heartbeat loop runs while waiting: the same limit and the same order
@@ -1103,11 +1152,31 @@ class WatcherSupervisor:
                 self.reporter,
                 stopped_message=stopped_message,
                 system_shutdown=system_shutdown,
+                stop_reason=stop_reason,
                 deadline=_stop_deadline(system_shutdown),
             )
             self._waiting = None
         if self._state is not None:
             self._state.close()
+
+    def _final_stop_reason(
+        self, *, system_shutdown: bool, operator_stop: bool, handed_off: bool
+    ) -> str | None:
+        """The `status_reason` for the final `stopped` heartbeat, or `None`.
+
+        *handed_off* is what `UpgradeHandoff.begin_stop` returned.
+        """
+        if system_shutdown:
+            return SYSTEM_SHUTDOWN_STATUS_REASON
+        if operator_stop:
+            return None
+        if self.classify_shutdown().is_upgrade_restart:
+            # An in-process update was installed and the process is exiting to load it.
+            return AUTO_UPDATE_STATUS_REASON
+        if handed_off:
+            # The Windows upgrade worker is stopping this service to install an update.
+            return AUTO_UPDATE_STATUS_REASON
+        return None
 
     # ------------------------------------------------------------------
     # config revisions
@@ -1554,6 +1623,7 @@ class WatcherSupervisor:
             reporter=self.reporter,
             shutdown_event=self.shutdown_event,
             upgrade_restart_event=self.upgrade_restart_event,
+            upgrade_handoff=self._handoff,
             report_only=_any_rule(rules),
             config_revision=lambda: self._applied,
             on_config_revision=self._on_heartbeat_revision,
@@ -1609,6 +1679,7 @@ class WatcherSupervisor:
                 self.shutdown_event, self.upgrade_restart_event
             ),
             updater_cfg=updater_config_from_overrides(),
+            handoff=self._handoff,
         )
 
         def on_tick() -> None:
@@ -1691,6 +1762,9 @@ class WatcherSupervisor:
         Returns only once every upload thread of the old runtime has exited
         (see `_stop_upload_threads`), so its state DB is closed with nothing
         left to write to it, and the next runtime never uploads alongside it.
+
+        The `UpgradeHandoff` stays as it is: the supervisor owns it, and the next
+        runtime's updater is given it.
         """
         rt, self.rt = self.rt, None
         if rt is not None:

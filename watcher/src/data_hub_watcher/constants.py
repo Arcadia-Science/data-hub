@@ -75,6 +75,18 @@ HEARTBEAT_INTERVAL_SECONDS = 60
 # instrument's requested uploads queued, for the watcher to upload after the PC
 # starts again. The server's `SYSTEM_SHUTDOWN_STATUS_REASON` must say the same.
 SYSTEM_SHUTDOWN_STATUS_REASON = "system_shutdown"
+# The `status_reason` on the final `stopped` heartbeat when the watcher stops to
+# install an automatic update and starts again. A server that knows the value keeps
+# the instrument's requested uploads queued, as for a system shutdown, and shows the
+# watcher as Unresponsive if it hasn't come back after 15 minutes. The server's
+# `AUTO_UPDATE_STATUS_REASON` must say the same.
+AUTO_UPDATE_STATUS_REASON = "auto_update"
+# How long the watcher remembers that it handed an upgrade to the Windows upgrade
+# worker (`UpgradeHandoff`). The worker stops the service within seconds, so a service
+# still running after this long was not stopped by it. For this long the updater
+# dispatches nothing else. The first heartbeat tick after it ends the hand-off, and a
+# stop that begins before then is sent as `auto_update`.
+UPGRADE_HANDOFF_TIMEOUT_SECONDS = 600
 # A normal stop (Ctrl+C or SIGTERM for `watch`, `service stop`, a restart for an update)
 # finishes within `STOP_BUDGET_SECONDS`, even when the server stops answering. Uploads
 # still running and a heartbeat in progress get the time before the last
@@ -89,10 +101,10 @@ SYSTEM_SHUTDOWN_STATUS_REASON = "system_shutdown"
 # a plain `stopped` heartbeat makes the server cancel the instrument's requested
 # uploads, so it has to be requested again. Only a final heartbeat marked as a restart
 # keeps them queued: `SYSTEM_SHUTDOWN_STATUS_REASON` for Windows restarting, and
-# `auto_update` for an update once the watcher sends it (`RESTART_STOP_REASONS` in
-# `web/lib/api/watcher-status.ts`). The service loop sees a stop as soon as it is set,
-# unless it is busy with config work, and the SCM is told to wait
-# `SERVICE_STOP_WAIT_HINT_MILLISECONDS`.
+# `AUTO_UPDATE_STATUS_REASON` for an update (watcher 1.4.2 and later;
+# `RESTART_STOP_REASONS` in `web/lib/api/watcher-status.ts`). The service loop sees a
+# stop as soon as it is set, unless it is busy with config work, and the SCM is told to
+# wait `SERVICE_STOP_WAIT_HINT_MILLISECONDS`.
 STOP_BUDGET_SECONDS = 25
 STOP_RESERVE_SECONDS = 10
 STOP_FINAL_HEARTBEAT_SECONDS = 5

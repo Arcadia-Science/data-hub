@@ -61,8 +61,10 @@ TRANSITIONS: tuple[Transition, ...] = (
         "heartbeat gets, because it can't send another one. It does not turn `stale` "
         "(`Unresponsive`), which is for a watcher that went quiet without saying so. (A "
         "watcher that stopped for a Windows restart or an update turns `stale` after 15 "
-        "minutes; only the web app's integration tests can show that, because no test here "
-        "can make a watcher send that mark.)",
+        "minutes; only the web app's integration tests show that. The update stop is the one "
+        "such stop a test here can make a watcher send, and "
+        "`selfupdate.stopped->auto_update_reason_sent` checks its mark. No test here can make "
+        "a watcher send the mark for a Windows restart.)",
     ),
     covered(
         MACHINE,

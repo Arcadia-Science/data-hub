@@ -34,6 +34,7 @@ from data_hub_watcher.constants import (
     HEARTBEAT_INTERVAL_SECONDS,
     STOP_BUDGET_SECONDS,
     SYSTEM_SHUTDOWN_HTTP_TIMEOUT,
+    UPGRADE_HANDOFF_TIMEOUT_SECONDS,
 )
 from data_hub_watcher.events import EventType
 from data_hub_watcher.heartbeat import HeartbeatLoop
@@ -50,6 +51,7 @@ from data_hub_watcher.models import (
 )
 from data_hub_watcher.runtime import WatcherSupervisor
 from data_hub_watcher.state import StateDB
+from data_hub_watcher.updater import UpgradeHandoff
 
 WATCHER_ID = "w-test"
 
@@ -125,7 +127,9 @@ class _Env:
         save_config(cfg, self.config_path)
         return cfg
 
-    def supervisor(self, cfg: WatcherConfig | None = None) -> WatcherSupervisor:
+    def supervisor(
+        self, cfg: WatcherConfig | None = None, *, upgrade_handoff: UpgradeHandoff | None = None
+    ) -> WatcherSupervisor:
         if cfg is None:
             cfg = self.write_config(_cfg(self.watch_dir))
         sup = WatcherSupervisor(
@@ -136,6 +140,7 @@ class _Env:
             config_dir=self.tmp_path,
             role="Watcher",
             host="test-host",
+            upgrade_handoff=upgrade_handoff,
         )
         self.supervisors.append(sup)
         return sup
@@ -1345,6 +1350,348 @@ class TestStopMarksASystemShutdown:
 
         assert sent.index("event watcher_stopped") < sent.index("heartbeat stopped")
         assert sent[-1] == "heartbeat stopped"
+
+
+class TestStopMarksAnUpdate:
+    """`WatcherSupervisor.stop` marks the final heartbeat `auto_update` for an update.
+
+    The server then keeps the instrument's requested uploads queued for the watcher to
+    upload after it starts again. An update is under way when an in-process update was
+    installed (the `watch` CLI, or a pip-installed service) or when the updater handed an
+    upgrade to the Windows worker, which stops the service from outside.
+    """
+
+    @staticmethod
+    def _started(env: _Env, *, waiting: bool) -> WatcherSupervisor:
+        sup = env.supervisor(env.write_config(_cfg(env.tmp_path / "later")) if waiting else None)
+        sup.start()
+        assert (sup.waiting_reason is not None) is waiting
+        return sup
+
+    @staticmethod
+    def _hand_off_to_the_worker(sup: WatcherSupervisor) -> None:
+        # What the updater records once `schtasks` has accepted the upgrade.
+        sup._handoff.record("9.9.9")
+
+    @staticmethod
+    def _final_status_reason(env: _Env) -> str | None:
+        payload = env.client.send_heartbeat.call_args.args[1]
+        assert payload["status"] == "stopped"
+        return payload.get("status_reason")
+
+    @pytest.mark.parametrize("waiting", [False, True], ids=["running", "waiting"])
+    def test_an_in_process_update_marks_the_final_heartbeat(self, env: _Env, waiting: bool) -> None:
+        sup = self._started(env, waiting=waiting)
+        # What the updater does once the new version is installed.
+        sup.upgrade_restart_event.set()
+
+        sup.stop(stopped_message="Watcher restarting for auto-update")
+
+        assert self._final_status_reason(env) == "auto_update"
+
+    @pytest.mark.parametrize("waiting", [False, True], ids=["running", "waiting"])
+    def test_a_hand_off_to_the_worker_marks_the_final_heartbeat(
+        self, env: _Env, waiting: bool
+    ) -> None:
+        sup = self._started(env, waiting=waiting)
+        self._hand_off_to_the_worker(sup)
+
+        # The worker's `Stop-Service` is an ordinary stop for the service loop.
+        sup.stop(stopped_message="Service stopped")
+
+        assert self._final_status_reason(env) == "auto_update"
+
+    @pytest.mark.parametrize("waiting", [False, True], ids=["running", "waiting"])
+    def test_a_system_shutdown_wins_over_an_update(self, env: _Env, waiting: bool) -> None:
+        sup = self._started(env, waiting=waiting)
+        sup.upgrade_restart_event.set()
+        self._hand_off_to_the_worker(sup)
+
+        sup.stop(stopped_message="Service stopped: Windows is shutting down", system_shutdown=True)
+
+        assert self._final_status_reason(env) == "system_shutdown"
+
+    @pytest.mark.parametrize("waiting", [False, True], ids=["running", "waiting"])
+    def test_a_stop_the_operator_asked_for_is_never_marked(self, env: _Env, waiting: bool) -> None:
+        # Ctrl+C in the CLI, even with an update installed or handed off at that moment.
+        sup = self._started(env, waiting=waiting)
+        sup.upgrade_restart_event.set()
+        self._hand_off_to_the_worker(sup)
+
+        sup.stop(stopped_message="Watcher stopped by user", operator_stop=True)
+
+        assert self._final_status_reason(env) is None
+
+    @pytest.mark.parametrize("waiting", [False, True], ids=["running", "waiting"])
+    def test_a_stop_with_no_update_under_way_is_not_marked(self, env: _Env, waiting: bool) -> None:
+        sup = self._started(env, waiting=waiting)
+
+        sup.stop(stopped_message="Service stopped")
+
+        assert self._final_status_reason(env) is None
+
+
+class TestHandOffToTheWorker:
+    """What the supervisor keeps of an upgrade handed to the Windows worker.
+
+    The updater records the hand-off in the supervisor's `UpgradeHandoff`, so it
+    outlives the runtime: a runtime is built again, with a new updater, for a config
+    revision, when the watch folder comes back, and when a start fails. Each test
+    dispatches through the updater's real tick, with `schtasks` and the install
+    method stood in for, so the worker's own work is not run.
+    """
+
+    @staticmethod
+    def _windows_uv_tool(env: _Env, monkeypatch: pytest.MonkeyPatch) -> list[None]:
+        """Make every updater dispatch a mandatory update to the worker.
+
+        Returns the list that gets an item for every `schtasks /Run`.
+        """
+        from data_hub_watcher import updater as updater_module
+        from data_hub_watcher.models import WatcherUpdateInfoResponse
+        from data_hub_watcher.self_update import InstallMethod
+
+        monkeypatch.setattr(updater_module.sys, "platform", "win32")
+        monkeypatch.setattr(updater_module, "detect_install_method", lambda: InstallMethod.UV_TOOL)
+        monkeypatch.setattr(
+            updater_module,
+            "_resolve_uv_executable",
+            lambda **_kw: ("/fake/uv.exe", ["/fake/uv.exe"]),
+        )
+        monkeypatch.setattr(updater_module, "detect_installed_extras", lambda: [])
+        triggers: list[None] = []
+        monkeypatch.setattr(
+            "data_hub_watcher.scheduled_task.trigger_upgrade_task",
+            lambda **_kw: triggers.append(None),
+        )
+        env.client.get_update_info.return_value = WatcherUpdateInfoResponse(
+            latest_version="9.9.9", mandatory=True
+        )
+        return triggers
+
+    @staticmethod
+    def _tick(sup: WatcherSupervisor) -> None:
+        """One heartbeat tick of whatever runs: the updater's `on_tick` runs from it."""
+        heartbeat = sup.rt.heartbeat if sup.rt is not None else sup._waiting.heartbeat  # type: ignore[union-attr]
+        heartbeat._on_tick()  # type: ignore[misc]
+
+    @staticmethod
+    def _updater(sup: WatcherSupervisor) -> Any:
+        return sup.rt.updater if sup.rt is not None else sup._waiting.updater  # type: ignore[union-attr]
+
+    @staticmethod
+    def _final_status_reason(env: _Env) -> str | None:
+        payload = env.client.send_heartbeat.call_args.args[1]
+        assert payload["status"] == "stopped"
+        return payload.get("status_reason")
+
+    @staticmethod
+    def _flushed_event_types(env: _Env) -> list[str]:
+        return [e["event_type"] for c in env.client.send_events.call_args_list for e in c.args[1]]
+
+    def _hand_off(
+        self, env: _Env, monkeypatch: pytest.MonkeyPatch, *, waiting: bool = False
+    ) -> tuple[WatcherSupervisor, list[None], list[float]]:
+        """A started supervisor whose first tick handed an upgrade to the worker."""
+        triggers = self._windows_uv_tool(env, monkeypatch)
+        now = [1_000.0]
+        sup = env.supervisor(
+            env.write_config(_cfg(env.tmp_path / "later")) if waiting else None,
+            upgrade_handoff=UpgradeHandoff(clock=lambda: now[0]),
+        )
+        sup.start()
+        assert (sup.waiting_reason is not None) is waiting
+        self._tick(sup)
+        assert triggers == [None]
+        return sup, triggers, now
+
+    def _assert_kept(self, env: _Env, sup: WatcherSupervisor, triggers: list[None]) -> None:
+        """The runtime was built again, and the hand-off is neither lost nor repeated."""
+        env.client.get_update_info.reset_mock()
+        updater = self._updater(sup)
+
+        result = updater.on_tick()
+
+        assert result is not None and result.reason == "upgrade handed to the worker"
+        env.client.get_update_info.assert_not_called()
+        assert triggers == [None]
+        # The worker's `Stop-Service` is an ordinary stop for the service loop.
+        sup.stop(stopped_message="Service stopped")
+        assert self._final_status_reason(env) == "auto_update"
+
+    def test_a_config_revision_rebuild_keeps_the_hand_off(
+        self, env: _Env, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The heartbeat before the dispatching tick carried a new revision, and the tick
+        # that dispatched ran before the poll thread rebuilt the runtime.
+        sup, triggers, _now = self._hand_off(env, monkeypatch)
+        old_updater = self._updater(sup)
+        env.client.get_latest_config_revision.return_value = _revision(
+            2, _settings(env.watch_dir, file_patterns=["*.txt"])
+        )
+
+        _deliver(sup, 2)
+
+        assert sup.rt is not None and self._updater(sup) is not old_updater
+        self._assert_kept(env, sup, triggers)
+
+    def test_the_switch_from_waiting_to_watching_keeps_the_hand_off(
+        self, env: _Env, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        sup, triggers, _now = self._hand_off(env, monkeypatch, waiting=True)
+        old_updater = self._updater(sup)
+        (env.tmp_path / "later").mkdir()
+        # The next tick still has the hand-off, and the folder check it starts rebuilds.
+        self._tick(sup)
+        sup.poll(timeout=0)
+
+        assert sup.rt is not None and sup.waiting_reason is None
+        assert self._updater(sup) is not old_updater
+        self._assert_kept(env, sup, triggers)
+
+    def test_a_rollback_after_a_failed_start_keeps_the_hand_off(
+        self, env: _Env, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        sup, triggers, _now = self._hand_off(env, monkeypatch)
+        old_updater = self._updater(sup)
+        real_start = runtime.start_runtime
+        attempts: list[None] = []
+
+        def flaky_start(rt: Any, **kwargs: Any) -> None:
+            attempts.append(None)
+            if len(attempts) == 1:
+                raise OSError("cannot watch")
+            real_start(rt, **kwargs)
+
+        monkeypatch.setattr(runtime, "start_runtime", flaky_start)
+        env.client.get_latest_config_revision.return_value = _revision(
+            2, _settings(env.watch_dir, file_patterns=["*.txt"])
+        )
+
+        _deliver(sup, 2)
+
+        # The new config failed, and the previous one runs again with a new updater.
+        assert len(attempts) == 2 and sup.rt is not None
+        assert self._updater(sup) is not old_updater
+        self._assert_kept(env, sup, triggers)
+
+    def test_the_fallback_to_waiting_after_a_failed_start_keeps_the_hand_off(
+        self, env: _Env, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        sup, triggers, _now = self._hand_off(env, monkeypatch)
+        old_updater = self._updater(sup)
+
+        def failing_start(rt: Any, **kwargs: Any) -> None:
+            raise OSError("cannot watch")
+
+        monkeypatch.setattr(runtime, "start_runtime", failing_start)
+        env.client.get_latest_config_revision.return_value = _revision(
+            2, _settings(env.watch_dir, file_patterns=["*.txt"])
+        )
+
+        _deliver(sup, 2)
+
+        # Neither config could start, so only the heartbeat and a new updater run.
+        assert sup.rt is None and sup.waiting_reason is not None
+        assert self._updater(sup) is not old_updater
+        self._assert_kept(env, sup, triggers)
+
+    def test_a_stop_after_the_window_by_the_clock_is_the_workers_until_a_tick_ends_it(
+        self, env: _Env, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A late worker stops the service just before the window ends, and the service
+        # loop notices the stop up to a second later, when the clock says it is over.
+        sup, _triggers, now = self._hand_off(env, monkeypatch)
+        now[0] += UPGRADE_HANDOFF_TIMEOUT_SECONDS + 0.3
+
+        sup.stop(stopped_message="Service stopped")
+
+        assert self._final_status_reason(env) == "auto_update"
+
+    def test_a_tick_that_runs_during_the_stop_does_not_end_the_hand_off(
+        self, env: _Env, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from data_hub_watcher.updater import upgrade_marker_path
+        from data_hub_watcher.upgrade_worker import upgrade_request_path
+
+        sup, triggers, now = self._hand_off(env, monkeypatch)
+        updater = self._updater(sup)
+        now[0] += UPGRADE_HANDOFF_TIMEOUT_SECONDS + 1
+        env.client.get_update_info.reset_mock()
+        ticks: list[Any] = []
+
+        def final_heartbeat_with_a_tick(
+            _watcher_id: str, payload: dict[str, Any], **_kw: Any
+        ) -> Any:
+            # A heartbeat tick that is still running when the stop begins reaches the
+            # updater after the stop has chosen its reason.
+            if payload["status"] == "stopped":
+                ticks.append(updater.on_tick())
+            return HeartbeatResponse(ok=True)
+
+        env.client.send_heartbeat.side_effect = final_heartbeat_with_a_tick
+
+        sup.stop(stopped_message="Service stopped")
+
+        assert ticks == [None]
+        assert self._final_status_reason(env) == "auto_update"
+        assert EventType.UPDATE_FAILED.value not in self._flushed_event_types(env)
+        # What the worker reads, and the next process's marker, are still there.
+        assert upgrade_request_path(env.tmp_path).exists()
+        assert upgrade_marker_path(env.tmp_path).exists()
+        env.client.get_update_info.assert_not_called()
+        assert triggers == [None]
+
+    def test_a_tick_that_runs_while_the_uploads_finish_does_not_end_the_hand_off(
+        self, env: _Env, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from data_hub_watcher.updater import upgrade_marker_path
+        from data_hub_watcher.upgrade_worker import upgrade_request_path
+
+        sup, triggers, now = self._hand_off(env, monkeypatch)
+        assert sup.rt is not None
+        updater = self._updater(sup)
+        heartbeat = sup.rt.heartbeat
+        now[0] += UPGRADE_HANDOFF_TIMEOUT_SECONDS + 1
+        env.client.get_update_info.reset_mock()
+        on_tick_results: list[Any] = []
+        real_on_tick = updater.on_tick
+        real_request_stop = sup.rt.uploader.request_stop
+
+        def recording_on_tick() -> Any:
+            on_tick_results.append(real_on_tick())
+            return on_tick_results[-1]
+
+        def request_stop_then_tick() -> None:
+            # The heartbeat loop goes on ticking until the uploads have stopped, which can
+            # take most of the stop's budget. A tick in that time reaches the updater after
+            # the stop has chosen its reason, and while the window by the clock is over.
+            real_request_stop()
+            heartbeat._tick()
+
+        monkeypatch.setattr(updater, "on_tick", recording_on_tick)
+        monkeypatch.setattr(sup.rt.uploader, "request_stop", request_stop_then_tick)
+
+        sup.stop(stopped_message="Service stopped")
+
+        assert on_tick_results == [None]
+        assert self._final_status_reason(env) == "auto_update"
+        assert EventType.UPDATE_FAILED.value not in self._flushed_event_types(env)
+        assert upgrade_request_path(env.tmp_path).exists()
+        assert upgrade_marker_path(env.tmp_path).exists()
+        env.client.get_update_info.assert_not_called()
+        assert triggers == [None]
+
+    def test_a_stop_after_the_tick_that_ended_the_hand_off_is_not_marked(
+        self, env: _Env, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        sup, _triggers, now = self._hand_off(env, monkeypatch)
+        now[0] += UPGRADE_HANDOFF_TIMEOUT_SECONDS
+        self._tick(sup)
+
+        sup.stop(stopped_message="Service stopped")
+
+        assert self._final_status_reason(env) is None
 
 
 class TestHeartbeatRevisionFields:

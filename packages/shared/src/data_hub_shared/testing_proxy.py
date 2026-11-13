@@ -25,7 +25,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Literal, cast, get_args
 from urllib.parse import urlsplit
 
-__all__ = ["FaultMode", "FaultProxy", "FaultRule", "RecordedRequest"]
+__all__ = ["MAX_RECORDED_BODY_BYTES", "FaultMode", "FaultProxy", "FaultRule", "RecordedRequest"]
 
 FaultMode = Literal["status", "delay", "reset", "drop_response"]
 """What a fault rule does to a matching request.
@@ -71,6 +71,10 @@ _REFUSAL_PROBE_SECONDS = 0.25
 
 _MAX_HEADER_LINE = 65536
 
+# A request body is kept in the log up to this size: a JSON heartbeat or event batch fits,
+# and the part of a large upload (up to 64 MB) is not held in memory for the whole test.
+MAX_RECORDED_BODY_BYTES = 64 * 1024
+
 
 @dataclass(frozen=True)
 class RecordedRequest:
@@ -84,11 +88,13 @@ class RecordedRequest:
     ``headers`` are the request headers as the client sent them, as ``(name, value)``
     pairs in order, with repeated headers kept and the names in the client's own case.
     ``client_gone`` is true when a ``"delay"`` rule was waiting and the client hung up
-    before the wait ended, so the request was never forwarded.
+    before the wait ended, so the request was never forwarded. ``body`` is the request
+    body when it has one of at most ``MAX_RECORDED_BODY_BYTES``, and ``None`` otherwise.
 
     A request is logged as soon as it arrives, and ``upstream_status`` is filled in once
     the upstream server answers. So a request that is still being delayed or is still
-    waiting on the upstream server is already visible in the log.
+    waiting on the upstream server is already visible in the log. Its ``body`` is filled
+    in once the proxy has read it, which is before it forwards the request.
     """
 
     timestamp: float
@@ -98,6 +104,7 @@ class RecordedRequest:
     upstream_status: int | None
     headers: tuple[tuple[str, str], ...] = ()
     client_gone: bool = False
+    body: bytes | None = None
 
     def header(self, name: str) -> str | None:
         """The value of the first header called ``name`` (any case), or ``None``."""
@@ -506,6 +513,13 @@ class FaultProxy:
             self._log_changed.notify_all()
             return log_id
 
+    def _log_body(self, log_id: int, body: bytes) -> None:
+        with self._lock:
+            entry = self._log.get(log_id)
+            if entry is not None:  # The log may have been cleared meanwhile.
+                self._log[log_id] = replace(entry, body=body)
+                self._log_changed.notify_all()
+
     def _log_client_gone(self, log_id: int) -> None:
         with self._lock:
             entry = self._log.get(log_id)
@@ -664,6 +678,8 @@ class _ProxyHandler(BaseHTTPRequestHandler):
             return
 
         body = self._read_request_body()
+        if body is not None and len(body) <= MAX_RECORDED_BODY_BYTES:
+            proxy._log_body(log_id, body)
 
         if rule is not None and rule.mode == "status":
             payload = json.dumps(

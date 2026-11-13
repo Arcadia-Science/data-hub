@@ -15,7 +15,6 @@ from data_hub_watcher.api_client import (
 )
 from data_hub_watcher.constants import (
     HEARTBEAT_INTERVAL_SECONDS,
-    SYSTEM_SHUTDOWN_STATUS_REASON,
     WATCHER_VERSION,
 )
 from data_hub_watcher.events import EventReporter
@@ -128,8 +127,10 @@ class HeartbeatLoop:
         """Change the ``status_reason`` sent from the next heartbeat on."""
         self._status_reason = reason
 
-    def stop(self, *, send_stopped: bool = True, system_shutdown: bool = False) -> None:
+    def stop(self, *, send_stopped: bool = True, stop_reason: str | None = None) -> None:
         """Stop the loop and, unless *send_stopped* is false, send the final heartbeat.
+
+        *stop_reason* is the `status_reason` of that heartbeat (see `send_final_heartbeat`).
 
         Both halves have no time limit: this waits as long as a tick in progress can take,
         and sends the final heartbeat with the client's usual timeout. A stop that has a
@@ -139,7 +140,7 @@ class HeartbeatLoop:
         """
         self.stop_loop()
         if send_stopped:
-            self.send_final_heartbeat(system_shutdown=system_shutdown)
+            self.send_final_heartbeat(stop_reason=stop_reason)
 
     def stop_loop(self, *, join_timeout: float | None = None) -> None:
         """Stop the periodic heartbeats and wait for a tick in progress. Sends nothing.
@@ -165,7 +166,7 @@ class HeartbeatLoop:
     def send_final_heartbeat(
         self,
         *,
-        system_shutdown: bool = False,
+        stop_reason: str | None = None,
         deadline: float | None = None,
         timeout_cap: tuple[float, float] = DEFAULT_TIMEOUT,
     ) -> None:
@@ -175,10 +176,12 @@ class HeartbeatLoop:
         A rebuild for a new config doesn't send it, because a new loop starts straight away
         and the watcher never actually stops.
 
-        *system_shutdown* marks it as caused by Windows shutting down or restarting: the
-        server then keeps the instrument's requested uploads queued for the watcher to
-        upload once the PC starts again, instead of cancelling them as it does for any
-        other stop.
+        *stop_reason* is the `status_reason` of that heartbeat:
+        `SYSTEM_SHUTDOWN_STATUS_REASON` when Windows is shutting down or restarting,
+        `AUTO_UPDATE_STATUS_REASON` when the watcher stops to install an automatic
+        update. The server then keeps the instrument's requested uploads queued for
+        the watcher to upload once it starts again, instead of cancelling them as it
+        does for any other stop.
 
         *deadline* (a `time.monotonic()` value) is when the request should be done. Its HTTP
         timeout is *timeout_cap*, the client's usual one unless told otherwise, cut down to
@@ -188,7 +191,7 @@ class HeartbeatLoop:
         """
         self._send_heartbeat(
             status="stopped",
-            system_shutdown=system_shutdown,
+            stop_reason=stop_reason,
             timeout=None if deadline is None else timeout_until(deadline, timeout_cap),
         )
 
@@ -217,10 +220,10 @@ class HeartbeatLoop:
         self,
         status: str = "watching",
         *,
-        system_shutdown: bool = False,
+        stop_reason: str | None = None,
         timeout: tuple[float, float] | None = None,
     ) -> None:
-        payload = self._build_payload(status, system_shutdown=system_shutdown)
+        payload = self._build_payload(status, stop_reason=stop_reason)
         try:
             response = self._client.send_heartbeat(self._watcher_id, payload, timeout=timeout)
         except (ApiError, Exception) as exc:
@@ -269,7 +272,7 @@ class HeartbeatLoop:
         self.counters.runs_reported = 0
         self.counters.errors = 0
 
-    def _build_payload(self, status: str, *, system_shutdown: bool = False) -> dict[str, Any]:
+    def _build_payload(self, status: str, *, stop_reason: str | None = None) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "status": status,
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -285,8 +288,8 @@ class HeartbeatLoop:
         if status == "waiting" and self._status_reason:
             # The server caps `status_reason` at 500 characters.
             payload["status_reason"] = self._status_reason[:500]
-        elif status == "stopped" and system_shutdown:
-            payload["status_reason"] = SYSTEM_SHUTDOWN_STATUS_REASON
+        elif status == "stopped" and stop_reason:
+            payload["status_reason"] = stop_reason
         if self._config_revision is not None:
             payload["config_revision"] = self._config_revision()
         return payload
