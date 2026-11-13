@@ -368,7 +368,7 @@ export function registerRunTools(server: McpServer) {
         body: validated.body,
         instrumentId,
         instrumentDisplayName: run.instrumentDisplayName,
-        runDisplayId: runId,
+        runDisplayId: run.runId,
         origin,
       });
 

@@ -132,12 +132,10 @@ export async function prepareRunArchive(
     downloadable.map((f) => ({ id: f.id, s3Key: f.s3Key }))
   );
   const archiveBucket = getS3ArchivesBucket();
-  const archiveKey = getArchiveKey(
-    input.instrumentId,
-    input.runId,
-    fingerprint
-  );
-  const filename = getArchiveDownloadFilename(input.runId);
+  // Name the archive after the stored run ID, so a request that has spaces
+  // around the ID doesn't get an archive of its own.
+  const archiveKey = getArchiveKey(input.instrumentId, run.runId, fingerprint);
+  const filename = getArchiveDownloadFilename(run.runId);
 
   // Cache hit: Lambda already produced a zip with this fingerprint and
   // the lifecycle-policy hasn't expired it. Skip the build entirely and
@@ -191,7 +189,7 @@ export async function prepareRunArchive(
     const buildInput: InvokeBuildArchiveInput = {
       jobId: job.id,
       instrumentId: input.instrumentId,
-      runId: input.runId,
+      runId: run.runId,
       files: downloadable.map((f) => ({
         s3Key: f.s3Key,
         filename: f.filename,
