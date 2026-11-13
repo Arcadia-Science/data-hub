@@ -38,7 +38,7 @@ A run ID comes from a folder or file name, so it can hold `%`, `#`, `?`, spaces,
 
 - **Building a URL.** Encode the run ID once, as a single path segment: `encodeURIComponent` in TypeScript and `quote(run_id, safe="")` in Python. The watcher and the Lambda each do this in `_path_segment` in their `api_client.py`.
 - **Reading a URL in the web app.** A route handler under `runs/[runId]` and the run page read the run ID with `readRunIdParam(headers, param)` from `web/lib/api/run-id-param.ts`. They don't use the `runId` parameter alone, because on Vercel Next.js decodes a dynamic route parameter twice (ENG-2166). A run ID of `Q%41`, sent as `Q%2541`, reaches the handler as `QA`. Under `next start` the parameter is decoded once, so local runs and the integration tests can't show this.
-- **How it works.** `web/proxy.ts` copies the path as it was sent into the `x-data-hub-raw-path` request header on every request that it passes on, and replaces any value the client sent. `readRunIdParam` finds the run ID after `/instruments/<id>/runs/` in that header and decodes it once. If the header is missing, or has no run ID in it, it returns the parameter.
+- **How it works.** `web/proxy.ts` copies the path as it was sent into the `x-data-hub-raw-path` request header on every request that it passes on, and replaces any value the client sent. `readRunIdParam` finds the run ID after `/instruments/<id>/runs/` in that header and decodes it once. If the header is missing, has no run ID in it, or can't be decoded, it returns the parameter.
 
 A new route that has a run ID in its path has to read it the same way.
 

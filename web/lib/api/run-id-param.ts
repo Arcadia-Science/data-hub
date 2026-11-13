@@ -16,9 +16,9 @@ const RUN_ID_IN_PATH = /^(?:\/api\/v1)?\/instruments\/[^/]+\/runs\/([^/]+)/;
  * show this.
  *
  * `proxy.ts` copies the path as sent into a request header. This reads the run
- * ID from that header and decodes it once. It returns `paramValue`, the value
- * Next.js passed in, when the header is missing, doesn't name a run, or has a
- * malformed escape.
+ * ID from that header and decodes it once. It returns `paramValue`, the
+ * fallback that the caller passes in, when the header is missing, doesn't name
+ * a run, or has a malformed escape.
  */
 export function readRunIdParam(
   headers: Pick<Headers, "get">,
