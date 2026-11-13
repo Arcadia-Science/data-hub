@@ -16,6 +16,7 @@ import pytest
 
 from data_hub_shared.testing import IntegrationEnv, db_query, db_update
 from data_hub_watcher.api_client import DataHubClient
+from data_hub_watcher.constants import AUTO_UPDATE_STATUS_REASON, SYSTEM_SHUTDOWN_STATUS_REASON
 from data_hub_watcher.heartbeat import HeartbeatLoop
 
 pytestmark = pytest.mark.integration
@@ -174,8 +175,9 @@ class TestManualUploadQueue:
 class TestStopWithRequestedUploads:
     """What the server does with queued upload requests when the watcher stops.
 
-    A stop caused by Windows shutting down or restarting keeps them queued, so the
-    watcher uploads them after the PC starts again. Any other stop cancels them.
+    A stop caused by Windows shutting down or restarting, or by the watcher installing an
+    update, keeps them queued, so the watcher uploads them after it starts again. Any other
+    stop cancels them.
     This runs the watcher's own final heartbeat against the real server, so the
     reason the watcher sends and the one the server expects can't drift apart.
     """
@@ -222,7 +224,10 @@ class TestStopWithRequestedUploads:
         # With the deadline a stop for a system shutdown has, the heartbeat goes out with the
         # short HTTP timeout it gets there. This sends it through the real client.
         self._stop_the_watcher(
-            client, watcher_id, system_shutdown=True, deadline=time.monotonic() + 7
+            client,
+            watcher_id,
+            stop_reason=SYSTEM_SHUTDOWN_STATUS_REASON,
+            deadline=time.monotonic() + 7,
         )
 
         watchers = db_query(
@@ -231,6 +236,24 @@ class TestStopWithRequestedUploads:
         assert watchers[0][0] == "stopped"
         assert self._file_status(integration_env, file_id) == "upload_requested"
         # Once the PC is back and the watcher has started, it finds the request in its queue.
+        client.send_heartbeat(watcher_id, {"status": "watching"})
+        assert [f.id for f in client.get_upload_queue(watcher_id).files] == [file_id]
+
+    def test_a_stop_for_an_update_keeps_the_request_queued(
+        self, client: DataHubClient, integration_env: IntegrationEnv
+    ) -> None:
+        watcher_id, file_id = self._request_the_upload(client, integration_env)
+
+        self._stop_the_watcher(client, watcher_id, stop_reason=AUTO_UPDATE_STATUS_REASON)
+
+        watchers = db_query(
+            integration_env.db_dsn,
+            "SELECT status, status_reason FROM watchers WHERE id = %s",
+            (watcher_id,),
+        )
+        assert tuple(watchers[0]) == ("stopped", "auto_update")
+        assert self._file_status(integration_env, file_id) == "upload_requested"
+        # Once the updated watcher has started, it finds the request in its queue.
         client.send_heartbeat(watcher_id, {"status": "watching"})
         assert [f.id for f in client.get_upload_queue(watcher_id).files] == [file_id]
 
