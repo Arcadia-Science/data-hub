@@ -32,6 +32,7 @@ from data_hub_watcher.constants import (
 from data_hub_watcher.events import EventReporter, EventType, WatcherEvent
 from data_hub_watcher.heartbeat import WatcherCounters
 from data_hub_watcher.models import (
+    ApiErrorDetail,
     MultipartPartUrl,
     MultipartPartUrlsResponse,
     PresignedUploadResponse,
@@ -3154,6 +3155,39 @@ class TestMultipartUpload:
         assert up._counters.errors == 1
         assert up._counters.files_uploaded == 0
         assert not state_db.has_stat_match("big.bin", 24, before.st_mtime + 30)
+
+    def test_a_restart_refused_because_the_run_was_deleted_is_remembered_and_reported_once(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path
+    ) -> None:
+        up, path, changed, before = self._changing_file(mock_client, state_db, tmp_path)
+        refusal = ApiError(
+            "This run was deleted on Data Hub. Restore it to upload files.",
+            status_code=409,
+            detail=ApiErrorDetail(
+                code="CONFLICT", message="deleted", details={"reason": "run_deleted"}
+            ),
+        )
+        mock_client.request_upload_url.side_effect = [
+            _multipart_presigned(part_size=4, part_count=4),
+            refusal,
+        ]
+
+        def complete(*args: object) -> None:
+            self._change(path, changed, before)
+            raise self._bad_digest()
+
+        mock_client.complete_multipart_upload.side_effect = complete
+
+        with patch.object(up._s3_session, "put", return_value=_etag_response(1)):
+            assert up._upload_single(path, "RUN-001") is False
+
+        # The run is remembered, so its other files are skipped, and the one event says why.
+        assert "RUN-001" in up._deleted_runs
+        [event] = _events(up)
+        assert event.event_type == EventType.UPLOAD_FAILED
+        assert event.details["reason"] == "run_deleted"
+        assert up._counters.errors == 1
+        mock_client.abort_multipart_upload.assert_called_once_with(42, "abc123")
 
     def test_a_file_that_shrank_below_the_multipart_size_fails_the_restart(
         self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path

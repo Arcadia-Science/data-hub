@@ -24,14 +24,16 @@ from typing import Any, Generic, TypeVar, cast
 import requests as http_requests
 from requests.adapters import HTTPAdapter
 
-from data_hub_watcher.api_client import ApiError, DataHubClient
+from data_hub_watcher.api_client import ApiError, DataHubClient, is_run_deleted
 from data_hub_watcher.constants import (
     MAX_PENDING_UPLOAD_ATTEMPTS,
     MAX_QUEUE_FILE_ATTEMPTS,
+    RUN_DELETED_REASON,
     UPLOAD_POLL_INTERVAL_SECONDS,
     UPLOAD_RETRY_BASE_DELAY,
     UPLOAD_RETRY_MAX,
 )
+from data_hub_watcher.deleted_runs import DeletedRuns
 from data_hub_watcher.events import EventReporter, EventType, WatcherEvent
 from data_hub_watcher.heartbeat import WatcherCounters
 from data_hub_watcher.models import (
@@ -603,6 +605,10 @@ class Uploader:
         value keep their previous behaviour. Production wiring (see
         ``runtime.build_runtime``) reads this from the per-instrument
         config.
+    deleted_runs:
+        The runs the server refused because they were deleted on Data Hub. Share the
+        run detector's. An upload-URL request refused for that reason adds its run, and
+        no file of a run in the set is uploaded. Defaults to a set of its own.
     """
 
     def __init__(
@@ -617,6 +623,7 @@ class Uploader:
         watch_directory: Path,
         upload_parallelism: int = 1,
         stop_event: threading.Event | None = None,
+        deleted_runs: DeletedRuns | None = None,
     ) -> None:
         self._client = client
         self._state_db = state_db
@@ -636,6 +643,9 @@ class Uploader:
         self._stop_event = stop_event
         # Set by `abort`, when the owner can't wait for those parts any longer.
         self._abort = threading.Event()
+        # Added to by any upload thread and read by all of them, and by the run
+        # detector's thread too; the set has its own lock.
+        self._deleted_runs = deleted_runs if deleted_runs is not None else DeletedRuns()
         # Track consecutive upload-queue poll failures so the watcher
         # surfaces a ``kind=upload_queue_poll_failed`` event on the
         # 1st failure and every 10th repeat. The unthrottled case
@@ -983,8 +993,11 @@ class Uploader:
             uploaded = False
         if uploaded:
             return
-        if self._stop_requested():
-            # An interrupted upload is not a failed attempt.
+        if self._stop_requested() or pending.run_id in self._deleted_runs:
+            # Neither is a failed attempt: an interrupted upload, or a run Data Hub refuses
+            # because it was deleted. The row stays, so once the run is restored the next
+            # start uploads the file, and a run that stays deleted costs one request per
+            # start, with no event for each of its files.
             return
         attempts = self._state_db.bump_pending_upload_attempts(pending.relative_path)
         if attempts < MAX_PENDING_UPLOAD_ATTEMPTS:
@@ -1157,7 +1170,15 @@ class Uploader:
         A file that is on disk but can't be read yet (an instrument holds it
         open) is not an attempt. It is reported once, stays queued, and is
         tried again on every poll, with no limit.
+
+        A file of a run Data Hub refused because it was deleted is not an attempt
+        either, and is skipped before anything else, so it is not reported
+        missing on every poll. The server drops the requests of a deleted run, so
+        a queue that still lists such a file is rare.
         """
+        if qf.run_id in self._deleted_runs:
+            logger.debug("Skipping queued file %s: run %s was deleted", qf.filename, qf.run_id)
+            return
         attempt = self._queue_attempts.get(qf.id)
         attempt_count = attempt.count if attempt else 0
 
@@ -1228,10 +1249,11 @@ class Uploader:
         if ok:
             self._queue_attempts.pop(qf.id, None)
             return
-        if self._stop_requested():
+        if self._stop_requested() or qf.run_id in self._deleted_runs:
             # A stop, or a config rebuild, cut the upload off. That isn't a
             # failed attempt, so it can't use up the last one and cancel the
-            # request: the file stays queued for the next poll or runtime.
+            # request: the file stays queued for the next poll or runtime. Nor is
+            # an upload that Data Hub refused just now because the run was deleted.
             return
 
         attempt_count += 1
@@ -1394,8 +1416,38 @@ class Uploader:
         )
         self._bump_errors()
 
-    def _fail_presign(self, path: Path, exc: ApiError) -> None:
+    def _note_run_deleted(self, run_id: str, exc: ApiError) -> None:
+        """Remember that Data Hub refused an upload because *run_id* was deleted, and say so once.
+
+        From now on `_upload_single` skips every file of the run before any request. A
+        file whose request was already out when this one came back is refused too, and
+        says nothing: only the call that adds the run reports it, so a run with many files
+        costs one event and one error, not one per file. The detector's reports and
+        updates stop for the run as well, because they share the set.
+        """
+        if not self._deleted_runs.add(run_id):
+            logger.debug("Run %s was already known to be deleted on Data Hub", run_id)
+            return
+        logger.warning(
+            "Run %s was deleted on Data Hub: %s. Its files are not uploaded until the "
+            "watcher restarts",
+            run_id,
+            exc.message,
+        )
+        self._bump_errors()
+        self._reporter.queue_event(
+            WatcherEvent(
+                event_type=EventType.UPLOAD_FAILED,
+                message=f"Upload refused: run {run_id} was deleted on Data Hub",
+                details={"error": exc.message, "reason": RUN_DELETED_REASON, "run_id": run_id},
+            )
+        )
+
+    def _fail_presign(self, path: Path, exc: ApiError, run_id: str) -> None:
         """Report a refused upload-URL request."""
+        if is_run_deleted(exc):
+            self._note_run_deleted(run_id, exc)
+            return
         logger.error("Failed to get presigned URL for %s: %s", path.name, exc.message)
         self._bump_errors()
         self._reporter.queue_event(
@@ -1644,7 +1696,10 @@ class Uploader:
                 relative_path=relative_path,
             )
         except ApiError as exc:
-            self._fail_upload(path.name, s3_key, exc)
+            if is_run_deleted(exc):
+                self._note_run_deleted(run_id, exc)
+            else:
+                self._fail_upload(path.name, s3_key, exc)
             return None
         if upload.upload_type != "multipart" or not upload.upload_id:
             self._fail_upload(
@@ -1842,7 +1897,14 @@ class Uploader:
         `CantReadYet` when the file is on disk but can't be read yet. That is
         neither: nothing was recorded or counted as a failure, and the caller
         decides how to wait.
+
+        Returns `False` at once, without a request, for a file of a run Data Hub
+        refused because it was deleted. That is neither a failure nor an attempt, so
+        the callers that count attempts check the run too.
         """
+        if run_id in self._deleted_runs:
+            logger.debug("Skipping %s: run %s was deleted on Data Hub", path.name, run_id)
+            return False
         with self._exclusive(path) as waited:
             uploaded = self._upload_locked(path, run_id, waited)
             if uploaded:
@@ -1923,7 +1985,7 @@ class Uploader:
             try:
                 presigned = request_url()
             except ApiError as exc:
-                self._fail_presign(path, exc)
+                self._fail_presign(path, exc, run_id)
                 return False
         else:
             # Kick off both the SHA-256 and the presigned-URL request in
@@ -1946,7 +2008,7 @@ class Uploader:
                         sha_future.result()
                     except Exception:
                         pass
-                    self._fail_presign(path, exc)
+                    self._fail_presign(path, exc, run_id)
                     return False
 
                 digests = self._take_digests(path, sha_future.result, presigned)

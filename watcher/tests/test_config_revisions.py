@@ -173,6 +173,25 @@ def _deliver(sup: WatcherSupervisor, latest: int | None) -> None:
 
 
 class TestApplyInProcess:
+    def test_a_rebuild_keeps_the_runs_found_deleted(self, env: _Env) -> None:
+        sup = env.supervisor()
+        sup.start()
+        old_rt = sup.rt
+        assert old_rt is not None
+        old_rt.uploader._deleted_runs.add("RUN001")
+
+        env.client.get_latest_config_revision.return_value = _revision(
+            2, _settings(env.watch_dir, file_patterns=["*.csv", "*.txt"])
+        )
+        sup._on_heartbeat_revision(2)
+        assert sup.poll(timeout=0) is False
+
+        new_rt = sup.rt
+        assert new_rt is not None and new_rt is not old_rt
+        # A change of config is not a restart, so the run is still left alone.
+        assert "RUN001" in new_rt.detector._deleted_runs
+        assert "RUN001" in new_rt.uploader._deleted_runs
+
     def test_revision_rebuilds_runtime_without_exiting(self, env: _Env) -> None:
         sup = env.supervisor()
         sup.start()

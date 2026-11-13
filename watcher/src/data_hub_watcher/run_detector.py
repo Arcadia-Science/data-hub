@@ -13,6 +13,12 @@ that fails or is cut short by a kill remembers nothing, so the next start's
 initial scan reports the files again. A write that fails while the process
 goes on is retried with the backoff of a failed report. Until it has gone
 through, nothing is uploaded and no further request is sent for the run.
+
+A run that was deleted on Data Hub is refused with a 409 that says so (`is_run_deleted`).
+The first refusal is reported once, and the run is remembered in memory (`DeletedRuns`)
+until the process ends: its later files send nothing and report nothing, so a forgotten
+run with many files in the folder costs one request and one event, not one per file.
+Nothing of it is recorded, so the next start asks again.
 """
 
 from __future__ import annotations
@@ -26,11 +32,13 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePath
 from typing import Literal
 
-from data_hub_watcher.api_client import ApiError, DataHubClient
+from data_hub_watcher.api_client import ApiError, DataHubClient, is_run_deleted
 from data_hub_watcher.constants import (
+    RUN_DELETED_REASON,
     RUN_REPORT_RETRY_BASE_DELAY_SECONDS,
     RUN_REPORT_RETRY_MAX_DELAY_SECONDS,
 )
+from data_hub_watcher.deleted_runs import DeletedRuns
 from data_hub_watcher.events import EventReporter, EventType, WatcherEvent
 from data_hub_watcher.heartbeat import WatcherCounters
 from data_hub_watcher.state import StateDB
@@ -163,6 +171,10 @@ class RunDetector:
         Typically `Uploader.upload_files` in auto mode; `None` in manual mode.
     watch_directory:
         The root watch directory (used for relative path calculation).
+    deleted_runs:
+        The runs the server refused because they were deleted on Data Hub. Share the
+        uploader's, so a run found deleted by either is left alone by both. Defaults to
+        a set of its own.
     """
 
     def __init__(
@@ -177,6 +189,7 @@ class RunDetector:
         counters: WatcherCounters,
         upload_callback: Callable[[str, list[FileInfo]], int] | None = None,
         watch_directory: Path,
+        deleted_runs: DeletedRuns | None = None,
     ) -> None:
         self._pattern = re.compile(pattern)
         self._instrument_id = instrument_id
@@ -187,6 +200,8 @@ class RunDetector:
         self._counters = counters
         self._upload_cb = upload_callback
         self._watch_dir = watch_directory
+        # Read here on the stability thread, and added to by the uploader's threads too.
+        self._deleted_runs = deleted_runs if deleted_runs is not None else DeletedRuns()
 
         self._runs: dict[str, RunState] = {}
         # Due time (`time.monotonic()`) of the next retry, by run ID. A run has
@@ -218,6 +233,13 @@ class RunDetector:
         """
         run_id = self._extract_run_id(path)
         if run_id is None:
+            return
+
+        if run_id in self._deleted_runs:
+            # Data Hub refused this run as deleted. Nothing is sent, recorded or reported
+            # for its files, so the next start, or an admin's restore and a restart, finds
+            # them still unreported.
+            logger.debug("Skipping %s: run %s was deleted on Data Hub", path, run_id)
             return
 
         try:
@@ -263,7 +285,12 @@ class RunDetector:
             return
         _, run_id = min(due)
         del self._retry_at[run_id]
-        self._send_report(self._runs[run_id])
+        run = self._runs[run_id]
+        if run_id in self._deleted_runs:
+            # The uploader found the run deleted while this retry waited.
+            self._clear_retry(run)
+            return
+        self._send_report(run)
 
     def _send_report(self, run: RunState) -> None:
         if run.reported:
@@ -287,6 +314,9 @@ class RunDetector:
         self, run: RunState, operation: ReportOperation, exc: Exception
     ) -> None:
         """Count a failed POST or PATCH, report it, and schedule a retry if it can help."""
+        if is_run_deleted(exc):
+            self._handle_run_deleted(run, operation, exc)
+            return
         verb = "report" if operation == "create" else "update"
         if isinstance(exc, ApiError):
             status_code, error, retryable = exc.status_code, exc.message, exc.is_transient
@@ -316,6 +346,40 @@ class RunDetector:
             self._schedule_retry(run)
         else:
             self._clear_retry(run)
+
+    def _handle_run_deleted(self, run: RunState, operation: ReportOperation, exc: ApiError) -> None:
+        """Stop reporting *run*, which the server refused because it was deleted on Data Hub.
+
+        Remembers the run for the life of the process, so no later file of it sends a request
+        (`on_stable_file`) and no retry does (`retry_failed_reports`). Counts one error and
+        queues one ``run_report_failed`` event, with the reason in its details, however many
+        files the run has. When the uploader has met the refusal first, it has said so, and
+        nothing more is reported. A 409 is never retried, so this ends any retry that was
+        scheduled. The run's files are not recorded, so the next start tries once more.
+        """
+        self._clear_retry(run)
+        if not self._deleted_runs.add(run.run_id):
+            logger.debug("Run %s was already known to be deleted on Data Hub", run.run_id)
+            return
+        verb = "report" if operation == "create" else "update"
+        logger.warning(
+            "Failed to %s run %s: %s. The run was deleted on Data Hub, so its files are not "
+            "reported again until the watcher restarts",
+            verb,
+            run.run_id,
+            exc.message,
+        )
+        self._counters.errors += 1
+        self._reporter.report_error(
+            "run_report_failed",
+            f"Failed to {verb} run {run.run_id}: {exc.message}",
+            run_id=run.run_id,
+            operation=operation,
+            status_code=exc.status_code,
+            error=exc.message,
+            file_count=len(run.files),
+            reason=RUN_DELETED_REASON,
+        )
 
     def _handle_write_failure(self, run: RunState, exc: Exception) -> None:
         """Count a failed write of a report the server accepted, report it, and retry it.

@@ -19,7 +19,9 @@ a database migration. Known ``kind`` values, with their per-kind
   is emitted; a 4xx is emitted every time because it is not retried.
   ``status_code`` is 0 when no HTTP status came back.
   ``details = {"kind", "run_id", "operation": "create"|"update",
-  "status_code", "error", "file_count"}``.
+  "status_code", "error", "file_count"}``. A 409 that says the run was deleted
+  on Data Hub is emitted once per run per process, not for every file, and
+  also carries ``"reason": "run_deleted"``.
 * ``state_write_failed`` -- the server accepted a run report, but writing it
   to the state database failed (a full disk, say). The watcher retries the
   write on the backoff of a failed report, and uploads nothing and sends
