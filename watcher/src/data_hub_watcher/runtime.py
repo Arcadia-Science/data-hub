@@ -114,9 +114,9 @@ class WatcherRuntime:
     shutdown_event: threading.Event = field(default_factory=threading.Event)
     upgrade_restart_event: threading.Event = field(default_factory=threading.Event)
     # Set, together with ``shutdown_event``, once the server has answered enough heartbeats
-    # in a row with "watcher not found": the registration was deleted on Data Hub and the
-    # watcher can never report again (see ``HeartbeatLoop``). The stop that follows sends
-    # no ``watcher_stopped`` event and no final heartbeat, which would get the same 404.
+    # in a row with its "deregistered" reply: the registration was deleted on Data Hub and
+    # the watcher can never report again (see ``HeartbeatLoop``). The stop that follows
+    # sends no ``watcher_stopped`` event and no final heartbeat, which would get the same 404.
     deregistered_event: threading.Event = field(default_factory=threading.Event)
     # The thread that polls the upload queue off the heartbeat. Always set by
     # ``build_runtime``; ``None`` only in tests that build a runtime by hand.

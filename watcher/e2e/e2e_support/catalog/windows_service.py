@@ -284,7 +284,7 @@ TRANSITIONS: tuple[Transition, ...] = (
     covered(
         MACHINE,
         "service.deregistered->stays_stopped",
-        "After three heartbeats in a row get the server's not-found reply, the running service "
+        "After three heartbeats in a row get the server's deregistered reply, the running service "
         "stops itself and exits 0, a clean stop for the SCM, so its recovery actions do not "
         "restart it and it stays stopped. (A failure exit would make the SCM restart a watcher "
         "that can never recover.) It is the service side of "
