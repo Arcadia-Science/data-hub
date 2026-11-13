@@ -448,11 +448,14 @@ export const watchers = pgTable(
       withTimezone: true,
       mode: "date",
     }),
-    // `stale` is computed at query time when
-    // last_heartbeat_at < now() - interval '5 minutes'.
+    // `stale` is computed at query time, never stored. See
+    // `computeEffectiveStatus` in `lib/api/watchers.ts`: a `watching` or
+    // `waiting` watcher goes stale after 5 minutes without a heartbeat, and a
+    // `stopped` one only if it stopped for a restart and is not back in 15.
     status: watcherStatusEnum("status").notNull().default("registered"),
-    // Why the watcher is `waiting` (for example the missing folder). NULL
-    // for every other status.
+    // Why the watcher is `waiting` (for example the missing folder), or why it
+    // is `stopped` for a restart (`system_shutdown` or `auto_update`). NULL
+    // otherwise, including for any other stop.
     statusReason: text("status_reason"),
     // Highest revision number in `watcher_config_revisions` for this
     // watcher. NULL until the first revision exists.

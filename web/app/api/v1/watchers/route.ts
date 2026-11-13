@@ -1,7 +1,12 @@
-import { and, eq, isNull, type SQL, sql } from "drizzle-orm";
+import { and, eq, isNull, type SQL } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 import { authorize } from "@/lib/api/auth";
-import { computeEffectiveStatus, STALE_THRESHOLD_MS } from "@/lib/api/watchers";
+import { apiError, VALIDATION_ERROR } from "@/lib/api/errors";
+import { watcherStatusSchema } from "@/lib/api/openapi/schemas/common";
+import {
+  computeEffectiveStatus,
+  effectiveStatusCondition,
+} from "@/lib/api/watchers";
 import { db } from "@/lib/db";
 import { instruments, watchers } from "@/lib/db/schema";
 
@@ -15,6 +20,9 @@ export async function GET(request: NextRequest) {
   const instrumentIdFilter = searchParams.get("instrument_id");
   const statusFilter = searchParams.get("status");
   const includeDeleted = searchParams.get("include_deleted") === "true";
+  // One clock for the filter and for the status printed in each row, so a
+  // watcher can't match one filter and print another status.
+  const now = new Date();
 
   const conditions: SQL[] = [];
 
@@ -26,22 +34,20 @@ export async function GET(request: NextRequest) {
     conditions.push(eq(watchers.instrumentId, instrumentIdFilter));
   }
 
-  if (statusFilter === "stale") {
-    // "stale" is virtual — push the staleness check into the WHERE clause
-    // so we don't fetch all watchers just to filter in JS. A watcher is stale
-    // if its last heartbeat is too old, OR it has no heartbeat at all and
-    // isn't in the initial "registered" state (which is exempt).
-    const threshold = new Date(Date.now() - STALE_THRESHOLD_MS);
-    conditions.push(
-      sql`(${watchers.lastHeartbeatAt} < ${threshold} OR (${watchers.lastHeartbeatAt} IS NULL AND ${watchers.status} != 'registered'))`
-    );
-  } else if (statusFilter) {
-    conditions.push(
-      eq(
-        watchers.status,
-        statusFilter as "registered" | "watching" | "stopped" | "waiting"
-      )
-    );
+  // Each value selects the watchers whose computed status, the one printed
+  // below, is that value. "stale" is never stored, so the filter can't just
+  // compare the stored status. The check runs in the WHERE clause so we don't
+  // fetch all watchers just to filter in JS.
+  if (statusFilter) {
+    const parsedStatus = watcherStatusSchema.safeParse(statusFilter);
+    if (!parsedStatus.success) {
+      return apiError(
+        400,
+        VALIDATION_ERROR,
+        `Invalid status '${statusFilter}'. Use one of: ${watcherStatusSchema.options.join(", ")}.`
+      );
+    }
+    conditions.push(effectiveStatusCondition(parsedStatus.data, now));
   }
 
   const rows = await db
@@ -67,10 +73,14 @@ export async function GET(request: NextRequest) {
   // Override stored status with the computed effective status (may be "stale").
   const data = rows.map((row) => ({
     ...row,
-    status: computeEffectiveStatus({
-      status: row.status,
-      lastHeartbeatAt: row.last_heartbeat_at,
-    }),
+    status: computeEffectiveStatus(
+      {
+        status: row.status,
+        statusReason: row.status_reason,
+        lastHeartbeatAt: row.last_heartbeat_at,
+      },
+      now
+    ),
   }));
 
   return Response.json({ data });
