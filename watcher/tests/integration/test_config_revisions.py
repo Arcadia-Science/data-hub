@@ -25,6 +25,7 @@ import yaml
 from data_hub_shared.testing import IntegrationEnv, db_query, seed_auth
 from data_hub_watcher.api_client import DataHubClient
 from data_hub_watcher.config_io import save_config
+from data_hub_watcher.constants import WATCHER_VERSION
 from data_hub_watcher.models import InstrumentConfig, RunDetectionConfig, WatcherConfig
 from data_hub_watcher.runtime import WatcherSupervisor
 
@@ -203,7 +204,7 @@ class TestAdminRevision:
         [first] = admin.revisions(pc.watcher_id)
         assert (first["revision"], first["source"], first["status"]) == (1, "pc", "applied")
         assert sup.applied_revision == 1
-        assert _watcher_row(integration_env.db_dsn, pc.watcher_id)[4] == "1.4.0"
+        assert _watcher_row(integration_env.db_dsn, pc.watcher_id)[4] == WATCHER_VERSION
 
         # A .txt file that was already on disk before the change.
         old_txt = pc.watch_dir / "RUN002_notes.txt"
