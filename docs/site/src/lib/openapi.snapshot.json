@@ -1082,7 +1082,8 @@
               "stopped",
               "waiting",
               "stale"
-            ]
+            ],
+            "description": "The status Data Hub shows for the watcher. `stale` is worked out when you ask and is never stored. A `watching` or `waiting` watcher is `stale` when its last heartbeat is more than 5 minutes old. A `stopped` watcher stays `stopped`, however old its last heartbeat, unless it stopped for a restart or an update (see `status_reason`): then it is `stale` when its last heartbeat is more than 15 minutes old. A deregistered watcher is always `stopped`. The `status` filter on the list endpoint returns the watchers that show that status."
           },
           "config_yaml": {
             "type": [
@@ -1112,7 +1113,8 @@
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "Why the watcher is `waiting` (for example a missing watch folder), or why it stopped for a restart: `system_shutdown` for Windows shutting down or restarting, `auto_update` for an update (watcher 1.4.2 will send it). It is the reason of the watcher's last heartbeat, so it stays while `status` reads `stale`. It is null when that heartbeat was any other status, or a stop that gave no such reason."
           },
           "last_heartbeat_at": {
             "type": [
@@ -2563,9 +2565,11 @@
           {
             "schema": {
               "type": "string",
+              "description": "The run ID. Spaces at the start or end are ignored.",
               "example": "run-2026-001"
             },
             "required": true,
+            "description": "The run ID. Spaces at the start or end are ignored.",
             "name": "runId",
             "in": "path"
           }
@@ -2658,9 +2662,11 @@
           {
             "schema": {
               "type": "string",
+              "description": "The run ID. Spaces at the start or end are ignored.",
               "example": "run-2026-001"
             },
             "required": true,
+            "description": "The run ID. Spaces at the start or end are ignored.",
             "name": "runId",
             "in": "path"
           }
@@ -2778,7 +2784,7 @@
       "delete": {
         "operationId": "deleteInstrumentRun",
         "summary": "Soft-delete a run",
-        "description": "Requires scope `runs:delete`.",
+        "description": "Requires scope `runs:delete`. Also cancels the uploads that were requested for the run's files: they go back to `detected` and leave the watcher's upload queue. Restoring the run doesn't bring the requests back.",
         "tags": [
           "Runs"
         ],
@@ -2800,9 +2806,11 @@
           {
             "schema": {
               "type": "string",
+              "description": "The run ID. Spaces at the start or end are ignored.",
               "example": "run-2026-001"
             },
             "required": true,
+            "description": "The run ID. Spaces at the start or end are ignored.",
             "name": "runId",
             "in": "path"
           }
@@ -2910,7 +2918,7 @@
       "post": {
         "operationId": "restoreInstrumentRun",
         "summary": "Restore a run",
-        "description": "Requires scope `runs:delete`.",
+        "description": "Requires scope `runs:delete`. Doesn't bring back the upload requests that deleting the run cancelled. Request the uploads again.",
         "tags": [
           "Runs"
         ],
@@ -2932,9 +2940,11 @@
           {
             "schema": {
               "type": "string",
+              "description": "The run ID. Spaces at the start or end are ignored.",
               "example": "run-2026-001"
             },
             "required": true,
+            "description": "The run ID. Spaces at the start or end are ignored.",
             "name": "runId",
             "in": "path"
           }
@@ -3058,9 +3068,11 @@
           {
             "schema": {
               "type": "string",
+              "description": "The run ID. Spaces at the start or end are ignored.",
               "example": "run-2026-001"
             },
             "required": true,
+            "description": "The run ID. Spaces at the start or end are ignored.",
             "name": "runId",
             "in": "path"
           }
@@ -3175,9 +3187,11 @@
           {
             "schema": {
               "type": "string",
+              "description": "The run ID. Spaces at the start or end are ignored.",
               "example": "run-2026-001"
             },
             "required": true,
+            "description": "The run ID. Spaces at the start or end are ignored.",
             "name": "runId",
             "in": "path"
           }
@@ -3288,9 +3302,11 @@
           {
             "schema": {
               "type": "string",
+              "description": "The run ID. Spaces at the start or end are ignored.",
               "example": "run-2026-001"
             },
             "required": true,
+            "description": "The run ID. Spaces at the start or end are ignored.",
             "name": "runId",
             "in": "path"
           },
@@ -3629,9 +3645,11 @@
           {
             "schema": {
               "type": "string",
+              "description": "The run ID. Spaces at the start or end are ignored.",
               "example": "run-2026-001"
             },
             "required": true,
+            "description": "The run ID. Spaces at the start or end are ignored.",
             "name": "runId",
             "in": "path"
           }
@@ -3796,9 +3814,11 @@
           {
             "schema": {
               "type": "string",
+              "description": "The run ID. Spaces at the start or end are ignored.",
               "example": "run-2026-001"
             },
             "required": true,
+            "description": "The run ID. Spaces at the start or end are ignored.",
             "name": "runId",
             "in": "path"
           }
@@ -3909,9 +3929,11 @@
           {
             "schema": {
               "type": "string",
+              "description": "The run ID. Spaces at the start or end are ignored.",
               "example": "run-2026-001"
             },
             "required": true,
+            "description": "The run ID. Spaces at the start or end are ignored.",
             "name": "runId",
             "in": "path"
           }
@@ -4038,9 +4060,11 @@
           {
             "schema": {
               "type": "string",
+              "description": "The run ID. Spaces at the start or end are ignored.",
               "example": "run-2026-001"
             },
             "required": true,
+            "description": "The run ID. Spaces at the start or end are ignored.",
             "name": "runId",
             "in": "path"
           }
@@ -4144,9 +4168,11 @@
           {
             "schema": {
               "type": "string",
+              "description": "The run ID. Spaces at the start or end are ignored.",
               "example": "run-2026-001"
             },
             "required": true,
+            "description": "The run ID. Spaces at the start or end are ignored.",
             "name": "runId",
             "in": "path"
           }
@@ -4260,9 +4286,11 @@
           {
             "schema": {
               "type": "string",
+              "description": "The run ID. Spaces at the start or end are ignored.",
               "example": "run-2026-001"
             },
             "required": true,
+            "description": "The run ID. Spaces at the start or end are ignored.",
             "name": "runId",
             "in": "path"
           },
@@ -4384,9 +4412,11 @@
           {
             "schema": {
               "type": "string",
+              "description": "The run ID. Spaces at the start or end are ignored.",
               "example": "run-2026-001"
             },
             "required": true,
+            "description": "The run ID. Spaces at the start or end are ignored.",
             "name": "runId",
             "in": "path"
           },
@@ -4506,9 +4536,11 @@
           {
             "schema": {
               "type": "string",
+              "description": "The run ID. Spaces at the start or end are ignored.",
               "example": "run-2026-001"
             },
             "required": true,
+            "description": "The run ID. Spaces at the start or end are ignored.",
             "name": "runId",
             "in": "path"
           }
@@ -5500,9 +5532,11 @@
           {
             "schema": {
               "type": "string",
+              "description": "The run ID. Spaces at the start or end are ignored.",
               "example": "run-2026-001"
             },
             "required": true,
+            "description": "The run ID. Spaces at the start or end are ignored.",
             "name": "runId",
             "in": "path"
           }
@@ -6223,7 +6257,7 @@
       "post": {
         "operationId": "createWatcherEvent",
         "summary": "Report a watcher event",
-        "description": "Requires scope `watchers:report`. PAT only; browser sessions are rejected.",
+        "description": "Requires scope `watchers:report`. PAT only; browser sessions are rejected. Event types that only Data Hub writes, such as `upload_requests_cancelled`, are rejected with a 400 error. The event list still returns them.",
         "tags": [
           "Watchers"
         ],
@@ -6421,7 +6455,8 @@
                               "error",
                               "update_started",
                               "update_succeeded",
-                              "update_failed"
+                              "update_failed",
+                              "upload_requests_cancelled"
                             ]
                           },
                           "message": {
@@ -6556,7 +6591,7 @@
                   "status_reason": {
                     "type": "string",
                     "maxLength": 500,
-                    "description": "Why the watcher is `waiting`, for example a missing watch folder. On a `stopped` heartbeat, `system_shutdown` says the watcher stopped because Windows is shutting down or restarting. Data Hub then keeps the instrument's requested uploads queued for the watcher to upload after the PC starts again, and cancels them only if no heartbeat arrives for about 15 minutes. Any other `stopped` heartbeat cancels them at once."
+                    "description": "Why the watcher is `waiting`, for example a missing watch folder. On a `stopped` heartbeat, `system_shutdown` says the watcher stopped because Windows is shutting down or restarting (watcher 1.4.1 and later send it), and `auto_update` says it stopped to install an update and start again (watcher 1.4.2 will send it). Data Hub keeps these two reasons on the watcher, keeps the instrument's requested uploads queued for the watcher to upload after it starts again, and cancels them only if no heartbeat arrives for about 15 minutes. After that long without a heartbeat the watcher shows as `stale`. Any other `stopped` heartbeat cancels the requested uploads at once, and its reason is not kept."
                   },
                   "config_revision": {
                     "type": [

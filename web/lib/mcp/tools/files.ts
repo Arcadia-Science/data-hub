@@ -97,7 +97,7 @@ export function registerFileTools(server: McpServer) {
         return structuredResult({
           status: "ready",
           instrumentId,
-          runId,
+          runId: result.runId,
           downloadUrl: result.downloadUrl,
           filename: result.filename,
           sizeBytes: result.sizeBytes,
@@ -109,7 +109,7 @@ export function registerFileTools(server: McpServer) {
       return structuredResult({
         status: "building",
         instrumentId,
-        runId,
+        runId: result.runId,
         jobId: result.jobId,
         retryAfterSeconds: result.retryAfterSeconds,
         hint: "Call get_run_archive again after the suggested wait to retrieve the download URL.",

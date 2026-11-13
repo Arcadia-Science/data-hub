@@ -938,11 +938,6 @@ def test_an_uploaded_file_cannot_be_dismissed(
     assert server.read_object(instrument_id, RUN, "a.csv") == content
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=KnownBugStillPresent,
-    reason="ENG-2113: the upload queue still lists files of a run that was deleted",
-)
 @pytest.mark.covers("queue.deleted_run_file->not_listed")
 def test_upload_queue_does_not_list_files_of_a_deleted_run(
     watcher: WatcherFactory,
@@ -954,13 +949,33 @@ def test_upload_queue_does_not_list_files_of_a_deleted_run(
 ) -> None:
     pc = manual_watcher(watcher, server)
     files = detect_run(server, instrument_id, watch_dir, RUN, {"a.csv": SMALL, "b.csv": SMALL})
-    hold_queue(proxy)
+    hold = hold_queue(proxy)
     admin.request_upload_all(instrument_id, RUN).raise_for_status()
     assert queue_ids(server, pc) == {f.row.id for f in files.values()}
 
     # The run is deleted after its files were queued.
     admin.delete_run(instrument_id, RUN).raise_for_status()
 
-    # Intended: files of a deleted run are not offered to the watcher. Today they still are.
-    with known_bug():
-        assert queue_ids(server, pc) == set()
+    # Deleting the run cancelled the requests. The files read `detected` again, they are not
+    # offered to the watcher, and the watcher's event log says why.
+    assert queue_ids(server, pc) == set()
+    assert statuses(server, instrument_id, RUN) == {"a.csv": "detected", "b.csv": "detected"}
+    assert all(f.upload_requested_at is None for f in server.files(instrument_id, RUN))
+    (cancelled,) = server.events(pc.watcher_id, event_type="upload_requests_cancelled")
+    assert cancelled.details == {
+        "kind": "upload_requests_cancelled",
+        "reason": "run_deleted",
+        "run_id": RUN,
+        "cancelled_count": 2,
+    }
+
+    # When its queue polls work again, the watcher finds nothing to upload.
+    mark = len(proxy.requests)
+    proxy.remove_fault(hold)
+    wait_for_good_poll_after(proxy, mark)
+    stays_true(
+        lambda: not calls(proxy, "POST", "/request-upload-url") and not s3_puts(proxy),
+        3,
+        lambda: server.dump(pc.watcher_id, instrument_id),
+        what="the watcher to leave the files of the deleted run alone",
+    )

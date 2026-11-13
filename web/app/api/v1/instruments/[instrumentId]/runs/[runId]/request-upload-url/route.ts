@@ -138,7 +138,8 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   }
 
   const storedName = existingFile?.filename ?? filename;
-  const s3Key = `${instrumentId}/${runId}/${storedName}`;
+  // The stored run ID, not the one in the URL, which can have spaces around it.
+  const s3Key = `${instrumentId}/${run.runId}/${storedName}`;
 
   let fileId: number;
 

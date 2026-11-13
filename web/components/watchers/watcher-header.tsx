@@ -92,7 +92,9 @@ export function WatcherHeader({
             </h1>
             <WatcherStatusBadge
               lastOnlineAt={watcher.lastHeartbeatAt}
-              reason={watcher.statusReason}
+              // A deregistered watcher reads Stopped whatever it reported
+              // last, so its reason doesn't apply.
+              reason={isDeregistered ? null : watcher.statusReason}
               status={watcher.effectiveStatus}
             />
             {watcher.watcherVersion && (

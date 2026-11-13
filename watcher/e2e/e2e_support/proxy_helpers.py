@@ -3,14 +3,19 @@
 ``silence_heartbeats`` is how a test keeps a watcher's heartbeats from reaching the server
 before it ages ``last_heartbeat_at`` (see ``ServerView.age_heartbeat``), so that the age it sets
 is the one the test then reads.
+
+``wait_for_answer`` is how a test reads ``upstream_status`` of a request after it has waited for
+the server to hold the result of that request.
 """
 
 from __future__ import annotations
 import time
+from collections.abc import Callable
 
-from data_hub_shared.testing_proxy import FaultProxy, FaultRule
+from data_hub_shared.testing_proxy import FaultProxy, FaultRule, RecordedRequest
+from e2e_support.waiting import wait_until
 
-__all__ = ["silence_heartbeats"]
+__all__ = ["silence_heartbeats", "wait_for_answer"]
 
 
 def silence_heartbeats(
@@ -43,3 +48,40 @@ def silence_heartbeats(
         timeout=timeout,
     )
     return refusal
+
+
+def wait_for_answer(
+    proxy: FaultProxy,
+    select: Callable[[], list[RecordedRequest]],
+    *,
+    what: str,
+    timeout: float = 30.0,
+) -> list[RecordedRequest]:
+    """Wait until the proxy has noted the server's answer to the newest request ``select``
+    returns, and return what ``select`` returns then.
+
+    The proxy logs a request when it arrives, and fills in ``upstream_status`` only after the
+    server has answered. The server stores a file before it answers, so a test that has waited
+    for the file can read the request while its status is still ``None``. Wait here before
+    reading ``upstream_status``. Use the list that is returned, because a request read earlier
+    is a snapshot that never gets the status.
+
+    ``select`` reads ``proxy.requests`` and returns the requests the test cares about, oldest
+    first. The newest of them must be one the proxy sends to the server: a request that a
+    ``"status"`` fault answers never gets a status, and this wait runs out. ``what`` names the
+    answer in the failure message, which lists everything the proxy has logged.
+    """
+
+    def answered() -> list[RecordedRequest] | None:
+        selected = select()
+        return selected if selected and selected[-1].upstream_status is not None else None
+
+    return wait_until(
+        answered,
+        timeout,
+        lambda: "\n".join(
+            f"{r.method} {r.path} fault={r.fault_mode} upstream={r.upstream_status}"
+            for r in proxy.requests
+        ),
+        what=f"the proxy to note {what}",
+    )

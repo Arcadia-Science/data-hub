@@ -96,7 +96,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     body: validated.body,
     instrumentId,
     instrumentDisplayName: run.instrumentDisplayName,
-    runDisplayId: runId,
+    runDisplayId: run.runId,
     origin: new URL(request.url).origin,
   });
 

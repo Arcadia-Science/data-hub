@@ -246,6 +246,7 @@ vi.mock("@/lib/api/instrument-runs", () => ({
       }
       return null;
     }),
+  normalizeRunId: (runId: string) => runId.trim(),
   lookupRunUuidsByNaturalKeys: vi
     .fn()
     .mockImplementation((_instId: string, runIds: string[]) => {
@@ -521,6 +522,7 @@ vi.mock("@/lib/api/run-archive", () => ({
     expiresInSeconds: 900,
     archiveBucket: "test-archives",
     archiveKey: "runs/test-plate-reader/run-1/abc.zip",
+    runId: "run-1",
   }),
 }));
 
@@ -1542,6 +1544,7 @@ describe("MCP Protocol (in-memory)", () => {
       ok: true,
       status: "building",
       jobId: "job-abc",
+      runId: "run-1",
       ownsBuild: true,
       retryAfterSeconds: 5,
     });
@@ -1562,6 +1565,35 @@ describe("MCP Protocol (in-memory)", () => {
     expect(parsed.jobId).toBe("job-abc");
     expect(parsed.retryAfterSeconds).toBe(5);
     expect(parsed.hint).toMatch(/get_run_archive/);
+  });
+
+  // The tool names the run by the stored ID that `prepareRunArchive` found,
+  // not by the ID in the call, which can have spaces around it.
+  it("get_run_archive reports the stored run ID, not the one in the call", async () => {
+    const ready = await client.callTool({
+      name: "get_run_archive",
+      arguments: { instrumentId: "test-plate-reader", runId: " run-1 " },
+    });
+    expect(ready.isError).toBeFalsy();
+    expect((parseText(ready.content) as { runId: string }).runId).toBe("run-1");
+
+    const { prepareRunArchive } = await import("@/lib/api/run-archive");
+    vi.mocked(prepareRunArchive).mockResolvedValueOnce({
+      ok: true,
+      status: "building",
+      jobId: "job-abc",
+      runId: "run-1",
+      ownsBuild: true,
+      retryAfterSeconds: 5,
+    });
+    const building = await client.callTool({
+      name: "get_run_archive",
+      arguments: { instrumentId: "test-plate-reader", runId: " run-1 " },
+    });
+    expect(building.isError).toBeFalsy();
+    expect((parseText(building.content) as { runId: string }).runId).toBe(
+      "run-1"
+    );
   });
 
   it("get_run_archive surfaces a clear error when no files are downloadable", async () => {

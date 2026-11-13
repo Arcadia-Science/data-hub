@@ -9,6 +9,7 @@ import {
   isNotNull,
   isNull,
   or,
+  type SQL,
   sql,
 } from "drizzle-orm";
 import { cache } from "react";
@@ -27,6 +28,11 @@ import {
   isBoundToOtherToken,
 } from "@/lib/api/watcher-binding";
 import type { ConfigRevisionStatus } from "@/lib/api/watcher-config/revisions";
+import {
+  isRestartStopReason,
+  RESTART_STOP_REASONS,
+  UPLOAD_REQUEST_REVERT_GRACE_MS,
+} from "@/lib/api/watcher-status";
 import { type DbExecutor, db } from "@/lib/db";
 import {
   files,
@@ -128,11 +134,14 @@ export async function enforceWatcherBinding(
  * Called when a watcher's `watch_directory` changes: every queued file's
  * `relative_path` was anchored to the old root, so none resolve under the
  * new one and the watcher would otherwise re-error on each heartbeat poll.
+ * It is also called when a run is deleted, with `runUuid` set to that run's
+ * internal ID so that only the run's own requests are reverted.
  * Returns the reverted file ids (for event reporting).
  */
 export async function revertPendingUploadRequests(
   instrumentId: string,
-  executor: DbExecutor = db
+  executor: DbExecutor = db,
+  runUuid?: string
 ): Promise<number[]> {
   const reverted = await executor
     .update(files)
@@ -146,6 +155,7 @@ export async function revertPendingUploadRequests(
             .from(instrumentRuns)
             .where(eq(instrumentRuns.instrumentId, instrumentId))
         ),
+        runUuid === undefined ? undefined : eq(files.instrumentRunId, runUuid),
         eq(files.status, "upload_requested"),
         isNull(files.uploadedAt),
         isNull(files.deletedAt)
@@ -159,19 +169,62 @@ export async function revertPendingUploadRequests(
   return reverted.map((row) => row.id);
 }
 
-// The `status_reason` on the `stopped` heartbeat of a watcher that stopped
-// because Windows is shutting down or restarting. Such a PC is expected back, so
-// the heartbeat route keeps its instrument's upload requests queued for the
-// watcher to drain after the restart. Must match the watcher's
-// `SYSTEM_SHUTDOWN_STATUS_REASON`.
-export const SYSTEM_SHUTDOWN_STATUS_REASON = "system_shutdown";
+/**
+ * Cancels a run's requested uploads because the run was deleted. The files go
+ * back to `detected` so they leave the upload queue, and the instrument's
+ * active watcher gets an `upload_requests_cancelled` event. A deleted run
+ * refuses uploads, so without this the watcher would keep retrying files that
+ * the server turns away. Records no event when nothing was queued or when the
+ * instrument has no active watcher. Returns the number of files reverted.
+ *
+ * Call it in the same transaction as the delete, and before the run row is
+ * updated. It locks the files first and then the run, which is the order of
+ * the other paths that revert requests. Updating the run first can deadlock
+ * with one of them.
+ */
+export async function cancelRunUploadRequests(
+  run: { id: string; instrumentId: string; runId: string },
+  executor: DbExecutor = db
+): Promise<number> {
+  const revertedIds = await revertPendingUploadRequests(
+    run.instrumentId,
+    executor,
+    run.id
+  );
+  if (revertedIds.length === 0) {
+    return 0;
+  }
 
-// Sweep window, wider than the 5-minute online threshold so a brief heartbeat
-// blip doesn't churn the queue. The graceful-stop path skips it: an explicit
-// stop is intentional and reverts immediately. The exception is a stop for a
-// system shutdown, which waits for this window like a watcher that died: the
-// sweep cancels its requests if the PC doesn't come back.
-export const UPLOAD_REQUEST_REVERT_GRACE_MS = 15 * 60 * 1000;
+  const [watcher] = await executor
+    .select({ id: watchers.id })
+    .from(watchers)
+    .where(
+      and(
+        eq(watchers.instrumentId, run.instrumentId),
+        isNull(watchers.deletedAt)
+      )
+    )
+    .limit(1);
+  if (!watcher) {
+    return revertedIds.length;
+  }
+
+  const count = revertedIds.length;
+  await executor.insert(watcherEvents).values({
+    watcherId: watcher.id,
+    eventType: "upload_requests_cancelled",
+    message: `Cancelled ${count} requested ${count === 1 ? "upload" : "uploads"} because run ${run.runId} was deleted`,
+    details: {
+      kind: "upload_requests_cancelled",
+      reason: "run_deleted",
+      run_id: run.runId,
+      cancelled_count: count,
+    },
+    timestamp: new Date(),
+  });
+
+  return count;
+}
 
 type UploadRevertReason =
   | "watcher_stopped"
@@ -290,8 +343,12 @@ export async function deregisterInstrumentWatchers(
 }
 
 interface WatcherLike {
+  /** Set when the watcher was deregistered. */
+  deletedAt: Date | null;
   lastHeartbeatAt: Date | null;
   status: string;
+  /** Why the watcher is `waiting`, or why it `stopped` for a restart. */
+  statusReason: string | null;
 }
 
 export type EffectiveStatus =
@@ -302,24 +359,89 @@ export type EffectiveStatus =
   | "stale";
 
 /**
- * Derives the display status from stored status + heartbeat recency.
- * "stale" is never stored in the DB — it's a virtual status computed here.
- * Watchers in "registered" state haven't sent their first heartbeat yet,
- * so they're exempt from staleness checks.
+ * Derives the display status from stored status, stop reason, and heartbeat
+ * recency. "stale" is never stored in the DB: it's a virtual status computed
+ * here, and `effectiveStatusCondition` below must agree with it.
+ *
+ * - Deregistered: always `stopped`. It can no longer send heartbeats, so
+ *   staleness is moot, whatever it reported last.
+ * - `registered`: no heartbeat yet, so it is exempt from staleness checks.
+ * - `watching` and `waiting`: `stale` once the last heartbeat is more than
+ *   `STALE_THRESHOLD_MS` old, or missing.
+ * - `stopped` for a restart (see `RESTART_STOP_REASONS`): the watcher is
+ *   expected back, so it reads `stale` once the last heartbeat is more than
+ *   `UPLOAD_REQUEST_REVERT_GRACE_MS` old, or missing.
+ * - Any other `stopped`: always `stopped`. The watcher said it was stopping,
+ *   so it can't send another heartbeat and its silence is not a fault.
  */
-export function computeEffectiveStatus(watcher: WatcherLike): EffectiveStatus {
+export function computeEffectiveStatus(
+  watcher: WatcherLike,
+  now: Date = new Date()
+): EffectiveStatus {
+  if (watcher.deletedAt) {
+    return "stopped";
+  }
+
   if (watcher.status === "registered") {
     return "registered";
   }
 
-  if (!watcher.lastHeartbeatAt) {
-    return "stale";
+  const age = watcher.lastHeartbeatAt
+    ? now.getTime() - watcher.lastHeartbeatAt.getTime()
+    : Number.POSITIVE_INFINITY;
+
+  if (watcher.status === "stopped") {
+    const expectedBack = isRestartStopReason(watcher.statusReason);
+    return expectedBack && age > UPLOAD_REQUEST_REVERT_GRACE_MS
+      ? "stale"
+      : "stopped";
   }
 
-  const age = Date.now() - watcher.lastHeartbeatAt.getTime();
   return age > STALE_THRESHOLD_MS
     ? "stale"
     : (watcher.status as EffectiveStatus);
+}
+
+/**
+ * The SQL condition that selects the watchers whose `computeEffectiveStatus`
+ * is `status`, for list filters. It uses the same thresholds as that function,
+ * and each watcher row satisfies the condition of exactly one status.
+ * `now` is the moment the thresholds count back from.
+ */
+export function effectiveStatusCondition(
+  status: EffectiveStatus,
+  now: Date = new Date()
+): SQL {
+  const heartbeat = watchers.lastHeartbeatAt;
+  const staleBefore = new Date(now.getTime() - STALE_THRESHOLD_MS);
+  const restartStaleBefore = new Date(
+    now.getTime() - UPLOAD_REQUEST_REVERT_GRACE_MS
+  );
+  const restartReasons = sql.join(
+    RESTART_STOP_REASONS.map((reason) => sql`${reason}`),
+    sql`, `
+  );
+
+  // A deregistered watcher is `stopped` and nothing else, so every other
+  // status needs `deleted_at is null`.
+  const active = sql`${watchers.deletedAt} is null`;
+
+  switch (status) {
+    case "registered":
+      return sql`(${active} and ${watchers.status} = 'registered')`;
+    case "watching":
+      return sql`(${active} and ${watchers.status} = 'watching' and ${heartbeat} >= ${staleBefore})`;
+    case "waiting":
+      return sql`(${active} and ${watchers.status} = 'waiting' and ${heartbeat} >= ${staleBefore})`;
+    case "stopped":
+      // `status_reason` is checked for NULL first, because `NULL not in (...)`
+      // is NULL, not true, and a plain stop has no reason.
+      return sql`(${watchers.deletedAt} is not null or (${watchers.status} = 'stopped' and (${watchers.statusReason} is null or ${watchers.statusReason} not in (${restartReasons}) or ${heartbeat} >= ${restartStaleBefore})))`;
+    case "stale":
+      return sql`(${active} and ((${watchers.status} in ('watching', 'waiting') and (${heartbeat} is null or ${heartbeat} < ${staleBefore})) or (${watchers.status} = 'stopped' and ${watchers.statusReason} in (${restartReasons}) and (${heartbeat} is null or ${heartbeat} < ${restartStaleBefore}))))`;
+    default:
+      return status satisfies never;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -345,7 +467,10 @@ export interface WatcherListItem {
    * `pickRestartPending` in `watcher-config/revisions.ts`).
    */
   pcEditAwaitingRestart: boolean;
-  /** Why the watcher is waiting; null for every other status. */
+  /**
+   * Why the watcher is waiting, or why it stopped for a restart (one of
+   * `RESTART_STOP_REASONS`); null otherwise.
+   */
   statusReason: string | null;
   watcherVersion: string | null;
 }
@@ -413,9 +538,7 @@ export async function getWatcherList(opts: {
     instrumentDisplayName: row.instrumentDisplayName,
     hostname: row.hostname,
     watcherVersion: row.watcherVersion,
-    // Deregistered watchers always show as "stopped" regardless of their
-    // last DB status — they can no longer heartbeat so staleness is moot.
-    effectiveStatus: row.deletedAt ? "stopped" : computeEffectiveStatus(row),
+    effectiveStatus: computeEffectiveStatus(row),
     statusReason: row.statusReason,
     configRevision: row.configRevision,
     appliedConfigRevision: row.appliedConfigRevision,
@@ -498,7 +621,7 @@ export const getWatcherById = cache(async function getWatcherById(
     hostname: row.hostname,
     osInfo: row.osInfo,
     watcherVersion: row.watcherVersion,
-    effectiveStatus: row.deletedAt ? "stopped" : computeEffectiveStatus(row),
+    effectiveStatus: computeEffectiveStatus(row),
     statusReason: row.statusReason,
     configRevision: row.configRevision,
     appliedConfigRevision: row.appliedConfigRevision,

@@ -322,6 +322,58 @@ describe("MCP Server (HTTP)", () => {
     expect(result.content[0].text.toLowerCase()).toContain("not found");
   });
 
+  // A run created as ` RUN1 ` is stored as `RUN1`, so a tool call has to find
+  // the run whether or not the ID has spaces at either end.
+  it("get_run finds a run when the ID has spaces around it", async () => {
+    const result = await callTool("get_run", {
+      instrumentId,
+      runId: ` ${runId} `,
+    });
+    expect(result.isError).toBeFalsy();
+    expect(JSON.parse(result.content[0].text).runId).toBe(runId);
+  });
+
+  it("claim_run and unclaim_run find a run when the ID has spaces around it and report its stored ID", async () => {
+    const claimed = await callTool("claim_run", {
+      instrumentId,
+      runId: `  ${runId}`,
+    });
+    expect(claimed.isError).toBeFalsy();
+    const claimedBody = JSON.parse(claimed.content[0].text);
+    expect(claimedBody.runId).toBe(runId);
+    expect(claimedBody.attributions).toHaveLength(1);
+
+    const unclaimed = await callTool("unclaim_run", {
+      instrumentId,
+      runId: ` ${runId} `,
+    });
+    expect(unclaimed.isError).toBeFalsy();
+    const unclaimedBody = JSON.parse(unclaimed.content[0].text);
+    expect(unclaimedBody.runId).toBe(runId);
+    expect(unclaimedBody.attributions).toEqual([]);
+  });
+
+  it("claim_runs finds runs when the IDs have spaces around them and reports the IDs it could not find as sent", async () => {
+    const batch = await callTool("claim_runs", {
+      instrumentId,
+      runIds: [`${runId} `, runId, " no-such-run ", "   "],
+    });
+    expect(batch.isError).toBeFalsy();
+    const parsed = JSON.parse(batch.content[0].text);
+    // Two spellings of one run claim it once, under its stored ID.
+    expect(parsed.claimed.map((c: { runId: string }) => c.runId)).toEqual([
+      runId,
+    ]);
+    expect(parsed.claimed[0].attributions).toHaveLength(1);
+    expect(parsed.notFound).toEqual([" no-such-run ", "   "]);
+  });
+
+  it("get_run does not find a run ID that is only spaces", async () => {
+    const result = await callTool("get_run", { instrumentId, runId: "   " });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text.toLowerCase()).toContain("not found");
+  });
+
   it("unclaim_run removes attribution and is idempotent", async () => {
     await callTool("claim_run", { instrumentId, runId });
 
@@ -508,6 +560,32 @@ describe("MCP Server (HTTP)", () => {
     });
     expect(del2.isError).toBeFalsy();
     expect(JSON.parse(del2.content[0].text).deleted).toBe(true);
+  });
+
+  it("add_run_comment puts the comment on the run when the ID has spaces around it", async () => {
+    const add = await callTool("add_run_comment", {
+      instrumentId,
+      runId: ` ${runId} `,
+      body: "comment on a padded run ID",
+    });
+    expect(add.isError).toBeFalsy();
+    const created = JSON.parse(add.content[0].text) as { id: string };
+
+    const db = getTestDb();
+    const [run] = await db
+      .select({ id: schema.instrumentRuns.id })
+      .from(schema.instrumentRuns)
+      .where(
+        and(
+          eq(schema.instrumentRuns.instrumentId, instrumentId),
+          eq(schema.instrumentRuns.runId, runId)
+        )
+      );
+    const [comment] = await db
+      .select({ runId: schema.runComments.runId })
+      .from(schema.runComments)
+      .where(eq(schema.runComments.id, created.id));
+    expect(comment.runId).toBe(run.id);
   });
 
   // Admins may delete anyone's comment over MCP; members may not.

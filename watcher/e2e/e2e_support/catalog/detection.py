@@ -171,6 +171,17 @@ TRANSITIONS: tuple[Transition, ...] = (
         "Next.js decodes route parameters a second time (ENG-2166). The server undoes that by "
         "reading the run ID from the path as sent, which this test can't show.",
     ),
+    covered(
+        MACHINE,
+        "run.id_with_outer_spaces->update_reaches_run",
+        "A run whose ID starts or ends with a space, such as `RUN1 ` from a file named "
+        "`RUN1 _a.csv`, gets its files. The server saves the run as `RUN1` and finds it again "
+        "when the watcher names it with the space, in the run update (`PATCH /runs/<id>`) and "
+        "the upload URL request (`POST /runs/<id>/request-upload-url`). The test runs in both "
+        "upload modes. It writes two files, then a third after the run exists, and asserts that "
+        "all three are in the one run `RUN1` and, in auto mode, stored under "
+        "`<instrument>/RUN1/`, with no error event.",
+    ),
     # --- the initial scan and restarts ------------------------------------------------------
     covered(
         MACHINE,
