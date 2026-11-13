@@ -109,6 +109,75 @@ class TestRegisterWatcher:
 
 
 # ------------------------------------------------------------------
+# A deregistered watcher
+# ------------------------------------------------------------------
+
+
+class TestDeregisteredWatcherReplies:
+    """What the real server says to a watcher whose registration was deleted.
+
+    The watcher stops on three heartbeats in a row that get the server's own "not found"
+    reply, and refuses to start on the same reply to `GET /watchers/{id}`. The unit tests
+    build that reply by hand, so these check the shape the server really sends.
+    """
+
+    @staticmethod
+    def _deregister(integration_env: IntegrationEnv, watcher_id: str) -> None:
+        db_update(
+            integration_env.db_dsn,
+            "UPDATE watchers SET deleted_at = now() WHERE id = %s",
+            (watcher_id,),
+        )
+
+    def test_a_registered_watcher_is_found(self, client: DataHubClient, instrument_id: str) -> None:
+        registered = client.register_watcher(instrument_id, hostname="LAB-PC-01")
+
+        assert client.get_watcher(registered.watcher_id).id == registered.watcher_id
+
+    def test_a_deregistered_watcher_gets_the_not_found_reply_to_get_watcher(
+        self,
+        client: DataHubClient,
+        instrument_id: str,
+        integration_env: IntegrationEnv,
+    ) -> None:
+        registered = client.register_watcher(instrument_id, hostname="LAB-PC-01")
+        self._deregister(integration_env, registered.watcher_id)
+
+        with pytest.raises(ApiError) as exc_info:
+            client.get_watcher(registered.watcher_id)
+
+        assert exc_info.value.status_code == 404
+        assert exc_info.value.detail is not None
+        assert exc_info.value.detail.code == "NOT_FOUND"
+        assert exc_info.value.is_not_found_reply is True
+
+    def test_a_deregistered_watcher_gets_the_same_reply_to_its_heartbeat(
+        self,
+        client: DataHubClient,
+        instrument_id: str,
+        integration_env: IntegrationEnv,
+    ) -> None:
+        registered = client.register_watcher(instrument_id, hostname="LAB-PC-01")
+        self._deregister(integration_env, registered.watcher_id)
+
+        with pytest.raises(ApiError) as exc_info:
+            client.send_heartbeat(
+                registered.watcher_id,
+                {"status": "watching", "instrument_id": instrument_id},
+            )
+
+        assert exc_info.value.is_not_found_reply is True
+
+    def test_a_watcher_id_that_was_never_registered_gets_it_too(
+        self, client: DataHubClient
+    ) -> None:
+        with pytest.raises(ApiError) as exc_info:
+            client.get_watcher("00000000-0000-4000-8000-000000000000")
+
+        assert exc_info.value.is_not_found_reply is True
+
+
+# ------------------------------------------------------------------
 # Config push / checksum
 # ------------------------------------------------------------------
 

@@ -25,10 +25,15 @@ from data_hub_watcher.models import (
     RunDetailResponse,
     RunResponse,
     UploadQueueResponse,
+    WatcherResponse,
     WatcherUpdateInfoResponse,
 )
 
 logger = logging.getLogger(__name__)
+
+
+# The `code` the server puts in the JSON body of a 404 (`NOT_FOUND` in `web/lib/api/errors.ts`).
+NOT_FOUND_ERROR_CODE = "NOT_FOUND"
 
 
 class ApiError(Exception):
@@ -57,6 +62,21 @@ class ApiError(Exception):
         A 4xx needs someone to fix the cause, and replaying it would fail the same way.
         """
         return self.status_code == 0 or self.status_code >= 500
+
+    @property
+    def is_not_found_reply(self) -> bool:
+        """True for the server's own "not found" reply: a 404 with the error code `NOT_FOUND`.
+
+        On a route that names a watcher, that is how Data Hub says the watcher's
+        registration was deleted. A 404 from anything else on the way, such as an HTML
+        page from a proxy or a failed deploy, has no JSON error body (`detail` is `None`),
+        and any other status or code is some other problem, so none of those count.
+        """
+        return (
+            self.status_code == 404
+            and self.detail is not None
+            and self.detail.code == NOT_FOUND_ERROR_CODE
+        )
 
 
 DEFAULT_TIMEOUT: tuple[float, float] = (5, 30)  # (connect, read) seconds
@@ -209,6 +229,16 @@ class DataHubClient:
             payload["os_info"] = os_info
         resp = self._request("POST", "/watchers/register", json=payload)
         return RegisterWatcherResponse.model_validate(resp.json())
+
+    def get_watcher(self, watcher_id: str) -> WatcherResponse:
+        """Fetch a watcher that is still registered (`GET /watchers/{id}`).
+
+        A deregistered watcher gets a 404 with the code `NOT_FOUND`
+        (`ApiError.is_not_found_reply`). The watcher's own token has the scope for it,
+        `watchers:read`, which it already uses for the upload queue.
+        """
+        resp = self._request("GET", f"/watchers/{watcher_id}")
+        return WatcherResponse.model_validate(resp.json())
 
     def push_config(
         self,

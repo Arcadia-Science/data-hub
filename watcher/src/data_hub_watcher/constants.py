@@ -70,6 +70,26 @@ WATCHER_LOG_DIR = _resolve_watcher_log_dir()
 SUPPORTED_ENVIRONMENTS: tuple[str, ...] = ("staging", "production", "preview")
 
 HEARTBEAT_INTERVAL_SECONDS = 60
+# A watcher whose registration was deleted on Data Hub (deregistered in the web app) can't
+# report anything again: the server answers every heartbeat with a 404 whose JSON error code
+# is `NOT_FOUND`. One such reply could come from a broken deploy, which must not stop every
+# lab PC's watcher for good, so the watcher stops only after this many heartbeats in a row
+# get it. That is about 3 minutes at the production interval. Any other result, a success
+# or any other error, starts the count again.
+DEREGISTERED_HEARTBEAT_THRESHOLD = 3
+# What the watcher says, in the log and at the command line, when it stops or refuses to
+# start for that reason. The word "init" is what the person on the PC has to act on.
+DEREGISTERED_MESSAGE = (
+    "This watcher was deregistered on Data Hub, so its registration no longer exists. "
+    "Run 'data-hub-watcher init' to register it again."
+)
+# The exit code of `data-hub-watcher watch` when it stops because it was deregistered. It
+# differs from 0 (a stop that was asked for) and from 1 (an update was installed and the
+# watcher has to start again, which is also what a refused start-up returns), so a wrapper
+# script can tell that restarting the watcher won't help. The Windows service exits 0 for
+# it instead, so that the SCM's recovery actions, which restart a service that fails, leave
+# it stopped.
+DEREGISTERED_EXIT_CODE = 3
 # The `status_reason` on the final `stopped` heartbeat when the stop was caused by
 # Windows shutting down or restarting. A server that knows the value keeps the
 # instrument's requested uploads queued, for the watcher to upload after the PC

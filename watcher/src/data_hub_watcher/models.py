@@ -248,6 +248,18 @@ class RegisterWatcherResponse(BaseModel):
     watcher_id: str
 
 
+class WatcherResponse(BaseModel):
+    """What `GET /watchers/{id}` returns for a watcher that is still registered.
+
+    Only the ID is read. The probe at start-up cares about whether the server answers
+    at all, and a deregistered watcher gets a 404 instead.
+    """
+
+    model_config = _API_MODEL_CONFIG
+
+    id: str
+
+
 class ConfigChecksumResponse(BaseModel):
     model_config = _API_MODEL_CONFIG
 
