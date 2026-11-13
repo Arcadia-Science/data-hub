@@ -7,7 +7,7 @@ Code: ``api_client.py``; server side ``app/api/v1/watchers/register``,
 
 from __future__ import annotations
 
-from e2e_support.catalog.model import Transition, covered, xfail_bug
+from e2e_support.catalog.model import Transition, covered
 
 MACHINE = "registration_tokens"
 
@@ -76,27 +76,22 @@ TRANSITIONS: tuple[Transition, ...] = (
         "their queued uploads, with an `upload_requests_cancelled` event whose reason is "
         "`instrument_retired`.",
     ),
-    xfail_bug(
+    covered(
         MACHINE,
         "watcher.deregistered->process_exits",
-        "A running watcher that finds out it was deregistered (from the 404 of its heartbeat) "
-        "stops uploading, logs a clear error and stops, instead of running on with 404s. "
-        "(Today it still reports and uploads a new file of a run the server already has: "
-        "only the report of a new run names the watcher, so only that is refused.) "
-        "Under the CLI it exits with a non-zero code. Under the Windows service the intended "
-        "outcome is that it stops and stays stopped: a deregistered watcher can never "
-        "recover, so the SCM's recovery actions, which restart a service that exits with a "
-        "failure, must not keep bringing it back. The shared test checks the stop and the "
-        "uploads, a CLI test the exit code, and the SCM side is "
-        "`service.deregistered->stays_stopped` in `test_windows_service.py`.",
-        "ENG-2117",
+        "After three heartbeats in a row get the server's own not-found reply (a 404 whose error "
+        "code is `NOT_FOUND`), a running watcher stops uploading at once, logs one error that "
+        "says to run `init`, and stops. It sends no `watcher_stopped` event and no final "
+        "heartbeat, because the server would refuse both. Under the CLI `watch` exits with code "
+        "3. Under the Windows service the process exits 0, so the SCM's recovery actions do not "
+        "restart it (`service.deregistered->stays_stopped`, in `test_windows_service.py`).",
     ),
-    xfail_bug(
+    covered(
         MACHINE,
         "startup.deregistered->refused",
-        "Starting a watcher whose registration was deleted exits with a clear message that "
-        "says to run `init` again. (A service start that is refused exits with a failure, and "
-        "the SCM's recovery restarts it twice before it stays down.)",
-        "ENG-2117",
+        "Starting a watcher whose registration was deleted is refused, with a message that says "
+        "to run `init` again. This covers `watch`, `watch --dry-run` and the service. `watch` "
+        "exits 1. A service start that is refused also exits 1, so the SCM's recovery restarts "
+        "it twice before it stays down.",
     ),
 )
