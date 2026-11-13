@@ -857,12 +857,6 @@ def test_a_run_with_a_space_at_the_end_of_its_id_gets_its_files(
     assert error_events(server, pc.watcher_id) == []
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=KnownBugStillPresent,
-    reason="ENG-2115: the dismissed file's path stays unique in "
-    "its run, so the report of a new file at that path is dropped without a trace",
-)
 @pytest.mark.covers("file.dismissed_path->redetected")
 def test_a_new_file_at_a_dismissed_path_is_detected(
     watcher: WatcherFactory,
@@ -888,11 +882,10 @@ def test_a_new_file_at_a_dismissed_path_is_detected(
     server.wait_for_events(pc.watcher_id, event_type="run_reported", count=2)
 
     row = server.file(instrument_id, "RUN001", "RUN001/a.csv", include_deleted=False)
-    with known_bug():
-        assert row is not None, "the new file at the dismissed path is not on the server"
-        assert row.status == "detected"
-        assert row.size_bytes == 900
-        assert row.id != bad.id
+    assert row is not None, "the new file at the dismissed path is not on the server"
+    assert row.status == "detected"
+    assert row.size_bytes == 900
+    assert row.id != bad.id
 
 
 # ---------------------------------------------------------------------------

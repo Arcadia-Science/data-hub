@@ -151,13 +151,12 @@ TRANSITIONS: tuple[Transition, ...] = (
         "updating it is, and attaches no files to it.",
         "ENG-2114",
     ),
-    xfail_bug(
+    covered(
         MACHINE,
         "file.dismissed_path->redetected",
-        "A new file at a path whose earlier file was dismissed (a different size or "
-        "modification time), reported by a watcher that forgot the old one with "
-        "`state forget`, appears on the server as `detected`.",
-        "ENG-2115",
+        "A different file at a path whose earlier file was dismissed (a different size or "
+        "creation time), reported by a watcher that forgot the old one with `state forget`, "
+        "appears on the server as a new `detected` file. The dismissed file stays dismissed.",
     ),
     covered(
         MACHINE,
