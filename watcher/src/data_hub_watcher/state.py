@@ -23,6 +23,7 @@ gives us cooperative serialisation without ever surfacing
 """
 
 from __future__ import annotations
+import contextlib
 import logging
 import sqlite3
 import threading
@@ -323,7 +324,7 @@ class StateDB:
             )
             # detected_files predates the file_created_at column; add it
             # as nullable so legacy rows survive the migration. New rows
-            # always populate it (record_detected_files passes the value
+            # always populate it (record_report passes the value
             # through).
             detected_cols = {
                 row[1] for row in self._conn.execute("PRAGMA table_info(detected_files)")
@@ -463,22 +464,6 @@ class StateDB:
     # pending_uploads
     # ------------------------------------------------------------------
 
-    def record_pending_uploads(self, run_id: str, relative_paths: Iterable[str]) -> None:
-        """Mark files as handed to the auto-mode uploader.
-
-        Existing rows keep their attempt count, so a file retried within
-        one session doesn't reset its restart budget.
-        """
-        rows = [(rel_path, run_id) for rel_path in relative_paths]
-        if not rows:
-            return
-        with self._write_lock:
-            self._conn.executemany(
-                "INSERT OR IGNORE INTO pending_uploads (relative_path, run_id) VALUES (?, ?)",
-                rows,
-            )
-            self._conn.commit()
-
     def pending_uploads(self) -> list[PendingUploadRecord]:
         """Return every pending upload, oldest first."""
         cur = self._conn.execute(
@@ -515,34 +500,6 @@ class StateDB:
     # ------------------------------------------------------------------
     # detected_files
     # ------------------------------------------------------------------
-
-    def record_detected_files(
-        self,
-        run_id: str,
-        files: Iterable[tuple[str, str, int, float, float | None]],
-    ) -> None:
-        """Persist the file manifest for a reported run.
-
-        *files* is an iterable of `(relative_path, filename, size_bytes,
-        mtime, file_created_at)` tuples. Rows are upserted so repeated
-        calls for the same run (e.g. as more files stabilise and PATCHes
-        are issued) keep the table consistent with the in-memory
-        `RunState`. *file_created_at* may be `None` for legacy callers.
-        """
-        rows = [
-            (run_id, rel_path, filename, size_bytes, mtime, file_created_at)
-            for rel_path, filename, size_bytes, mtime, file_created_at in files
-        ]
-        if not rows:
-            return
-        with self._write_lock:
-            self._conn.executemany(
-                "INSERT OR REPLACE INTO detected_files "
-                "(run_id, relative_path, filename, size_bytes, mtime, file_created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                rows,
-            )
-            self._conn.commit()
 
     def has_detected_stat_match(self, relative_path: str, size_bytes: int, mtime: float) -> bool:
         """Return True if this file was already reported as part of some run.
@@ -776,20 +733,73 @@ class StateDB:
             return None
         return RunRecord(run_id=row[0], reported_at=row[1], uploaded_at=row[2])
 
-    def record_run_reported(self, run_id: str) -> None:
-        """Mark a run as reported, preserving any existing uploaded_at timestamp.
+    def record_report(
+        self,
+        run_id: str,
+        files: Iterable[tuple[str, str, int, float, float | None]],
+        *,
+        new_run: bool,
+        pending_relative_paths: Iterable[str] = (),
+    ) -> None:
+        """Remember a run report the server accepted, all in one transaction.
 
-        The sub-SELECT keeps uploaded_at intact if the run was already recorded
-        (e.g. a retry after a previous partial failure).
+        The only way run reports, manifests and pending uploads are written, so
+        that nothing can store one without the others. It writes:
+
+        - the `runs` row, with *new_run* only: a PATCH leaves the row (and its
+          `reported_at`) alone. A run that has a row keeps its `uploaded_at`,
+          which is what a repeated POST after a failed write needs.
+        - the manifest rows for *files*, as `(relative_path, filename,
+          size_bytes, mtime, file_created_at)` tuples. Rows are upserted, so
+          repeated calls for the same run (as more files stabilise and PATCHes
+          are issued) keep the table consistent with the in-memory
+          `RunState`. *file_created_at* may be `None`.
+        - a `pending_uploads` row for each of *pending_relative_paths*. A file
+          that has a row keeps its attempt count, so a file retried within one
+          session doesn't reset its restart budget.
+
+        A kill or a failed write leaves all of it or none of it.
+
+        That matters in auto mode. The next start skips a file that has a
+        `detected_files` row and retries one that has a `pending_uploads` row,
+        so a file with the first and not the second is never uploaded. With
+        none of it the initial scan finds the file again and reports it again,
+        which the server accepts and dedups. A failed write is rolled back
+        here, so rows written before the failing one aren't left in an open
+        transaction on this thread's connection for the next write to commit.
         """
-        now = datetime.now(timezone.utc).isoformat()
+        manifest = [
+            (run_id, rel_path, filename, size_bytes, mtime, file_created_at)
+            for rel_path, filename, size_bytes, mtime, file_created_at in files
+        ]
+        pending = [(rel_path, run_id) for rel_path in pending_relative_paths]
         with self._write_lock:
-            self._conn.execute(
-                "INSERT OR REPLACE INTO runs (run_id, reported_at, uploaded_at) "
-                "VALUES (?, ?, (SELECT uploaded_at FROM runs WHERE run_id = ?))",
-                (run_id, now, run_id),
-            )
-            self._conn.commit()
+            try:
+                if new_run:
+                    self._conn.execute(
+                        "INSERT OR REPLACE INTO runs (run_id, reported_at, uploaded_at) "
+                        "VALUES (?, ?, (SELECT uploaded_at FROM runs WHERE run_id = ?))",
+                        (run_id, datetime.now(timezone.utc).isoformat(), run_id),
+                    )
+                if manifest:
+                    self._conn.executemany(
+                        "INSERT OR REPLACE INTO detected_files "
+                        "(run_id, relative_path, filename, size_bytes, mtime, file_created_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?)",
+                        manifest,
+                    )
+                if pending:
+                    self._conn.executemany(
+                        "INSERT OR IGNORE INTO pending_uploads (relative_path, run_id) "
+                        "VALUES (?, ?)",
+                        pending,
+                    )
+                self._conn.commit()
+            except BaseException:
+                # Don't let a failed rollback hide the error that caused it.
+                with contextlib.suppress(sqlite3.Error):
+                    self._conn.rollback()
+                raise
 
     def last_run_reported_at(self) -> str | None:
         """Most recent ``reported_at`` timestamp across all runs, or None.

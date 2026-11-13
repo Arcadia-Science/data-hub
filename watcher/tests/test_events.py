@@ -14,6 +14,7 @@ Covers the three resilience properties added to ``EventReporter``:
 """
 
 from __future__ import annotations
+import time
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -133,6 +134,15 @@ class TestFlushRetry:
         assert reporter._dropped_count == 2
         assert reporter._dropped_since is not None
 
+    def test_a_flush_without_a_deadline_keeps_the_clients_timeout(
+        self, reporter: EventReporter, client: MagicMock
+    ) -> None:
+        reporter.queue_event(WatcherEvent(event_type=EventType.WATCHER_STARTED, message="hi"))
+
+        reporter.flush()
+
+        assert client.send_events.call_args.kwargs["timeout"] is None
+
     def test_recovery_flush_prepends_events_dropped_event(
         self, reporter: EventReporter, client: MagicMock
     ) -> None:
@@ -159,4 +169,60 @@ class TestFlushRetry:
         assert last_batch[0]["details"]["dropped_count"] == 1
         # The real event is still present, after the synthetic prefix.
         assert last_batch[1]["message"] == "run-1"
+        assert reporter._dropped_count == 0
+
+
+# ---------------------------------------------------------------------------
+# Flush with a deadline
+# ---------------------------------------------------------------------------
+
+
+class TestFlushWithADeadline:
+    """A flush with a deadline, as when Windows is shutting down, makes one short attempt.
+
+    The usual flush retries up to three times, sleeping 1 s and 2 s between attempts and
+    waiting up to 30 s for each answer, which is far more than Windows allows the service.
+    """
+
+    @staticmethod
+    def _queue(reporter: EventReporter) -> None:
+        reporter.queue_event(WatcherEvent(event_type=EventType.WATCHER_STOPPED, message="bye"))
+
+    def test_sends_once_with_a_short_timeout(
+        self, reporter: EventReporter, client: MagicMock
+    ) -> None:
+        self._queue(reporter)
+
+        reporter.flush(deadline=time.monotonic() + 5)
+
+        client.send_events.assert_called_once()
+        connect, read = client.send_events.call_args.kwargs["timeout"]
+        assert 0 < connect <= 2
+        assert 0 < read <= 3
+        assert len(reporter._queue) == 0
+
+    def test_does_not_retry_or_sleep_after_a_failure(
+        self, reporter: EventReporter, client: MagicMock
+    ) -> None:
+        self._queue(reporter)
+        client.send_events.side_effect = ApiError("dead", status_code=0)
+
+        with patch("data_hub_watcher.events.time.sleep") as sleep:
+            reporter.flush(deadline=time.monotonic() + 5)
+
+        assert client.send_events.call_count == 1
+        sleep.assert_not_called()
+        # The batch is dropped and counted, as after any failed flush.
+        assert reporter._dropped_count == 1
+
+    def test_sends_nothing_once_the_deadline_has_passed(
+        self, reporter: EventReporter, client: MagicMock
+    ) -> None:
+        self._queue(reporter)
+
+        reporter.flush(deadline=time.monotonic() - 1)
+
+        client.send_events.assert_not_called()
+        # Not counted as dropped: a later flush could still send it.
+        assert len(reporter._queue) == 1
         assert reporter._dropped_count == 0

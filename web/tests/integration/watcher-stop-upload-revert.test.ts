@@ -17,7 +17,15 @@ import {
 
 // A non-`watching` heartbeat (graceful `stopped` on shutdown) reverts the
 // instrument's still-queued upload requests to `detected` so they don't sit
-// stuck with no watcher to drain them.
+// stuck with no watcher to drain them. A `stopped` heartbeat marked
+// `status_reason: "system_shutdown"` (Windows is restarting the PC) is the
+// exception: the requests stay queued for the watcher to drain after the
+// restart, and the cron sweep cancels them if the PC doesn't come back.
+
+// Must match CRON_SECRET set on the test server in global-setup.ts.
+const CRON_SECRET = "test-cron-secret";
+
+const MINUTE_MS = 60 * 1000;
 
 async function seedQueuedRun(
   instrumentId: string,
@@ -136,6 +144,122 @@ describe("Heartbeat — revert upload queue on watcher stop", () => {
     expect(
       (revert?.details as { cancelled_count?: number }).cancelled_count
     ).toBe(2);
+  });
+
+  it("keeps queued files when the stopped heartbeat says Windows is shutting down", async () => {
+    const instrumentId = "stop-keep-system-shutdown-inst";
+    const ids = await seedQueuedRun(instrumentId, "run-1", token);
+    const watcherId = await insertWatcher(instrumentId, "lab-pc");
+
+    const res = await api(`/api/v1/watchers/${watcherId}/heartbeat`, {
+      method: "POST",
+      token,
+      body: { status: "stopped", status_reason: "system_shutdown" },
+    });
+    expect(res.status).toBe(200);
+
+    const db = getTestDb();
+    const rows = await db
+      .select({
+        status: files.status,
+        uploadRequestedAt: files.uploadRequestedAt,
+      })
+      .from(files)
+      .where(inArray(files.id, ids));
+    expect(rows).toHaveLength(2);
+    for (const r of rows) {
+      expect(r.status).toBe("upload_requested");
+      expect(r.uploadRequestedAt).not.toBeNull();
+    }
+
+    // The heartbeat itself is recorded as for any stop, and no cancellation is.
+    const [watcher] = await db
+      .select({ status: watchers.status })
+      .from(watchers)
+      .where(eq(watchers.id, watcherId));
+    expect(watcher.status).toBe("stopped");
+    const events = await db
+      .select()
+      .from(watcherEvents)
+      .where(eq(watcherEvents.watcherId, watcherId));
+    expect(events).toHaveLength(0);
+  });
+
+  it("reverts queued files when a stopped heartbeat gives any other reason", async () => {
+    const instrumentId = "stop-revert-other-reason-inst";
+    const ids = await seedQueuedRun(instrumentId, "run-1", token);
+    const watcherId = await insertWatcher(instrumentId, "lab-pc");
+
+    const res = await api(`/api/v1/watchers/${watcherId}/heartbeat`, {
+      method: "POST",
+      token,
+      body: { status: "stopped", status_reason: "shutdown" },
+    });
+    expect(res.status).toBe(200);
+
+    const rows = await getTestDb()
+      .select({ status: files.status })
+      .from(files)
+      .where(inArray(files.id, ids));
+    for (const r of rows) {
+      expect(r.status).toBe("detected");
+    }
+  });
+
+  it("lets the sweep cancel the kept files if the PC doesn't come back", async () => {
+    const instrumentId = "stop-keep-then-sweep-inst";
+    const ids = await seedQueuedRun(instrumentId, "run-1", token);
+    const watcherId = await insertWatcher(instrumentId, "lab-pc");
+    const db = getTestDb();
+
+    const res = await api(`/api/v1/watchers/${watcherId}/heartbeat`, {
+      method: "POST",
+      token,
+      body: { status: "stopped", status_reason: "system_shutdown" },
+    });
+    expect(res.status).toBe(200);
+
+    // Just after the stop the sweep leaves the files alone, within its grace.
+    const early = await api("/api/cron/upload-queue-sweep", {
+      headers: { Authorization: `Bearer ${CRON_SECRET}` },
+    });
+    expect(early.status).toBe(200);
+    const queuedRows = await db
+      .select({ status: files.status })
+      .from(files)
+      .where(inArray(files.id, ids));
+    for (const r of queuedRows) {
+      expect(r.status).toBe("upload_requested");
+    }
+
+    // 20 minutes later, with no heartbeat since, the sweep cancels them.
+    await db
+      .update(watchers)
+      .set({ lastHeartbeatAt: new Date(Date.now() - 20 * MINUTE_MS) })
+      .where(eq(watchers.id, watcherId));
+    const late = await api("/api/cron/upload-queue-sweep", {
+      headers: { Authorization: `Bearer ${CRON_SECRET}` },
+    });
+    expect(late.status).toBe(200);
+    const revertedRows = await db
+      .select({ status: files.status })
+      .from(files)
+      .where(inArray(files.id, ids));
+    for (const r of revertedRows) {
+      expect(r.status).toBe("detected");
+    }
+    const events = await db
+      .select()
+      .from(watcherEvents)
+      .where(eq(watcherEvents.watcherId, watcherId));
+    const revert = events.find(
+      (e) =>
+        (e.details as { kind?: string } | null)?.kind ===
+        "upload_requests_cancelled"
+    );
+    expect((revert?.details as { reason?: string }).reason).toBe(
+      "watcher_offline_sweep"
+    );
   });
 
   it("records no event when the stopped watcher had nothing queued", async () => {

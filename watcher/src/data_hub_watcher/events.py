@@ -20,6 +20,12 @@ a database migration. Known ``kind`` values, with their per-kind
   ``status_code`` is 0 when no HTTP status came back.
   ``details = {"kind", "run_id", "operation": "create"|"update",
   "status_code", "error", "file_count"}``.
+* ``state_write_failed`` -- the server accepted a run report, but writing it
+  to the state database failed (a full disk, say). The watcher retries the
+  write on the backoff of a failed report, and uploads nothing and sends
+  nothing more for the run until it works.
+  Only the first of a row of failed writes for a run is emitted.
+  ``details = {"kind", "run_id", "error", "file_count"}``.
 * ``config_sync_failed`` -- the startup ``PUT /watchers/:id/config``
   call raised ``ApiError``. ``details = {"kind", "checksum", "error"}``.
 * ``stability_timeout`` -- a file kept changing past the configured
@@ -76,7 +82,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
-from data_hub_watcher.api_client import ApiError, DataHubClient
+from data_hub_watcher.api_client import ApiError, DataHubClient, timeout_until
 
 logger = logging.getLogger(__name__)
 
@@ -193,7 +199,16 @@ class EventReporter:
             self._dropped_since = datetime.now(timezone.utc).isoformat()
         self._dropped_count += n
 
-    def flush(self) -> None:
+    def flush(self, *, deadline: float | None = None) -> None:
+        """Send the queued events.
+
+        *deadline* (a `time.monotonic()` value) is for a flush that has little time, as
+        when Windows is shutting down. It makes one attempt, with an HTTP timeout that
+        fits before the deadline, and none once the deadline has passed. The events
+        that couldn't be sent are dropped as after any failed flush.
+        """
+        if deadline is not None and time.monotonic() >= deadline:
+            return
         with self._lock:
             if not self._queue and self._dropped_count == 0:
                 return
@@ -232,11 +247,13 @@ class EventReporter:
         # simplicity. Switch to a worker thread if this ever needs to
         # exceed half the heartbeat period.
         last_exc: Exception | None = None
-        for attempt in range(FLUSH_RETRY_MAX):
+        max_attempts = FLUSH_RETRY_MAX if deadline is None else 1
+        for attempt in range(max_attempts):
             try:
                 self._client.send_events(
                     self._watcher_id,
                     [e.to_dict() for e in events_to_send],
+                    timeout=None if deadline is None else timeout_until(deadline),
                 )
                 # Success — clear the pending-drop counter we just
                 # surfaced. New drops may have accumulated concurrently
@@ -250,12 +267,12 @@ class EventReporter:
                 return
             except (ApiError, Exception) as exc:
                 last_exc = exc
-                if attempt < FLUSH_RETRY_MAX - 1:
+                if attempt < max_attempts - 1:
                     delay = FLUSH_RETRY_BASE_DELAY * (2**attempt)
                     logger.warning(
                         "Event flush attempt %d/%d failed: %s (retry in %.1fs)",
                         attempt + 1,
-                        FLUSH_RETRY_MAX,
+                        max_attempts,
                         exc,
                         delay,
                     )
@@ -270,6 +287,6 @@ class EventReporter:
         logger.warning(
             "Failed to flush %d event(s) after %d attempts: %s",
             len(events_to_send),
-            FLUSH_RETRY_MAX,
+            max_attempts,
             last_exc,
         )

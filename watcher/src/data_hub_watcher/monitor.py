@@ -26,6 +26,7 @@ from watchdog.observers import Observer
 
 from data_hub_watcher.constants import MAX_STABILITY_WAIT_SECONDS
 from data_hub_watcher.events import EventReporter
+from data_hub_watcher.run_detector import relative_key
 from data_hub_watcher.state import StateDB
 
 logger = logging.getLogger(__name__)
@@ -213,18 +214,19 @@ class FileMonitor:
             self._recursive,
         )
 
-    def stop(self, timeout: float = 5.0) -> bool:
+    def stop(self, timeout: float = 5.0, *, observer_timeout: float = 5.0) -> bool:
         """Stop the observer and stability-checker thread.
 
         *timeout* bounds the wait for the stability checker, which may be in
-        the middle of an auto-mode upload. Returns whether it exited in time.
+        the middle of an auto-mode upload, and *observer_timeout* the wait for
+        the observer. Returns whether the stability checker exited in time.
         """
         self._checker_stop.set()
         self._observer.stop()
         # Not started when `start()` failed partway, e.g. in a rebuild that is
         # being rolled back, and joining an unstarted thread raises.
         if self._observer.is_alive():
-            self._observer.join(timeout=5)
+            self._observer.join(timeout=observer_timeout)
         stopped = self.join(timeout)
         logger.info("FileMonitor stopped")
         return stopped
@@ -381,13 +383,7 @@ class FileMonitor:
             except OSError:
                 continue
             entry_path = Path(entry.path)
-            try:
-                rel_path = entry_path.relative_to(self._watch_dir).as_posix()
-            except ValueError:
-                # Symlinks or oddities outside the watch dir: fall back to
-                # basename so the lookup degrades gracefully instead of
-                # raising.
-                rel_path = entry.name
+            rel_path = relative_key(entry_path, self._watch_dir)
             if _stat_in_dedup_index(dedup_index, rel_path, st.st_size, st.st_mtime):
                 skipped += 1
                 continue
@@ -448,11 +444,7 @@ class FileMonitor:
                 st = entry.stat(follow_symlinks=False)
             except OSError:
                 continue
-            entry_path = Path(entry.path)
-            try:
-                rel_path = entry_path.relative_to(self._watch_dir).as_posix()
-            except ValueError:
-                rel_path = entry.name
+            rel_path = relative_key(Path(entry.path), self._watch_dir)
             rows.append((rel_path, st.st_size, st.st_mtime))
 
         self._state_db.record_baseline_files(rows)

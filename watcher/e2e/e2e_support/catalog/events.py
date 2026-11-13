@@ -110,6 +110,13 @@ TRANSITIONS: tuple[Transition, ...] = (
     ),
     covered(
         MACHINE,
+        "event.state_write_failed->emitted",
+        "An `error` event of kind `state_write_failed` is stored when the watcher can't write "
+        "a run report the server accepted to its state database, with the run, the error and "
+        "the file count. Only the first of a row of failed writes is stored.",
+    ),
+    covered(
+        MACHINE,
         "event.config_sync_failed->emitted",
         "An `error` event of kind `config_sync_failed` is stored when the startup checksum "
         "check or config push fails.",

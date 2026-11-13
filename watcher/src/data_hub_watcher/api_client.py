@@ -1,13 +1,18 @@
 from __future__ import annotations
 import logging
 import os
+import time
 from datetime import datetime, timezone
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 import requests
 
-from data_hub_watcher.constants import WATCHER_VERSION, WATCHER_VERSION_HEADER
+from data_hub_watcher.constants import (
+    SYSTEM_SHUTDOWN_HTTP_TIMEOUT,
+    WATCHER_VERSION,
+    WATCHER_VERSION_HEADER,
+)
 from data_hub_watcher.models import (
     ApiErrorDetail,
     ConfigChecksumResponse,
@@ -54,6 +59,39 @@ class ApiError(Exception):
 
 
 DEFAULT_TIMEOUT: tuple[float, float] = (5, 30)  # (connect, read) seconds
+
+# Least time a request that must finish by a deadline is given, so a deadline that has
+# nearly passed still allows a request to be made.
+_MIN_REQUEST_SECONDS = 0.5
+
+
+def timeout_until(deadline: float) -> tuple[float, float]:
+    """The HTTP timeout for a last request that should be done by *deadline*.
+
+    *deadline* is a `time.monotonic()` value. This is `SYSTEM_SHUTDOWN_HTTP_TIMEOUT`,
+    cut down so that the connect and the read together fit in the time left.
+    """
+    left = max(deadline - time.monotonic(), _MIN_REQUEST_SECONDS)
+    connect = min(SYSTEM_SHUTDOWN_HTTP_TIMEOUT[0], left / 2)
+    read = min(SYSTEM_SHUTDOWN_HTTP_TIMEOUT[1], left - connect)
+    return (connect, read)
+
+
+def _path_segment(value: str) -> str:
+    """Percent-encode *value* so it is one literal segment of a URL path.
+
+    A run ID comes from a folder name, a file name or a custom pattern, so it
+    can hold characters that mean something in a URL. Put into a path as it is,
+    a `#` ends the path (the rest becomes a fragment that is never sent) and
+    `%41` is sent as `A`, so the call reaches another run or none. `requests`
+    doesn't encode these for us, so it has to be done here.
+
+    Two kinds of ID still can't reach their run. `.` and `..` are removed as dot
+    segments by `urllib3`. On Vercel, Next.js decodes the route parameter a
+    second time, so an ID with `%` followed by two hex digits (such as `Q%41`)
+    can be misread there.
+    """
+    return quote(value, safe="")
 
 
 class DataHubClient:
@@ -252,12 +290,30 @@ class DataHubClient:
                 return None
             raise
 
-    def send_heartbeat(self, watcher_id: str, payload: dict[str, Any]) -> HeartbeatResponse:
-        resp = self._request("POST", f"/watchers/{watcher_id}/heartbeat", json=payload)
+    def send_heartbeat(
+        self,
+        watcher_id: str,
+        payload: dict[str, Any],
+        *,
+        timeout: tuple[float, float] | None = None,
+    ) -> HeartbeatResponse:
+        """Send a heartbeat. *timeout* replaces the client's, for a last one sent in a hurry."""
+        resp = self._request(
+            "POST", f"/watchers/{watcher_id}/heartbeat", json=payload, timeout=timeout
+        )
         return HeartbeatResponse.model_validate(resp.json())
 
-    def send_events(self, watcher_id: str, events: list[dict[str, Any]]) -> EventsResponse:
-        resp = self._request("POST", f"/watchers/{watcher_id}/events", json={"events": events})
+    def send_events(
+        self,
+        watcher_id: str,
+        events: list[dict[str, Any]],
+        *,
+        timeout: tuple[float, float] | None = None,
+    ) -> EventsResponse:
+        """Send events. *timeout* replaces the client's, for a last batch sent in a hurry."""
+        resp = self._request(
+            "POST", f"/watchers/{watcher_id}/events", json={"events": events}, timeout=timeout
+        )
         return EventsResponse.model_validate(resp.json())
 
     def get_update_info(self, watcher_id: str) -> WatcherUpdateInfoResponse:
@@ -280,7 +336,11 @@ class DataHubClient:
     def update_run(
         self, instrument_id: str, run_id: str, data: dict[str, Any]
     ) -> RunDetailResponse:
-        resp = self._request("PATCH", f"/instruments/{instrument_id}/runs/{run_id}", json=data)
+        resp = self._request(
+            "PATCH",
+            f"/instruments/{instrument_id}/runs/{_path_segment(run_id)}",
+            json=data,
+        )
         return RunDetailResponse.model_validate(resp.json())
 
     # ------------------------------------------------------------------
@@ -316,7 +376,7 @@ class DataHubClient:
             ).isoformat()
         resp = self._request(
             "POST",
-            f"/instruments/{instrument_id}/runs/{run_id}/request-upload-url",
+            f"/instruments/{instrument_id}/runs/{_path_segment(run_id)}/request-upload-url",
             json=payload,
         )
         parsed = PresignedUploadResponse.model_validate(resp.json())

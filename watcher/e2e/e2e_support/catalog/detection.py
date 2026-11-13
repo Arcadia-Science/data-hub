@@ -159,19 +159,17 @@ TRANSITIONS: tuple[Transition, ...] = (
         "`state forget`, appears on the server as `detected`.",
         "ENG-2115",
     ),
-    xfail_bug(
+    covered(
         MACHINE,
         "run.url_characters_in_id->update_reaches_run",
         "A run whose ID contains URL characters such as `#` or `%` gets its files: the watcher "
         "percent-encodes the run ID in every URL path that carries it, which are the run update "
         "(`PATCH /runs/<id>`) and the upload URL request (`POST /runs/<id>/request-upload-url`). "
-        "Today a `#` cuts the path short (an update goes to another run, and in auto mode no "
-        "file of the run uploads), and `Q%41` reads as `QA`: in auto mode the file's row is "
-        "created in run `QA` and its bytes are stored under `<instrument>/QA/`. The test "
-        "runs in both upload modes and asserts that each file lands in its own run and, in "
-        "auto mode, under `<instrument>/<run id>/`, and that the run the ID reads as gets "
-        "nothing.",
-        "ENG-2121",
+        "The test runs in both upload modes against `next start` and asserts that each file "
+        "lands in its own run and, in auto mode, under `<instrument>/<run id>/`, and that the "
+        "run an unencoded ID would reach (`Q%41` reads as `QA`) gets nothing. On Vercel, "
+        "Next.js decodes route parameters a second time, so an ID with `%` followed by two hex "
+        "digits is still misread there. That is a server issue, tracked separately.",
     ),
     # --- the initial scan and restarts ------------------------------------------------------
     covered(

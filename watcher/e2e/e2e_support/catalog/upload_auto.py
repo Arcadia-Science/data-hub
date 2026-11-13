@@ -166,24 +166,32 @@ TRANSITIONS: tuple[Transition, ...] = (
         "A pending upload whose file is gone at start is dropped with a "
         "`pending_upload_missing` event.",
     ),
-    xfail_bug(
+    covered(
         MACHINE,
         "upload.crash_after_report->retried_after_restart",
         "A watcher killed after its run report but before the `pending_uploads` row is "
         "written still uploads those files after a restart in auto mode.",
-        "ENG-2111",
     ),
-    # The same bug, reached without a crash: the run is reported and remembered in one
-    # transaction and the pending record is written in another, so any interruption between them
-    # (a kill, or a write that fails) leaves a reported file that nothing will upload. One fix
-    # (write both together, or the pending record first) makes both scenarios pass, which is why
-    # they share one issue.
-    xfail_bug(
+    # The same gap, reached without a crash. The watcher remembers a run it reported, its files
+    # and their pending records in one transaction, after the server accepted the report. A kill
+    # or a write that fails before the commit leaves none of it, so the next start finds the
+    # files again, reports the run again (the server keeps its row and one row per file) and
+    # uploads them. A watcher that goes on after a failed write retries it and sends the server
+    # nothing more.
+    covered(
         MACHINE,
         "upload.pending_record_failed->retried_after_restart",
         "When the `pending_uploads` row of a reported run can't be written (the write fails, "
-        "nothing crashes), the files are still uploaded after the next start in auto mode.",
-        "ENG-2111",
+        "nothing crashes) and the watcher stops before the write works again, the files are "
+        "still uploaded after the next start in auto mode.",
+    ),
+    covered(
+        MACHINE,
+        "upload.pending_record_failed->retried_in_process",
+        "When the `pending_uploads` row of a reported run can't be written, the running "
+        "watcher retries the write, on the backoff of a failed run report, and uploads the "
+        "files once it works, with no restart and no new file. The server hears about the "
+        "run once, because the retry only writes.",
     ),
     excluded(
         MACHINE,

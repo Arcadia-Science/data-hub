@@ -101,6 +101,7 @@ Older watchers try again only when another file in the run finishes or the watch
 
 - In **manual** mode, files wait for approval in the upload queue; see [Manage the watcher fleet](/docs/manage-watchers#approving-manual-uploads)
 - Check the log for `upload_failed`
+- A `state_write_failed` event in the watcher’s event log means the PC’s disk is full or the watcher’s state file can’t be written. Free up space; the watcher retries on its own and uploads the files once it can write again
 - A revoked or expired token surfaces as `401 Unauthorized`. Create a new token and re-run `init`; see [Issue and revoke tokens](/docs/manage-tokens#after-revoking-a-token)
 
 ### A requested upload stays on Uploading
@@ -111,7 +112,7 @@ On an instrument in **auto** mode, **Request upload** needs watcher 1.2.1 or lat
 
 Watchers older than 1.2.0 can’t upload files larger than 5 GB, and Data Hub refuses the upload instead of letting it fail partway. Update the watcher to 1.2.0 or later, which uploads large files in parts.
 
-### An upload was cut off by a restart or an update
+### An upload was cut off by a restart or an update [#an-upload-was-cut-off-by-a-restart-or-an-update]
 
 Watcher 1.2.1 and later retry an automatic upload that didn’t finish the next time the watcher starts, on up to three starts. Two events tell you when it stops trying:
 
@@ -119,6 +120,27 @@ Watcher 1.2.1 and later retry an automatic upload that didn’t finish the next 
 - `pending_upload_missing`: the file was no longer on disk when the watcher started, so there was nothing to retry.
 
 Older watchers don’t retry; use **Upload** on the run page instead.
+
+### A file stays Pending after the watcher restarted [#a-file-stays-pending-after-the-watcher-restarted]
+
+Watchers before 1.4.1 could lose track of a file in an automatic upload when the watcher stopped without shutting down cleanly, such as after a reboot, a power cut, or a crash, just after it reported the run. The run is in Data Hub, but the file shows **Pending** and nothing uploads it, because after the restart the watcher treats the file as already handled. Watcher 1.4.1 and later record a run and its files on the PC together, so a restart like that doesn’t leave a file behind.
+
+Updating doesn’t pick up files that an older watcher already lost this way. Ask for them from the run page:
+
+<Steps>
+
+<Step>
+If the watcher is older than 1.2.1, update it first. Older watchers in auto mode ignore upload requests; see [A requested upload stays on Uploading](#a-requested-upload-stays-on-uploading).
+</Step>
+
+<Step>
+Open the run, select the files that show **Pending**, and choose **Upload**. To ask for the files of several runs at once, select the runs in the run list and choose **Upload**. See [Request an upload](/docs/browse-runs#request-upload).
+</Step>
+
+<Step>
+The watcher picks up the request within a minute and uploads the files that are still on the instrument PC.
+</Step>
+</Steps>
 
 ### Files with the same name were skipped [#files-with-the-same-name-were-skipped]
 

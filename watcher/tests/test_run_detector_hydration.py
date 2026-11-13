@@ -83,12 +83,13 @@ class TestFileCreatedAtHelper:
 
 class TestHydrateFromStateDb:
     def test_populates_runs_with_reported_true(self, state_db: StateDB, watch_dir: Path) -> None:
-        state_db.record_detected_files(
+        state_db.record_report(
             "run-alpha",
             [
                 ("run-alpha/a.nd2", "a.nd2", 1024, 1_700_000_000.0, 1_699_999_900.0),
                 ("run-alpha/b.nd2", "b.nd2", 2048, 1_700_000_001.0, None),
             ],
+            new_run=False,
         )
 
         detector = _make_detector(watch_dir, state_db)
@@ -117,7 +118,7 @@ class TestHydrateFromStateDb:
         code path exactly once, re-report, record their manifest, and
         future restarts will skip them.
         """
-        state_db.record_run_reported("run-legacy")
+        state_db.record_report("run-legacy", [], new_run=True)
 
         detector = _make_detector(watch_dir, state_db)
         detector.hydrate_from_state_db()
@@ -125,8 +126,8 @@ class TestHydrateFromStateDb:
         assert detector._runs == {}
 
     def test_hydration_is_idempotent(self, state_db: StateDB, watch_dir: Path) -> None:
-        state_db.record_detected_files(
-            "run-1", [("run-1/a.nd2", "a.nd2", 10, 1_700_000_000.0, 1_700_000_000.0)]
+        state_db.record_report(
+            "run-1", [("run-1/a.nd2", "a.nd2", 10, 1_700_000_000.0, 1_700_000_000.0)], new_run=False
         )
 
         detector = _make_detector(watch_dir, state_db)
@@ -149,7 +150,7 @@ class TestNewFileAfterHydrationTriggersPatch:
         existing = watch_dir / "run-42" / "existing.nd2"
         existing.write_bytes(b"x" * 1024)
         st = existing.stat()
-        state_db.record_detected_files(
+        state_db.record_report(
             "run-42",
             [
                 (
@@ -160,6 +161,7 @@ class TestNewFileAfterHydrationTriggersPatch:
                     st.st_mtime,
                 )
             ],
+            new_run=False,
         )
 
         client = MagicMock()
@@ -190,8 +192,8 @@ class TestNewFileAfterHydrationTriggersPatch:
         existing = watch_dir / "run-7" / "a.nd2"
         existing.write_bytes(b"x" * 1024)
         st = existing.stat()
-        state_db.record_detected_files(
-            "run-7", [("run-7/a.nd2", "a.nd2", st.st_size, st.st_mtime, st.st_mtime)]
+        state_db.record_report(
+            "run-7", [("run-7/a.nd2", "a.nd2", st.st_size, st.st_mtime, st.st_mtime)], new_run=False
         )
 
         client = MagicMock()
@@ -320,9 +322,10 @@ class TestUpdateRunSendsDeltaOnly:
         existing = run_dir / "only.nd2"
         existing.write_bytes(b"x" * 16)
         st = existing.stat()
-        state_db.record_detected_files(
+        state_db.record_report(
             "run-empty",
             [("run-empty/only.nd2", "only.nd2", st.st_size, st.st_mtime, st.st_mtime)],
+            new_run=False,
         )
 
         client = MagicMock()

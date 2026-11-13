@@ -146,17 +146,19 @@ TRANSITIONS: tuple[Transition, ...] = (
         "ENG-2128",
         platforms=SERVICE,
     ),
-    xfail_bug(
+    covered(
         MACHINE,
         "service.system_shutdown->clean_stop",
-        "PROPOSED — confirm intent: the service accepts a system shutdown "
-        "(`SERVICE_ACCEPT_SHUTDOWN`, which pywin32 sets when the class has a "
-        "`SvcShutdown`), so a reboot stops it as `service stop` does, with a `stopped` "
-        "heartbeat and a `watcher_stopped` event. Today the class has none, `sc queryex` "
-        "lists IGNORES_SHUTDOWN, and every reboot kills the service with no `stopped` "
-        "heartbeat. The test reads the controls `sc queryex` lists: a test can't send a "
-        "shutdown to a service.",
-        "ENG-2129",
+        "The service tells the SCM it takes the preshutdown notification that Windows sends "
+        "before a restart or a full shutdown (`SERVICE_ACCEPT_PRESHUTDOWN`; `sc queryex` "
+        "lists ACCEPTS_PRESHUTDOWN), and its handler stops the service as `service stop` "
+        "does, with a `stopped` heartbeat and a `watcher_stopped` event that say Windows is "
+        "shutting down. The test reads only the controls `sc queryex` lists, because a "
+        "test can't send a preshutdown to a service. The unit tests cover the handler and "
+        "the limits the stop sets itself (about 8 s in all). So the test doesn't show that "
+        "a stop finishes in the time Windows waits, 10 s by default from Windows 10 "
+        "version 1703: only a real restart does. With Fast Startup on, a shutdown from the "
+        "Start menu doesn't stop the service.",
         platforms=SERVICE,
     ),
     # --- start-up failures and the SCM's recovery -------------------------------------------

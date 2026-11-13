@@ -44,7 +44,7 @@ class TestBaselineFiles:
         assert state_db.baseline_established() is True
 
     def test_established_true_with_detected_history(self, state_db: StateDB) -> None:
-        state_db.record_detected_files("run-1", [("a.csv", "a.csv", 1, 1.0, None)])
+        state_db.record_report("run-1", [("a.csv", "a.csv", 1, 1.0, None)], new_run=False)
         assert state_db.baseline_established() is True
 
     def test_baseline_survives_prune(self, state_db: StateDB) -> None:

@@ -37,8 +37,14 @@ export const watcherEventBody = z.object({
 
 export const heartbeatBody = z.object({
   status: z.enum(["registered", "watching", "stopped", "waiting"]),
-  // Why the watcher is `waiting`, for example a missing watch folder.
-  status_reason: z.string().max(500).optional(),
+  // Why the watcher is `waiting`, for example a missing watch folder. On a
+  // `stopped` heartbeat, `system_shutdown` says Windows is shutting down or
+  // restarting (watcher 1.4.1 and later send it). The route stores a reason
+  // for `waiting` only.
+  status_reason: z.string().max(500).optional().openapi({
+    description:
+      "Why the watcher is `waiting`, for example a missing watch folder. On a `stopped` heartbeat, `system_shutdown` says the watcher stopped because Windows is shutting down or restarting. Data Hub then keeps the instrument's requested uploads queued for the watcher to upload after the PC starts again, and cancels them only if no heartbeat arrives for about 15 minutes. Any other `stopped` heartbeat cancels them at once.",
+  }),
   // The highest config revision this watcher has applied.
   config_revision: z.number().int().nonnegative().nullable().optional(),
   timestamp: z.string().optional(),

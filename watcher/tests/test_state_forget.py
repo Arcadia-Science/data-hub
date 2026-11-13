@@ -38,12 +38,13 @@ def _seed(db: StateDB) -> None:
         size_bytes=10,
         mtime=1.0,
     )
-    db.record_detected_files(
+    db.record_report(
         "alice",
         [
             ("alice/day-1/capture/sample.tif", "sample.tif", 10, 1.0, 1.0),
             ("alice_notes/sample.tif", "sample.tif", 10, 1.0, 1.0),
         ],
+        new_run=False,
     )
     db.record_baseline_files(
         [
@@ -51,8 +52,12 @@ def _seed(db: StateDB) -> None:
             ("alice_extra/old.tif", 1, 1.0),
         ]
     )
-    db.record_pending_uploads("alice", ["alice/day-2/capture/pending.tif"])
-    db.record_pending_uploads("alice_notes", ["alice_notes/pending.tif"])
+    db.record_report(
+        "alice", [], new_run=False, pending_relative_paths=["alice/day-2/capture/pending.tif"]
+    )
+    db.record_report(
+        "alice_notes", [], new_run=False, pending_relative_paths=["alice_notes/pending.tif"]
+    )
 
 
 def _paths(db: StateDB) -> set[str]:
