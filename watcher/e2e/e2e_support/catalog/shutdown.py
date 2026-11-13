@@ -36,10 +36,10 @@ TRANSITIONS: tuple[Transition, ...] = (
     covered(
         MACHINE,
         "process.stop->upload_deferred",
-        "A graceful stop during a long upload cuts it short and exits within the stop bound. "
-        "The unfinished file keeps its `pending_uploads` row, being cut off does not use up "
-        "one of the file's three starts, and the next start uploads it. (How soon the "
-        "uploader stops starting new parts and files is "
+        "A graceful stop during a long upload cuts it short and exits within the stop limit "
+        "(25 seconds). The unfinished file keeps its `pending_uploads` row, being cut off does "
+        "not use up one of the file's three starts, and the next start uploads it. (That the "
+        "uploader starts no new part or file once the stop is requested is "
         "`process.stop->no_new_uploads_after_stop`.)",
     ),
     covered(
@@ -55,40 +55,32 @@ TRANSITIONS: tuple[Transition, ...] = (
         "Starting again after a kill resumes cleanly: the watcher is `watching` and files "
         "already reported are not reported again.",
     ),
-    xfail_bug(
+    covered(
         MACHINE,
         "process.stop->event_before_stopped_heartbeat",
         "On a graceful stop the server receives the `watcher_stopped` event before the "
-        "final `stopped` heartbeat.",
-        "ENG-2116",
+        "final `stopped` heartbeat: the stop sends the events first and the heartbeat last. "
+        "The test keeps the periodic heartbeat from ticking during the stop and compares the "
+        "times the server stored.",
     ),
-    xfail_bug(
+    covered(
         MACHINE,
         "process.stop->no_new_uploads_after_stop",
         "Once a graceful stop is requested, an auto-mode upload starts no new part and no "
-        "new file. `stop_runtime` joins the file monitor for up to 5 seconds before it "
-        "stops the upload worker, and the worker's stop is what sets the uploader's stop "
-        "signal, so an upload running on the monitor's own thread keeps starting parts, "
-        "and a following file, for about 5 seconds after the stop. (The in-process rebuild "
-        "for a config revision stops the worker first.) The test makes a stop arrive during "
-        "the first of two short files and asserts that no request for a part follows it.",
-        "ENG-2126",
+        "new file. The stop tells the uploader to stop first, before it waits for the file "
+        "monitor, so an upload running on the monitor's own thread stops at once. The test "
+        "makes a stop arrive during the first of two short files and asserts that no request "
+        "for a part follows it.",
     ),
-    xfail_bug(
+    covered(
         MACHINE,
         "process.stop->bounded_when_server_hangs",
-        "PROPOSED — confirm intent: a graceful stop completes within about 30 seconds even "
-        "when the server has stopped answering. Today a stop waits for the heartbeat thread "
-        "(whose request is stuck for the client's 30 s read timeout), sends the final "
-        "`stopped` heartbeat and flushes the events, each of which can wait for the same "
-        "timeout again, and the join of the thread allows 65 s, so a stop against a hung "
-        "server took up to about 95 s. For the Windows service that is worse than slow: "
-        "pywin32 reports a wait hint of 5 s that nothing updates, the SCM doesn't kill a "
-        "manual stop that is slow, and `service reinstall` gives up waiting for the "
-        "service after 30 s. The test holds every heartbeat and event request for longer "
-        "than the client waits, asks for a stop and expects the process to be gone within "
-        "30 s.",
-        "ENG-2127",
+        "A graceful stop completes within 25 seconds even if the server has stopped "
+        "answering. Uploads and a heartbeat in progress get the first 15 seconds, and the "
+        "`watcher_stopped` event and the final heartbeat get the last 10, each with a short "
+        "timeout. Whatever doesn't fit is given up. The test holds every heartbeat and event "
+        "request for longer than the client waits and asserts that the process exits within "
+        "30 seconds of the stop request.",
     ),
     xfail_bug(
         MACHINE,
