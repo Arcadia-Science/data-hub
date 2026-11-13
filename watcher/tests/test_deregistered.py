@@ -17,7 +17,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from data_hub_watcher import testing_overrides
+from data_hub_watcher import runtime, testing_overrides
 from data_hub_watcher.api_client import ApiError
 from data_hub_watcher.config_io import save_config
 from data_hub_watcher.constants import DEREGISTERED_HEARTBEAT_THRESHOLD
@@ -413,6 +413,155 @@ class TestWaitingWatcher:
         errors = [r.getMessage() for r in caplog.records if "deregistered" in r.getMessage()]
         assert len(errors) == 1
         assert "data-hub-watcher init" in errors[0]
+
+
+@pytest.fixture
+def builds(monkeypatch: pytest.MonkeyPatch) -> list[WatcherConfig]:
+    """One entry for every runtime that `WatcherSupervisor` builds from now on."""
+    built: list[WatcherConfig] = []
+    original = runtime.build_runtime
+
+    def spy(*args: Any, **kwargs: Any) -> Any:
+        built.append(kwargs["cfg"])
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(runtime, "build_runtime", spy)
+    return built
+
+
+def _arrives_while_the_loops_stop(
+    monkeypatch: pytest.MonkeyPatch, env: _Env, sup: WatcherSupervisor
+) -> None:
+    """Make the third "deregistered" reply arrive while `_teardown_for_rebuild` is running.
+
+    A rebuild can wait up to 2 minutes for uploads to drain and the heartbeat loop to stop, and
+    the loop is still ticking then.
+    """
+    original = sup._teardown_for_rebuild
+
+    def teardown() -> None:
+        env.client.send_heartbeat.side_effect = _deregistered()
+        _tick(sup, DEREGISTERED_HEARTBEAT_THRESHOLD)
+        original()
+
+    monkeypatch.setattr(sup, "_teardown_for_rebuild", teardown)
+
+
+class TestARebuildThatOverlapsIt:
+    """The third reply comes in while a rebuild has stopped the old loops and is about to build.
+
+    The watcher must then build nothing: a new runtime would retry its pending uploads and scan
+    and upload the backlog while the watcher stops.
+    """
+
+    def test_a_config_rebuild_builds_no_runtime(
+        self, env: _Env, monkeypatch: pytest.MonkeyPatch, builds: list[WatcherConfig]
+    ) -> None:
+        sup = env.supervisor()
+        sup.start()
+        assert len(builds) == 1
+        _arrives_while_the_loops_stop(monkeypatch, env, sup)
+        pushes = env.client.push_config.call_count
+
+        applied = sup._apply(_revision(1, env.watch_dir, stability_period_seconds=7))
+
+        assert applied is False
+        assert sup.deregistered_event.is_set()
+        # No new runtime, and no waiting loop either.
+        assert len(builds) == 1
+        assert sup.rt is None
+        assert sup._waiting is None
+        # The revision is not recorded or reported as applied, and the config is not pushed:
+        # nothing runs it, and the server would answer each with the same 404.
+        assert sup.applied_revision is None
+        env.client.report_config_revision_result.assert_not_called()
+        assert env.client.push_config.call_count == pushes
+
+    def test_the_watcher_then_stops_without_sending_anything(
+        self, env: _Env, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        sup = env.supervisor()
+        sup.start()
+        _arrives_while_the_loops_stop(monkeypatch, env, sup)
+        sup._apply(_revision(1, env.watch_dir, stability_period_seconds=7))
+        assert sup.poll(timeout=0) is True
+        heartbeats = env.client.send_heartbeat.call_count
+        events = env.client.send_events.call_count
+
+        sup.stop(stopped_message="Watcher stopped: its registration was deleted")
+
+        assert env.client.send_heartbeat.call_count == heartbeats
+        assert env.client.send_events.call_count == events
+        assert "stopped" not in env.heartbeat_statuses()
+
+    def test_a_waiting_watcher_whose_folder_came_back_builds_no_runtime(
+        self, env: _Env, monkeypatch: pytest.MonkeyPatch, builds: list[WatcherConfig]
+    ) -> None:
+        sup = _waiting_supervisor(env)
+        _bring_the_folder_back(env)
+        _arrives_while_the_loops_stop(monkeypatch, env, sup)
+
+        sup._check_waiting_folder()
+
+        assert sup.deregistered_event.is_set()
+        assert builds == []
+        assert sup.rt is None
+        assert sup._waiting is None
+
+    def test_a_failed_start_enters_no_waiting_loop(
+        self, env: _Env, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        sup = env.supervisor()
+        sup.start()
+        sup._teardown_for_rebuild()
+        heartbeats = env.client.send_heartbeat.call_count
+
+        def start_that_fails_as_the_third_reply_arrives(**_kwargs: Any) -> None:
+            sup.deregistered_event.set()
+            raise RuntimeError("could not start")
+
+        monkeypatch.setattr(
+            sup, "_start_watching_or_wait", start_that_fails_as_the_third_reply_arrives
+        )
+
+        sup._start_or_wait_on_error(started_message="Watcher restarted")
+
+        assert sup._waiting is None
+        assert sup.rt is None
+        # A waiting loop would have sent its first heartbeat at once.
+        assert env.client.send_heartbeat.call_count == heartbeats
+
+    def test_nothing_is_built_once_it_has_been_deregistered(
+        self, env: _Env, builds: list[WatcherConfig]
+    ) -> None:
+        sup = env.supervisor()
+        sup.start()
+        sup._teardown_for_rebuild()
+        built = len(builds)
+        heartbeats = env.client.send_heartbeat.call_count
+        sup.deregistered_event.set()
+
+        sup._start_watching_or_wait(started_message="Watcher restarted")
+        sup._enter_waiting("watch folder is missing", started_message="Watcher restarted")
+
+        assert len(builds) == built
+        assert sup.rt is None
+        assert sup._waiting is None
+        assert env.client.send_heartbeat.call_count == heartbeats
+
+    def test_a_waiting_watcher_that_is_stopping_does_not_start_watching(
+        self, env: _Env, builds: list[WatcherConfig]
+    ) -> None:
+        sup = _waiting_supervisor(env)
+        env.client.send_heartbeat.side_effect = _deregistered()
+        _tick(sup, DEREGISTERED_HEARTBEAT_THRESHOLD)
+        _bring_the_folder_back(env)
+
+        sup._check_waiting_folder()
+
+        # Its loop is left for the stop, and no runtime is built.
+        assert sup._waiting is not None
+        assert builds == []
 
 
 class TestTheCountSurvivesStateChanges:

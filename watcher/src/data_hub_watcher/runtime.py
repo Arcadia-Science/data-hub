@@ -1430,6 +1430,12 @@ class WatcherSupervisor:
             self._roll_back(old_cfg, previous_file, restart=running)
             self._reject(number, f"Could not start with the new config: {exc}")
             return False
+        if self.deregistered_event.is_set():
+            # The registration was deleted while the old loops were stopping, so
+            # `_start_watching_or_wait` started nothing, and the watcher is stopping for
+            # good. The revision is neither recorded nor reported: nothing runs it, and the
+            # server would answer with the same 404.
+            return False
         # Kept only once the new config runs. When called from `start`, before
         # anything runs, `start` builds the first runtime with them next.
         self._report_only_rules = rules
@@ -1747,7 +1753,15 @@ class WatcherSupervisor:
         far (see `_report_only_rules`). With *announce_late*, the started
         event is queued after the runtime has started rather than by
         `start_runtime`, so an attempt that fails leaves no event behind.
+
+        Builds nothing once the registration was deleted on Data Hub
+        (`deregistered_event`). A rebuild can be in `_teardown_for_rebuild`, waiting for
+        uploads or for the heartbeat loop to stop, when the third reply arrives, and
+        the runtime it then builds would retry the pending uploads and scan and upload the
+        backlog while the watcher stops.
         """
+        if self.deregistered_event.is_set():
+            return
         rules = self._report_only_rules if report_only_rules is None else report_only_rules
         problem = watch_directory_problem(self.cfg.instrument.watch_directory)
         if problem is not None:
@@ -1797,7 +1811,13 @@ class WatcherSupervisor:
         `watch_directory_unavailable` error) and when the reason changes (the
         error only). Coming back with the same reason, after a retry failed
         the same way or a revision was rolled back, queues nothing.
+
+        Does nothing once the registration was deleted on Data Hub (see
+        `_start_watching_or_wait`): a waiting loop would only send heartbeats that get the
+        same 404.
         """
+        if self.deregistered_event.is_set():
+            return
         new_stretch = self._waiting_event_reason is None
         reason_changed = reason != self._waiting_event_reason
         if reason_changed:
@@ -1873,7 +1893,7 @@ class WatcherSupervisor:
 
     def _check_waiting_folder(self) -> None:
         waiting = self._waiting
-        if waiting is None:
+        if waiting is None or self.deregistered_event.is_set():
             return
         problem = watch_directory_problem(self.cfg.instrument.watch_directory)
         if problem is not None:
