@@ -807,6 +807,49 @@ def test_a_run_with_url_characters_in_its_id_gets_its_files(
     assert not server.object_exists(instrument_id, "QA", "second.csv")
 
 
+# The run is the part of the file name before the first underscore, so `RUN1 _a.csv` is in the run
+# `RUN1 ` with a space at the end. The server saves that run as `RUN1`, and has to find it again
+# when the watcher names it with the space.
+@pytest.mark.covers("run.id_with_outer_spaces->update_reaches_run")
+@pytest.mark.parametrize("upload_mode", ["manual", "auto"])
+def test_a_run_with_a_space_at_the_end_of_its_id_gets_its_files(
+    upload_mode: Literal["auto", "manual"],
+    watcher: WatcherFactory,
+    server: ServerView,
+    instrument_id: str,
+    watch_dir: Path,
+) -> None:
+    pc = watcher(upload_mode=upload_mode, recursive=False, run_pattern=r"^([^_/]+)_[^/]*$")
+    pc.start()
+
+    def wait_until_done(name: str, content: bytes) -> None:
+        if upload_mode == "auto":
+            # Done means the row says so and the stand-in holds the bytes under the saved run ID.
+            server.wait_for_uploaded(instrument_id, "RUN1", name, content=content, timeout=20)
+        else:
+            server.wait_for_file(instrument_id, "RUN1", name, status="detected")
+
+    contents = {
+        "RUN1 _a.csv": write_file(watch_dir / "RUN1 _a.csv", SMALL),
+        "RUN1 _b.csv": write_file(watch_dir / "RUN1 _b.csv", LARGE),
+    }
+    for name, content in contents.items():
+        wait_until_done(name, content)
+
+    # A file that arrives after the run exists is reported with a run update, which also names
+    # the run with the space.
+    later = write_file(watch_dir / "RUN1 _c.csv", SMALL)
+    wait_until_done("RUN1 _c.csv", later)
+
+    assert run_names(server, instrument_id) == ["RUN1"]
+    assert relative_paths(server, instrument_id, "RUN1") == [
+        "RUN1 _a.csv",
+        "RUN1 _b.csv",
+        "RUN1 _c.csv",
+    ]
+    assert error_events(server, pc.watcher_id) == []
+
+
 @pytest.mark.xfail(
     strict=True,
     raises=KnownBugStillPresent,
