@@ -118,10 +118,10 @@ export async function getAttributionsByRunIds(
 // patch, delete, and child-resource endpoints.
 // ---------------------------------------------------------------------------
 
-// Creating a run trims its run ID, so a run is never stored with a space at
+// Creating a run trims its run ID (`createRunBody` in
+// `lib/api/openapi/schemas/runs.ts`), so the stored ID has no white space at
 // either end. Every lookup trims the ID it is given in the same way. Without
-// that, a caller that sends ` RUN1 ` would create `RUN1` and then get 404 for
-// ` RUN1 `.
+// that, a caller that created the run ` RUN1 ` would get 404 for ` RUN1 `.
 export function normalizeRunId(runId: string): string {
   return runId.trim();
 }
@@ -223,8 +223,8 @@ export const lookupRunByNaturalKey = cache(async function lookupRunByNaturalKey(
 
 /**
  * Natural runId → internal UUID for one instrument. Missing IDs are omitted.
- * The IDs are matched with `normalizeRunId`, so the map's keys are the stored
- * run IDs. Look an ID up with `normalizeRunId(id)`.
+ * Each ID is trimmed with `normalizeRunId` before it is matched, so the map's
+ * keys are the stored run IDs. Read the map with `normalizeRunId(id)`.
  */
 export async function lookupRunUuidsByNaturalKeys(
   instrumentId: string,
