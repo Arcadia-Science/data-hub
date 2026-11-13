@@ -886,6 +886,13 @@ def test_a_new_file_at_a_dismissed_path_is_detected(
     assert row.status == "detected"
     assert row.size_bytes == 900
     assert row.id != bad.id
+    # The dismissed file stays dismissed and keeps its own size.
+    at_path = server.files(instrument_id, "RUN001", include_deleted=True)
+    old = next((f for f in at_path if f.id == bad.id), None)
+    assert old is not None, "the dismissed file is gone from the server"
+    assert old.deleted_at is not None, "the dismissed file is no longer dismissed"
+    assert old.size_bytes == 700
+    assert len(at_path) == 2
 
 
 # ---------------------------------------------------------------------------
