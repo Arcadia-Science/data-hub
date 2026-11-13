@@ -10,6 +10,7 @@ exercise the actual rebuild, not a stand-in.
 from __future__ import annotations
 import collections
 import itertools
+import json
 import logging
 import os
 import sqlite3
@@ -1849,3 +1850,124 @@ class TestCountsAcrossRebuilds:
 
         assert _heartbeat_counts(env)[-1] == ("watching", 2, 0, 0)
 
+
+class TestSavedEventsAcrossRestarts:
+    """The supervisor's reporter saves its events in the state database it opens in `start`.
+
+    `start` attaches the database and `stop` detaches it before the close, so events that
+    couldn't be sent when the watcher stopped (or when it was killed) go out after the next
+    start, and an event queued after the close doesn't open the database again.
+    """
+
+    @staticmethod
+    def _sent_messages(env: _Env) -> list[str]:
+        return [e["message"] for c in env.client.send_events.call_args_list for e in c.args[1]]
+
+    def test_events_that_could_not_be_sent_at_a_stop_are_sent_after_the_next_start(
+        self, env: _Env
+    ) -> None:
+        first = env.supervisor()
+        first.start()
+        env.client.send_events.reset_mock()
+        # The server can't be reached when the watcher stops, so `watcher_stopped` isn't sent.
+        env.client.send_events.side_effect = ApiError("offline", status_code=0)
+        first.reporter.report_error("upload_queue_poll_failed", "queued before the stop")
+
+        first.stop(stopped_message="Watcher stopped")
+
+        state = env.state()
+        try:
+            saved = [json.loads(raw)["message"] for _id, raw in state.pending_events(WATCHER_ID)]
+        finally:
+            state.close()
+        assert saved == ["queued before the stop", "Watcher stopped"]
+
+        env.client.send_events.reset_mock(side_effect=True)
+        second = env.supervisor()
+        second.start()
+
+        sent = self._sent_messages(env)
+        # What the first process saved goes out first, in order, then what the second queued.
+        assert sent[:2] == ["queued before the stop", "Watcher stopped"]
+        assert any(m.startswith("Watcher started on test-host") for m in sent[2:])
+        state = env.state()
+        try:
+            assert state.pending_events(WATCHER_ID) == []
+        finally:
+            state.close()
+
+    def test_start_sends_what_an_earlier_process_saved_and_discards_another_watchers(
+        self, env: _Env
+    ) -> None:
+        def event(message: str) -> str:
+            return json.dumps(
+                {
+                    "event_type": "error",
+                    "timestamp": "2026-01-01T00:00:00+00:00",
+                    "message": message,
+                    "details": {"kind": "from_an_earlier_process"},
+                }
+            )
+
+        state = env.state()
+        try:
+            state.add_pending_event("w-an-earlier-registration", event("not this watcher's"))
+            state.add_pending_event(WATCHER_ID, event("saved before the kill"))
+        finally:
+            state.close()
+
+        sup = env.supervisor()
+        sup.start()
+
+        sent = self._sent_messages(env)
+        assert "not this watcher's" not in sent
+        assert sent.index("saved before the kill") == 0
+        state = env.state()
+        try:
+            assert state.pending_events("w-an-earlier-registration") == []
+            assert state.pending_events(WATCHER_ID) == []
+        finally:
+            state.close()
+
+    def test_the_events_of_a_runtime_that_is_rebuilt_are_saved_and_sent_once(
+        self, env: _Env
+    ) -> None:
+        sup = env.supervisor()
+        sup.start()
+        env.client.get_latest_config_revision.return_value = _revision(
+            2, _settings(env.watch_dir, file_patterns=["*.csv", "*.txt"])
+        )
+
+        sup._on_heartbeat_revision(2)
+        sup.poll(timeout=0)
+        # What the rebuild queued after its start-up flush (the config push) goes out with
+        # the next tick's flush.
+        sup.reporter.flush()
+
+        sent = self._sent_messages(env)
+        assert len([m for m in sent if m.startswith("Watcher restarted")]) == 1
+        state = env.state()
+        try:
+            assert state.pending_events(WATCHER_ID) == []
+        finally:
+            state.close()
+
+    def test_an_event_queued_after_the_stop_does_not_open_the_closed_database_again(
+        self, env: _Env
+    ) -> None:
+        sup = env.supervisor()
+        sup.start()
+        sup.stop(stopped_message="Watcher stopped")
+        assert sup._state is not None
+        assert not sup._state._connections
+
+        # As from a heartbeat tick that the stop left running.
+        sup.reporter.report_error("heartbeat_recovered", "late")
+
+        assert sup.reporter._store is None
+        assert not sup._state._connections
+        state = env.state()
+        try:
+            assert state.pending_events(WATCHER_ID) == []
+        finally:
+            state.close()

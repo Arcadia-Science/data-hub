@@ -971,7 +971,8 @@ class WatcherSupervisor:
         self.host = host
         self.watcher_id: str = cfg.watcher_id
         # Shared by every runtime this supervisor builds, so events queued just
-        # before a rebuild are flushed by the next heartbeat.
+        # before a rebuild are flushed by the next heartbeat. `start` attaches the
+        # state database to it, which saves the events it queues.
         self.reporter = EventReporter(client, self.watcher_id)
         # Shared the same way: the counts that the heartbeat hasn't sent yet, which a
         # rebuild or the waiting state would otherwise drop with the old loop.
@@ -1043,6 +1044,10 @@ class WatcherSupervisor:
         # the package index is otherwise only read when an upgrade runs.
         testing_overrides.announce_active_overrides()
         self._state = StateDB(self.db_path)
+        # From here on the reporter saves each event it queues in this database, and
+        # sends the ones that an earlier process saved and never got to send (the flush
+        # of the first heartbeat does). Detached again in `stop`, before the close.
+        self.reporter.attach_store(self._state)
         if self._state.claim_config_revisions(self.watcher_id):
             logger.info("Dropped config revision bookkeeping from a different watcher registration")
         self._seen = self._state.config_revision_seen()
@@ -1163,6 +1168,11 @@ class WatcherSupervisor:
             )
             self._waiting = None
         if self._state is not None:
+            # Events queued from here on, such as one from a heartbeat tick that was left
+            # running (see `HeartbeatLoop.stop_loop`), stay in memory: a write after the
+            # close would open the database again. What is saved and unsent waits for the
+            # next start.
+            self.reporter.detach_store()
             self._state.close()
 
     def _final_stop_reason(

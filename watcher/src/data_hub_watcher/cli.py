@@ -1329,6 +1329,9 @@ def upload(ctx: click.Context, file_path: str | None, run_id: str | None, dry_ru
     db_path = resolve_state_db_path(state_db_dir(path, service=False), cfg.environment)
     state_db = StateDB(db_path)
     counters = WatcherCounters()
+    # Memory only, unlike the supervisor's reporter: this command can run while the
+    # watcher is running and has the same database open, and two processes that each
+    # sent the saved events would send them twice.
     reporter = EventReporter(client, cfg.watcher_id)
     # Set on Ctrl-C, so upload threads that are still running start no more
     # files or parts before the process exits.
