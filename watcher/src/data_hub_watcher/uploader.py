@@ -10,6 +10,7 @@ watcher does not need AWS credentials.
 from __future__ import annotations
 import logging
 import mimetypes
+import os
 import re
 import threading
 import time
@@ -17,6 +18,7 @@ from collections.abc import Callable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import TypeVar, cast
 
@@ -82,33 +84,52 @@ class CantReadYet(Exception):
     its own handling.
     """
 
-    def __init__(self, path: Path, error: str) -> None:
+    def __init__(self, path: Path, error: str, reason: str | None = None) -> None:
         super().__init__(f"{path.name}: {error}")
         self.path = path
+        # The OS error as text, which names the file's whole path.
         self.error = error
+        # The same without the path, for a message that already names the file.
+        self.reason = reason or error
 
 
 def _is_file(path: Path) -> bool:
-    """Whether *path* is still a file. One that can't be looked at counts as there."""
+    """Whether *path* is still a file. One that can't be looked at counts as there.
+
+    ``Path.is_file`` raises ``PermissionError`` for a file in a folder this user can't
+    search, and for one on a share that has dropped.
+    """
     try:
         return path.is_file()
     except OSError:
         return True
 
 
-def _cant_read_yet(path: Path, exc: BaseException) -> OSError | None:
+def _exists(path: Path) -> bool:
+    """Whether *path* is still there. One that can't be looked at counts as there."""
+    try:
+        return path.exists()
+    except OSError:
+        return True
+
+
+def _cant_read_yet(path: Path, exc: BaseException) -> PermissionError | None:
     """Return *exc* if it says the file at *path* can't be read yet, else ``None``.
 
-    That is an ``OSError`` other than "not found" (a sharing violation, a
-    permission error) for a file that is still there. The check does not look
-    at Windows error codes, so it is the same on every OS.
+    That is a ``PermissionError`` for a file that is still there. CPython maps the
+    Windows sharing violation (32) and lock violation (33) to it, and on Linux and
+    macOS it is EACCES or EPERM, so the check is the same on every OS and looks at no
+    Windows error code. Any other ``OSError`` is a real failure, such as a bad sector
+    (EIO), a share that drops in the middle of a read (EINVAL, WinError 64) or a stale
+    handle (ESTALE). None of those clears by itself, so waiting for one with no time
+    limit would hide it.
     """
-    if not isinstance(exc, OSError) or isinstance(exc, FileNotFoundError):
+    if not isinstance(exc, PermissionError):
         return None
     return exc if _is_file(path) else None
 
 
-def _probe_readable(path: Path) -> OSError | None:
+def _probe_readable(path: Path) -> PermissionError | None:
     """Open *path* and read its first byte. Returns why it can't be read yet, or ``None``.
 
     A cheap check that needs no network request. A byte-range lock, which
@@ -120,6 +141,26 @@ def _probe_readable(path: Path) -> OSError | None:
     except OSError as exc:
         return _cant_read_yet(path, exc)
     return None
+
+
+def _cant_read(path: Path, blocked: OSError) -> CantReadYet:
+    """The `CantReadYet` for *path*, from the error that says it can't be read yet."""
+    return CantReadYet(path, str(blocked), reason=blocked.strerror or str(blocked))
+
+
+def _stat(path: Path) -> os.stat_result:
+    """``path.stat()``, except that a file this user can't look at yet raises `CantReadYet`.
+
+    That is a file in a folder this user has no permission to search, which may be
+    fixed later. A file that is gone, or any other error, raises as ``stat`` does.
+    """
+    try:
+        return path.stat()
+    except OSError as exc:
+        blocked = _cant_read_yet(path, exc)
+        if blocked is not None:
+            raise _cant_read(path, blocked) from exc
+        raise
 
 
 class _FileSlice:
@@ -536,6 +577,9 @@ class Uploader:
         # replaces the dict before it starts the file tasks and returns only
         # after they finish, and each task touches only its own file id.
         self._queue_attempts: dict[int, _QueueAttempt] = {}
+        # The ids in the queue the last poll saw, so an unchanged queue is not
+        # logged at INFO on every poll. Used by `poll_upload_queue` alone.
+        self._logged_queue_ids: set[int] = set()
         # Auto-mode files that are on disk but can't be read yet, keyed like
         # their ``pending_uploads`` row. The upload worker tries them again on
         # every poll (see `retry_waiting_files`), with no limit, and a try
@@ -544,7 +588,9 @@ class Uploader:
         # The keys of files whose "can't read yet" event is queued, so the
         # event goes out once per file and not once per poll. It covers the
         # queue path too, which has no `_waiting` entry, because the server's
-        # queue brings the file back on each poll.
+        # queue brings the file back on each poll. A key leaves when the file is
+        # uploaded, stops waiting, or (each poll) is neither queued nor waiting.
+        # A file in it is also hashed before its upload URL is requested.
         self._cant_read_reported: set[str] = set()
         # Guards both, which the stability-checker thread, the upload worker
         # and its file threads all reach.
@@ -617,7 +663,9 @@ class Uploader:
         A file that is on disk but can't be read yet (an instrument holds it
         open) isn't counted as uploaded and its row stays. It goes into
         the waiting collection, which `retry_waiting_files` works through on
-        each upload poll, and the files after it carry on.
+        each upload poll, and the files after it carry on. So do the files after
+        one whose upload raises an unexpected error: the first such error is raised
+        once every file has had its turn.
 
         When ``upload_parallelism > 1`` the per-file
         :meth:`_upload_single` calls run on short-lived daemon threads
@@ -638,12 +686,20 @@ class Uploader:
             return 0
 
         uploaded: list[Path] = []
+        errors: list[Exception] = []
 
         def upload(info: FileInfo) -> None:
             try:
                 done = self._upload_pending(info.path, run_id)
             except CantReadYet as exc:
                 self._wait_for_file(info.path, run_id, exc)
+                return
+            except Exception as exc:
+                # With one worker an error that escaped here would end the loop
+                # and leave the files after this one without an attempt. Keep
+                # it instead, and raise it once the batch is done, so the caller
+                # still reports it. This file keeps its ``pending_uploads`` row.
+                errors.append(exc)
                 return
             if done:
                 uploaded.append(info.path)
@@ -673,6 +729,8 @@ class Uploader:
                 len(files),
             )
 
+        if errors:
+            raise errors[0]
         return succeeded
 
     def _upload_pending(self, path: Path, run_id: str) -> bool:
@@ -720,8 +778,7 @@ class Uploader:
             WatcherEvent(
                 event_type=EventType.UPLOAD_FAILED,
                 message=(
-                    f"Can't read {path.name} yet: another program may have it open. "
-                    "Retrying every minute."
+                    f"Can't read {path.name} yet ({exc.reason}). Trying again on each upload poll."
                 ),
                 details={
                     "error": exc.error,
@@ -734,14 +791,35 @@ class Uploader:
         )
 
     def _forget_unreadable(self, path: Path) -> None:
-        """Drop *path* from the waiting collection once it is uploaded, or gone.
+        """Drop *path* from the waiting collection once it is uploaded.
 
-        A later time it can't be read counts as new, and is reported again.
+        A later time it can't be read counts as new, and is reported again. The
+        callers hold the file's `_exclusive` lock, so a thread that gets the
+        file next can't add its entry for this to take out.
         """
         key = relative_key(path, self._watch_dir)
         with self._waiting_lock:
             self._waiting.pop(key, None)
             self._cant_read_reported.discard(key)
+
+    def _stop_waiting(self, waiting: _WaitingFile) -> None:
+        """Take *waiting* out of the collection, and forget that its file was reported.
+
+        Does nothing when another thread has put a newer entry for the same file
+        there since: that thread found the file unreadable after this try, and its
+        entry is the one that counts.
+        """
+        key = relative_key(waiting.path, self._watch_dir)
+        with self._waiting_lock:
+            if self._waiting.get(key) is waiting:
+                del self._waiting[key]
+                self._cant_read_reported.discard(key)
+
+    def _was_found_unreadable(self, path: Path) -> bool:
+        """Whether a try has found *path* unreadable since it last uploaded or stopped waiting."""
+        key = relative_key(path, self._watch_dir)
+        with self._waiting_lock:
+            return key in self._cant_read_reported
 
     def retry_waiting_files(self) -> None:
         """Try again each auto-mode file that couldn't be read yet.
@@ -758,15 +836,16 @@ class Uploader:
         self._for_each(waiting, self._retry_waiting)
 
     def _retry_waiting(self, waiting: _WaitingFile) -> None:
-        """Try one waiting file: a cheap open first, then the upload."""
+        """Try one waiting file: the open and the hash come before any request."""
         path = waiting.path
         key = relative_key(path, self._watch_dir)
-        if not path.is_file():
-            self._forget_unreadable(path)
+        if not _is_file(path):
+            self._stop_waiting(waiting)
             self._drop_missing_pending(key, waiting.run_id, path)
             return
-        # `_upload_single_unlocked` opens the file before it asks the server for
-        # an upload URL, so a file that is still locked costs no request.
+        # `_upload_single_unlocked` opens the file and, for a file that was found
+        # unreadable before, hashes it before it asks the server for an upload URL.
+        # A file that is still locked, even partway through, costs no request.
         try:
             self._upload_pending(path, waiting.run_id)
         except CantReadYet as exc:
@@ -780,8 +859,7 @@ class Uploader:
         # The file can be read now, so it isn't waiting any more. An upload that
         # failed for another reason was reported or logged when it failed, and
         # its row stays for the next start's retry, as for any failed upload.
-        with self._waiting_lock:
-            self._waiting.pop(key, None)
+        self._stop_waiting(waiting)
 
     def _drop_missing_pending(self, relative_path: str, run_id: str, path: Path) -> None:
         """Give up on a pending upload whose file is no longer on disk."""
@@ -813,7 +891,7 @@ class Uploader:
         # The path came from our own state DB, so it is not re-checked
         # for traversal the way server-supplied queue paths are.
         path = self._watch_dir / pending.relative_path
-        if not path.is_file():
+        if not _is_file(path):
             self._drop_missing_pending(pending.relative_path, pending.run_id, path)
             return
         try:
@@ -943,11 +1021,28 @@ class Uploader:
         self._queue_attempts = {
             fid: rec for fid, rec in self._queue_attempts.items() if fid in current_ids
         }
+        # The same for the files reported as unreadable: one that is neither
+        # queued nor waiting has left for good, so if it is requested again while
+        # it is still locked it is reported again. A file in the waiting
+        # collection is kept, because that is what tries it on each poll.
+        queued_keys = {key for qf in queue.files if (key := self._queued_key(qf)) is not None}
+        with self._waiting_lock:
+            self._cant_read_reported &= queued_keys | self._waiting.keys()
+
+        # A request for a file that stays locked brings the same queue back on
+        # every poll, so say so at INFO only when the queue is not the one the
+        # last poll saw.
+        queue_changed = current_ids != self._logged_queue_ids
+        self._logged_queue_ids = current_ids
 
         if not queue.files:
             return
 
-        logger.info("Upload queue has %d file(s)", len(queue.files))
+        logger.log(
+            logging.INFO if queue_changed else logging.DEBUG,
+            "Upload queue has %d file(s)",
+            len(queue.files),
+        )
         if self._stop_requested():
             logger.info("Stop requested; deferring %d queued file(s)", len(queue.files))
             return
@@ -957,6 +1052,11 @@ class Uploader:
         # are picked up on the next start's poll. This returns only after
         # every file task has finished, so the next poll never overlaps them.
         self._for_each(queue.files, self._process_queued_file)
+
+    def _queued_key(self, qf: UploadQueueFile) -> str | None:
+        """The key a queued file has in `_cant_read_reported`, or ``None`` for an unsafe path."""
+        local_path = _resolve_within(self._watch_dir, qf.relative_path or qf.filename)
+        return None if local_path is None else relative_key(local_path, self._watch_dir)
 
     def _process_queued_file(self, qf: UploadQueueFile) -> None:
         """Attempt one queued file, bounding retries across polls.
@@ -1007,7 +1107,7 @@ class Uploader:
             self._cancel_queued_file(qf, "unsafe_path")
             return
 
-        if local_path.exists():
+        if _exists(local_path):
             try:
                 ok = self._upload_single(local_path, qf.run_id)
             except CantReadYet as exc:
@@ -1206,6 +1306,53 @@ class Uploader:
         )
         self._bump_errors()
 
+    def _fail_presign(self, path: Path, exc: ApiError) -> None:
+        """Report a refused upload-URL request."""
+        logger.error("Failed to get presigned URL for %s: %s", path.name, exc.message)
+        self._bump_errors()
+        self._reporter.queue_event(
+            WatcherEvent(
+                event_type=EventType.UPLOAD_FAILED,
+                message=f"Presigned URL request failed: {path.name}",
+                details={"error": exc.message},
+            )
+        )
+
+    def _fail_hash(
+        self, path: Path, exc: Exception, presigned: PresignedUploadResponse | None = None
+    ) -> None:
+        """Report a hash that failed, or raise `CantReadYet` when the file can't be read yet.
+
+        *presigned* is the upload URL response that was requested in parallel
+        with the hash, if there was one.
+        """
+        blocked = _cant_read_yet(path, exc)
+        if blocked is not None:
+            # Locked after the open check, or its permissions changed. The file
+            # is still there, so wait for it like any other file that can't be
+            # read yet. The URL request may have started a multipart upload, and
+            # nothing else will end it, so end it now.
+            if (
+                presigned is not None
+                and presigned.upload_type == "multipart"
+                and presigned.upload_id
+                and not presigned.already_uploaded
+            ):
+                self._abort_quietly(presigned.file_id, presigned.upload_id)
+            raise _cant_read(path, blocked) from exc
+        # Hashing failed (e.g. the file vanished mid-stream).
+        # Treat as an upload failure so the file is retried
+        # rather than silently dropped.
+        logger.error("Failed to hash %s: %s", path.name, exc)
+        self._bump_errors()
+        self._reporter.queue_event(
+            WatcherEvent(
+                event_type=EventType.UPLOAD_FAILED,
+                message=f"Hashing failed: {path.name}",
+                details={"error": str(exc)},
+            )
+        )
+
     @staticmethod
     def _raise_if_cant_read(path: Path, exc: BaseException) -> None:
         """Raise `CantReadYet` when an upload error is really a file that can't be read.
@@ -1220,7 +1367,7 @@ class Uploader:
             return
         blocked = _probe_readable(path)
         if blocked is not None:
-            raise CantReadYet(path, str(blocked)) from exc
+            raise _cant_read(path, blocked) from exc
 
     def _upload_single_put(
         self,
@@ -1530,21 +1677,24 @@ class Uploader:
         neither: nothing was recorded or counted as a failure, and the caller
         decides how to wait.
         """
-        uploaded = self._upload_exclusively(path, run_id)
-        if uploaded:
-            self._forget_unreadable(path)
-        return uploaded
-
-    def _upload_exclusively(self, path: Path, run_id: str) -> bool:
         with self._exclusive(path) as waited:
-            if waited:
-                if self._stop_requested():
-                    return False
-                st = path.stat()
-                rel_path = relative_key(path, self._watch_dir)
-                if self._state_db.has_stat_match(rel_path, st.st_size, st.st_mtime):
-                    return True
-            return self._upload_single_unlocked(path, run_id)
+            uploaded = self._upload_locked(path, run_id, waited)
+            if uploaded:
+                # Still under the file's lock, so a thread that gets the file next
+                # can't add its waiting entry only for this to take it out.
+                self._forget_unreadable(path)
+            return uploaded
+
+    def _upload_locked(self, path: Path, run_id: str, waited: bool) -> bool:
+        """The upload `_upload_single` makes while it holds the file."""
+        if waited:
+            if self._stop_requested():
+                return False
+            st = _stat(path)
+            rel_path = relative_key(path, self._watch_dir)
+            if self._state_db.has_stat_match(rel_path, st.st_size, st.st_mtime):
+                return True
+        return self._upload_single_unlocked(path, run_id)
 
     def _upload_single_unlocked(self, path: Path, run_id: str) -> bool:
         """Upload one file via a presigned URL, notify the API, and record in StateDB.
@@ -1563,90 +1713,90 @@ class Uploader:
         multi-GiB instrument file with a slow API, this halves the
         critical-path latency before the actual S3 PUT can start. The
         pool is created per call -- short-lived overhead is dwarfed by
-        the time savings on any non-trivial file.
+        the time savings on any non-trivial file. A file that was found
+        unreadable before is the exception: it is hashed first, and the
+        URL is requested only once the hash has read all of it.
         """
         content_type = _guess_content_type(path)
-        stat = path.stat()
+        stat = _stat(path)
         rel_path = relative_key(path, self._watch_dir)
 
         # Open the file before anything else. A file that is locked then costs
         # no upload-URL request, which matters because it is tried again on
-        # every poll until it can be read. The hash below can still fail on a
-        # file that was locked after this check.
+        # every poll until it can be read. A file locked only past its first
+        # byte passes this check, and the hash below fails on it. A first try
+        # has asked for the URL by then; the tries after it hash first.
         blocked = _probe_readable(path)
         if blocked is not None:
-            raise CantReadYet(path, str(blocked)) from blocked
+            raise _cant_read(path, blocked) from blocked
 
-        # Kick off both the SHA-256 and the presigned-URL request in
-        # parallel. ``ThreadPoolExecutor(2)`` is plenty: hashing is
-        # CPU/IO with mostly-released GIL via hashlib's C
-        # implementation, and the request thread blocks on the
-        # network. Resolve both before branching so the rest of the
-        # method behaves exactly as the old serial version.
+        request_url = partial(
+            self._client.request_upload_url,
+            self._instrument_id,
+            run_id,
+            path.name,
+            content_type=content_type,
+            size_bytes=stat.st_size,
+            file_created_at_ts=file_created_at(stat),
+            relative_path=rel_path,
+        )
+
         prep_started = time.monotonic()
-        with ThreadPoolExecutor(max_workers=2, thread_name_prefix="upload-prep") as prep:
-            sha_future = prep.submit(file_digests, path, self._abort)
-            presign_future = prep.submit(
-                self._client.request_upload_url,
-                self._instrument_id,
-                run_id,
-                path.name,
-                content_type=content_type,
-                size_bytes=stat.st_size,
-                file_created_at_ts=file_created_at(stat),
-                relative_path=rel_path,
-            )
-
+        if self._was_found_unreadable(path):
+            # A file that a try found unreadable before may be locked only past
+            # its first byte, so the open above passes and the hash fails, on
+            # every poll. Hash it first: a request made before that would cost the
+            # server a request per poll, and for a large file would start a
+            # multipart upload only to abort it.
             try:
-                presigned = presign_future.result()
-            except ApiError as exc:
-                # Wait for the hash to finish (cancellation is best-effort
-                # for already-running futures) before exiting the
-                # ``with`` block, otherwise the pool blocks on shutdown.
-                sha_future.cancel()
-                try:
-                    sha_future.result()
-                except Exception:
-                    pass
-                logger.error("Failed to get presigned URL for %s: %s", path.name, exc.message)
-                self._bump_errors()
-                self._reporter.queue_event(
-                    WatcherEvent(
-                        event_type=EventType.UPLOAD_FAILED,
-                        message=f"Presigned URL request failed: {path.name}",
-                        details={"error": exc.message},
-                    )
-                )
-                return False
-
-            try:
-                sha, crc64nvme = sha_future.result()
+                sha, crc64nvme = file_digests(path, self._abort)
             except DigestCancelled:
-                # `abort` cut the hash off. Nothing was sent or recorded.
                 logger.info("Upload cut off; deferring %s", path.name)
                 return False
             except Exception as exc:
-                # Locked after the check above, or its permissions changed.
-                # The file is still there, so wait for it like any other
-                # file that can't be read yet.
-                blocked = _cant_read_yet(path, exc)
-                if blocked is not None:
-                    raise CantReadYet(path, str(blocked)) from exc
-                # Hashing failed (e.g. the file vanished mid-stream).
-                # Treat as an upload failure so the file is retried
-                # rather than silently dropped.
-                logger.error("Failed to hash %s: %s", path.name, exc)
-                self._bump_errors()
-                self._reporter.queue_event(
-                    WatcherEvent(
-                        event_type=EventType.UPLOAD_FAILED,
-                        message=f"Hashing failed: {path.name}",
-                        details={"error": str(exc)},
-                    )
-                )
+                self._fail_hash(path, exc)
                 return False
-            # The URL request finished above, so this is when both were done.
-            prep_seconds = time.monotonic() - prep_started
+            try:
+                presigned = request_url()
+            except ApiError as exc:
+                self._fail_presign(path, exc)
+                return False
+        else:
+            # Kick off both the SHA-256 and the presigned-URL request in
+            # parallel. ``ThreadPoolExecutor(2)`` is plenty: hashing is
+            # CPU/IO with mostly-released GIL via hashlib's C
+            # implementation, and the request thread blocks on the
+            # network. Resolve both before branching so the rest of the
+            # method behaves exactly as the old serial version.
+            with ThreadPoolExecutor(max_workers=2, thread_name_prefix="upload-prep") as prep:
+                sha_future = prep.submit(file_digests, path, self._abort)
+                presign_future = prep.submit(request_url)
+
+                try:
+                    presigned = presign_future.result()
+                except ApiError as exc:
+                    # Wait for the hash to finish (cancellation is best-effort
+                    # for already-running futures) before exiting the
+                    # ``with`` block, otherwise the pool blocks on shutdown.
+                    sha_future.cancel()
+                    try:
+                        sha_future.result()
+                    except Exception:
+                        pass
+                    self._fail_presign(path, exc)
+                    return False
+
+                try:
+                    sha, crc64nvme = sha_future.result()
+                except DigestCancelled:
+                    # `abort` cut the hash off. Nothing was sent or recorded.
+                    logger.info("Upload cut off; deferring %s", path.name)
+                    return False
+                except Exception as exc:
+                    self._fail_hash(path, exc, presigned)
+                    return False
+        # Both are done: the URL request and the hash.
+        prep_seconds = time.monotonic() - prep_started
 
         s3_key = presigned.s3_key
         s3_bucket = presigned.s3_bucket
@@ -1737,7 +1887,8 @@ class Uploader:
                     "s3_key": s3_key,
                     "sha256": sha,
                     "size_bytes": stat.st_size,
-                    # Hashing and the upload-URL request, which run together.
+                    # Hashing and the upload-URL request. They run together, except for a
+                    # file that was found unreadable before: those run one after the other.
                     "prep_seconds": round(prep_seconds, 3),
                     # The transfer to S3: until the single PUT succeeds, or the
                     # multipart complete call returns. The file-status PATCH
