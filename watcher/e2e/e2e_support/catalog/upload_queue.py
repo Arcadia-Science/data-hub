@@ -153,11 +153,12 @@ TRANSITIONS: tuple[Transition, ...] = (
         "queue.uploaded_file->dismiss_refused",
         "A file that is already uploaded cannot be dismissed: the route answers 409.",
     ),
-    xfail_bug(
+    covered(
         MACHINE,
         "queue.deleted_run_file->not_listed",
-        "A queued file whose run was soft-deleted is not listed in the watcher's upload queue.",
-        "ENG-2113",
+        "Deleting a run cancels its requested uploads: its files read `detected` again, are "
+        "not listed in the watcher's upload queue, and the instrument's watcher gets an "
+        "`upload_requests_cancelled` event.",
     ),
     excluded(
         MACHINE,

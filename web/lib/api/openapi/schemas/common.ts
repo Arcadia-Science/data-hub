@@ -23,6 +23,15 @@ export const watcherStatusSchema = z.enum([
   "stale",
 ]);
 export const watcherEventTypeSchema = z.enum(watcherEventTypeEnum.enumValues);
+// Event types that only Data Hub writes. The events a watcher posts leave
+// them out, so a watcher token can't forge them. Reading and filtering events
+// still use the full `watcherEventTypeSchema`.
+export const SERVER_ONLY_WATCHER_EVENT_TYPES = [
+  "upload_requests_cancelled",
+] as const;
+export const watcherEventInputTypeSchema = watcherEventTypeSchema.exclude(
+  SERVER_ONLY_WATCHER_EVENT_TYPES
+);
 export const uploadModeSchema = z.enum(["auto", "manual"]);
 export const archiveJobStatusSchema = z.enum(archiveJobStatusEnum.enumValues);
 export const paginationSchema = z.object({

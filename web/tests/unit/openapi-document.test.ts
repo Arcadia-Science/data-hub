@@ -4,6 +4,7 @@ import {
   createInstrumentBody,
   createRunBody,
   requestUploadBody,
+  watcherEventBody,
 } from "@/lib/api/openapi";
 
 describe("OpenAPI document", () => {
@@ -90,5 +91,28 @@ describe("request body schemas", () => {
   it("requires at least one file_id for upload requests", () => {
     expect(requestUploadBody.safeParse({ file_ids: [] }).success).toBe(false);
     expect(requestUploadBody.parse({ file_ids: [1] }).file_ids).toEqual([1]);
+  });
+
+  it("rejects event types that only Data Hub writes when a watcher posts events", () => {
+    const event = (event_type: string) => ({
+      events: [{ event_type, timestamp: "2026-01-01T00:00:00Z", message: "x" }],
+    });
+
+    expect(
+      watcherEventBody.safeParse(event("upload_requests_cancelled")).success
+    ).toBe(false);
+    expect(watcherEventBody.safeParse(event("error")).success).toBe(true);
+  });
+
+  it("documents server-only event types when reading events, but not when posting them", () => {
+    const eventsPath =
+      buildOpenApiDocument().paths?.["/watchers/{watcherId}/events"];
+    const postSchema = JSON.stringify(eventsPath?.post?.requestBody ?? {});
+    const listSchema = JSON.stringify(
+      eventsPath?.get?.responses?.["200"] ?? {}
+    );
+
+    expect(postSchema).not.toContain("upload_requests_cancelled");
+    expect(listSchema).toContain("upload_requests_cancelled");
   });
 });

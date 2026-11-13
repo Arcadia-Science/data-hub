@@ -2780,7 +2780,7 @@
       "delete": {
         "operationId": "deleteInstrumentRun",
         "summary": "Soft-delete a run",
-        "description": "Requires scope `runs:delete`.",
+        "description": "Requires scope `runs:delete`. Also cancels the uploads that were requested for the run's files: they go back to `detected` and leave the watcher's upload queue. Restoring the run doesn't bring the requests back.",
         "tags": [
           "Runs"
         ],
@@ -2912,7 +2912,7 @@
       "post": {
         "operationId": "restoreInstrumentRun",
         "summary": "Restore a run",
-        "description": "Requires scope `runs:delete`.",
+        "description": "Requires scope `runs:delete`. Doesn't bring back the upload requests that deleting the run cancelled. Request the uploads again.",
         "tags": [
           "Runs"
         ],
@@ -6225,7 +6225,7 @@
       "post": {
         "operationId": "createWatcherEvent",
         "summary": "Report a watcher event",
-        "description": "Requires scope `watchers:report`. PAT only; browser sessions are rejected.",
+        "description": "Requires scope `watchers:report`. PAT only; browser sessions are rejected. Event types that only Data Hub writes, such as `upload_requests_cancelled`, are rejected with a 400 error. The event list still returns them.",
         "tags": [
           "Watchers"
         ],
@@ -6423,7 +6423,8 @@
                               "error",
                               "update_started",
                               "update_succeeded",
-                              "update_failed"
+                              "update_failed",
+                              "upload_requests_cancelled"
                             ]
                           },
                           "message": {

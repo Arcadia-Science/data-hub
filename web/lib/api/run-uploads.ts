@@ -3,9 +3,73 @@ import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
 import { instrumentHasOnlineWatcher } from "@/lib/api/instruments";
 import { touchRuns } from "@/lib/api/touch-runs";
 import { db } from "@/lib/db";
-import { files } from "@/lib/db/schema";
+import { files, instrumentRuns } from "@/lib/db/schema";
 
 export const MAX_UPLOAD_FILE_IDS = 100;
+
+const DELETED_RUN_MESSAGE = "Cannot request uploads for a soft-deleted run";
+
+// A condition for the UPDATE that queues files: the run is not deleted. The
+// check in `prepareUploadTarget` runs before the UPDATE, so a delete that lands
+// in between would otherwise let the request queue files of a deleted run.
+// With this condition that request changes nothing.
+function runIsLive(runUuid: string) {
+  return inArray(
+    files.instrumentRunId,
+    db
+      .select({ id: instrumentRuns.id })
+      .from(instrumentRuns)
+      .where(
+        and(eq(instrumentRuns.id, runUuid), isNull(instrumentRuns.deletedAt))
+      )
+  );
+}
+
+// True when the run has been deleted since the request began.
+async function runWasDeleted(runUuid: string): Promise<boolean> {
+  const [row] = await db
+    .select({ deletedAt: instrumentRuns.deletedAt })
+    .from(instrumentRuns)
+    .where(eq(instrumentRuns.id, runUuid))
+    .limit(1);
+  return row?.deletedAt != null;
+}
+
+// Runs when the UPDATE queued fewer files than were asked for. A deleted run
+// and a file that changed state are 409 conflicts, like a request that arrives
+// after the change. A skipped file that is now `upload_requested` is fine: a
+// second request for the same files may have queued it a moment earlier, and
+// asking twice has always worked.
+async function explainSkippedFiles(
+  runUuid: string,
+  wanted: number[],
+  queued: number[]
+): Promise<UploadPrepError | null> {
+  if (await runWasDeleted(runUuid)) {
+    return {
+      ok: false,
+      status: 409,
+      code: "CONFLICT",
+      message: DELETED_RUN_MESSAGE,
+    };
+  }
+  const queuedIds = new Set(queued);
+  const skipped = wanted.filter((id) => !queuedIds.has(id));
+  const rows = await db
+    .select({ status: files.status, deletedAt: files.deletedAt })
+    .from(files)
+    .where(inArray(files.id, skipped));
+  if (rows.some((f) => f.status !== "upload_requested" || f.deletedAt)) {
+    return {
+      ok: false,
+      status: 409,
+      code: "CONFLICT",
+      message:
+        "Some files changed while the upload was being requested. Check the run and request the upload again.",
+    };
+  }
+  return null;
+}
 
 interface UploadPrepError {
   code: "NOT_FOUND" | "CONFLICT" | "WATCHER_OFFLINE";
@@ -57,7 +121,7 @@ async function prepareUploadTarget(
       ok: false,
       status: 409,
       code: "CONFLICT",
-      message: "Cannot request uploads for a soft-deleted run",
+      message: DELETED_RUN_MESSAGE,
     };
   }
 
@@ -168,11 +232,34 @@ export async function requestRunUploads(input: {
   );
 
   if (toTransition.length > 0) {
-    await db
+    // The conditions repeat what was checked above, because the run or a file
+    // can change in between. A file that is no longer `detected` is left as it
+    // is, and a deleted run is left alone.
+    const queued = await db
       .update(files)
       .set({ status: "upload_requested", uploadRequestedAt: now })
-      .where(inArray(files.id, toTransition));
-    await touchRuns([run.id]);
+      .where(
+        and(
+          inArray(files.id, toTransition),
+          eq(files.status, "detected"),
+          isNull(files.deletedAt),
+          runIsLive(run.id)
+        )
+      )
+      .returning({ id: files.id });
+    if (queued.length > 0) {
+      await touchRuns([run.id]);
+    }
+    if (queued.length < toTransition.length) {
+      const problem = await explainSkippedFiles(
+        run.id,
+        toTransition,
+        queued.map((f) => f.id)
+      );
+      if (problem) {
+        return problem;
+      }
+    }
   }
 
   return {
@@ -212,13 +299,22 @@ export async function requestAllRunUploads(
       and(
         eq(files.instrumentRunId, run.id),
         eq(files.status, "detected"),
-        isNull(files.deletedAt)
+        isNull(files.deletedAt),
+        runIsLive(run.id)
       )
     )
     .returning({ id: files.id });
 
   if (updated.length > 0) {
     await touchRuns([run.id]);
+  } else if (await runWasDeleted(run.id)) {
+    // The run was deleted after the check above, so nothing was queued.
+    return {
+      ok: false,
+      status: 409,
+      code: "CONFLICT",
+      message: DELETED_RUN_MESSAGE,
+    };
   }
 
   return {

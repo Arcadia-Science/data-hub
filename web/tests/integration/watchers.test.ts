@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, like } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   watcherChecksumResponse,
@@ -12,7 +12,7 @@ import {
   watcherRegistered,
   watcherUpdateCheckResponse,
 } from "@/lib/api/openapi";
-import { instruments, watchers } from "@/lib/db/schema";
+import { instruments, watcherEvents, watchers } from "@/lib/db/schema";
 import {
   api,
   closeTestDb,
@@ -300,6 +300,38 @@ describe("Watchers API", () => {
       },
     });
     expect(res.status).toBe(400);
+  });
+
+  // `upload_requests_cancelled` is written by Data Hub when a run is deleted.
+  // A watcher token must not be able to forge it, and the batch is refused
+  // whole, like any other invalid batch.
+  it("POST /api/v1/watchers/:id/events rejects event types that only Data Hub writes", async () => {
+    const now = new Date().toISOString();
+    const res = await api(`/api/v1/watchers/${watcherId}/events`, {
+      method: "POST",
+      token,
+      body: {
+        events: [
+          {
+            event_type: "watcher_started",
+            timestamp: now,
+            message: "server-only batch, valid event",
+          },
+          {
+            event_type: "upload_requests_cancelled",
+            timestamp: now,
+            message: "server-only batch, forged event",
+          },
+        ],
+      },
+    });
+    expect(res.status).toBe(400);
+
+    const stored = await getTestDb()
+      .select({ message: watcherEvents.message })
+      .from(watcherEvents)
+      .where(like(watcherEvents.message, "server-only batch%"));
+    expect(stored).toEqual([]);
   });
 
   // Regression: the auto-update lifecycle event types are defined on the
