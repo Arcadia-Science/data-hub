@@ -399,7 +399,7 @@ export const SEED_INSTRUMENTS: readonly SeededInstrument[] = [
     displayName: "Azure 600 Gel Doc",
     instrumentType: "gel_doc",
     status: "active",
-    hostname: "WIN-G7U3JO19L7O",
+    hostname: "LAB-PC-03",
     osInfo: "Windows 11",
     watcherStatus: "watching",
     configYamlTemplate: buildSeedConfigYaml(`instrument:
@@ -407,7 +407,7 @@ export const SEED_INSTRUMENTS: readonly SeededInstrument[] = [
   watch_directory: C:\\Data
   file_patterns:
   - '*.tif'
-  - .*jpg
+  - '*.jpg'
   enabled: true
   upload_mode: auto
   stability_period_seconds: 5
@@ -444,7 +444,7 @@ export const SEED_INSTRUMENTS: readonly SeededInstrument[] = [
     displayName: "Epson v700 Scanner",
     instrumentType: "epson_v700_scanner",
     status: "active",
-    hostname: "WIN-G7U3JO19L7O",
+    hostname: "LAB-PC-03",
     osInfo: "Windows 11",
     watcherStatus: "watching",
     configYamlTemplate: buildSeedConfigYaml(`instrument:
