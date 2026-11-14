@@ -872,7 +872,8 @@ export type RunFilesListFilters = RunFilesFilter & {
 const PENDING_FILE_STATUSES = ["detected", "upload_requested"] as const;
 
 // Ranks rows by the label the status column shows, alphabetically: Completed,
-// Dismissed, Failed, Pending, Processing, Queued, Stalled, Uploaded, Uploading.
+// Dismissed, Failed, Processing, Queued, Stalled, Uploaded, Uploading, Waiting
+// to upload.
 // The labels live in `FILE_STATUS_CONFIG`; keep the two in step when either
 // changes. Dismissed (soft-deleted) rows rank by their label too, so the
 // deleted check has to come first. Built per call because the Processing /
@@ -882,12 +883,12 @@ function statusSortRank(now: Date): SQL {
     when ${files.deletedAt} is not null then 2
     when ${files.status} = 'completed' then 1
     when ${files.status} = 'failed' then 3
-    when ${files.status} = 'detected' then 4
-    when ${inFlightProcessingSql(now)} then 5
-    when ${files.status} = 'queued' then 6
-    when ${files.status} = 'processing' then 7
-    when ${files.status} = 'uploaded' then 8
-    when ${files.status} = 'upload_requested' then 9
+    when ${inFlightProcessingSql(now)} then 4
+    when ${files.status} = 'queued' then 5
+    when ${files.status} = 'processing' then 6
+    when ${files.status} = 'uploaded' then 7
+    when ${files.status} = 'upload_requested' then 8
+    when ${files.status} = 'detected' then 9
     else 10
   end`;
 }

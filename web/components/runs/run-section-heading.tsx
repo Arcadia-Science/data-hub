@@ -40,9 +40,11 @@ export function RunSectionHeading({
     return heading;
   }
   return (
-    <div className="flex w-full min-w-0 items-center justify-between gap-3">
+    // Wraps when the actions don't fit beside the title, such as an Upload all
+    // button with the reason it can't upload next to it on a phone.
+    <div className="flex w-full min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-2">
       {heading}
-      <div className="shrink-0">{resolved}</div>
+      <div className="ml-auto min-w-0 max-w-full">{resolved}</div>
     </div>
   );
 }

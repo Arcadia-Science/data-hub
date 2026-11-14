@@ -324,10 +324,11 @@ export async function revertUploadQueueIfWatcherOffline(
   },
   executor: DbExecutor = db
 ): Promise<number> {
-  // Only an online watcher drains the queue, as before. A restarting watcher
-  // is expected back and keeps its queue, but whether this revert should wait
-  // for it is a separate decision from accepting new upload requests while it
-  // restarts. TODO(run-page uploads): decide it with `prepareUploadTarget`.
+  // Only an online watcher drains the queue, so any other state reverts. The
+  // callers decide when to ask: the heartbeat route skips a stop for a restart,
+  // and the sweep waits out `UPLOAD_REQUEST_REVERT_GRACE_MS`. That keeps an
+  // upload request accepted while the watcher restarts queued for it until
+  // then.
   const connectionState = await getInstrumentConnectionState(
     opts.instrumentId,
     executor

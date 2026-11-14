@@ -34,6 +34,10 @@ import { notebookLinkToWire } from "@/lib/api/run-notebook-link-wire";
 import { listNotebookLinksForRun } from "@/lib/api/run-notebook-links";
 import { auth } from "@/lib/auth";
 import { formatDateLong } from "@/lib/date";
+import {
+  type Connection,
+  instrumentBadgeState,
+} from "@/lib/instruments/connection";
 import { decodePageParam } from "@/lib/runs/page-param";
 import {
   emptyReportItemsPage,
@@ -228,16 +232,31 @@ async function RunDetailContentBody({
     listNotebookLinksForRun(run.id),
   ]);
 
-  // Gate client-side upload actions on watcher availability — a queued
-  // upload request is a no-op if no agent is around to action it.
-  const isWatcherOnline = instrument?.connection.state === "online";
+  // The upload buttons and the offline notice follow the instrument badge, so
+  // a restarting watcher still takes upload requests and a retired instrument
+  // doesn't. A missing instrument can't happen for a run that was found, and
+  // reads as having no watcher if it does.
+  const connection: Connection = instrument?.connection ?? {
+    state: "offline",
+    reason: "no_watcher",
+  };
+  const badgeState = instrumentBadgeState(
+    instrument?.status ?? "active",
+    connection
+  );
 
   const toRunHref = (rid: string) =>
     `/instruments/${instrumentId}/runs/${encodeURIComponent(rid)}`;
 
   return (
     <RestReportDataSourceProvider instrumentId={instrumentId} runId={runId}>
-      <WatcherStatusProvider isWatcherOnline={isWatcherOnline}>
+      <WatcherStatusProvider
+        badgeState={badgeState}
+        connection={connection}
+        instrumentId={run.instrumentId}
+        instrumentName={run.instrumentDisplayName}
+        lastHeartbeatAt={instrument?.watcher?.lastHeartbeatAt ?? null}
+      >
         <RunClaimTargetProvider
           instrumentId={run.instrumentId}
           runId={run.runId}

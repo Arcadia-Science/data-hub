@@ -9,8 +9,9 @@ export const INTERNAL_ERROR = "INTERNAL_ERROR";
 // `watcher_release_config.min_supported_version` floor.
 export const UPGRADE_REQUIRED = "UPGRADE_REQUIRED";
 // Paired with HTTP 409. Returned by the upload-request routes when the
-// instrument has no online watcher to pick up the queue — without one,
-// queued files would sit in `upload_requested` forever (never reaching S3).
+// instrument has no watcher that is online or restarting to pick up the queue
+// (or is pending or retired) — without one, queued files would sit in
+// `upload_requested` forever (never reaching S3).
 export const WATCHER_OFFLINE = "WATCHER_OFFLINE";
 // Paired with HTTP 413. A watcher that cannot split an upload would send
 // the whole file in one request, which S3 rejects above 5 GiB.
