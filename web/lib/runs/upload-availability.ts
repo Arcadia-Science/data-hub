@@ -27,6 +27,8 @@ export interface RunUploadAvailability {
 export const RESTARTING_UPLOAD_REASON =
   "The instrument PC is restarting. Uploads start once it's back.";
 export const CONNECTING_UPLOAD_REASON = "The watcher hasn't checked in yet.";
+export const PENDING_UPLOAD_REASON =
+  "This instrument is waiting for an admin to confirm it.";
 export const OFFLINE_UPLOAD_REASON =
   "Can't upload while the watcher is offline.";
 export const RETIRED_UPLOAD_REASON = "This instrument is retired.";
@@ -40,15 +42,16 @@ export const RETIRED_UPLOAD_REASON = "This instrument is retired.";
  * - Connecting: Upload disabled, with a grey line.
  * - Offline: Upload disabled, with a red line.
  * - Retired: Upload disabled, with a grey line.
+ * - Pending: Upload disabled, with a grey line.
  *
  * The design's table has no Pending row, because a pending instrument's page
  * shows a "Waiting for confirmation" card in place of its runs. A run of a
- * pending instrument can still be opened by its URL, and it reads like
- * Connecting: not ready to take uploads, with no new copy to write.
+ * pending instrument can still be opened by its URL. Its watcher may be
+ * online, so the line says what is actually missing: an admin's confirmation.
  *
  * Requests made while the watcher restarts queue until it is back. Data Hub
- * cancels them if no heartbeat follows within `UPLOAD_REQUEST_REVERT_GRACE_MS`,
- * and that rule is unchanged.
+ * cancels them if the watcher's last heartbeat is more than 15 minutes old
+ * (`UPLOAD_REQUEST_REVERT_GRACE_MS`), and that rule is unchanged.
  */
 export function getRunUploadAvailability(
   badge: InstrumentBadgeState
@@ -59,12 +62,13 @@ export function getRunUploadAvailability(
     case "restarting":
       return { enabled: true, reason: RESTARTING_UPLOAD_REASON, tone: "info" };
     case "connecting":
-    case "pending":
       return {
         enabled: false,
         reason: CONNECTING_UPLOAD_REASON,
         tone: "muted",
       };
+    case "pending":
+      return { enabled: false, reason: PENDING_UPLOAD_REASON, tone: "muted" };
     case "offline":
       return {
         enabled: false,

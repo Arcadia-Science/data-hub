@@ -50,7 +50,7 @@ export function WatcherGatedUploadButton({
   const reasonId = useId();
   const describedBy = upload.reason ? reasonId : undefined;
   const reasonText = upload.reason ? (
-    <span className="sr-only" id={reasonId}>
+    <span hidden id={reasonId}>
       {upload.reason}
     </span>
   ) : null;

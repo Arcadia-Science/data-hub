@@ -12,9 +12,9 @@ import {
 import { getRunUploadAvailability } from "@/lib/runs/upload-availability";
 
 // The run page's upload table: each badge state says whether Upload works and
-// what to tell the viewer. The first five tests are its rows. The rest walk
+// what to tell the viewer. The first six tests are its rows. The rest walk
 // from a stored watcher to the table, as the page and the upload-request
-// routes read it, and check the badges that have no row of their own.
+// routes read it, and check the instrument states that decide the badge.
 
 describe("getRunUploadAvailability", () => {
   it("Online: Upload is enabled and nothing is said", () => {
@@ -57,10 +57,12 @@ describe("getRunUploadAvailability", () => {
     });
   });
 
-  it("Pending reads like Connecting, which is the closest row", () => {
-    expect(getRunUploadAvailability("pending")).toEqual(
-      getRunUploadAvailability("connecting")
-    );
+  it("Pending: Upload is disabled because an admin hasn't confirmed the instrument", () => {
+    expect(getRunUploadAvailability("pending")).toEqual({
+      enabled: false,
+      reason: "This instrument is waiting for an admin to confirm it.",
+      tone: "muted",
+    });
   });
 
   it("only Online and Restarting accept upload requests", () => {

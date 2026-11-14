@@ -1,10 +1,7 @@
 "use client";
 
 import { createContext, type ReactNode, use, useMemo } from "react";
-import type {
-  Connection,
-  InstrumentBadgeState,
-} from "@/lib/instruments/connection";
+import type { InstrumentBadgeState } from "@/lib/instruments/connection";
 import {
   getRunUploadAvailability,
   type RunUploadAvailability,
@@ -13,12 +10,10 @@ import {
 /**
  * What the run page knows about the instrument's watcher: the badge the
  * instrument shows (which lets Pending and Retired win over the connection),
- * the connection under it, and what the offline notice says about the
- * instrument.
+ * and what the offline notice says about the instrument.
  */
 export interface WatcherStatus {
   badgeState: InstrumentBadgeState;
-  connection: Connection;
   instrumentId: string;
   instrumentName: string;
   /** When the watcher last checked in, or null if it never has. */
@@ -39,7 +34,6 @@ const WatcherStatusContext = createContext<WatcherStatus | null>(null);
 export function WatcherStatusProvider({
   badgeState,
   children,
-  connection,
   instrumentId,
   instrumentName,
   lastHeartbeatAt,
@@ -47,13 +41,12 @@ export function WatcherStatusProvider({
   const value = useMemo<WatcherStatus>(
     () => ({
       badgeState,
-      connection,
       instrumentId,
       instrumentName,
       lastHeartbeatAt,
       upload: getRunUploadAvailability(badgeState),
     }),
-    [badgeState, connection, instrumentId, instrumentName, lastHeartbeatAt]
+    [badgeState, instrumentId, instrumentName, lastHeartbeatAt]
   );
   return (
     <WatcherStatusContext.Provider value={value}>

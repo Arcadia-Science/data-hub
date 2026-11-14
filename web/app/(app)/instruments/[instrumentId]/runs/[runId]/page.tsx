@@ -234,14 +234,15 @@ async function RunDetailContentBody({
 
   // The upload buttons and the offline notice follow the instrument badge, so
   // a restarting watcher still takes upload requests and a retired instrument
-  // doesn't. A missing instrument can't happen for a run that was found, and
-  // reads as having no watcher if it does.
+  // doesn't. A missing instrument can't happen for a run that was found. If
+  // it does, it reads as retired, the strictest reading, as in the upload
+  // routes (`getInstrumentBadge` in `lib/api/run-uploads.ts`).
   const connection: Connection = instrument?.connection ?? {
     state: "offline",
     reason: "no_watcher",
   };
   const badgeState = instrumentBadgeState(
-    instrument?.status ?? "active",
+    instrument?.status ?? "inactive",
     connection
   );
 
@@ -252,7 +253,6 @@ async function RunDetailContentBody({
     <RestReportDataSourceProvider instrumentId={instrumentId} runId={runId}>
       <WatcherStatusProvider
         badgeState={badgeState}
-        connection={connection}
         instrumentId={run.instrumentId}
         instrumentName={run.instrumentDisplayName}
         lastHeartbeatAt={instrument?.watcher?.lastHeartbeatAt ?? null}

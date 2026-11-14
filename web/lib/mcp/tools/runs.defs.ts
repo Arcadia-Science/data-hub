@@ -401,7 +401,7 @@ export const requestRunUploadTool = {
   scope: "runs:upload",
   title: "Request Run Upload",
   description:
-    "Queue specific detected files for watcher upload (max 100). Requires a watcher that is online or restarting; a request made during a restart waits until the watcher is back. Idempotent for files already in upload_requested.",
+    "Queue specific detected files for watcher upload (max 100). Requires an instrument whose watcher is online or restarting; a request made during a restart waits until the watcher is back. Offline, connecting, pending and retired instruments are refused. Idempotent for files already in upload_requested.",
   inputSchema: {
     instrumentId: z.string().describe("Instrument identifier"),
     runId: z.string().describe("Run identifier within the instrument"),
@@ -425,7 +425,7 @@ export const requestRunUploadAllTool = {
   scope: "runs:upload",
   title: "Request Run Upload All",
   description:
-    "Queue every detected file on a run for watcher upload. Requires a watcher that is online or restarting; a request made during a restart waits until the watcher is back.",
+    "Queue every detected file on a run for watcher upload. Requires an instrument whose watcher is online or restarting; a request made during a restart waits until the watcher is back. Offline, connecting, pending and retired instruments are refused.",
   inputSchema: {
     instrumentId: z.string().describe("Instrument identifier"),
     runId: z.string().describe("Run identifier within the instrument"),

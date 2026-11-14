@@ -1,5 +1,6 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { watcherUploadQueueResponse } from "@/lib/api/openapi";
 import { files, instrumentRuns, instruments, watchers } from "@/lib/db/schema";
 import {
   api,
@@ -61,6 +62,9 @@ async function seedRun(
 }
 
 const MINUTE = 60 * 1000;
+
+// Must match CRON_SECRET set on the test server in global-setup.ts.
+const CRON_SECRET = "test-cron-secret";
 
 async function statusesOf(fileIds: number[]): Promise<string[]> {
   const rows = await getTestDb()
@@ -341,6 +345,64 @@ describe("Request Upload — watcher offline guard", () => {
       "upload_requested",
       "upload_requested",
     ]);
+  });
+
+  it("keeps a request made while the watcher restarts through the sweep, and hands it over when the watcher is back", async () => {
+    const instrumentId = "restart-pickup-inst";
+    const runId = "run-1";
+    const fileIds = await seedRun(instrumentId, runId, token);
+
+    const db = getTestDb();
+    const [watcher] = await db
+      .insert(watchers)
+      .values({
+        instrumentId,
+        hostname: "restart-pickup-pc",
+        status: "stopped",
+        statusReason: "auto_update",
+        lastHeartbeatAt: new Date(Date.now() - 10 * MINUTE),
+      })
+      .returning({ id: watchers.id });
+
+    const queue = async (): Promise<number[]> => {
+      const res = await api(`/api/v1/watchers/${watcher.id}/upload-queue`, {
+        token,
+      });
+      expect(res.status).toBe(200);
+      const body = watcherUploadQueueResponse.parse(await res.json());
+      return body.files.map((file) => file.id).sort((a, b) => a - b);
+    };
+
+    const request = await api(
+      `/api/v1/instruments/${instrumentId}/runs/${runId}/request-upload-all`,
+      { method: "POST", token }
+    );
+    expect(request.status).toBe(200);
+    expect(await statusesOf(fileIds)).toEqual([
+      "upload_requested",
+      "upload_requested",
+    ]);
+
+    // The last heartbeat is 10 minutes old, inside the 15-minute window, so the
+    // sweep leaves the request queued.
+    const sweep = await api("/api/cron/upload-queue-sweep", {
+      headers: { Authorization: `Bearer ${CRON_SECRET}` },
+    });
+    expect(sweep.status).toBe(200);
+    expect((await sweep.json()).reverted_files).toBe(0);
+    expect(await statusesOf(fileIds)).toEqual([
+      "upload_requested",
+      "upload_requested",
+    ]);
+
+    // The watcher comes back and checks in, and its queue lists the files.
+    const heartbeat = await api(`/api/v1/watchers/${watcher.id}/heartbeat`, {
+      method: "POST",
+      token,
+      body: { status: "watching" },
+    });
+    expect(heartbeat.status).toBe(200);
+    expect(await queue()).toEqual([...fileIds].sort((a, b) => a - b));
   });
 
   it("rejects a watcher stopped for an update more than 15 minutes ago", async () => {

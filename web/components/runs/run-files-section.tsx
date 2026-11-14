@@ -84,7 +84,7 @@ const FILES_CATEGORY_OPTIONS: FilesFilterOption<FilesCategoryFilter>[] = [
 // "Processing" is in-flight work only; files past the stall cutoff answer to
 // "Stalled" instead, matching what the status column labels them.
 const FILES_STATUS_OPTIONS: FilesFilterOption<FilesLifecycleFilter>[] = [
-  { value: "pending", label: "Pending" },
+  { value: "pending", label: "Waiting to upload" },
   { value: "uploaded", label: "Uploaded" },
   { value: "queued", label: "Queued" },
   { value: "processing", label: "Processing" },
@@ -436,7 +436,8 @@ function RunFilesSectionContent({
               : ""}
           </span>
           <span>
-            {stats.pending} pending &middot; {stats.uploaded} uploaded
+            {stats.pending} waiting on the instrument PC &middot;{" "}
+            {stats.uploaded} uploaded
           </span>
         </div>
       </div>
@@ -489,6 +490,9 @@ function BulkActionBarHost({
       if (!res.ok) {
         const body = await res.json().catch(() => null);
         toast.error(body?.error?.message ?? "Failed to request uploads");
+        // The badge was read at page load, so a refusal means the page is out
+        // of date: refresh it so the buttons and the line match the server.
+        router.refresh();
         return;
       }
       toast.success(`Upload requested for ${ids.length} file(s)`);
@@ -614,6 +618,9 @@ function handleSingleUpload(
     if (!res.ok) {
       const body = await res.json().catch(() => null);
       toast.error(body?.error?.message ?? "Failed to request upload");
+      // The badge was read at page load, so a refusal means the page is out
+      // of date: refresh it so the buttons and the line match the server.
+      router.refresh();
       return;
     }
     toast.success("Upload requested");
@@ -641,14 +648,22 @@ function handleUploadAll(
     const body = await res.json().catch(() => null);
     if (!res.ok) {
       toast.error(body?.error?.message ?? "Failed to request uploads");
+      // The badge was read at page load, so a refusal means the page is out
+      // of date: refresh it so the buttons and the line match the server.
+      router.refresh();
       return;
     }
     const queued = Number(body?.files_queued ?? 0);
-    toast.success(
-      queued === 1
-        ? "Upload requested for 1 file"
-        : `Upload requested for ${queued} files`
-    );
+    if (queued === 0) {
+      // Another request queued them first, so there was nothing left to ask for.
+      toast.info("The files were already requested for upload");
+    } else {
+      toast.success(
+        queued === 1
+          ? "Upload requested for 1 file"
+          : `Upload requested for ${queued} files`
+      );
+    }
     onWorkStarted();
     router.refresh();
   });

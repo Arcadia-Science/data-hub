@@ -128,6 +128,9 @@ function uploadRefusedMessage(badge: InstrumentBadgeState): string {
   if (badge === "retired") {
     return "This instrument is retired, so uploads can't be requested.";
   }
+  if (badge === "pending") {
+    return "This instrument is waiting for an admin to confirm it, so uploads can't be requested.";
+  }
   return "The watcher for this instrument isn't online or restarting. Bring it online before requesting uploads — otherwise nothing will transfer to S3.";
 }
 
@@ -163,9 +166,9 @@ async function prepareUploadTarget(
   // watcher, or one that is restarting, because upload requests survive a
   // restart (since watcher 1.4.1 for a Windows restart, and 1.4.2 for an
   // update). A request made while it restarts queues until the watcher is
-  // back, and the upload-queue sweep cancels it if no heartbeat follows within
-  // `UPLOAD_REQUEST_REVERT_GRACE_MS`. Offline, connecting, pending and retired
-  // instruments are refused.
+  // back, and the upload-queue sweep cancels it once the watcher's last
+  // heartbeat is more than 15 minutes old (`UPLOAD_REQUEST_REVERT_GRACE_MS`).
+  // Offline, connecting, pending and retired instruments are refused.
   const badge = await getInstrumentBadge(run.instrumentId);
   if (!getRunUploadAvailability(badge).enabled) {
     return {
