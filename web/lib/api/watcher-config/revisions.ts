@@ -817,6 +817,8 @@ export async function latestRawFilePaths(
     .where(
       and(
         eq(instrumentRuns.instrumentId, instrumentId),
+        // Deleting a run marks the run, not its files.
+        isNull(instrumentRuns.deletedAt),
         eq(files.category, "raw"),
         isNull(files.deletedAt)
       )

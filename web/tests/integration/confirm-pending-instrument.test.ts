@@ -141,7 +141,7 @@ describe("Confirming a pending instrument", () => {
       });
     });
 
-    it("uses the newest raw file for the example, skipping deleted and non-raw files", async () => {
+    it("uses the newest raw file for the example, skipping deleted runs, deleted files and non-raw files", async () => {
       await seedPending("plate-reader-d");
       await seedWatcher("plate-reader-d", null);
       const db = getTestDb();
@@ -153,6 +153,23 @@ describe("Confirming a pending instrument", () => {
           source: "watcher",
         })
         .returning({ id: instrumentRuns.id });
+      // Deleting a run marks the run, not its files.
+      const [deletedRun] = await db
+        .insert(instrumentRuns)
+        .values({
+          instrumentId: "plate-reader-d",
+          runId: "run-0002",
+          source: "watcher",
+          deletedAt: new Date("2026-01-06T00:00:00Z"),
+        })
+        .returning({ id: instrumentRuns.id });
+      await db.insert(files).values({
+        instrumentRunId: deletedRun.id,
+        filename: "fromdeleted_quant.csv",
+        relativePath: "fromdeleted_quant.csv",
+        category: "raw",
+        createdAt: new Date("2026-01-05T00:00:00Z"),
+      });
       await db.insert(files).values([
         {
           instrumentRunId: run.id,
