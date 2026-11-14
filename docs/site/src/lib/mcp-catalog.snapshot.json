@@ -6967,7 +6967,7 @@
     {
       "name": "get_system_status",
       "title": "Get System Status",
-      "description": "Get a dashboard-level overview: per-instrument run counts, watcher health (online/offline/no_watcher), and pending upload counts.",
+      "description": "Get a dashboard-level overview: per-instrument run counts, whether new files can reach Data Hub (`connection`: online, restarting, connecting, or offline, with a reason when offline), and pending upload counts.",
       "group": "discovery",
       "scope": "instruments:read",
       "annotations": {
@@ -7024,13 +7024,53 @@
                   "minimum": -9007199254740991,
                   "maximum": 9007199254740991
                 },
+                "connection": {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "online",
+                        "restarting",
+                        "connecting",
+                        "offline"
+                      ]
+                    },
+                    "reason": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "folder_missing",
+                            "unresponsive",
+                            "stopped",
+                            "no_watcher",
+                            "deregistered"
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Why the instrument is offline. Null in every other state."
+                    }
+                  },
+                  "required": [
+                    "state",
+                    "reason"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Whether new files can reach Data Hub. `online`: the watcher checked in within 5 minutes. `restarting`: the watcher stopped for a Windows restart or an automatic update less than 15 minutes ago. `connecting`: the watcher registered and hasn't sent a heartbeat yet. `offline`: anything else. This does not take the instrument's status into account: a pending instrument can be `online`."
+                },
                 "watcherStatus": {
                   "type": "string",
                   "enum": [
                     "online",
                     "offline",
                     "no_watcher"
-                  ]
+                  ],
+                  "deprecated": true,
+                  "description": "Deprecated. Use `connection.state`, or `connection.reason`."
                 }
               },
               "required": [
@@ -7040,6 +7080,7 @@
                 "runCount",
                 "lastRunAt",
                 "filesPendingUpload",
+                "connection",
                 "watcherStatus"
               ],
               "additionalProperties": false

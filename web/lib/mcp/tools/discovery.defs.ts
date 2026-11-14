@@ -38,7 +38,7 @@ export const getSystemStatusTool = {
   name: "get_system_status",
   title: "Get System Status",
   description:
-    "Get a dashboard-level overview: per-instrument run counts, watcher health (online/offline/no_watcher), and pending upload counts.",
+    "Get a dashboard-level overview: per-instrument run counts, whether new files can reach Data Hub (`connection`: online, restarting, connecting, or offline, with a reason when offline), and pending upload counts.",
   group: "discovery",
   scope: "instruments:read",
   outputSchema: getSystemStatusOutputSchema,

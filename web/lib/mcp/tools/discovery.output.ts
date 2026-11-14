@@ -118,7 +118,10 @@ export const instrumentSummarySchema = z.object({
   runCount: z.number().int(),
   lastRunAt: isoDateTime.nullable(),
   filesPendingUpload: z.number().int(),
-  watcherStatus: z.enum(["online", "offline", "no_watcher"]),
+  connection: instrumentConnectionSchema,
+  watcherStatus: z
+    .enum(["online", "offline", "no_watcher"])
+    .meta(deprecated("Use `connection.state`, or `connection.reason`.")),
 });
 
 // Object root so 2025-era MCP clients don't SEP-2106-wrap a bare array as
