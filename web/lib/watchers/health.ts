@@ -4,7 +4,10 @@
 // `lib/api/watcher-health.ts`; this file has the rules, so they need no
 // database to test, and server pages and client components share them.
 
-import { STALE_THRESHOLD_MS } from "@/lib/api/watcher-status";
+import {
+  STALE_THRESHOLD_MS,
+  UPLOAD_REQUEST_REVERT_GRACE_MS,
+} from "@/lib/api/watcher-status";
 import { BLOCK_MINUTES } from "./block-edges";
 import { describeWithin, pluralize } from "./phrases";
 import { describeRange, formatDay, type WatcherRange } from "./range";
@@ -13,10 +16,10 @@ import type { RestartReason } from "./stop-reasons";
 /**
  * How long a watcher that stopped for an update or a Windows restart has to come
  * back before it reads as unresponsive. The same wait as the badge's: a restart
- * is Restarting for this long, then Unresponsive
- * (`UPLOAD_REQUEST_REVERT_GRACE_MS`).
+ * is Restarting for this long, then Unresponsive. It is the badge's own
+ * constant, `UPLOAD_REQUEST_REVERT_GRACE_MS`, so the two can't drift apart.
  */
-export const RESTART_GRACE_MS = 15 * 60 * 1000;
+export const RESTART_GRACE_MS = UPLOAD_REQUEST_REVERT_GRACE_MS;
 
 // ---------------------------------------------------------------------------
 // Blocks
