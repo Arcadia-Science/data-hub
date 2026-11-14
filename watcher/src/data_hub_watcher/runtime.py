@@ -49,6 +49,7 @@ from data_hub_watcher.constants import (
     WATCH_FOLDER_GONE_DRAIN_TIMEOUT_SECONDS,
     WATCH_FOLDER_GONE_JOIN_SECONDS,
 )
+from data_hub_watcher.deleted_runs import DeletedRuns
 from data_hub_watcher.events import EventReporter, EventType, WatcherEvent
 from data_hub_watcher.folder_probe import FolderLook, FolderProbe
 from data_hub_watcher.heartbeat import DeregisteredReplies, HeartbeatLoop, WatcherCounters
@@ -327,6 +328,7 @@ def build_runtime(
     request_folder_check: Callable[[], None] | None = None,
     folder_probe: FolderProbe | None = None,
     should_stop: Callable[[], bool] | None = None,
+    deleted_runs: DeletedRuns | None = None,
 ) -> WatcherRuntime:
     """Construct the full runtime graph from a validated config.
 
@@ -360,6 +362,10 @@ def build_runtime(
     *request_folder_check* and counts nothing. *should_stop* tells the file monitor's
     initial scan to end early (see :class:`FileMonitor`), and ends the uploader's look
     at the folder.
+    *deleted_runs* is the set of runs the server refused because they were deleted on
+    Data Hub. The run detector and the uploader share it, and a supervisor shares it
+    across rebuilds, so such a run is left alone until the process restarts, or until
+    the server accepts an upload that someone requested for it.
     """
     if not cfg.watcher_id:
         raise ValueError("cfg.watcher_id must be set before building the runtime")
@@ -405,6 +411,9 @@ def build_runtime(
 
     is_auto = inst.upload_mode == "auto"
 
+    if deleted_runs is None:
+        deleted_runs = DeletedRuns()
+
     # Shared with the ``UploadQueueWorker`` so a shutdown can interrupt an
     # in-flight upload's backoff and abort between queued files.
     upload_stop_event = threading.Event()
@@ -441,6 +450,7 @@ def build_runtime(
         upload_parallelism=inst.upload_parallelism,
         stop_event=upload_stop_event,
         watch_folder_unavailable=_watch_folder_unavailable if folder_probe is not None else None,
+        deleted_runs=deleted_runs,
     )
 
     # Both modes poll the server queue so "Request upload" works everywhere.
@@ -463,6 +473,7 @@ def build_runtime(
         counters=counters,
         upload_callback=uploader.upload_files if is_auto else None,
         watch_directory=inst.watch_directory,
+        deleted_runs=deleted_runs,
     )
 
     monitor = FileMonitor(
@@ -1223,6 +1234,11 @@ class WatcherSupervisor:
         # What the updater remembers of an upgrade it handed to the Windows worker.
         # Every updater this supervisor builds gets it, so a rebuilt runtime keeps it.
         self._handoff = upgrade_handoff if upgrade_handoff is not None else UpgradeHandoff()
+        # The runs the server refused because they were deleted on Data Hub. Every runtime
+        # this supervisor builds shares it, so a rebuild for a config change doesn't report
+        # such a run again. Only a restart of the process does, or an upload that someone
+        # requested for the run and the server accepted.
+        self._deleted_runs = DeletedRuns()
         self.rt: WatcherRuntime | None = None
         self._waiting: _WaitingMode | None = None
         # Opened in `start`. Separate from each runtime's own `StateDB` handle
@@ -2045,6 +2061,7 @@ class WatcherSupervisor:
             request_folder_check=self._request_folder_check,
             folder_probe=self._probe,
             should_stop=self._stopping,
+            deleted_runs=self._deleted_runs,
         )
         check_marker = not self._upgrade_marker_checked
         self._upgrade_marker_checked = True

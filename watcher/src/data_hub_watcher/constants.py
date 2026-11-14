@@ -281,6 +281,13 @@ MAX_PENDING_UPLOAD_ATTEMPTS = 3
 # delay doubles from the base, then stays at the cap.
 RUN_REPORT_RETRY_BASE_DELAY_SECONDS = 5
 RUN_REPORT_RETRY_MAX_DELAY_SECONDS = 300
+# The `error.details.reason` of the 409 the server answers when a request is
+# about a run that was deleted on Data Hub: a run report, a run update or an
+# upload-URL request. A watcher that sees it stops sending requests about that
+# run until it restarts, or until the server accepts an upload that someone
+# requested for the run. The server's reason (`web/lib/api/errors.ts`) must say
+# the same.
+RUN_DELETED_REASON = "run_deleted"
 # Upload records older than this are pruned from the local state DB
 # to prevent unbounded growth on long-running watcher instances.
 PRUNE_DAYS = 90

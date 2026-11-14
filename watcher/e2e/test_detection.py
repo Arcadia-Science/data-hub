@@ -13,6 +13,7 @@ watcher got, because the same assertions run on FSEvents (macOS) and on inotify 
 
 from __future__ import annotations
 import hashlib
+import json
 from pathlib import Path
 from typing import Literal
 
@@ -703,9 +704,13 @@ def test_a_deleted_run_refuses_updates_and_catches_up_after_it_is_restored(
     assert patches()[0].upstream_status == 409
     assert relative_paths(server, instrument_id, "RUN001") == ["RUN001/a.csv"]
 
-    # Restored, the run takes the next file's update, which also carries the refused file.
+    # Restored, the run takes files again. The watcher doesn't ask until it restarts, because it
+    # remembers that the server refused the run as deleted. The restart sends the file the
+    # refusal left behind, and the next one, each in its own update.
     admin.restore_run(instrument_id, "RUN001").raise_for_status()
     write_file(watch_dir / "RUN001" / "c.csv")
+    assert pc.stop() == 0
+    pc.start()
     server.wait_for_file(instrument_id, "RUN001", "RUN001/c.csv", status="detected")
     assert relative_paths(server, instrument_id, "RUN001") == [
         "RUN001/a.csv",
@@ -714,7 +719,7 @@ def test_a_deleted_run_refuses_updates_and_catches_up_after_it_is_restored(
     ]
     # The server stores the file before it answers, so wait until the proxy has the answer.
     answered = wait_for_answer(proxy, patches, what="the server's answer to the update of c.csv")
-    assert [r.upstream_status for r in answered] == [409, 200]
+    assert [r.upstream_status for r in answered] == [409, 200, 200]
     assert len(error_events(server, pc.watcher_id, "run_report_failed")) == 1
 
 
@@ -768,6 +773,80 @@ def test_reporting_a_deleted_run_again_is_refused_and_attaches_no_files(
     assert failed.details["status_code"] == 409
     assert failed.message.startswith("Failed to report run RUN001: ")
     assert "deleted on Data Hub" in failed.message
+
+
+@pytest.mark.covers("run.deleted->refusal_reported_once_per_start")
+def test_a_forgotten_deleted_run_is_refused_and_reported_once_in_each_start(
+    watcher: WatcherFactory,
+    server: ServerView,
+    admin: Admin,
+    proxy: FaultProxy,
+    instrument_id: str,
+    watch_dir: Path,
+) -> None:
+    pc = watcher(upload_mode="manual")
+    pc.start()
+    write_file(watch_dir / "RUN001" / "first.csv")
+    server.wait_for_file(instrument_id, "RUN001", "RUN001/first.csv", status="detected")
+    assert pc.stop() == 0
+
+    # An admin deletes the run while the watcher is stopped, and the instrument leaves several
+    # more files in its folder. The PC then forgets the folder, so every start reports the run
+    # from scratch: one report, then an update for each of the other files, if the watcher
+    # went on asking.
+    admin.delete_run(instrument_id, "RUN001").raise_for_status()
+    names = ["a.csv", "b.csv", "c.csv", "d.csv", "e.csv"]
+    for name in names:
+        write_file(watch_dir / "RUN001" / name)
+    forget(pc, "RUN001")
+
+    def requests_about_run001() -> list[RecordedRequest]:
+        found: list[RecordedRequest] = []
+        for request in run_reports(proxy, instrument_id):
+            if request.method == "PATCH" and request.path.endswith("/runs/RUN001"):
+                found.append(request)
+            elif request.method == "POST" and request.body is not None:
+                if json.loads(request.body)["run_id"] == "RUN001":
+                    found.append(request)
+        return found
+
+    for start in (1, 2):
+        proxy.clear_log()
+        pc.start()
+        # A file of another run, written after the start. It is reported after every file that
+        # was already in the folder, so once its event is on the server, the watcher is done
+        # with the files of RUN001 and with the events about them.
+        sentinel = f"SENTINEL{start}"
+        write_file(watch_dir / sentinel / "x.csv")
+        server.wait_for_event(pc.watcher_id, event_type="run_reported", message_contains=sentinel)
+
+        # One report, which the server refused, and no update for the other files.
+        sent = wait_for_answer(proxy, requests_about_run001, what="the server's answer for RUN001")
+        assert [(r.method, r.upstream_status) for r in sent] == [("POST", 409)]
+        failed = error_events(server, pc.watcher_id, "run_report_failed")
+        assert len(failed) == start
+        assert failed[-1].details["run_id"] == "RUN001"
+        assert failed[-1].details["operation"] == "create"
+        assert failed[-1].details["status_code"] == 409
+        assert failed[-1].details["reason"] == "run_deleted"
+        assert failed[-1].message.startswith("Failed to report run RUN001: ")
+        # The refused files are not on the server.
+        for name in names:
+            assert server.file(instrument_id, "RUN001", f"RUN001/{name}") is None
+        assert pc.stop() == 0
+
+    # The admin restores the run, and the next start sends every file.
+    admin.restore_run(instrument_id, "RUN001").raise_for_status()
+    pc.start()
+    for name in names:
+        server.wait_for_file(instrument_id, "RUN001", f"RUN001/{name}", status="detected")
+    server.wait_for_events(
+        pc.watcher_id, event_type="run_reported", message_contains="RUN001", count=2
+    )
+    assert relative_paths(server, instrument_id, "RUN001") == sorted(
+        ["RUN001/first.csv", *(f"RUN001/{name}" for name in names)]
+    )
+    assert len(error_events(server, pc.watcher_id, "run_report_failed")) == 2
 
 
 # The test server is `next start`, which decodes a route parameter once. On Vercel, Next.js decodes

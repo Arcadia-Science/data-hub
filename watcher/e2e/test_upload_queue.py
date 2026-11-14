@@ -28,7 +28,7 @@ from e2e_support.factory import WatcherFactory
 from e2e_support.files import LARGE, SMALL, make_readable, write_file, write_run
 from e2e_support.proxy_helpers import silence_heartbeats
 from e2e_support.server import FileRow, ServerView
-from e2e_support.waiting import KnownBugStillPresent, known_bug, stays_true, wait_until
+from e2e_support.waiting import stays_true, wait_until
 
 pytestmark = pytest.mark.e2e
 
@@ -611,10 +611,9 @@ def test_queued_file_that_is_missing_is_reported_once_and_cancelled_after_three_
     assert s3_puts(proxy) == []
 
     # A cancelled file can be requested again and starts over with three attempts: it is
-    # reported missing again, and gives up again only after three more polls. The watcher
-    # forgets a cancelled file when a poll no longer lists it, so the request waits for such a
-    # poll (one the server answered after the cancellation). A request that comes sooner is
-    # another scenario, which is a known bug.
+    # reported missing again, and gives up again only after three more polls. This request
+    # waits for a poll that the server answered after the cancellation. A request that comes
+    # sooner is another scenario, tested below.
     wait_for_good_poll_after(proxy, cancel_at)
     admin.request_upload(instrument_id, RUN, [a.row.id]).raise_for_status()
     wait_for_cancellation(server, pc, count=2)
@@ -622,8 +621,8 @@ def test_queued_file_that_is_missing_is_reported_once_and_cancelled_after_three_
     again = server.file(instrument_id, RUN, f"{RUN}/a.csv")
     assert again is not None and again.status == "detected"
 
-    # With the file back on disk the third request uploads it (once the second cancellation has
-    # been forgotten, as above).
+    # With the file back on disk the third request, made after a poll that the server answered
+    # after the second cancellation, uploads it.
     write_file(path, a.content)
     wait_for_good_poll_after(proxy, last_file_patch(proxy, a.row.id))
     admin.request_upload(instrument_id, RUN, [a.row.id]).raise_for_status()
@@ -631,12 +630,6 @@ def test_queued_file_that_is_missing_is_reported_once_and_cancelled_after_three_
     assert len(server.events(pc.watcher_id, event_type="error", kind="queued_file_missing")) == 2
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=KnownBugStillPresent,
-    reason="ENG-2123: a file requested again before the poll that "
-    "forgets its cancellation is cancelled again at once, without an attempt",
-)
 @pytest.mark.covers("queue.cancelled->requested_before_next_poll")
 def test_a_file_requested_again_right_after_its_cancellation_gets_its_attempts_back(
     watcher: WatcherFactory,
@@ -691,12 +684,11 @@ def test_a_file_requested_again_right_after_its_cancellation_gets_its_attempts_b
         what="the watcher to attempt the file or cancel it again",
     )
 
-    # Intended: a request is a new request, with three attempts of its own, so the watcher tries
-    # the file, which uploads now that nothing refuses it. Today the memory of the three failed
-    # attempts is still there, and the watcher cancels the request again without an attempt.
-    with known_bug():
-        assert attempts(), "the file was cancelled again without an attempt being made"
-        server.wait_for_uploaded(instrument_id, RUN, f"{RUN}/a.csv", content=a.content, timeout=15)
+    # A request is a new request, with three attempts of its own: the watcher forgot the
+    # three failed attempts when it cancelled the file, so it tries the file, which uploads
+    # now that nothing refuses it.
+    assert attempts(), "the file was cancelled again without an attempt being made"
+    server.wait_for_uploaded(instrument_id, RUN, f"{RUN}/a.csv", content=a.content, timeout=15)
 
 
 @pytest.mark.covers(

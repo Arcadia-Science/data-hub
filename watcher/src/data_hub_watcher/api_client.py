@@ -3,12 +3,13 @@ import logging
 import os
 import time
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, TypeGuard
 from urllib.parse import quote, urlsplit
 
 import requests
 
 from data_hub_watcher.constants import (
+    RUN_DELETED_REASON,
     WATCHER_DEREGISTERED_ERROR_CODE,
     WATCHER_VERSION,
     WATCHER_VERSION_HEADER,
@@ -80,6 +81,18 @@ class ApiError(Exception):
             and self.detail is not None
             and self.detail.code == WATCHER_DEREGISTERED_ERROR_CODE
         )
+
+
+def is_run_deleted(exc: BaseException) -> TypeGuard[ApiError]:
+    """True when *exc* is the server's 409 for a request about a run deleted on Data Hub.
+
+    The server marks that 409 with ``error.details.reason``. A 409 without the reason, from
+    an older server or for another conflict, is not it.
+    """
+    if not isinstance(exc, ApiError) or exc.status_code != 409 or exc.detail is None:
+        return False
+    details = exc.detail.details
+    return details is not None and details.get("reason") == RUN_DELETED_REASON
 
 
 DEFAULT_TIMEOUT: tuple[float, float] = (5, 30)  # (connect, read) seconds

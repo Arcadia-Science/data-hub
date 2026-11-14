@@ -100,15 +100,15 @@ Watcher 1.2.2 and later retry a run report that failed because the watcher could
 
 The watcher records one `run_report_failed` event when a run’s report first fails. It doesn’t record another for the same run while it keeps retrying, even if more files in the run finish in the meantime.
 
-A failure that isn’t a connection problem or a server error, such as `401 Unauthorized`, is not retried, because it would fail the same way. Each one is recorded. Fix the cause, then restart the watcher.
+A failure that isn’t a connection problem or a server error, such as `401 Unauthorized`, is not retried, because it would fail the same way. Each one is recorded, except the refusals of a run that was deleted on Data Hub, which watcher 1.4.3 and later record once per run (see [A run was deleted on Data Hub](#a-run-was-deleted-on-data-hub)). Fix the cause, then restart the watcher.
 
 Older watchers try again only when another file in the run finishes or the watcher restarts. Restart the watcher to report the run.
 
 ## A run was deleted on Data Hub [#a-run-was-deleted-on-data-hub]
 
-A run report that fails with `409 Conflict` and a message that starts “This run was deleted on Data Hub” means someone deleted the run. Data Hub refuses a watcher’s report of a deleted run, and the files in that report aren’t added to it.
+A run report or an upload request that fails with `409 Conflict` and a message that starts “This run was deleted on Data Hub” means someone deleted the run. Data Hub refuses a watcher’s report of a deleted run, and its requests to upload the run’s files, and the files in a refused report aren’t added to the run.
 
-Watcher 1.4.3 and later record one `run_report_failed` event for the run and stop reporting it until the watcher restarts. A restart tries once more, and records one more event if the run is still deleted. After you restore the run, restart the watcher to send its files.
+Watcher 1.4.3 and later record one event for the run, a `run_report_failed` event or an `upload_failed` event, whichever the watcher meets first, and stop reporting the run and uploading its files until the watcher restarts. A restart tries once more, and records one more event if the run is still deleted. After you restore the run, restart the watcher to send its files. A file that someone requests with **Upload** on the run page doesn’t wait for the restart: the watcher asks Data Hub for each requested file, and once Data Hub accepts one, the watcher reports and uploads the run’s new files again.
 
 Earlier watchers record one event for each file, and do it again each time they start. After you restore the run, they send its files when another file of the run finishes or the watcher restarts.
 

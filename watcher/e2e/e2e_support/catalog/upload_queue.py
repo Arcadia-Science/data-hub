@@ -9,7 +9,7 @@ and ``app/api/cron/upload-queue-sweep``.
 
 from __future__ import annotations
 
-from e2e_support.catalog.model import CLI, Transition, covered, excluded, xfail_bug
+from e2e_support.catalog.model import CLI, Transition, covered, excluded
 
 MACHINE = "upload_queue"
 
@@ -113,17 +113,15 @@ TRANSITIONS: tuple[Transition, ...] = (
     covered(
         MACHINE,
         "queue.cancelled->requested_again",
-        "A cancelled file can be requested again (once a poll that no longer lists it has "
-        "gone by), and gets a fresh set of three attempts.",
+        "A cancelled file can be requested again after a poll that no longer lists it, and "
+        "gets a fresh set of three attempts.",
     ),
-    xfail_bug(
+    covered(
         MACHINE,
         "queue.cancelled->requested_before_next_poll",
         "A file that is requested again straight after its cancellation, before any poll "
         "has gone by without it, also gets a fresh set of three attempts: the watcher tries to "
-        "upload it. Today it still remembers the three failures, and cancels the new request "
-        "at once with no attempt and no `queued_file_missing` event.",
-        "ENG-2123",
+        "upload it. It forgets the three failed attempts once the cancellation succeeds.",
     ),
     covered(
         MACHINE,

@@ -43,6 +43,7 @@ from data_hub_watcher.constants import (
     SYSTEM_SHUTDOWN_STOP_BUDGET_SECONDS,
     UPLOAD_POLL_INTERVAL_SECONDS,
 )
+from data_hub_watcher.deleted_runs import DeletedRuns
 from data_hub_watcher.events import EventType
 from data_hub_watcher.heartbeat import DeregisteredReplies, HeartbeatLoop, WatcherCounters
 from data_hub_watcher.models import (
@@ -104,6 +105,34 @@ def _make_config(
 @pytest.fixture
 def db_path(tmp_path: Path) -> Path:
     return tmp_path / "state.sqlite"
+
+
+class TestBuildRuntimeDeletedRuns:
+    """The detector and the uploader share the set of runs Data Hub refused as deleted."""
+
+    @pytest.mark.parametrize("upload_mode", ["auto", "manual"])
+    def test_they_share_one_set(
+        self, tmp_path: Path, db_path: Path, upload_mode: Literal["auto", "manual"]
+    ) -> None:
+        cfg = _make_config(tmp_path, upload_mode=upload_mode)
+        rt = build_runtime(client=MagicMock(), cfg=cfg, db_path=db_path)
+
+        try:
+            rt.uploader._deleted_runs.add("RUN001")
+            assert "RUN001" in rt.detector._deleted_runs
+        finally:
+            rt.state_db.close()
+
+    def test_a_set_passed_in_is_the_one_they_use(self, tmp_path: Path, db_path: Path) -> None:
+        cfg = _make_config(tmp_path, upload_mode="auto")
+        deleted = DeletedRuns()
+        rt = build_runtime(client=MagicMock(), cfg=cfg, db_path=db_path, deleted_runs=deleted)
+
+        try:
+            assert rt.detector._deleted_runs is deleted
+            assert rt.uploader._deleted_runs is deleted
+        finally:
+            rt.state_db.close()
 
 
 class TestBuildRuntimeAutoMode:

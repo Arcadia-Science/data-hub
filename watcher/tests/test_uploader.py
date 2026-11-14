@@ -6,6 +6,7 @@ import errno
 import hashlib
 import itertools
 import logging
+import os
 import signal
 import subprocess
 import sys
@@ -31,6 +32,7 @@ from data_hub_watcher.constants import (
 from data_hub_watcher.events import EventReporter, EventType, WatcherEvent
 from data_hub_watcher.heartbeat import WatcherCounters
 from data_hub_watcher.models import (
+    ApiErrorDetail,
     MultipartPartUrl,
     MultipartPartUrlsResponse,
     PresignedUploadResponse,
@@ -797,6 +799,43 @@ class TestPollUploadQueueAttemptCap:
         mock_client.get_upload_queue.return_value = self._ghost_queue()
         uploader.poll_upload_queue()
         assert reporter_mock.queue_event.call_count == 2
+
+    def test_a_file_requested_again_right_after_its_cancellation_gets_three_fresh_attempts(
+        self,
+        uploader: Uploader,
+        mock_client: MagicMock,
+    ) -> None:
+        """A file requested again after its cancel gets three fresh attempts.
+
+        The queue keeps listing the file, which models a re-request before any
+        poll goes by without it. The successful cancel removed the file's
+        attempt record, so the first poll after the re-request is a new first
+        attempt, not an immediate cancel from the old record.
+        """
+        mock_client.get_upload_queue.return_value = self._ghost_queue()
+        reporter_mock = cast(MagicMock, uploader._reporter)
+
+        # The first give-up: three misses, then the cancel succeeds.
+        for _ in range(MAX_QUEUE_FILE_ATTEMPTS):
+            uploader.poll_upload_queue()
+        mock_client.cancel_upload_request.assert_called_once_with(1)
+        assert 1 not in uploader._queue_attempts
+        assert reporter_mock.queue_event.call_count == 1
+
+        # Requested again while the queue still lists it. This poll is a new
+        # first attempt: it reports the missing file again and is not cancelled.
+        uploader.poll_upload_queue()
+        assert uploader._queue_attempts[1].count == 1
+        assert mock_client.cancel_upload_request.call_count == 1
+        assert reporter_mock.queue_event.call_count == 2
+        assert reporter_mock.report_error.call_count == 1
+
+        # Two more misses complete the three fresh attempts, and the second cancel follows.
+        for _ in range(MAX_QUEUE_FILE_ATTEMPTS - 1):
+            uploader.poll_upload_queue()
+        assert mock_client.cancel_upload_request.call_count == 2
+        assert reporter_mock.report_error.call_count == 2
+        assert 1 not in uploader._queue_attempts
 
     def test_cancel_failure_is_retried_next_poll(
         self,
@@ -2871,6 +2910,345 @@ class TestMultipartUpload:
         assert mock_client.complete_multipart_upload.call_count == 2
         assert mock_client.request_upload_url.call_count == 2
 
+    # A file that changed while its parts were sent. The server rejects the checksum of the
+    # first attempt, and the restart that follows hashes the file as it is then.
+
+    @staticmethod
+    def _bad_digest() -> ApiError:
+        return ApiError("checksum", status_code=400, detail=MagicMock(code="BadDigest"))
+
+    @staticmethod
+    def _changing_file(
+        mock_client: MagicMock,
+        state_db: StateDB,
+        tmp_path: Path,
+        *,
+        stop_event: threading.Event | None = None,
+    ) -> tuple[Uploader, Path, bytes, os.stat_result]:
+        """An uploader, a 16-byte file, and the 20 bytes the file holds once it changes.
+
+        The first upload has four 4-byte parts and the second has five. Pass *stop_event*
+        for an uploader that `request_stop` reaches.
+        """
+        path = tmp_path / "big.bin"
+        path.write_bytes(bytes(range(16)))
+        before = path.stat()
+        up = _make_uploader(mock_client, state_db, tmp_path, parallelism=1, stop_event=stop_event)
+        first = _multipart_presigned(part_size=4, part_count=4)
+        second = _multipart_presigned(part_size=4, part_count=5)
+        second.upload_id = "def456"
+        mock_client.request_upload_url.side_effect = [first, second]
+        mock_client.get_part_urls.side_effect = _part_urls
+        return up, path, bytes(range(20)), before
+
+    @staticmethod
+    def _change(path: Path, content: bytes, before: os.stat_result) -> None:
+        """Rewrite *path* with *content* and a later modification time."""
+        path.write_bytes(content)
+        os.utime(path, (before.st_atime, before.st_mtime + 30))
+
+    def test_bad_digest_hashes_the_file_again_and_completes_with_what_it_is_now(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path
+    ) -> None:
+        up, path, changed, before = self._changing_file(mock_client, state_db, tmp_path)
+        original_digests = file_digests(path)
+        sent: list[bytes] = []
+
+        def put(url: str, **kwargs: _FileSlice) -> MagicMock:
+            sent.append(kwargs["data"].read())
+            return _etag_response(_part_number(url))
+
+        completes: list[tuple[str, str]] = []
+
+        def complete(file_id: int, upload_id: str, parts: object, crc64nvme: str) -> None:
+            completes.append((upload_id, crc64nvme))
+            if upload_id == "abc123":
+                # The file grew, with a new modification time, after it was hashed.
+                self._change(path, changed, before)
+                raise self._bad_digest()
+
+        mock_client.complete_multipart_upload.side_effect = complete
+
+        with patch.object(up._s3_session, "put", side_effect=put):
+            assert up._upload_single(path, "RUN-001") is True
+
+        changed_digests = file_digests(path)
+        assert changed_digests != original_digests
+        # The first upload was made of the original bytes and the second of the changed ones.
+        assert b"".join(sent[:4]) == bytes(range(16))
+        assert b"".join(sent[4:]) == changed
+        # The completion of the second upload carries the checksum of the changed bytes.
+        assert completes == [("abc123", original_digests[1]), ("def456", changed_digests[1])]
+        # The restart asked for an upload of the size the file has now.
+        sizes = [c.kwargs["size_bytes"] for c in mock_client.request_upload_url.call_args_list]
+        assert sizes == [16, 20]
+        mock_client.abort_multipart_upload.assert_called_once_with(42, "abc123")
+        # What is recorded and reported is the file that was uploaded, not the one first hashed.
+        s3_key = "test-instrument/RUN-001/test_data.csv"
+        assert state_db.is_uploaded("big.bin", changed_digests[0], s3_key)
+        assert not state_db.is_uploaded("big.bin", original_digests[0], s3_key)
+        assert state_db.has_stat_match("big.bin", 20, path.stat().st_mtime)
+        assert not state_db.has_stat_match("big.bin", 16, before.st_mtime)
+        [event] = _events(up)
+        assert event.event_type == EventType.FILE_UPLOADED
+        assert event.details["sha256"] == changed_digests[0]
+        assert event.details["size_bytes"] == 20
+        assert event.details["part_count"] == 5
+        assert up._counters.files_uploaded == 1
+        assert up._counters.errors == 0
+
+    def test_a_stop_during_the_second_hash_defers_the_file(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path
+    ) -> None:
+        up, path, changed, before = self._changing_file(mock_client, state_db, tmp_path)
+        hashes = itertools.count()
+
+        def digests(file_path: Path, cancel: threading.Event) -> tuple[str, str]:
+            if next(hashes) == 1:
+                up.abort()
+            return file_digests(file_path, cancel)
+
+        def complete(*args: object) -> None:
+            self._change(path, changed, before)
+            raise self._bad_digest()
+
+        mock_client.complete_multipart_upload.side_effect = complete
+
+        with (
+            patch("data_hub_watcher.uploader.file_digests", side_effect=digests) as hashing,
+            patch.object(up._s3_session, "put", return_value=_etag_response(1)),
+        ):
+            assert up._upload_single(path, "RUN-001") is False
+
+        assert hashing.call_count == 2
+        # Deferred, not failed: nothing is requested, recorded or reported, and the
+        # first upload was aborted before the file was hashed again.
+        mock_client.request_upload_url.assert_called_once()
+        mock_client.abort_multipart_upload.assert_called_once_with(42, "abc123")
+        mock_client.complete_multipart_upload.assert_called_once()
+        assert up._counters.errors == 0
+        assert up._counters.files_uploaded == 0
+        cast(MagicMock, up._reporter).queue_event.assert_not_called()
+        assert not state_db.has_stat_match("big.bin", 20, path.stat().st_mtime)
+
+    def test_a_normal_stop_during_the_second_hash_opens_no_new_upload(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path
+    ) -> None:
+        up, path, changed, before = self._changing_file(
+            mock_client, state_db, tmp_path, stop_event=threading.Event()
+        )
+        hashes = itertools.count()
+
+        def digests(file_path: Path, cancel: threading.Event) -> tuple[str, str]:
+            result = file_digests(file_path, cancel)
+            if next(hashes) == 1:
+                # `request_stop` doesn't cut a hash off, so this hash runs to its end.
+                up.request_stop()
+            return result
+
+        def complete(*args: object) -> None:
+            self._change(path, changed, before)
+            raise self._bad_digest()
+
+        mock_client.complete_multipart_upload.side_effect = complete
+
+        with (
+            patch("data_hub_watcher.uploader.file_digests", side_effect=digests) as hashing,
+            patch.object(up._s3_session, "put", return_value=_etag_response(1)),
+        ):
+            assert up._upload_single(path, "RUN-001") is False
+
+        assert hashing.call_count == 2
+        # The second upload is never requested, so there is none for nothing to abort.
+        mock_client.request_upload_url.assert_called_once()
+        mock_client.abort_multipart_upload.assert_called_once_with(42, "abc123")
+        mock_client.complete_multipart_upload.assert_called_once()
+        assert up._counters.errors == 0
+        assert up._counters.files_uploaded == 0
+        cast(MagicMock, up._reporter).queue_event.assert_not_called()
+        assert not state_db.has_stat_match("big.bin", 20, path.stat().st_mtime)
+
+    def test_a_stop_before_the_restart_reads_the_file_again_hashes_nothing(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path
+    ) -> None:
+        up, path, changed, before = self._changing_file(
+            mock_client, state_db, tmp_path, stop_event=threading.Event()
+        )
+
+        def complete(*args: object) -> None:
+            self._change(path, changed, before)
+            raise self._bad_digest()
+
+        def abort(*args: object) -> None:
+            # The stop comes while the first upload is being aborted.
+            up.request_stop()
+
+        mock_client.complete_multipart_upload.side_effect = complete
+        mock_client.abort_multipart_upload.side_effect = abort
+
+        with (
+            patch("data_hub_watcher.uploader.file_digests", wraps=file_digests) as hashing,
+            patch.object(up._s3_session, "put", return_value=_etag_response(1)),
+        ):
+            assert up._upload_single(path, "RUN-001") is False
+
+        # Only the first hash was made, and no second upload was requested.
+        assert hashing.call_count == 1
+        mock_client.request_upload_url.assert_called_once()
+        assert up._counters.errors == 0
+        cast(MagicMock, up._reporter).queue_event.assert_not_called()
+
+    def test_a_hash_that_fails_during_the_restart_is_reported_and_starts_no_upload(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path
+    ) -> None:
+        up, path, _changed, _before = self._changing_file(mock_client, state_db, tmp_path)
+        hashes = itertools.count()
+
+        def digests(file_path: Path, cancel: threading.Event) -> tuple[str, str]:
+            if next(hashes) == 1:
+                raise OSError(errno.EIO, "Input/output error", str(file_path))
+            return file_digests(file_path, cancel)
+
+        mock_client.complete_multipart_upload.side_effect = self._bad_digest()
+
+        with (
+            patch("data_hub_watcher.uploader.file_digests", side_effect=digests),
+            patch.object(up._s3_session, "put", return_value=_etag_response(1)),
+        ):
+            assert up._upload_single(path, "RUN-001") is False
+
+        [event] = _events(up)
+        assert event.event_type == EventType.UPLOAD_FAILED
+        assert event.message == "Hashing failed: big.bin"
+        assert up._counters.errors == 1
+        mock_client.request_upload_url.assert_called_once()
+        mock_client.abort_multipart_upload.assert_called_once_with(42, "abc123")
+        assert up._counters.files_uploaded == 0
+
+    def test_a_file_locked_during_the_restart_waits_instead_of_failing(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path
+    ) -> None:
+        up, path, _changed, _before = self._changing_file(mock_client, state_db, tmp_path)
+        hashes = itertools.count()
+
+        def digests(file_path: Path, cancel: threading.Event) -> tuple[str, str]:
+            if next(hashes) == 1:
+                # The instrument took the file back after the first upload.
+                raise PermissionError(13, "Permission denied", str(file_path))
+            return file_digests(file_path, cancel)
+
+        mock_client.complete_multipart_upload.side_effect = self._bad_digest()
+
+        with (
+            patch("data_hub_watcher.uploader.file_digests", side_effect=digests),
+            patch.object(up._s3_session, "put", return_value=_etag_response(1)),
+            pytest.raises(CantReadYet) as raised,
+        ):
+            up._upload_single(path, "RUN-001")
+
+        assert "Permission denied" in raised.value.error
+        # Not a failed attempt: nothing counted or reported, and no second upload was started.
+        assert up._counters.errors == 0
+        cast(MagicMock, up._reporter).queue_event.assert_not_called()
+        mock_client.request_upload_url.assert_called_once()
+        mock_client.abort_multipart_upload.assert_called_once_with(42, "abc123")
+
+    def test_a_second_bad_digest_fails_the_upload_after_two_tries(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path
+    ) -> None:
+        up, path, changed, before = self._changing_file(mock_client, state_db, tmp_path)
+        completes = itertools.count()
+
+        def complete(*args: object) -> None:
+            # The file changes during each upload, so the checksum of every attempt is wrong.
+            n = next(completes)
+            self._change(path, changed if n == 0 else bytes(range(24)), before)
+            raise self._bad_digest()
+
+        mock_client.complete_multipart_upload.side_effect = complete
+
+        with (
+            patch("data_hub_watcher.uploader.file_digests", wraps=file_digests) as hashing,
+            patch.object(up._s3_session, "put", return_value=_etag_response(1)),
+        ):
+            assert up._upload_single(path, "RUN-001") is False
+
+        # The restart hashed the file again, and that was the last try.
+        assert hashing.call_count == 2
+        assert mock_client.complete_multipart_upload.call_count == 2
+        assert mock_client.request_upload_url.call_count == 2
+        assert [c.args for c in mock_client.abort_multipart_upload.call_args_list] == [
+            (42, "abc123"),
+            (42, "def456"),
+        ]
+        [event] = _events(up)
+        assert event.event_type == EventType.UPLOAD_FAILED
+        assert up._counters.errors == 1
+        assert up._counters.files_uploaded == 0
+        assert not state_db.has_stat_match("big.bin", 24, before.st_mtime + 30)
+
+    def test_a_restart_refused_because_the_run_was_deleted_is_remembered_and_reported_once(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path
+    ) -> None:
+        up, path, changed, before = self._changing_file(mock_client, state_db, tmp_path)
+        refusal = ApiError(
+            "This run was deleted on Data Hub. Restore it to upload files.",
+            status_code=409,
+            detail=ApiErrorDetail(
+                code="CONFLICT", message="deleted", details={"reason": "run_deleted"}
+            ),
+        )
+        mock_client.request_upload_url.side_effect = [
+            _multipart_presigned(part_size=4, part_count=4),
+            refusal,
+        ]
+
+        def complete(*args: object) -> None:
+            self._change(path, changed, before)
+            raise self._bad_digest()
+
+        mock_client.complete_multipart_upload.side_effect = complete
+
+        with patch.object(up._s3_session, "put", return_value=_etag_response(1)):
+            assert up._upload_single(path, "RUN-001") is False
+
+        # The run is remembered, so its other files are skipped, and the one event says why.
+        assert "RUN-001" in up._deleted_runs
+        [event] = _events(up)
+        assert event.event_type == EventType.UPLOAD_FAILED
+        assert event.details["reason"] == "run_deleted"
+        assert up._counters.errors == 1
+        mock_client.abort_multipart_upload.assert_called_once_with(42, "abc123")
+
+    def test_a_file_that_shrank_below_the_multipart_size_fails_the_restart(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path
+    ) -> None:
+        up, path, _changed, before = self._changing_file(mock_client, state_db, tmp_path)
+        # The server answers the smaller size with a single-PUT URL.
+        mock_client.request_upload_url.side_effect = [
+            _multipart_presigned(part_size=4, part_count=4),
+            _single_presigned("big.bin"),
+        ]
+
+        def complete(*args: object) -> None:
+            self._change(path, b"tiny", before)
+            raise self._bad_digest()
+
+        mock_client.complete_multipart_upload.side_effect = complete
+
+        with patch.object(up._s3_session, "put", return_value=_etag_response(1)):
+            assert up._upload_single(path, "RUN-001") is False
+
+        # The restart asked for the size the file has now. The first upload was aborted and
+        # the single-request answer opened no upload, so none is left open on the server.
+        assert mock_client.request_upload_url.call_args_list[1].kwargs["size_bytes"] == 4
+        mock_client.abort_multipart_upload.assert_called_once_with(42, "abc123")
+        [event] = _events(up)
+        assert event.event_type == EventType.UPLOAD_FAILED
+        assert "did not return a multipart upload" in event.details["error"]
+        assert up._counters.errors == 1
+        assert up._counters.files_uploaded == 0
+
 
 def test_single_put_records_the_s3_error_body(
     uploader: Uploader,
@@ -3812,7 +4190,7 @@ class TestParallelQueue:
         barrier = threading.Barrier(3, timeout=3)
         uploaded: list[str] = []
 
-        def upload(path: Path, run_id: str) -> bool:
+        def upload(path: Path, run_id: str, *, requested: bool = False) -> bool:
             barrier.wait()
             uploaded.append(path.name)
             return True
@@ -3830,7 +4208,7 @@ class TestParallelQueue:
         up = _make_uploader(mock_client, state_db, tmp_path, parallelism=3)
         finished: list[str] = []
 
-        def upload(path: Path, run_id: str) -> bool:
+        def upload(path: Path, run_id: str, *, requested: bool = False) -> bool:
             time.sleep(0.1)
             finished.append(path.name)
             return True
@@ -3873,7 +4251,7 @@ class TestParallelQueue:
         up = _make_uploader(mock_client, state_db, tmp_path, parallelism=3)
         uploaded: list[str] = []
 
-        def upload(path: Path, run_id: str) -> bool:
+        def upload(path: Path, run_id: str, *, requested: bool = False) -> bool:
             if path.name == "q-1.csv":
                 raise ValueError("unexpected response")
             uploaded.append(path.name)
@@ -3894,7 +4272,7 @@ class TestParallelQueue:
         started: list[str] = []
         saw_stop: list[bool] = []
 
-        def upload(path: Path, run_id: str) -> bool:
+        def upload(path: Path, run_id: str, *, requested: bool = False) -> bool:
             started.append(path.name)
             if path.name == "q-1.csv":
                 _press_ctrl_c()
@@ -4299,7 +4677,7 @@ class TestWorkerThreads:
         threads: list[threading.Thread] = []
         all_started = threading.Barrier(3, timeout=5)
 
-        def upload(path: Path, run_id: str) -> bool:
+        def upload(path: Path, run_id: str, *, requested: bool = False) -> bool:
             threads.append(threading.current_thread())
             all_started.wait()
             return True
