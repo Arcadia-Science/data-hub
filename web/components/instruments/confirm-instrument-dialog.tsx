@@ -156,7 +156,9 @@ export function ConfirmInstrumentDialog({
         }}
       >
         <DialogHeader>
-          <DialogTitle>Confirm {displayName}?</DialogTitle>
+          <DialogTitle className="text-lg leading-normal">
+            Confirm {displayName}?
+          </DialogTitle>
           <DialogDescription>
             Once confirmed, the watcher starts uploading files from this folder.
             Check that this is what you expect.

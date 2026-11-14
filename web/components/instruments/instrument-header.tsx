@@ -124,7 +124,12 @@ export function InstrumentHeader({
   };
 }) {
   const timeZone = useViewerTimeZone();
-  const watchDirectory = instrument.watcher?.watchDirectory ?? null;
+  // A pending instrument's page lists the watch folder and patterns in its
+  // "Waiting for confirmation" card, so the header leaves them out.
+  const showWatcherDetails = instrument.status !== "pending";
+  const watchDirectory = showWatcherDetails
+    ? (instrument.watcher?.watchDirectory ?? null)
+    : null;
   const filePatterns = instrument.watcher?.filePatterns ?? [];
   const isManualUpload = instrument.watcher?.uploadMode === "manual";
   const retiredAt =
