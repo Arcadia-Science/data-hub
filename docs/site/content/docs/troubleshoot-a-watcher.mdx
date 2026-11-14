@@ -33,7 +33,7 @@ The instrument was registered but an admin has not confirmed it. Its badge reads
 
 Each instrument can have at most one active watcher. An earlier install (often on another PC, or before a reimage) is still registered. The CLI prints the existing watcher id; deregister it before re-running `init`:
 
-- **Web app**: open the instrument’s watcher page (the CLI’s message gives its address) and choose **Deregister** from the page’s menu. Only admins see that menu
+- **Web app**: open the instrument, select its status badge to open its watcher page, and choose **Deregister** from the ⋮ menu. You can also use the row menu in **Settings → Watchers**. Only admins see those menus. Watcher 1.4.3’s message names a menu that no longer exists; the next watcher release will print the address of the watcher’s page instead
 - **API**: `DELETE /api/v1/watchers/<existing_watcher_id>` with a bearer token that has `watchers:admin`
 
 Deregistration is a soft-delete: the history stays with the instrument as a past watcher, and on the **Deregistered** tab of **Settings → Watchers**.
@@ -51,7 +51,7 @@ The wizard rejects values that do not start with `dhub_`, and strips zero-width 
 
 ## The watcher stopped and says it was deregistered [#the-watcher-was-deregistered]
 
-Someone deleted the watcher’s registration on Data Hub. The instrument reads **Offline**, and its notice says its watcher was deregistered. This happens when an admin deregisters the watcher in the web app, or retires its instrument (see [Deregister a watcher](/docs/manage-watchers#deregister-a-watcher)). Watcher 1.4.3 and later stop by themselves when this happens. The watcher logs one error:
+Someone deleted the watcher’s registration on Data Hub. This happens when an admin deregisters the watcher in the web app, or retires its instrument (see [Deregister a watcher](/docs/manage-watchers#deregister-a-watcher)). After a deregistration, the instrument reads **Offline** and its notice says its watcher was deregistered. A retired instrument reads **Retired**, with no notice. Watcher 1.4.3 and later stop by themselves when this happens. The watcher logs one error:
 
 `This watcher was deregistered on Data Hub, so its registration no longer exists. Run 'data-hub-watcher init' to register it again.`
 

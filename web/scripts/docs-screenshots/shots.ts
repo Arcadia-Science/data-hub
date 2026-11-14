@@ -38,9 +38,6 @@ const DELETED_RUN = {
   runId: "260720_OD595_flat_BBB",
 } as const;
 
-// The ID of the seed's pending instrument, which the confirm review shows.
-const PENDING_INSTRUMENT = "seed-pending-instrument";
-
 const TOKEN_NAME = "Gel doc watcher, Lab 204";
 // Same length as a real token, so the layout does not change.
 const PLACEHOLDER_TOKEN = `dhub_${"0123456789abcdef".repeat(4)}`;
@@ -267,13 +264,6 @@ export const SHOTS: Shot[] = [
       // The review of the watcher's settings loads after the dialog opens.
       await dialog.getByText("Registered from").waitFor();
       await dialog.getByText("Upload mode", { exact: true }).waitFor();
-      // The seed's ID reads like test data, and the dialog shows it as typed
-      // text, so show an ID a lab would choose.
-      await dialog
-        .getByText(PENDING_INSTRUMENT, { exact: true })
-        .evaluate((el) => {
-          el.textContent = "bio-rad-cfx96";
-        });
     },
   },
   {

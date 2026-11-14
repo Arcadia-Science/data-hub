@@ -68,7 +68,7 @@ See [Watcher status](/docs/concepts#watcher-status). The instrument’s own badg
 
 Each event is a row with a label, a plain message, and when it happened. Run IDs in a message link to the run. Select a row to expand it. The expanded row shows details such as the file’s size, the run, and the number of upload parts, with the exact time. Admins also see the raw event, as the watcher sent it, which is the primary tool for remote diagnosis. Members see the plain version only.
 
-The labels are **Started**, **Stopped**, **File uploaded**, **Upload failed**, **Run reported**, **Settings synced**, **Error**, **Update started**, **Update finished**, **Update failed**, and **Uploads cancelled**. Some events get a more specific label, such as **Missed heartbeat** for an error that says the watcher checked in again after missing some, or **File not ready**. An event of any other type gets a label written from its name. The raw event keeps the type names the docs and the API use, such as `watcher_started`, `run_reported`, `file_uploaded`, `update_*`, and `error` with a `details.kind` discriminator.
+The labels are **Started**, **Stopped**, **File uploaded**, **Upload failed**, **Run reported**, **Settings synced**, **Error**, **Update started**, **Update finished**, **Update failed**, and **Uploads cancelled**. Some events get a more specific label, such as **Missed heartbeat** for an error that says the watcher checked in again after missing some, or **File not ready**, for a file that can’t be read yet, which the watcher tries again. Choosing **Upload failed** in the event type filter leaves out **File not ready** events, because those files haven’t failed. An event of any other type gets a label written from its name. The raw event keeps the type names the docs and the API use, such as `watcher_started`, `run_reported`, `file_uploaded`, `update_*`, and `error` with a `details.kind` discriminator.
 
 Data Hub adds `upload_requests_cancelled`, shown as **Uploads cancelled**, when someone deletes a run that has requested uploads. From watcher 1.3.0, a `file_uploaded` event reports `size_bytes`, `part_count`, `prep_seconds` (hashing the file and requesting its upload link), and `upload_seconds` (sending the file to storage). Divide `size_bytes` by `upload_seconds` to get the upload speed.
 
@@ -80,7 +80,7 @@ Events are the primary remote-diagnosis tool. For operator-side symptoms, see [T
 
 - Four counts: **Files uploaded**, **Upload failures**, **Restarts** (with the reason, for example “All for automatic updates”), and **Missed heartbeats** (with how long each took to recover). A missed heartbeat is an error event that says the watcher checked in again after missing some
 - A bar chart of files uploaded per day
-- **Connectivity**, a grid with one row for each day and one block for each 30 minutes, in your time zone, which the caption names. Green is checked in, gray is restarted for an update, amber is a missed heartbeat that recovered, red is unresponsive, and light gray is no data yet. Hover over a block to see what happened and when
+- **Connectivity**, a grid with one row for each day and one block for each 30 minutes, in your time zone, which the caption names. Green is checked in, gray is restarted for an update, amber is a missed heartbeat that recovered, red is unresponsive, and light gray is no data yet. A block that holds a heartbeat but went quiet for a long stretch with nothing to explain it, such as an outage that is still going, is red too. On a day the clocks change, a block for a half hour that didn’t happen is light gray. Hover over a block to see what happened and when
 
 A watcher that shows amber blocks every few hours, or red blocks in the middle of the night, points at the PC or its network rather than at Data Hub.
 
@@ -88,7 +88,7 @@ A watcher that shows amber blocks every few hours, or red blocks in the middle o
 
 ## See every watcher at once [#all-watchers]
 
-**Settings → Watchers**, which only admins see, has the release form from [Roll out watcher releases](/docs/watcher-releases) at the top and the list of **All watchers** below it. There is one watcher per instrument. The heading carries a rollout pill, “16 of 16 on 1.4.3” for example. It is green when every watcher runs the latest version and amber otherwise, so you can watch a release catch up.
+**Settings → Watchers**, which only admins see, has the release form from [Roll out watcher releases](/docs/watcher-releases) at the top and the list of **All watchers** below it. There is one watcher per instrument. The heading carries a rollout pill, “14 of 16 on 1.4.3” for example. It is green when every watcher runs the latest version or a newer one, and amber otherwise, so you can watch a release catch up.
 
 The **Active** tab has one row for each watcher:
 

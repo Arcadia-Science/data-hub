@@ -1,6 +1,6 @@
 ---
 title: Browse and analyze runs
-description: Use the web app to find runs, inspect processed results, claim attribution, download files, comment, and manage run lifecycle.
+description: Use the web app to find runs, check that new files will arrive, inspect processed results, claim attribution, download files, comment, and manage run lifecycle.
 contentType: How-to
 ---
 
@@ -68,7 +68,7 @@ If a file you saved on the instrument PC hasn’t shown up, start with the badge
 | **Restarting** | The instrument PC is restarting or updating. This usually takes a minute or two, and you don’t need to do anything. |
 | **Connecting** | The watcher was just set up and hasn’t checked in yet. |
 | **Offline** | New files won’t appear right now. A notice under the instrument’s name says why. |
-| **Pending** | An admin hasn’t confirmed this instrument yet. Its page has a card in place of the runs table, with one line for members. |
+| **Pending** | An admin hasn’t confirmed this instrument yet. Admins see a card in place of the runs table; members see one line. |
 | **Retired** | The instrument no longer takes new runs. Its runs stay browsable. |
 
 Hover over the badge, or focus it with the keyboard, for a short explanation. Select it to open the instrument’s watcher page, where anyone signed in can read its activity, health, and settings. Only admins can change anything there. The watcher is the program on the instrument PC that finds new files and uploads them; [Concepts](/docs/concepts#instrument-status) has the full rules for each badge.
@@ -173,7 +173,7 @@ Select the checkbox on one or more run rows to open an action bar at the bottom 
 
 - **I ran these**: claim every selected run in one step
 - **Remove my attribution**: unclaim them
-- **Upload**: ask the watcher to upload files that are still on the instrument PC. Data Hub refuses the request for a run whose instrument isn’t **Online** or **Restarting**, and the bar says how many failed; see [Request an upload](#request-upload)
+- **Upload**: ask the watcher to upload files that are still on the instrument PC. Data Hub refuses the request for a run whose instrument isn’t **Online** or **Restarting**, and a message says how many failed; see [Request an upload](#request-upload)
 - **Download**: download a zip of each selected run
 - **Reprocess**: run server-side processing again, including on runs whose files have stalled
 - **Add notebook link**: link every selected run to the same [lab notebook](#lab-notebook) page. Runs that already link to it keep their link and are skipped

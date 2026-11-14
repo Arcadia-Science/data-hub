@@ -99,9 +99,10 @@ Clients that speak MCP but not OAuth can bridge through [`mcp-remote`](https://w
 
 These older fields still come back with the values they had, but are deprecated, and the [tools catalog](/docs/mcp/tools) marks each one with the field to use instead:
 
-- `watcherCount`, `watchersOnline`, `watchersOffline`, `hasDeregisteredWatcher`, and `lastWatcherHeartbeatAt`
-- `activeWatcherId`, `activeWatcherHostname`, `activeWatcherWatchDirectory`, and `activeWatcherDeregistered`
-- the top-level `filePatterns`, which `watcher.filePatterns` replaces
+- `watcherCount`, `watchersOnline`, `lastWatcherHeartbeatAt`, and `activeWatcherId`, from both tools
+- `watchersOffline`, `activeWatcherHostname`, `activeWatcherWatchDirectory`, and `activeWatcherDeregistered`, from `get_instrument` only
+- `hasDeregisteredWatcher`, from `list_instruments` only
+- the top-level `filePatterns`, from both tools, which `watcher.filePatterns` replaces
 - `watcherStatus` and `lastWatcherHeartbeatAt` on an instrument result of `global_search`, which `connection` replaces
 
 ## Questions about Data Hub [#questions-about-data-hub]

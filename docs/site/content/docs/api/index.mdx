@@ -58,6 +58,8 @@ An instrument has at most one active watcher, so `GET /instruments` and `GET /in
 
 `GET /instruments/:id` still returns `watcher_count`, but it is deprecated. It keeps its old value for now. A later release will remove it, and the changelog will announce the date first. Read `watcher` instead, which is `null` when there is none.
 
+`GET /search` returns the same instrument results as the `global_search` MCP tool. An instrument result now carries `connection`, and its `watcherStatus` and `lastWatcherHeartbeatAt` are deprecated. They keep their old values for now, and `connection` replaces them.
+
 ## Actions taken by a token [#actions-taken-by-a-token]
 
 A token acts under its own name, not as a person, so responses name the token when it did something:

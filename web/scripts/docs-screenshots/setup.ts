@@ -241,20 +241,6 @@ export async function keepWatchersOnline(world: World): Promise<void> {
   });
 }
 
-// The seed's watchers report a test version, below the 1.4.0 that turns on the
-// settings form. The docs describe watchers on a current release, so move every
-// watcher, and the version the fleet is told to update to, to one.
-export const DOCS_WATCHER_VERSION = "1.4.3";
-
-export async function setCurrentWatcherVersion(world: World): Promise<void> {
-  await world.db
-    .update(schema.watchers)
-    .set({ watcherVersion: DOCS_WATCHER_VERSION });
-  await world.db.execute(
-    sql`UPDATE watcher_release_config SET latest_version = ${DOCS_WATCHER_VERSION}`
-  );
-}
-
 // The seed has two runs with files that never left their instrument PC, to show
 // the run page's offline and restarting states. They count as pending uploads
 // on Home, and a docs page that shows a backlog in red on its first screen is
@@ -296,6 +282,12 @@ export async function setWaitingRunFiles(
     .update(schema.files)
     .set({ status: waiting ? "detected" : "uploaded" })
     .where(eq(schema.files.instrumentRunId, run.id));
+  // The seed's only metadata on this run is a `seeded` flag, which the run page
+  // shows as a field. A real run has none of that, so the shot hides it.
+  await world.db
+    .update(schema.instrumentRuns)
+    .set({ metadata: waiting ? {} : { seeded: true } })
+    .where(eq(schema.instrumentRuns.id, run.id));
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
