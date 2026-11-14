@@ -52,10 +52,25 @@ export const ARCHIVES_BUCKET = "test-archives-bucket";
 export const SEED_ADMIN_EMAIL = "alice@example.com";
 export const SEED_ADMIN_NAME = "Alice Zimmerman";
 
-// Matches production watcher builds so the update-check UI doesn't nag
-// during docs screenshots. Integration tests keep the historical 9.9.9
-// default via `seedWatcherReleaseConfig`'s parameter default.
-export const SEED_WATCHER_VERSION = "1.0.0";
+// The watcher version most seeded watchers run, and the seeded "latest
+// version". It is at least 1.4.0, the first version that lets the web app edit
+// a watcher's settings, so the edit form works on a local database. Keep it at
+// the version in `watcher/pyproject.toml`. Integration tests keep the
+// historical 9.9.9 default via `seedWatcherReleaseConfig`'s parameter default.
+export const SEED_WATCHER_VERSION = "1.4.3";
+
+// A few seeded watchers run an older version, so the "Update available" notice
+// and the amber rollout pill have examples. One still supports editing from
+// the web app; the other is older than 1.4.0, so its Settings tab asks for an
+// update.
+const BEHIND_WATCHER_VERSIONS: Readonly<Record<string, string>> = {
+  "colony-counter-g": "1.4.0",
+  "balance-f": "1.3.2",
+};
+
+function currentWatcherVersion(instrumentId: string): string {
+  return BEHIND_WATCHER_VERSIONS[instrumentId] ?? SEED_WATCHER_VERSION;
+}
 
 // ---------------------------------------------------------------------------
 // clearAll — schema-driven TRUNCATE of every `pgTable` declared in
@@ -1355,7 +1370,7 @@ export async function seedWatchers(
         instrumentId: instrument.id,
         hostname: identity.hostname,
         osInfo: identity.osInfo,
-        watcherVersion: SEED_WATCHER_VERSION,
+        watcherVersion: currentWatcherVersion(instrument.id),
         configChecksum,
         configYaml,
         createdAt: rows.createdAt,
