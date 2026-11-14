@@ -14,6 +14,7 @@ from data_hub_watcher.api_client import (
     timeout_until,
 )
 from data_hub_watcher.constants import (
+    DEREGISTERED_HEARTBEAT_THRESHOLD,
     HEARTBEAT_INTERVAL_SECONDS,
     WATCHER_VERSION,
 )
@@ -110,6 +111,37 @@ class WatcherCounters:
             self.errors += taken.errors
 
 
+class DeregisteredReplies:
+    """How many heartbeats in a row Data Hub has answered with its "deregistered" reply.
+
+    The supervisor owns one and gives it to every heartbeat loop it builds, because every
+    switch between watching and waiting, every retry of a failed start and every config
+    rebuild makes a new `HeartbeatLoop`. A count that started again at 0 with each loop would
+    let a watcher that keeps changing state postpone its stop for good. Thread-safe: the
+    loop of the old runtime can still be finishing a tick when the next one starts.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._count = 0
+
+    @property
+    def count(self) -> int:
+        with self._lock:
+            return self._count
+
+    def add(self) -> int:
+        """Count one more reply and return the new total."""
+        with self._lock:
+            self._count += 1
+            return self._count
+
+    def reset(self) -> None:
+        """Start again at 0: a heartbeat got any other result."""
+        with self._lock:
+            self._count = 0
+
+
 class HeartbeatLoop:
     """Sends periodic heartbeats and flushes queued events."""
 
@@ -128,6 +160,8 @@ class HeartbeatLoop:
         status_reason: str | None = None,
         config_revision: Callable[[], int | None] | None = None,
         on_config_revision: Callable[[int | None], None] | None = None,
+        on_deregistered: Callable[[], None] | None = None,
+        deregistered_replies: DeregisteredReplies | None = None,
     ) -> None:
         self._client = client
         self._watcher_id = watcher_id
@@ -148,6 +182,15 @@ class HeartbeatLoop:
         # Called with the reply's `config_revision` (the server's latest) after
         # every successful heartbeat, so the runtime can fetch a new revision.
         self._on_config_revision = on_config_revision
+        # Called once, from the loop's thread, when the server has answered
+        # `DEREGISTERED_HEARTBEAT_THRESHOLD` heartbeats in a row with its "deregistered"
+        # reply. The loop ends itself first (see `_note_heartbeat_failure`).
+        self._on_deregistered = on_deregistered
+        # The run of those replies. Shared with the other loops of the same watcher when
+        # the supervisor passes one in; a loop built without one counts on its own.
+        self._deregistered_replies = (
+            deregistered_replies if deregistered_replies is not None else DeregisteredReplies()
+        )
 
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
@@ -159,6 +202,9 @@ class HeartbeatLoop:
         # event is the only reliable signal.
         self._consecutive_heartbeat_failures = 0
         self._first_failure_at: float | None = None
+        # Whether this loop has ended itself because of that reply. See
+        # `_note_heartbeat_failure`.
+        self._deregistered = False
 
     def start(self) -> None:
         """Send an immediate heartbeat, then run periodic heartbeats in a thread.
@@ -177,6 +223,13 @@ class HeartbeatLoop:
         ``WATCHER_STARTED`` event the runtime queued moments ago becomes
         visible right away rather than piggy-backing on the first
         loop-driven flush ~``interval`` seconds later.
+
+        The run of "deregistered" replies is shared with the loops that came before this one
+        (see `DeregisteredReplies`), so the startup beat can be the reply that reaches
+        `DEREGISTERED_HEARTBEAT_THRESHOLD`. The loop has then ended itself and called
+        `on_deregistered`, and ``start()`` returns at once: it flushes no events (they would
+        get the same 404) and starts no thread. A caller that has more to start, such as
+        `start_runtime`, checks for the stop before it starts it.
         """
         self._start_time = time.monotonic()
         self._stop_event.clear()
@@ -188,6 +241,8 @@ class HeartbeatLoop:
         # and emit the standard ``heartbeat_recovered`` event when the
         # link comes back.
         self._send_heartbeat(status=self._status)
+        if self._deregistered:
+            return
         self._event_reporter.flush()
         self._thread = threading.Thread(target=self._run, daemon=True, name="heartbeat")
         self._thread.start()
@@ -211,8 +266,10 @@ class HeartbeatLoop:
         if send_stopped:
             self.send_final_heartbeat(stop_reason=stop_reason)
 
-    def stop_loop(self, *, join_timeout: float | None = None) -> None:
+    def stop_loop(self, *, join_timeout: float | None = None) -> bool:
         """Stop the periodic heartbeats and wait for a tick in progress. Sends nothing.
+
+        Returns whether the loop's thread has exited (`True` too when it never ran).
 
         A tick is a heartbeat request, which can run for tens of seconds, an event flush and
         an update check. The final "stopped" heartbeat must not overtake that tick's
@@ -232,6 +289,11 @@ class HeartbeatLoop:
             if join_timeout is None:
                 join_timeout = max(self._interval, HEARTBEAT_INTERVAL_SECONDS) + 5
             self._thread.join(timeout=join_timeout)
+        return self.has_exited()
+
+    def has_exited(self) -> bool:
+        """Whether the loop's thread is gone: never started, or ended after a stop."""
+        return self._thread is None or not self._thread.is_alive()
 
     def send_final_heartbeat(
         self,
@@ -308,11 +370,16 @@ class HeartbeatLoop:
                 if self._consecutive_heartbeat_failures == 0:
                     self._first_failure_at = time.monotonic()
                 self._consecutive_heartbeat_failures += 1
+                if status != "stopped":
+                    self._note_heartbeat_failure(exc)
                 return
             delivered = True
         finally:
             if not delivered:
                 self.counters.restore(taken)
+
+        # Any success starts the count of "deregistered" replies again.
+        self._deregistered_replies.reset()
 
         if self._consecutive_heartbeat_failures > 0:
             # Recovery — emit a single event covering the full
@@ -342,6 +409,36 @@ class HeartbeatLoop:
                 self._on_config_revision(latest if isinstance(latest, int) else None)
             except Exception:
                 logger.exception("Config revision callback failed")
+
+    def _note_heartbeat_failure(self, exc: Exception) -> None:
+        """Count a failed heartbeat towards the watcher having been deregistered.
+
+        Only the server's "deregistered" reply counts (`ApiError.is_deregistered_reply`): a
+        404 whose JSON body has the code `WATCHER_DEREGISTERED`. A plain `NOT_FOUND`, an HTML
+        404, any other status and a network error say nothing about the registration, and any
+        of them, like a success, starts the count again, so a bad deploy, a bad proxy or rows
+        missing from the server's database can't stop a watcher for good by answering a few
+        heartbeats wrong. The count is shared with the other loops of the watcher (see
+        `DeregisteredReplies`).
+
+        On the `DEREGISTERED_HEARTBEAT_THRESHOLD`-th reply in a row the loop ends itself, so
+        that this tick flushes no events and runs no updater (both would get the same 404),
+        and calls `on_deregistered` once. The final "stopped" heartbeat is the caller's to
+        skip (`WatcherSupervisor.stop` does), and a failed one is not counted here.
+        """
+        if not (isinstance(exc, ApiError) and exc.is_deregistered_reply):
+            self._deregistered_replies.reset()
+            return
+        in_a_row = self._deregistered_replies.add()
+        if self._deregistered or in_a_row < DEREGISTERED_HEARTBEAT_THRESHOLD:
+            return
+        self._deregistered = True
+        self._stop_event.set()
+        if self._on_deregistered is not None:
+            try:
+                self._on_deregistered()
+            except Exception:
+                logger.exception("Deregistered callback failed")
 
     def _build_payload(
         self,

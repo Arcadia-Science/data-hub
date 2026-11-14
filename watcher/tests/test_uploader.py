@@ -1242,6 +1242,19 @@ class TestUploadQueueWorker:
         # immediately rather than after the 60s interval.
         assert worker.stop(timeout=5) is True
 
+    def test_has_exited_says_whether_the_thread_is_gone_and_signals_nothing(self) -> None:
+        stop = threading.Event()
+        worker = UploadQueueWorker(MagicMock(), stop_event=stop, interval_seconds=60)
+        assert worker.has_exited() is True  # never started
+
+        worker.start()
+        assert worker.has_exited() is False
+        # Asking doesn't stop it: a caller that asks again and again must not end the loop.
+        assert not stop.is_set()
+
+        assert worker.stop(timeout=5) is True
+        assert worker.has_exited() is True
+
     def test_stop_reports_false_when_upload_in_flight(self) -> None:
         # A poll stuck mid-upload past the join timeout must report unfinished
         # so teardown skips closing the state DB out from under it.
@@ -1264,6 +1277,24 @@ class TestUploadQueueWorker:
         finally:
             # Let the blocked poll finish so the daemon thread exits cleanly.
             release.set()
+
+    def test_a_stop_requested_before_the_start_stays_requested(self) -> None:
+        # A heartbeat that learns the watcher was deregistered requests the stop, and the
+        # runtime that is starting then must not undo it.
+        uploader = MagicMock()
+        stop = threading.Event()
+        worker = UploadQueueWorker(
+            uploader, stop_event=stop, interval_seconds=0, retry_pending_on_start=True
+        )
+        stop.set()
+
+        worker.start()
+
+        assert worker.stop(timeout=5) is True
+        assert stop.is_set()
+        # The loop never ran a poll.
+        uploader.retry_waiting_files.assert_not_called()
+        uploader.poll_upload_queue.assert_not_called()
 
     def test_retries_pending_uploads_before_the_first_poll(self) -> None:
         uploader = MagicMock()

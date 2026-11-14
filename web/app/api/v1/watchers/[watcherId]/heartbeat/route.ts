@@ -1,20 +1,18 @@
 import { eq } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 import { authorizeToken } from "@/lib/api/auth";
-import {
-  apiError,
-  NOT_FOUND,
-  UPGRADE_REQUIRED,
-  VALIDATION_ERROR,
-} from "@/lib/api/errors";
+import { apiError, UPGRADE_REQUIRED, VALIDATION_ERROR } from "@/lib/api/errors";
 import { heartbeatBody, readJsonBody } from "@/lib/api/openapi";
 import { isValidUUID } from "@/lib/api/validators";
 import { isRestartStopReason } from "@/lib/api/watcher-status";
 import { isBelowFloor } from "@/lib/api/watcher-versions";
 import {
+  callerMayActForWatcher,
   enforceWatcherBinding,
-  findActiveWatcher,
+  findWatcherIncludingDeleted,
   revertUploadQueueIfWatcherOffline,
+  watcherDeregisteredResponse,
+  watcherNotFoundResponse,
 } from "@/lib/api/watchers";
 import { db } from "@/lib/db";
 import {
@@ -39,9 +37,20 @@ export async function POST(
     return apiError(400, VALIDATION_ERROR, "Invalid watcher ID format");
   }
 
-  const watcher = await findActiveWatcher(watcherId);
+  const watcher = await findWatcherIncludingDeleted(watcherId);
   if (!watcher) {
-    return apiError(404, NOT_FOUND, `Watcher '${watcherId}' not found`);
+    return watcherNotFoundResponse(watcherId);
+  }
+  if (watcher.deletedAt) {
+    // A watcher stops for good on `WATCHER_DEREGISTERED`, so only a caller that
+    // may act for this watcher gets it: a token that `enforceWatcherBinding`
+    // would let through for an active watcher. The check is made without
+    // claiming the row, because a deregistered watcher is never claimed. Any
+    // other token gets the reply for a watcher that does not exist, so it can't
+    // learn that a watcher it does not own was deregistered.
+    return (await callerMayActForWatcher(authResult, watcher))
+      ? watcherDeregisteredResponse(watcherId)
+      : watcherNotFoundResponse(watcherId);
   }
 
   const bindingError = await enforceWatcherBinding(authResult, watcher);

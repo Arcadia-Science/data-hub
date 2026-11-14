@@ -27,6 +27,10 @@ def check_run_pattern(v: str) -> str:
     return v
 
 
+# What `watch_directory_problem` says when the folder does not exist, before the path.
+WATCH_DIRECTORY_NOT_FOUND = "watch_directory not found"
+
+
 def watch_directory_problem(path: Path) -> str | None:
     """Return why *path* can't be watched, or `None` if it can.
 
@@ -38,7 +42,7 @@ def watch_directory_problem(path: Path) -> str | None:
     """
     try:
         if not path.exists():
-            return f"watch_directory not found: {path}"
+            return f"{WATCH_DIRECTORY_NOT_FOUND}: {path}"
         if not path.is_dir():
             return f"watch_directory is not a folder: {path}"
         # `os.access` can report a folder as readable when an ACL denies
@@ -246,6 +250,18 @@ class RegisterWatcherResponse(BaseModel):
     model_config = _API_MODEL_CONFIG
 
     watcher_id: str
+
+
+class WatcherResponse(BaseModel):
+    """What `GET /watchers/{id}` returns for a watcher that is still registered.
+
+    Only the ID is read. The probe at start-up cares about whether the server answers
+    at all, and a deregistered watcher gets a 404 instead.
+    """
+
+    model_config = _API_MODEL_CONFIG
+
+    id: str
 
 
 class ConfigChecksumResponse(BaseModel):

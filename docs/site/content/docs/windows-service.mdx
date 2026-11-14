@@ -46,7 +46,7 @@ The Windows auto-update path requires that `service install` (or `service reinst
 
 `service reinstall` is the right command after an out-of-band wheel swap (for example a manual `uv tool install -U` from an Administrator shell). Stop and uninstall are best-effort, so it works even if the service is already gone.
 
-With watcher 1.4.2 and later, `service stop` finishes within about 25 seconds once the watcher is running, even when Data Hub doesn’t answer. It can take longer while the watcher is still starting, because it syncs its config, sends its first heartbeat and scans the watch folder before it looks for a stop. It can also take longer while the watcher applies a config change from Data Hub, which waits up to 2 minutes for uploads to finish. Once the stop begins, the watcher starts no new file or part. A part already on its way gets up to 15 seconds to arrive. In the last 10 seconds, the watcher sends its `watcher_stopped` event and then its final heartbeat, so it shows as **Stopped** when Data Hub answers.
+With watcher 1.4.2 and later, `service stop` finishes within about 25 seconds once the watcher is running, even when Data Hub doesn’t answer. It can take longer while the watcher is still starting. Before watcher 1.4.3 it scanned the whole watch folder first, which takes minutes on a large folder. From 1.4.3 a stop ends the scan at its next file, and the files it hadn’t reached are scanned at the next start. The watcher still syncs its config and sends its first heartbeat before it looks for a stop, so a stop that arrives then waits for Data Hub to answer each request, or for each request to time out after 35 seconds. It can also take longer while the watcher applies a config change from Data Hub, which waits up to 2 minutes for uploads to finish. Once the stop begins, the watcher starts no new file or part. A part already on its way gets up to 15 seconds to arrive. In the last 10 seconds, the watcher sends its `watcher_stopped` event and then its final heartbeat, so it shows as **Stopped** when Data Hub answers.
 
 A file that the watcher had to cut off isn’t lost. When the instrument uploads automatically, the watcher uploads that file again the next time it starts. A file that someone requested with **Upload** is different: `service stop` cancels the requests, so request the file again. A restart of the PC and the stop of an automatic update keep them queued, as [When the PC restarts or shuts down](#when-the-pc-restarts-or-shuts-down) describes. See also [Request uploads](/docs/manage-watchers#request-uploads).
 
@@ -67,6 +67,16 @@ If Data Hub can’t be reached, or the stop is cut off for another reason, the f
 Windows 10 and 11 turn on Fast Startup by default. With it, **Shut down** in the Start menu doesn’t stop the service: Windows saves its state and the service carries on from it at the next start, so no final heartbeat is sent and no `watcher_stopped` event is recorded. **Restart** always stops the service, and so does a shutdown with Fast Startup turned off.
 
 Watchers older than 1.4.1 don’t ask Windows to tell them about a restart, so a restart ends them with no final heartbeat and no `watcher_stopped` event. Updating to 1.4.1 is enough: the service tells Windows what it handles each time it runs, so no `service reinstall` is needed.
+
+## When the watcher is deregistered [#when-the-watcher-is-deregistered]
+
+With watcher 1.4.3 and later, the service stops about three minutes after someone deregisters its watcher or retires its instrument. It stays stopped. The service exits cleanly, so the restart-on-failure recovery doesn’t start it again.
+
+The error is in `watcher.log` and in the Application event log: `This watcher was deregistered on Data Hub, so its registration no longer exists. Run 'data-hub-watcher init' to register it again.` The service sends no `watcher_stopped` event and no final heartbeat, because Data Hub would refuse both.
+
+Starting the service again, including at boot, checks the registration first. If the watcher is still deregistered, the start logs the same error and the service stops with an error. Windows then tries again, after about one minute and then about two minutes, and after that leaves the service stopped. Those are the two retries Windows allows when the service hasn’t failed in the last 24 hours. A service that failed earlier that day gets fewer.
+
+To use the PC again, run `data-hub-watcher init` on the PC. If the instrument was retired, an admin has to reactivate it first, because `init` is refused for a retired instrument (see [Retire an instrument](/docs/retire-an-instrument#reactivate)). Then run `data-hub-watcher service start` from an Administrator terminal. See [Troubleshoot a watcher](/docs/troubleshoot-a-watcher#the-watcher-was-deregistered).
 
 ## Do not run `watch` alongside the service
 

@@ -56,7 +56,7 @@ class Transition:
       failing loudly (XPASS) the day the bug is fixed, which is when the mark and the
       ``known_bug()`` block come off and the status becomes ``covered``. A broken
       precondition raises something else, so it fails the test instead of hiding as an
-      expected failure. ``bug`` is the Linear issue (``ENG-2118``), or a short slug until the
+      expected failure. ``bug`` is the Linear issue (``ENG-0000``), or a short slug until the
       issue is filed, and the ``reason`` of the test starts with it.
     * ``excluded``: deliberately not tested end to end. ``reason`` says why and where it is
       tested instead. A test must not name it.
@@ -80,7 +80,7 @@ class Transition:
         if self.status == "xfail_bug" and not self.bug:
             raise ValueError(
                 f"{self.id}: an xfail_bug transition needs a bug: its Linear issue "
-                "(such as ENG-2118) or a short slug"
+                "(such as ENG-0000) or a short slug"
             )
         if self.status != "xfail_bug" and self.bug:
             raise ValueError(f"{self.id}: only an xfail_bug transition has a bug")

@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next/types";
 import { Suspense } from "react";
 import { SignInRequired } from "@/components/auth/sign-in-required";
+import { RunClaimTargetProvider } from "@/components/runs/claim-prompt/run-claim-target";
 import { RestReportDataSourceProvider } from "@/components/runs/report-data-source-provider";
 import { RunAttributionsSection } from "@/components/runs/run-attributions-section";
 import { RunCommentsSection } from "@/components/runs/run-comments-section";
@@ -11,6 +12,7 @@ import {
   RunContentSkeleton,
 } from "@/components/runs/run-detail-skeleton";
 import { RunNav } from "@/components/runs/run-nav";
+import { RunNotebookLinksSection } from "@/components/runs/run-notebook-links-section";
 import { RunDetailVariant } from "@/components/runs/variants";
 import { WatcherStatusProvider } from "@/components/runs/watcher-status-provider";
 import {
@@ -28,6 +30,8 @@ import { getInstrumentById } from "@/lib/api/instruments";
 import { getReportItemsPage } from "@/lib/api/report-items";
 import { listCommentsForRun } from "@/lib/api/run-comments";
 import { readRunIdParam } from "@/lib/api/run-id-param";
+import { notebookLinkToWire } from "@/lib/api/run-notebook-link-wire";
+import { listNotebookLinksForRun } from "@/lib/api/run-notebook-links";
 import { auth } from "@/lib/auth";
 import { formatDateLong } from "@/lib/date";
 import { decodePageParam } from "@/lib/runs/page-param";
@@ -188,6 +192,7 @@ async function RunDetailContentBody({
     wellData,
     auntyPlate,
     qpcrMeltingPlate,
+    notebookLinks,
   ] = await Promise.all([
     buildRunFilesQuery(run.id, {
       page: filters.files_page,
@@ -220,6 +225,7 @@ async function RunDetailContentBody({
     reportFilesPromise.then((rf) =>
       isQpcr ? getQpcrMeltingPlateData(rf) : Promise.resolve(null)
     ),
+    listNotebookLinksForRun(run.id),
   ]);
 
   // Gate client-side upload actions on watcher availability — a queued
@@ -232,47 +238,63 @@ async function RunDetailContentBody({
   return (
     <RestReportDataSourceProvider instrumentId={instrumentId} runId={runId}>
       <WatcherStatusProvider isWatcherOnline={isWatcherOnline}>
-        <RunDetailVariant
-          attributionsSlot={
-            <RunAttributionsSection
-              attributions={run.attributions}
-              instrumentId={run.instrumentId}
-              runId={run.runId}
-            />
-          }
-          auntyPlate={auntyPlate}
-          fileStats={fileStats}
-          files={filesPage.data}
-          filesDownloadableCount={filesPage.downloadableCount}
-          filesPagination={filesPage.pagination}
-          instrumentId={instrumentId}
-          qpcrMeltingPlate={qpcrMeltingPlate}
-          reportFiles={reportFiles}
-          reportItems={reportItems}
-          run={run}
-          runId={runId}
-          runNavSlot={
-            <RunNav
-              next={
-                adjacentRuns.nextRunId
-                  ? {
-                      href: toRunHref(adjacentRuns.nextRunId),
-                      runId: adjacentRuns.nextRunId,
-                    }
-                  : null
-              }
-              previous={
-                adjacentRuns.previousRunId
-                  ? {
-                      href: toRunHref(adjacentRuns.previousRunId),
-                      runId: adjacentRuns.previousRunId,
-                    }
-                  : null
-              }
-            />
-          }
-          wellData={wellData}
-        />
+        <RunClaimTargetProvider
+          instrumentId={run.instrumentId}
+          runId={run.runId}
+          unclaimed={run.attributions.length === 0 && run.deletedAt === null}
+        >
+          <RunDetailVariant
+            attributionsSlot={
+              <RunAttributionsSection
+                attributions={run.attributions}
+                instrumentId={run.instrumentId}
+                runId={run.runId}
+              />
+            }
+            auntyPlate={auntyPlate}
+            fileStats={fileStats}
+            files={filesPage.data}
+            filesDownloadableCount={filesPage.downloadableCount}
+            filesPagination={filesPage.pagination}
+            instrumentId={instrumentId}
+            notebookLinksSlot={
+              <RunNotebookLinksSection
+                attributions={run.attributions}
+                instrumentId={run.instrumentId}
+                isDeleted={run.deletedAt !== null}
+                key={`${run.instrumentId}:${run.runId}`}
+                links={notebookLinks.map(notebookLinkToWire)}
+                runId={run.runId}
+              />
+            }
+            qpcrMeltingPlate={qpcrMeltingPlate}
+            reportFiles={reportFiles}
+            reportItems={reportItems}
+            run={run}
+            runId={runId}
+            runNavSlot={
+              <RunNav
+                next={
+                  adjacentRuns.nextRunId
+                    ? {
+                        href: toRunHref(adjacentRuns.nextRunId),
+                        runId: adjacentRuns.nextRunId,
+                      }
+                    : null
+                }
+                previous={
+                  adjacentRuns.previousRunId
+                    ? {
+                        href: toRunHref(adjacentRuns.previousRunId),
+                        runId: adjacentRuns.previousRunId,
+                      }
+                    : null
+                }
+              />
+            }
+            wellData={wellData}
+          />
+        </RunClaimTargetProvider>
       </WatcherStatusProvider>
     </RestReportDataSourceProvider>
   );

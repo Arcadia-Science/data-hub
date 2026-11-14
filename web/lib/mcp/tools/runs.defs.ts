@@ -31,7 +31,7 @@ export const searchRunsTool = {
   scope: "runs:read",
   title: "Search Runs",
   description:
-    "Search instrument runs with filtering, pagination, and sorting. Supports run status filters and instrument-metadata filters (plate reader, gel-doc, qPCR, Hina microscope, Epson scanner, Aunty). Prefer global_search when the query may match filenames, instrument names, or attributor names rather than run IDs. Discover valid metadata filter values via get_instrument_filter_options or datahub://instruments/{id}/filter-options.",
+    "Search instrument runs with filtering, pagination, and sorting. Each run lists its lab notebook links. Supports run status, has-notebook-link, and instrument-metadata filters (plate reader, gel-doc, qPCR, Hina microscope, Epson scanner, Aunty). Prefer global_search when the query may match filenames, instrument names, or attributor names rather than run IDs. Discover valid metadata filter values via get_instrument_filter_options or datahub://instruments/{id}/filter-options.",
   outputSchema: searchRunsOutputSchema,
   inputSchema: {
     instrumentId: z
@@ -92,6 +92,12 @@ export const searchRunsTool = {
       .describe(
         'Filter by attributor. Pass a user id, the literal "me" for the authenticated token owner, or "unattributed" for runs with no attributions. Use get_me for your user id, or list_run_attributors to discover colleagues.'
       ),
+    hasNotebookLink: z
+      .boolean()
+      .optional()
+      .describe(
+        "true: only runs with at least one lab notebook link. false: only runs with none."
+      ),
     status: z
       .array(z.enum(RUN_STATUS_VALUES))
       .optional()
@@ -108,7 +114,7 @@ export const getRunTool = {
   scope: "runs:read",
   title: "Get Run",
   description:
-    "Get details for a specific instrument run by its natural key (instrument ID + run ID). Returns metadata, timestamps, instrument info, and attributions by default. Pass include to attach the first page of files, comments, and/or a failure_summary without extra tool calls. To show the interactive report (plate maps, spectra, images) or a bounded processed-CSV sample, call get_run_report for the same run.",
+    "Get details for a specific instrument run by its natural key (instrument ID + run ID). Returns metadata, timestamps, instrument info, attributions, and lab notebook links (notebookLinks) by default. Pass include to attach the first page of files, comments, and/or a failure_summary without extra tool calls. To show the interactive report (plate maps, spectra, images) or a bounded processed-CSV sample, call get_run_report for the same run.",
   outputSchema: getRunOutputSchema,
   inputSchema: {
     instrumentId: z.string().describe("Instrument identifier"),

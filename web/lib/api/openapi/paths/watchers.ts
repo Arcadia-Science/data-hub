@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   bearerSecurity,
+  ErrorBody,
   errorResponses,
   jsonResponse,
   registry,
@@ -39,6 +40,13 @@ const responses = (description: string, schema: z.ZodType = z.unknown()) => ({
 });
 const PAT_ONLY = " PAT only; browser sessions are rejected.";
 
+// What a route says about a deregistered watcher, for the two routes that tell
+// one from a watcher ID that does not exist.
+const DEREGISTERED_NOTE =
+  "A watcher that was deregistered gets a 404 with the error code `WATCHER_DEREGISTERED`; a watcher ID that does not exist gets `NOT_FOUND`.";
+const DEREGISTERED_404 =
+  "The watcher does not exist (error code `NOT_FOUND`), or was deregistered (error code `WATCHER_DEREGISTERED`).";
+
 const operation = (
   method: "get" | "post" | "put" | "delete",
   path: string,
@@ -47,18 +55,24 @@ const operation = (
   scope: string,
   responseSchema: z.ZodType,
   request?: object,
-  patOnly = false
+  patOnly = false,
+  deregisteredNote?: string
 ) =>
   registry.registerPath({
     method,
     path,
     operationId,
     summary,
-    description: `Requires scope \`${scope}\`.${patOnly ? PAT_ONLY : ""}`,
+    description: `Requires scope \`${scope}\`.${patOnly ? PAT_ONLY : ""}${deregisteredNote ? ` ${deregisteredNote}` : ""}`,
     tags: ["Watchers"],
     security: bearerSecurity,
     ...(request ? { request } : {}),
-    responses: responses(`${summary}.`, responseSchema),
+    responses: {
+      ...responses(`${summary}.`, responseSchema),
+      ...(deregisteredNote
+        ? { 404: jsonResponse(DEREGISTERED_404, ErrorBody) }
+        : {}),
+    },
   });
 
 operation(
@@ -100,7 +114,9 @@ operation(
   "Get a watcher",
   "watchers:read",
   watcherDetail,
-  { params: watcherParams }
+  { params: watcherParams },
+  false,
+  `${DEREGISTERED_NOTE} Any caller with this scope gets it, as it can already list deregistered watchers.`
 );
 operation(
   "delete",
@@ -163,7 +179,8 @@ operation(
   "watchers:report",
   watcherHeartbeatAck,
   { params: watcherParams, body: body(heartbeatBody) },
-  true
+  true,
+  `${DEREGISTERED_NOTE} Only a token that may act for the watcher (the token it is bound to, or one that could take it over) gets \`WATCHER_DEREGISTERED\`; any other token gets \`NOT_FOUND\`. Watcher 1.4.3 and later stop after three \`WATCHER_DEREGISTERED\` replies in a row.`
 );
 operation(
   "get",

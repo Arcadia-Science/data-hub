@@ -25,7 +25,7 @@ from e2e_support.drivers import InitAnswers, NewInstrument, RunDetection, Watche
 from e2e_support.factory import WatcherFactory
 from e2e_support.files import SMALL, write_run
 from e2e_support.server import ServerView
-from e2e_support.waiting import KnownBugStillPresent, known_bug, stays_true
+from e2e_support.waiting import stays_true
 
 pytestmark = pytest.mark.e2e
 
@@ -677,14 +677,6 @@ def test_a_start_that_keeps_failing_backs_off_and_then_succeeds(
     assert resumed[-1].message.startswith(pc.resumed_prefix)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=KnownBugStillPresent,
-    reason=(
-        "ENG-2110: a watch folder that disappears while the watcher runs "
-        "leaves it reporting `watching` instead of `waiting`"
-    ),
-)
 @pytest.mark.covers("waiting.folder_vanished->waiting_then_resumed")
 def test_a_watch_folder_that_vanishes_puts_the_watcher_back_to_waiting(
     watcher: WatcherFactory, server: ServerView, watch_dir: Path, instrument_id: str
@@ -697,13 +689,20 @@ def test_a_watch_folder_that_vanishes_puts_the_watcher_back_to_waiting(
     # The folder goes away while the watcher runs, as when a network drive drops.
     shutil.rmtree(folder)
 
-    with known_bug():
-        row = server.wait_for_watcher_status(pc.watcher_id, "waiting", timeout=12)
-        assert row.status_reason is not None
-        assert row.status_reason.startswith("watch_directory not found")
+    row = server.wait_for_watcher_status(pc.watcher_id, "waiting", timeout=12)
+    assert row.status_reason is not None
+    assert row.status_reason.startswith("watch_directory not found")
+    # The move reports why, once, and the watcher did not start again: it never stopped.
+    unavailable = server.wait_for_events(
+        pc.watcher_id, event_type="error", kind="watch_directory_unavailable"
+    )
+    assert [e.details["reason"] for e in unavailable] == [row.status_reason]
+    assert count_events(server, pc.watcher_id, "watcher_started") == 1
 
     # And it picks up again when the folder comes back.
     folder.mkdir()
     server.wait_for_watcher_status(pc.watcher_id, "watching")
+    resumed = server.wait_for_events(pc.watcher_id, count=2, event_type="watcher_started")
+    assert resumed[-1].message.startswith(pc.resumed_prefix)
     written = write_run(folder, "RUN001", {"a.csv": SMALL})
     server.wait_for_uploaded(instrument_id, "RUN001", "RUN001/a.csv", content=written["a.csv"])

@@ -20,7 +20,12 @@ import {
   resolveActor,
 } from "@/lib/api/actor";
 import type { AuthResult } from "@/lib/api/auth";
-import { apiError, FORBIDDEN } from "@/lib/api/errors";
+import {
+  apiError,
+  FORBIDDEN,
+  NOT_FOUND,
+  WATCHER_DEREGISTERED,
+} from "@/lib/api/errors";
 import { instrumentHasOnlineWatcher } from "@/lib/api/instruments";
 import { touchRuns } from "@/lib/api/touch-runs";
 import {
@@ -60,6 +65,73 @@ export async function findActiveWatcher(watcherId: string) {
 }
 
 /**
+ * The watcher's row, deregistered or not. Only for the routes that tell a
+ * deregistered watcher from one that never existed (see
+ * `watcherDeregisteredResponse`); every other route uses `findActiveWatcher`.
+ */
+export async function findWatcherIncludingDeleted(watcherId: string) {
+  const [watcher] = await db
+    .select()
+    .from(watchers)
+    .where(eq(watchers.id, watcherId))
+    .limit(1);
+
+  return watcher ?? null;
+}
+
+/** The 404 for a watcher ID that has no row at all. */
+export function watcherNotFoundResponse(watcherId: string): Response {
+  return apiError(404, NOT_FOUND, `Watcher '${watcherId}' not found`);
+}
+
+/**
+ * The 404 for a watcher whose row exists but was deregistered. The watcher
+ * CLI stops on its `WATCHER_DEREGISTERED` code (and on nothing else), so it is
+ * only for callers that may know the watcher is gone: see
+ * `callerMayActForWatcher` and the comments in the routes that use it.
+ */
+export function watcherDeregisteredResponse(watcherId: string): Response {
+  return apiError(
+    404,
+    WATCHER_DEREGISTERED,
+    `Watcher '${watcherId}' was deregistered`
+  );
+}
+
+/**
+ * Whether `enforceWatcherBinding` would let this caller act for the watcher,
+ * decided without changing anything: a token that is the watcher's registered
+ * token, or one that could claim the binding (none, or a binding to a token
+ * that was revoked). Sessions never may. It is how a route decides whether to
+ * tell the caller that a deregistered watcher is deregistered, since a
+ * deregistered row must not be claimed, and anyone else gets the same reply as
+ * for a watcher that does not exist.
+ *
+ * The rule that a binding to a revoked token counts as no binding is also in
+ * `enforceWatcherBinding`, as the `inArray` subquery of its claim. Change them
+ * together.
+ */
+export async function callerMayActForWatcher(
+  authResult: AuthResult,
+  watcher: { registeredByToken: string | null }
+): Promise<boolean> {
+  const bound = watcher.registeredByToken;
+  const verdict = decideWatcherBinding(authResult, bound);
+  if (verdict === "allow" || verdict === "tofu") {
+    return true;
+  }
+  if (bound === null || !isBoundToOtherToken(authResult, bound)) {
+    return false;
+  }
+  const [boundToken] = await db
+    .select({ revokedAt: personalAccessTokens.revokedAt })
+    .from(personalAccessTokens)
+    .where(eq(personalAccessTokens.id, bound))
+    .limit(1);
+  return Boolean(boundToken?.revokedAt);
+}
+
+/**
  * Returns null when the caller may act on this watcher, or a Response the
  * handler should return. Sessions are denied — watcher agent routes are
  * PAT-only via `authorizeToken`. Token callers must match the watcher's
@@ -89,7 +161,9 @@ export async function enforceWatcherBinding(
   }
 
   // TOFU: first token to check in claims the row. The `where` clause makes
-  // concurrent claims atomic: the loser re-reads and is denied.
+  // concurrent claims atomic: the loser re-reads and is denied. Its "bound to a
+  // revoked token" subquery is the rule that `callerMayActForWatcher` repeats
+  // in a read-only form. Change them together.
   const claimed = await db
     .update(watchers)
     .set({ registeredByToken: tokenId })

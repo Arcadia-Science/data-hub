@@ -12,7 +12,7 @@ The **Watchers** area is the fleet view: every registered watcher, its health, i
 
 Each watcher sends a [heartbeat](/docs/concepts#heartbeat) every 60 seconds with version, instrument, watch directory, upload mode, activity counters, and uptime. The fleet list surfaces:
 
-- **Status**: **Online**, **Waiting: folder not found** (running, but its watch folder is missing), **Unresponsive** (no heartbeat for more than 5 minutes, or more than 15 for a watcher that stopped for a Windows restart, a shutdown or an automatic update), **Stopped** (shut down cleanly. A stop you chose stays **Stopped** until the watcher starts again, and a stop for a Windows restart, a shutdown or an automatic update turns **Unresponsive** after 15 minutes), or **Registered** (no first heartbeat yet). See [Watcher status](/docs/concepts#watcher-status).
+- **Status**: **Online**, **Waiting: folder not found** (running, but its watch folder is missing, or went missing while it ran), **Unresponsive** (no heartbeat for more than 5 minutes, or more than 15 for a watcher that stopped for a Windows restart, a shutdown or an automatic update), **Stopped** (shut down cleanly. A stop you chose stays **Stopped** until the watcher starts again, and a stop for a Windows restart, a shutdown or an automatic update turns **Unresponsive** after 15 minutes), or **Registered** (no first heartbeat yet). See [Watcher status](/docs/concepts#watcher-status).
 - **Change pending** or **Change rejected**: the latest config change from the web app hasn’t reached the watcher yet, or the watcher refused it. See [Change a watcher’s config](#change-a-watchers-config).
 - **Edited on PC, restart pending**: someone changed `config.yaml` on the PC while the watcher was running, and the watcher hasn’t loaded it yet. See [Edits made on the PC](#edits-on-the-pc).
 - **Last heartbeat**: a stale value is the first sign of a stopped, disconnected, or crashed watcher
@@ -77,7 +77,9 @@ Each instrument can have at most one active watcher. Deregister the old one when
 
 Deregistration is a soft-delete: heartbeats, events, and runs stay under **Watchers → Deregistered**. A watcher removed through the API with a token shows that token’s name as the one that removed it.
 
-Retiring an instrument also deregisters its watchers automatically; see [Retire an instrument](/docs/retire-an-instrument).
+A running watcher that is deregistered stops by itself within about three minutes (watcher 1.4.3 and later). It doesn’t come back on its own. The Windows service isn’t restarted either, and a start is refused. To use the PC again, run `data-hub-watcher init` on the instrument PC. Older watchers keep running and getting errors until someone stops them on the PC. See [Troubleshoot a watcher](/docs/troubleshoot-a-watcher#the-watcher-was-deregistered).
+
+Retiring an instrument also deregisters its watchers automatically; see [Retire an instrument](/docs/retire-an-instrument). `init` is refused for a retired instrument, so reactivate it before anyone runs `data-hub-watcher init` on the PC again (see [Reactivate](/docs/retire-an-instrument#reactivate)).
 
 You don’t need to deregister a watcher just because its token was revoked. Re-running `data-hub-watcher init` with a new token takes over the existing registration; see [After revoking a token](/docs/manage-tokens#after-revoking-a-token).
 

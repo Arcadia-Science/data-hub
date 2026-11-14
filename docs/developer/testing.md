@@ -568,13 +568,13 @@ bug:
 @pytest.mark.xfail(
     strict=True,
     raises=KnownBugStillPresent,
-    reason="ENG-2118: a stop during start-up ends with no stopped heartbeat",
+    reason="bug-example: what goes wrong today",
 )
-@pytest.mark.covers("process.stop->clean_stop_during_scan")
-def test_a_stop_during_start_up_still_ends_with_a_clean_stop(...):
-    ...  # The precondition: the watcher is held up in its first heartbeat, and a stop was requested.
+@pytest.mark.covers("machine.thing->intended_outcome")
+def test_the_intended_behavior(...):
+    ...  # The precondition: everything that must hold before the bug can show.
     with known_bug():
-        assert pc.wait_exit(30) == 0
+        assert the_intended_behavior()
 ```
 
 `known_bug()` turns an `AssertionError` raised inside it (a `WaitTimeout` too) into
@@ -583,7 +583,7 @@ block is a different failure, so the test fails and doesn't count as the bug. Pu
 assertion that shows the intended behavior inside. The check enforces the pattern: the xfail is
 strict and has `raises=KnownBugStillPresent`, the test has a `with known_bug():` block and names
 only `xfail_bug` transitions, its reason starts with the bug of one of them (its Linear issue, such
-as `ENG-2118:`, or a short slug until the issue is filed), and
+as `ENG-0000:`, or a short slug until the issue is filed), and
 no other test names an `xfail_bug` transition. To see that a test fails inside the block, run it
 with `--runxfail`.
 
