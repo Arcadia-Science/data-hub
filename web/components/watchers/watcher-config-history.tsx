@@ -18,6 +18,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { useReturnFocus } from "@/hooks/use-return-focus";
 import type { ConfigRevision } from "@/lib/api/watcher-config/revisions";
 import {
   describeSettingsChanges,
@@ -231,6 +232,7 @@ function RestoreDialog({
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const returnFocus = useReturnFocus();
 
   function handleRestore(e: MouseEvent) {
     e.preventDefault();
@@ -267,7 +269,7 @@ function RestoreDialog({
 
   return (
     <AlertDialog onOpenChange={onOpenChange} open={revision !== null}>
-      <AlertDialogContent>
+      <AlertDialogContent {...returnFocus}>
         <AlertDialogHeader>
           <AlertDialogTitle>
             Restore revision {revision?.revision}?

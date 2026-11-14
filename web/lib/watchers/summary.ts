@@ -101,14 +101,3 @@ export function sharedComputerLine(
   });
   return parts;
 }
-
-/** The shared-computer line as plain text. */
-export function sharedComputerText(
-  others: readonly SharedComputerInstrument[]
-): string {
-  return sharedComputerLine(others)
-    .map((part) =>
-      part.kind === "text" ? part.text : part.instrument.displayName
-    )
-    .join("");
-}

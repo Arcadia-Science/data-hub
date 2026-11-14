@@ -38,7 +38,8 @@ describe("Settings pages", () => {
       redirect: "manual",
     });
     const html = await res.text();
-    expect(html).not.toContain("couldn’t load");
+    expect(html).not.toContain("This page couldn’t load");
+    expect(html).not.toContain("Couldn’t load this.");
     expect(res.status).toBe(200);
   });
 });

@@ -130,7 +130,9 @@ class TestSwitchWhenTheInstrumentHasAWatcher:
         assert "already has an active watcher" in result.output
         page_url = "https://production.example.test/instruments/test-instrument/watcher"
         assert page_url in result.output
-        assert "Deregister from its ⋮ menu" in result.output
+        assert "Deregister from its actions menu" in result.output
+        # A Windows console on a legacy code page can't always print more than ASCII.
+        assert result.output.split("Error:", 1)[1].isascii()
         # The old directions, through a Watchers list, are gone.
         assert "Watchers →" not in result.output
         assert load_config(path).environment == "staging"

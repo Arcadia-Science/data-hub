@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   sharedComputerLine,
-  sharedComputerText,
   versionSuffix,
   versionSuffixText,
 } from "@/lib/watchers/summary";
@@ -55,6 +54,18 @@ describe("versionSuffix", () => {
 const GEL_DOC = { instrumentId: "gel-doc", displayName: "Gel Doc" };
 const SCANNER = { instrumentId: "scanner", displayName: "Scanner" };
 const MIXER = { instrumentId: "mixer", displayName: "Mixer" };
+
+// The page renders each instrument piece as a link; the copy is checked as
+// the plain text those pieces add up to.
+function sharedComputerText(
+  others: Parameters<typeof sharedComputerLine>[0]
+): string {
+  return sharedComputerLine(others)
+    .map((part) =>
+      part.kind === "text" ? part.text : part.instrument.displayName
+    )
+    .join("");
+}
 
 describe("sharedComputerLine", () => {
   it("has no line when no other instrument shares the computer", () => {

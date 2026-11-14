@@ -120,17 +120,34 @@ describe("Watcher pages", () => {
   }
 
   describe("the three sub-tabs", () => {
+    // `loaded` is text that only the tab's own content renders, never the
+    // frame around it or the tab's loading skeleton. The frame sits outside
+    // the tab's Suspense boundary, so a tab whose data load threw would still
+    // show the frame and fail only on this text.
     const TABS = [
-      "/instruments/watcher-page-a/watcher",
-      "/instruments/watcher-page-a/watcher/health",
-      "/instruments/watcher-page-a/watcher/settings",
+      { path: "/instruments/watcher-page-a/watcher", loaded: "Event Type" },
+      {
+        path: "/instruments/watcher-page-a/watcher/health",
+        loaded: 'aria-label="Status since"',
+      },
+      {
+        path: "/instruments/watcher-page-a/watcher/settings",
+        loaded: "Current settings",
+      },
     ];
 
-    it.each(TABS)("%s loads for an admin", async (path) => {
+    function expectTabLoaded(html: string, loaded: string) {
+      // The root error screen, and the load error boundary's own message.
+      expect(html).not.toContain("This page couldn’t load");
+      expect(html).not.toContain("Couldn’t load this.");
+      expect(html).toContain(loaded);
+    }
+
+    it.each(TABS)("$path loads for an admin", async ({ path, loaded }) => {
       const res = await page(path, adminCookie);
       const html = await res.text();
       expect(res.status).toBe(200);
-      expect(html).not.toContain("couldn’t load");
+      expectTabLoaded(html, loaded);
       expect(html).toContain("Watcher for Watcher Page Instrument A");
       // The browser tab title, with the root layout's suffix.
       expect(html).toContain(
@@ -141,13 +158,14 @@ describe("Watcher pages", () => {
       expect(html).toContain('aria-label="Watcher actions"');
     });
 
-    it.each(
-      TABS
-    )("%s loads for a member, without the admin menu", async (path) => {
+    it.each(TABS)("$path loads for a member, without the admin menu", async ({
+      path,
+      loaded,
+    }) => {
       const res = await page(path, memberCookie);
       const html = await res.text();
       expect(res.status).toBe(200);
-      expect(html).not.toContain("couldn’t load");
+      expectTabLoaded(html, loaded);
       expect(html).toContain("Watcher for Watcher Page Instrument A");
       expect(html).not.toContain('aria-label="Watcher actions"');
     });

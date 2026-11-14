@@ -374,7 +374,7 @@ def init(ctx: click.Context, show_key: bool) -> None:
                 f"Instrument '{selected.id}' already has an active watcher{id_suffix}.\n"
                 "If this is a replacement install, deregister the existing watcher first:\n"
                 f"  - In the web app, open {_watcher_page_url(api_base_url, selected.id)}\n"
-                "    and choose Deregister from its ⋮ menu (an admin action).\n"
+                "    and choose Deregister from its actions menu (an admin action).\n"
                 f"  - Or via API: DELETE /api/v1/watchers/{existing_id or '<watcher_id>'}\n"
                 "Then re-run `data-hub-watcher init`."
             ) from exc
@@ -572,7 +572,7 @@ def _register_watcher_for_switch(
                 f"Instrument '{instrument_id}' already has an active watcher{id_suffix} "
                 "in the target environment. Deregister it there first, then retry:\n"
                 f"  open {_watcher_page_url(api_base_url, instrument_id)}\n"
-                "  and choose Deregister from its ⋮ menu (an admin action)."
+                "  and choose Deregister from its actions menu (an admin action)."
             ) from exc
         raise click.ClickException(f"Failed to register watcher: {exc.message}") from exc
     return reg.watcher_id

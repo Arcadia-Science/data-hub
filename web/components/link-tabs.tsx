@@ -1,3 +1,5 @@
+// Client component only because `tabsListVariants` is exported from a client
+// module (ui/tabs.tsx), and a server component can't call a client function.
 "use client";
 
 import Link from "next/link";

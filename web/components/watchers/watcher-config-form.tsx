@@ -180,7 +180,9 @@ export function WatcherConfigForm({
     if (focusField !== "watch_directory") {
       return;
     }
-    folderInput.current?.focus();
+    // Focusing alone scrolls the field to the viewport's edge; center it.
+    folderInput.current?.focus({ preventScroll: true });
+    folderInput.current?.scrollIntoView({ block: "center" });
     const url = new URL(window.location.href);
     if (url.searchParams.has("focus")) {
       url.searchParams.delete("focus");

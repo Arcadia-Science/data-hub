@@ -1,7 +1,7 @@
 "use client";
 
 import { EllipsisVertical, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -25,6 +25,7 @@ export function WatcherPageMenu({
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [deregisterOpen, setDeregisterOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   return (
     <>
@@ -32,6 +33,7 @@ export function WatcherPageMenu({
         <DropdownMenuTrigger asChild>
           <Button
             aria-label="Watcher actions"
+            ref={triggerRef}
             size="icon-sm"
             type="button"
             variant="outline"
@@ -57,6 +59,7 @@ export function WatcherPageMenu({
         hostname={hostname}
         onOpenChange={setDeregisterOpen}
         open={deregisterOpen}
+        returnFocusRef={triggerRef}
         watcherId={watcherId}
       />
     </>
