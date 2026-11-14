@@ -2049,7 +2049,14 @@ class UploadQueueWorker:
         self._thread: threading.Thread | None = None
 
     def start(self) -> None:
-        self._stop_event.clear()
+        """Start the thread, which runs until the stop event is set.
+
+        A stop that was requested before this call stays requested: the thread polls nothing
+        and uploads nothing, because the uploader starts no file once the event is set. The
+        event is not cleared here, since a heartbeat that learns the watcher was deregistered
+        sets it (`Uploader.request_stop`) and a start must not undo that. A worker is not
+        restarted after `stop`: each runtime builds its own worker and event.
+        """
         self._thread = threading.Thread(target=self._run, daemon=True, name="upload-worker")
         self._thread.start()
 

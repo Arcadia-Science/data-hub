@@ -41,7 +41,7 @@ from e2e_support.files import SMALL, ExclusiveWriter, payload, write_run
 from e2e_support.proxy_helpers import stopped_heartbeats
 from e2e_support.server import HeartbeatRow, ServerView
 from e2e_support.service_driver import READY_LINE, START_LINE, WindowsServiceDriver
-from e2e_support.waiting import KnownBugStillPresent, known_bug, stays_true, wait_until
+from e2e_support.waiting import stays_true, wait_until
 from e2e_support.windows_scm import SERVICE_FAILURE_EXIT_CODE, ServiceState
 
 pytestmark = pytest.mark.e2e
@@ -781,6 +781,33 @@ def test_a_service_that_cannot_start_its_module_writes_the_traceback_to_the_boot
     assert "Traceback (most recent call last)" in written
 
 
+@pytest.mark.covers("service.deregistered->stays_stopped")
+def test_a_deregistered_service_stops_and_the_scm_does_not_bring_it_back(
+    watcher: WatcherFactory, server: ServerView, admin: Admin, proxy: FaultProxy
+) -> None:
+    pc = service_pc(watcher)
+    pc.install_service()
+    # Restart after 2 s for any failure: a deregistered watcher can never recover, so the
+    # recovery actions must not bring it back, and a restart shows within seconds. (The service
+    # exits 0, a clean stop for the SCM, which restarts only what fails.)
+    pc.host.set_restart_actions([2_000, 2_000])
+    start_watching(pc, server)
+    admin.deregister_watcher(pc.watcher_id).raise_for_status()
+    proxy.wait_for_request(
+        lambda r: r.method == "POST" and r.path.endswith("/heartbeat") and r.upstream_status == 404,
+        timeout=30,
+    )
+
+    wait_until(lambda: not pc.is_running(), 30, pc.log_tail, what="the service to stop")
+    assert pc.exit_code == 0, f"the service stopped with {pc.exit_code}, not as a clean stop"
+    stays_true(
+        lambda: not pc.is_running(),
+        10,
+        pc.log_tail,
+        what="the SCM not to restart a deregistered service",
+    )
+
+
 # ---------------------------------------------------------------------------
 # The upgrade worker
 # ---------------------------------------------------------------------------
@@ -1039,45 +1066,8 @@ def test_uninstall_removes_the_service_its_registry_values_and_task_and_keeps_th
 
 
 # ---------------------------------------------------------------------------
-# Known bugs
+# Other scenarios
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.xfail(
-    strict=True,
-    raises=KnownBugStillPresent,
-    reason=(
-        "ENG-2117: a service whose watcher was deregistered "
-        "keeps running with 404s instead of stopping cleanly, and staying stopped"
-    ),
-)
-@pytest.mark.covers("service.deregistered->stays_stopped")
-def test_a_deregistered_service_stops_and_the_scm_does_not_bring_it_back(
-    watcher: WatcherFactory, server: ServerView, admin: Admin, proxy: FaultProxy
-) -> None:
-    pc = service_pc(watcher)
-    pc.install_service()
-    # Restart after 2 s for any failure: a deregistered watcher can never recover, so the
-    # recovery actions must not bring it back, and a restart shows within seconds. (The intended
-    # outcome, PROPOSED, is that the service exits 0: a clean stop for the SCM, which a failure
-    # exit would not be. The SCM restarts only what fails.)
-    pc.host.set_restart_actions([2_000, 2_000])
-    start_watching(pc, server)
-    admin.deregister_watcher(pc.watcher_id).raise_for_status()
-    proxy.wait_for_request(
-        lambda r: r.method == "POST" and r.path.endswith("/heartbeat") and r.upstream_status == 404,
-        timeout=30,
-    )
-
-    with known_bug():
-        wait_until(lambda: not pc.is_running(), 30, pc.log_tail, what="the service to stop")
-        assert pc.exit_code == 0, f"the service stopped with {pc.exit_code}, not as a clean stop"
-        stays_true(
-            lambda: not pc.is_running(),
-            10,
-            pc.log_tail,
-            what="the SCM not to restart a deregistered service",
-        )
 
 
 @pytest.mark.covers(

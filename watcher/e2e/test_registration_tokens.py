@@ -5,11 +5,10 @@ Each scenario registers a watcher through ``init`` or the API, or runs a real
 token, deregisters a watcher or retires the instrument, or a request arrives with another
 token. The transitions are in ``catalog/registration_tokens.py``.
 
-The ``xfail`` tests at the end are known bug 08: a watcher whose registration was deleted keeps
-running and uploading with 404s, and starting one does not refuse. They assert the intended
-behavior. Under the CLI that is a failure exit. Under the Windows service it is a stop that
-stays stopped (see ``catalog/registration_tokens.py``), so the exit code is checked by a test of
-its own that is marked ``platforms("cli")``.
+The last tests are about a watcher whose registration was deleted: it stops, and a start is
+refused. Under the CLI both exit with code 3. Under the Windows service the stop is a clean one
+that stays stopped (see ``catalog/registration_tokens.py``), so the exit codes are checked by
+tests of their own that are marked ``platforms("cli")``.
 """
 
 from __future__ import annotations
@@ -19,14 +18,18 @@ from pathlib import Path
 
 import pytest
 
-from data_hub_shared.testing_proxy import FaultProxy
+from data_hub_shared.testing_proxy import FaultProxy, RecordedRequest
+from data_hub_watcher.constants import (
+    DEREGISTERED_EXIT_CODE,
+    DEREGISTERED_HEARTBEAT_THRESHOLD,
+)
 from e2e_support._http import ApiResult, call, new_session
 from e2e_support.admin import Admin
 from e2e_support.drivers import InitAnswers, RunDetection, WatcherDriver
 from e2e_support.factory import WatcherFactory
 from e2e_support.files import SMALL, write_file
 from e2e_support.server import FileRow, ServerView
-from e2e_support.waiting import KnownBugStillPresent, known_bug, stays_true, wait_until
+from e2e_support.waiting import stays_true, wait_until
 
 pytestmark = pytest.mark.e2e
 
@@ -34,9 +37,20 @@ pytestmark = pytest.mark.e2e
 # watcher reacts within a few ticks.
 REACTION_SECONDS = 20.0
 
-# How long a watcher that must stop because it was deregistered may take. It learns of it from
-# its next heartbeat, 2 s away.
-EXIT_SECONDS = 10.0
+# How long a watcher that must stop because it was deregistered may take. It stops on the third
+# heartbeat in a row that the server answers with its deregistered reply
+# (DEREGISTERED_HEARTBEAT_THRESHOLD), which is 4 to 6 s after the deregistration at the suite's
+# 2 s interval, and its stop takes a few seconds more.
+EXIT_SECONDS = 20.0
+
+
+def _heartbeats_answered_with_404(proxy: FaultProxy) -> list[RecordedRequest]:
+    """The heartbeats the server has answered with 404, which it does for a deregistered watcher."""
+    return [
+        r
+        for r in proxy.requests
+        if r.method == "POST" and r.path.endswith("/heartbeat") and r.upstream_status == 404
+    ]
 
 
 def _send(server: ServerView, method: str, path: str, token: str, body: object) -> ApiResult:
@@ -411,19 +425,11 @@ def test_init_after_deregistration_registers_a_new_watcher_and_keeps_the_upload_
 
 
 # ---------------------------------------------------------------------------
-# Known bug 08: a deregistered watcher keeps running with 404s
+# A deregistered watcher stops and says to run init
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.covers("watcher.deregistered->process_exits")
-@pytest.mark.xfail(
-    strict=True,
-    raises=KnownBugStillPresent,
-    reason=(
-        "ENG-2117: a running watcher that is deregistered "
-        "keeps uploading and running with 404s instead of stopping with an error"
-    ),
-)
 def test_a_running_watcher_stops_uploading_and_stops_once_it_is_deregistered(
     watcher: WatcherFactory,
     server: ServerView,
@@ -432,9 +438,9 @@ def test_a_running_watcher_stops_uploading_and_stops_once_it_is_deregistered(
     watch_dir: Path,
     instrument_id: str,
 ) -> None:
-    # A long stability period, so that a file written after the watcher has been told is not
+    # A long stability period, so that a file written once the watcher has been told is not
     # stable yet when a watcher that stops on the news has stopped.
-    pc = watcher(stability_period_seconds=4)
+    pc = watcher(stability_period_seconds=6)
     pc.start()
     server.wait_for_watcher_status(pc.watcher_id, "watching")
     # The run is known to the server before the watcher is deregistered. The server refuses a
@@ -444,43 +450,39 @@ def test_a_running_watcher_stops_uploading_and_stops_once_it_is_deregistered(
     server.wait_for_uploaded(instrument_id, "RUN001", "RUN001/before.csv")
 
     admin.deregister_watcher(pc.watcher_id).raise_for_status()
-    # The watcher is told by the 404 of its next heartbeat.
-    proxy.wait_for_request(
-        lambda r: r.method == "POST" and r.path.endswith("/heartbeat") and r.upstream_status == 404,
-        timeout=REACTION_SECONDS,
+    # The watcher is told by the 404 reply to its heartbeats, and acts on the third one
+    # in a row. One reply is not enough, so the file is written once it has had all three.
+    wait_until(
+        lambda: len(_heartbeats_answered_with_404(proxy)) >= DEREGISTERED_HEARTBEAT_THRESHOLD,
+        REACTION_SECONDS,
+        lambda: server.dump(pc.watcher_id, instrument_id),
+        what="the watcher's heartbeats to be answered as deregistered",
     )
     write_file(watch_dir / "RUN001" / "after.csv", SMALL)
 
-    with known_bug():
-        stays_true(
-            lambda: server.file(instrument_id, "RUN001", "RUN001/after.csv") is None,
-            8,
-            lambda: server.dump(pc.watcher_id, instrument_id),
-            what="no report or upload after the watcher was told it is deregistered",
-        )
-        wait_until(
-            lambda: not pc.is_running(),
-            EXIT_SECONDS,
-            pc.log_tail,
-            what="the deregistered watcher to stop",
-        )
-        assert re.search(r"(?i)deregister", pc.log_text()), "no log line says it was deregistered"
+    # Longer than the stability period, so that a watcher that went on would have reported the
+    # file by now.
+    stays_true(
+        lambda: server.file(instrument_id, "RUN001", "RUN001/after.csv") is None,
+        10,
+        lambda: server.dump(pc.watcher_id, instrument_id),
+        what="no report or upload after the watcher was told it is deregistered",
+    )
+    wait_until(
+        lambda: not pc.is_running(),
+        EXIT_SECONDS,
+        pc.log_tail,
+        what="the deregistered watcher to stop",
+    )
+    assert re.search(r"(?i)deregister", pc.log_text()), "no log line says it was deregistered"
 
 
-# Under the service the intended outcome is not a failure exit: a deregistered watcher can never
-# recover, so the service must stop and stay stopped, and the SCM's recovery actions (which
-# restart a service that exits with a failure) must not bring it back every minute. The
-# service-side check is `service.deregistered->stays_stopped` in test_windows_service.py.
+# Under the Windows service the exit is not a failure. The service returns normally, so it exits
+# 0, and the SCM's recovery actions (which restart a service that exits with a failure) leave it
+# stopped. The service-side check is `service.deregistered->stays_stopped` in
+# test_windows_service.py.
 @pytest.mark.platforms("cli")
 @pytest.mark.covers("watcher.deregistered->process_exits")
-@pytest.mark.xfail(
-    strict=True,
-    raises=KnownBugStillPresent,
-    reason=(
-        "ENG-2117: a running watcher that is deregistered "
-        "keeps running with 404s instead of exiting with a failure code"
-    ),
-)
 def test_a_deregistered_watcher_exits_with_a_failure_code(
     watcher: WatcherFactory, server: ServerView, admin: Admin
 ) -> None:
@@ -490,25 +492,17 @@ def test_a_deregistered_watcher_exits_with_a_failure_code(
 
     admin.deregister_watcher(pc.watcher_id).raise_for_status()
 
-    with known_bug():
-        wait_until(
-            lambda: not pc.is_running(),
-            EXIT_SECONDS,
-            pc.log_tail,
-            what="the deregistered watcher to exit",
-        )
-        assert pc.exit_code not in (None, 0), f"the watcher exited with {pc.exit_code}"
+    wait_until(
+        lambda: not pc.is_running(),
+        EXIT_SECONDS,
+        pc.log_tail,
+        what="the deregistered watcher to exit",
+    )
+    # Its own code, not 0 (a stop that was asked for) and not 1 (a restart for an update).
+    assert pc.exit_code == DEREGISTERED_EXIT_CODE, f"the watcher exited with {pc.exit_code}"
 
 
 @pytest.mark.covers("startup.deregistered->refused")
-@pytest.mark.xfail(
-    strict=True,
-    raises=KnownBugStillPresent,
-    reason=(
-        "ENG-2117: starting a watcher whose registration was "
-        "deleted runs it with 404s instead of refusing with a message to run init"
-    ),
-)
 def test_starting_with_a_deregistered_watcher_refuses_and_says_to_run_init(
     watcher: WatcherFactory, admin: Admin
 ) -> None:
@@ -517,12 +511,34 @@ def test_starting_with_a_deregistered_watcher_refuses_and_says_to_run_init(
 
     pc.start(wait_ready=False)
 
-    with known_bug():
-        wait_until(
-            lambda: not pc.is_running(),
-            REACTION_SECONDS,
-            pc.log_tail,
-            what="the watcher to refuse to start",
-        )
-        assert pc.exit_code not in (None, 0), f"the watcher exited with {pc.exit_code}"
-        assert re.search(r"\binit\b", pc.log_text()), "the refusal does not say to run init"
+    wait_until(
+        lambda: not pc.is_running(),
+        REACTION_SECONDS,
+        pc.log_tail,
+        what="the watcher to refuse to start",
+    )
+    assert pc.exit_code not in (None, 0), f"the watcher exited with {pc.exit_code}"
+    assert re.search(r"\binit\b", pc.log_text()), "the refusal does not say to run init"
+
+
+# The CLI refuses with the code of a deregistered stop, not the 1 of "an update was installed,
+# start again", so a systemd unit with `RestartPreventExitStatus=3` doesn't start a deregistered
+# watcher in a loop after every reboot. (A service start that is refused exits with a failure
+# on purpose, so that the SCM retries.)
+@pytest.mark.platforms("cli")
+@pytest.mark.covers("startup.deregistered->refused")
+def test_a_refused_start_exits_with_the_deregistered_code(
+    watcher: WatcherFactory, admin: Admin
+) -> None:
+    pc = watcher()
+    admin.deregister_watcher(pc.watcher_id).raise_for_status()
+
+    pc.start(wait_ready=False)
+
+    wait_until(
+        lambda: not pc.is_running(),
+        REACTION_SECONDS,
+        pc.log_tail,
+        what="the watcher to refuse to start",
+    )
+    assert pc.exit_code == DEREGISTERED_EXIT_CODE, f"the watcher exited with {pc.exit_code}"

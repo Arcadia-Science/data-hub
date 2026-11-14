@@ -5,6 +5,10 @@ A stop for an in-process update is marked `auto_update` on the final heartbeat, 
 SIGTERM, is never marked, even with an update under way, so the command has to say so.
 A stop that arrives during start-up is acted on once `start` returns, the same way, and the
 supervisor's one stop signal, `request_stop`, also ends the start-up scan early.
+
+A watcher whose registration was deleted on Data Hub exits with a code of its own, and a new
+one refuses to start, with the same code, and says to run `init`. Only the server's
+"deregistered" reply counts: a plain `NOT_FOUND` lets the watcher start.
 """
 
 from __future__ import annotations
@@ -19,8 +23,11 @@ import pytest
 from click.testing import CliRunner, Result
 
 from data_hub_watcher import cli as cli_module
+from data_hub_watcher.api_client import ApiError
 from data_hub_watcher.config_io import save_config
+from data_hub_watcher.constants import DEREGISTERED_EXIT_CODE, DEREGISTERED_MESSAGE
 from data_hub_watcher.models import (
+    ApiErrorDetail,
     ConfigChecksumResponse,
     HeartbeatResponse,
     InstrumentConfig,
@@ -34,6 +41,7 @@ class _FakeSupervisor:
     """Stands in for `WatcherSupervisor`: records how it is stopped and asked to stop."""
 
     upgrade_restart = False
+    deregistered = False
     instances: list[_FakeSupervisor] = []
     # For the tests that send a signal during `start`: the handlers `watch` installed, and
     # the signal to send. Other tests never send one.
@@ -60,6 +68,12 @@ class _FakeSupervisor:
         self.stop_requested.set()
 
     def classify_shutdown(self) -> ShutdownReason:
+        if self.deregistered:
+            return ShutdownReason(
+                is_upgrade_restart=False,
+                stopped_message="Watcher stopped: its registration was deleted on Data Hub",
+                is_deregistered=True,
+            )
         return ShutdownReason(
             is_upgrade_restart=self.upgrade_restart,
             stopped_message="Watcher restarting for auto-update"
@@ -137,7 +151,11 @@ def api_client() -> MagicMock:
 def watch_until(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, api_client: MagicMock
 ) -> Callable[[str], Result]:
-    """Run `watch` against stubs, until Ctrl+C (``"ctrl_c"``) or an update (``"update"``)."""
+    """Run `watch` against stubs.
+
+    It runs until Ctrl+C (``"ctrl_c"``), an update (``"update"``) or the registration being
+    deleted on Data Hub (``"deregistered"``).
+    """
     _stub_watch_command(monkeypatch, tmp_path, api_client)
     _FakeSupervisor.instances = []
     # Keep the test process's own signal handlers.
@@ -152,6 +170,7 @@ def watch_until(
 
         monkeypatch.setattr(cli_module, "run_supervisor", run_supervisor)
         monkeypatch.setattr(_FakeSupervisor, "upgrade_restart", until == "update")
+        monkeypatch.setattr(_FakeSupervisor, "deregistered", until == "deregistered")
         return CliRunner().invoke(cli_module.cli, ["watch"])
 
     return watch
@@ -227,6 +246,133 @@ class TestWatchStop:
         assert result.exit_code == 1, result.output
         (supervisor,) = _FakeSupervisor.instances
         assert supervisor.stops == [{"stopped_message": "Watcher restarting for auto-update"}]
+
+
+def _deregistered() -> ApiError:
+    return ApiError(
+        "Watcher 'w-test' was deregistered",
+        status_code=404,
+        detail=ApiErrorDetail(
+            code="WATCHER_DEREGISTERED", message="Watcher 'w-test' was deregistered"
+        ),
+    )
+
+
+def _plain_not_found() -> ApiError:
+    return ApiError(
+        "Watcher 'w-test' not found",
+        status_code=404,
+        detail=ApiErrorDetail(code="NOT_FOUND", message="Watcher 'w-test' not found"),
+    )
+
+
+class TestWatchDeregistered:
+    def test_the_exit_code_is_its_own(self) -> None:
+        # Not 0 (a stop that was asked for) and not 1 (an update was installed, so start again),
+        # so a wrapper script or a systemd unit (`RestartPreventExitStatus=3`) can tell that
+        # starting the watcher again won't help.
+        assert DEREGISTERED_EXIT_CODE not in (0, 1)
+        assert DEREGISTERED_EXIT_CODE == 3
+
+    def test_a_deregistered_watcher_exits_with_its_own_code(
+        self, watch_until: Callable[[str], Result]
+    ) -> None:
+        result = watch_until("deregistered")
+
+        assert result.exit_code == DEREGISTERED_EXIT_CODE, result.output
+        (supervisor,) = _FakeSupervisor.instances
+        # It is stopped, not as an operator's stop and not as an update. The supervisor
+        # sends nothing for it.
+        assert supervisor.stops == [
+            {"stopped_message": "Watcher stopped: its registration was deleted on Data Hub"}
+        ]
+        # The update message is for a restart, and this is not one.
+        assert "Upgrade installed" not in result.output
+
+    def test_the_help_text_documents_the_exit_code(self) -> None:
+        result = CliRunner().invoke(cli_module.cli, ["watch", "--help"])
+
+        assert result.exit_code == 0
+        help_text = " ".join(result.output.split())
+        assert f"exits with code {DEREGISTERED_EXIT_CODE}" in help_text
+        assert "data-hub-watcher init" in help_text
+
+
+class TestWatchRefusesADeregisteredWatcher:
+    def test_it_refuses_to_start_and_says_to_run_init(
+        self, watch_until: Callable[[str], Result], api_client: MagicMock
+    ) -> None:
+        api_client.get_watcher.side_effect = _deregistered()
+
+        result = watch_until("ctrl_c")
+
+        # The code of a deregistered stop, and not the 1 of "an update was installed, start
+        # again": a systemd unit with `RestartPreventExitStatus=3` would otherwise restart a
+        # deregistered watcher in a loop after every reboot.
+        assert result.exit_code == DEREGISTERED_EXIT_CODE, result.output
+        assert DEREGISTERED_MESSAGE in " ".join(result.output.split())
+        assert "data-hub-watcher init" in result.output
+        # Nothing was built or synced.
+        assert _FakeSupervisor.instances == []
+        api_client.get_config_checksum.assert_not_called()
+        api_client.push_config.assert_not_called()
+        api_client.get_watcher.assert_called_once_with("w-test")
+
+    def test_a_dry_run_refuses_too(
+        self, watch_until: Callable[[str], Result], api_client: MagicMock
+    ) -> None:
+        api_client.get_watcher.side_effect = _deregistered()
+
+        # The fixture has set up the stubs, and `watch_until` is not needed for the run.
+        result = CliRunner().invoke(cli_module.cli, ["watch", "--dry-run"])
+
+        assert result.exit_code == DEREGISTERED_EXIT_CODE, result.output
+        assert DEREGISTERED_MESSAGE in " ".join(result.output.split())
+        api_client.get_config_checksum.assert_not_called()
+
+    def test_the_check_is_made_after_the_instrument_and_before_the_start(
+        self, watch_until: Callable[[str], Result], api_client: MagicMock
+    ) -> None:
+        result = watch_until("ctrl_c")
+
+        assert result.exit_code == 0, result.output
+        names = [call[0] for call in api_client.method_calls]
+        assert names.index("get_instrument") < names.index("get_watcher")
+        assert len(_FakeSupervisor.instances) == 1
+
+    def test_any_other_refused_start_still_exits_with_1(
+        self, watch_until: Callable[[str], Result], api_client: MagicMock
+    ) -> None:
+        # The deregistered code is for a deregistered watcher only. A pending instrument is
+        # refused the ordinary way.
+        api_client.get_instrument.return_value = MagicMock(status="pending")
+
+        result = watch_until("ctrl_c")
+
+        assert result.exit_code == 1, result.output
+        assert DEREGISTERED_MESSAGE not in " ".join(result.output.split())
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            _plain_not_found(),
+            ApiError("<html>404 Not Found</html>", status_code=404),
+            ApiError("bad gateway", status_code=502),
+            ApiError("Connection error: refused", status_code=0),
+            ValueError("a reply the client could not read"),
+        ],
+        ids=["plain-not-found", "html-404", "5xx", "network", "unreadable-reply"],
+    )
+    def test_any_other_failure_of_the_check_lets_the_watcher_start(
+        self, watch_until: Callable[[str], Result], api_client: MagicMock, error: Exception
+    ) -> None:
+        api_client.get_watcher.side_effect = error
+
+        result = watch_until("ctrl_c")
+
+        assert result.exit_code == 0, result.output
+        assert DEREGISTERED_MESSAGE not in " ".join(result.output.split())
+        assert len(_FakeSupervisor.instances) == 1
 
 
 class TestStopDuringStartUp:

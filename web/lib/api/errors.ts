@@ -19,6 +19,16 @@ export const PAYLOAD_TOO_LARGE = "PAYLOAD_TOO_LARGE";
 // deleted. The message is for people; a client reads the reason to tell this
 // conflict from others.
 export const RUN_DELETED_REASON = "run_deleted";
+// Paired with HTTP 404. Returned by the heartbeat route and `GET /watchers/{id}`
+// when the watcher's row exists but was deregistered (soft-deleted). The
+// heartbeat route sends it only to a caller that may act for the watcher (see
+// `callerMayActForWatcher`); `GET /watchers/{id}` sends it to every caller with
+// `watchers:read`, who can already see a deregistered watcher in the list. A row
+// that does not exist keeps `NOT_FOUND`, so a watcher stops for good only when
+// its registration was deleted on purpose, not when rows went missing from the
+// database. The watcher CLI stops on this string: keep it equal to
+// `WATCHER_DEREGISTERED_ERROR_CODE` in `watcher/src/data_hub_watcher/constants.py`.
+export const WATCHER_DEREGISTERED = "WATCHER_DEREGISTERED";
 export function apiError(
   status: number,
   code: string,

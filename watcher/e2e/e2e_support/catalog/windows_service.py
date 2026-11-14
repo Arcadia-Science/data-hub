@@ -10,7 +10,7 @@ group in ``cli.py``. The suite starts the service for real, so it needs an eleva
 
 from __future__ import annotations
 
-from e2e_support.catalog.model import SERVICE, Transition, covered, excluded, xfail_bug
+from e2e_support.catalog.model import SERVICE, Transition, covered, excluded
 
 MACHINE = "windows_service"
 
@@ -283,16 +283,14 @@ TRANSITIONS: tuple[Transition, ...] = (
         "with a repeat counted once.",
         platforms=SERVICE,
     ),
-    xfail_bug(
+    covered(
         MACHINE,
         "service.deregistered->stays_stopped",
-        "PROPOSED — confirm intent: a running service that finds out its watcher was "
-        "deregistered stops itself cleanly, exiting 0, which the SCM treats as a clean stop "
-        "(a failure exit would make its recovery actions restart a watcher that can never "
-        "recover), and it stays stopped. (It is the service side of "
-        "`watcher.deregistered->process_exits`, which exits non-zero under `watch`; today "
-        "the service keeps running with 404s.)",
-        "ENG-2117",
+        "After three heartbeats in a row get the server's deregistered reply, the running service "
+        "stops itself and exits 0, a clean stop for the SCM, so its recovery actions do not "
+        "restart it and it stays stopped. (A failure exit would make the SCM restart a watcher "
+        "that can never recover.) It is the service side of "
+        "`watcher.deregistered->process_exits`, which exits non-zero under `watch`.",
         platforms=SERVICE,
     ),
     # --- reinstall and uninstall ------------------------------------------------------------

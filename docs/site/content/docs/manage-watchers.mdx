@@ -77,7 +77,9 @@ Each instrument can have at most one active watcher. Deregister the old one when
 
 Deregistration is a soft-delete: heartbeats, events, and runs stay under **Watchers → Deregistered**. A watcher removed through the API with a token shows that token’s name as the one that removed it.
 
-Retiring an instrument also deregisters its watchers automatically; see [Retire an instrument](/docs/retire-an-instrument).
+A running watcher that is deregistered stops by itself within about three minutes (watcher 1.4.3 and later). It doesn’t come back on its own. The Windows service isn’t restarted either, and a start is refused. To use the PC again, run `data-hub-watcher init` on the instrument PC. Older watchers keep running and getting errors until someone stops them on the PC. See [Troubleshoot a watcher](/docs/troubleshoot-a-watcher#the-watcher-was-deregistered).
+
+Retiring an instrument also deregisters its watchers automatically; see [Retire an instrument](/docs/retire-an-instrument). `init` is refused for a retired instrument, so reactivate it before anyone runs `data-hub-watcher init` on the PC again (see [Reactivate](/docs/retire-an-instrument#reactivate)).
 
 You don’t need to deregister a watcher just because its token was revoked. Re-running `data-hub-watcher init` with a new token takes over the existing registration; see [After revoking a token](/docs/manage-tokens#after-revoking-a-token).
 

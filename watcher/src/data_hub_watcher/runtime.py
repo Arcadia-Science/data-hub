@@ -31,6 +31,7 @@ from data_hub_watcher.constants import (
     AUTO_UPDATE_STATUS_REASON,
     CONFIG_APPLY_DRAIN_TIMEOUT_SECONDS,
     DEFAULT_CONFIG_DIR,
+    DEREGISTERED_MESSAGE,
     FOLDER_CONFIRM_DELAY_SECONDS,
     FOLDER_PROBE_TIMEOUT_SECONDS,
     MONITOR_RESTART_WINDOW_SECONDS,
@@ -49,7 +50,7 @@ from data_hub_watcher.constants import (
 )
 from data_hub_watcher.events import EventReporter, EventType, WatcherEvent
 from data_hub_watcher.folder_probe import FolderLook, FolderProbe
-from data_hub_watcher.heartbeat import HeartbeatLoop, WatcherCounters
+from data_hub_watcher.heartbeat import DeregisteredReplies, HeartbeatLoop, WatcherCounters
 from data_hub_watcher.models import (
     ConfigRevisionResponse,
     InstrumentConfig,
@@ -117,6 +118,11 @@ class WatcherRuntime:
     # in their stop wait so a shutdown can be triggered from any thread.
     shutdown_event: threading.Event = field(default_factory=threading.Event)
     upgrade_restart_event: threading.Event = field(default_factory=threading.Event)
+    # Set, together with ``shutdown_event``, once the server has answered enough heartbeats
+    # in a row with its "deregistered" reply: the registration was deleted on Data Hub and
+    # the watcher can never report again (see ``HeartbeatLoop``). The stop that follows
+    # sends no ``watcher_stopped`` event and no final heartbeat, which would get the same 404.
+    deregistered_event: threading.Event = field(default_factory=threading.Event)
     # The thread that polls the upload queue off the heartbeat. Always set by
     # ``build_runtime``; ``None`` only in tests that build a runtime by hand.
     upload_worker: UploadQueueWorker | None = None
@@ -138,6 +144,10 @@ class ShutdownReason:
 
     is_upgrade_restart: bool
     stopped_message: str
+    # The watcher was deregistered on Data Hub. The stop then sends no event and no final
+    # heartbeat, the CLI exits with ``DEREGISTERED_EXIT_CODE`` and the Windows service exits
+    # 0, so the SCM's recovery actions don't start it again.
+    is_deregistered: bool = False
 
 
 # uv's diagnostic lines start with ``error:`` (or ``Error:`` on a few
@@ -221,7 +231,12 @@ def classify_shutdown(rt: WatcherRuntime, *, role: str) -> ShutdownReason:
     Note: the CLI's signal-initiated stop has its own "stopped by user"
     message and does not go through this helper — at that point we
     already know the cause is an operator signal, not the auto-updater.
+
+    A deregistered watcher wins over a pending update restart: there is no registration
+    left for a new version to run under.
     """
+    if rt.deregistered_event.is_set():
+        return _deregistered_shutdown(role)
     if rt.upgrade_restart_event.is_set():
         return ShutdownReason(
             is_upgrade_restart=True,
@@ -231,6 +246,49 @@ def classify_shutdown(rt: WatcherRuntime, *, role: str) -> ShutdownReason:
         is_upgrade_restart=False,
         stopped_message=f"{role} stopped",
     )
+
+
+def _deregistered_shutdown(role: str) -> ShutdownReason:
+    return ShutdownReason(
+        is_upgrade_restart=False,
+        stopped_message=f"{role} stopped: its registration was deleted on Data Hub",
+        is_deregistered=True,
+    )
+
+
+# Taken by every `_deregistered_requester` callback (each loop has its own) around checking and
+# setting the shared `deregistered_event`.
+_DEREGISTERED_REQUEST_LOCK = threading.Lock()
+
+
+def _deregistered_requester(
+    shutdown_event: threading.Event,
+    deregistered_event: threading.Event,
+    stop_uploads: Callable[[], None] | None = None,
+) -> Callable[[], None]:
+    """The callback the heartbeat loop calls when the watcher's registration was deleted.
+
+    It runs on the heartbeat thread, so it only logs, tells the uploads to start nothing
+    new (*stop_uploads*, `Uploader.request_stop`, so that nothing is uploaded while the
+    main thread gets to the stop) and sets the events the main loop waits for. The stop
+    itself, on the thread that polls, is `stop_runtime` or `WatcherSupervisor.stop`.
+    """
+
+    def request() -> None:
+        # The loops of one watcher share the run of replies, so a second loop can reach the
+        # threshold too (the first one's stop is still unwinding). It stops what it owns,
+        # and the reason is logged once, by whichever loop sets the event first. The lock
+        # makes that check and the set one step, so two loops can't both see it unset.
+        with _DEREGISTERED_REQUEST_LOCK:
+            first = not deregistered_event.is_set()
+            deregistered_event.set()
+        if first:
+            logger.error("%s The watcher is stopping.", DEREGISTERED_MESSAGE)
+        if stop_uploads is not None:
+            stop_uploads()
+        shutdown_event.set()
+
+    return request
 
 
 def _upgrade_restart_requester(
@@ -258,6 +316,8 @@ def build_runtime(
     reporter: EventReporter | None = None,
     shutdown_event: threading.Event | None = None,
     upgrade_restart_event: threading.Event | None = None,
+    deregistered_event: threading.Event | None = None,
+    deregistered_replies: DeregisteredReplies | None = None,
     upgrade_handoff: UpgradeHandoff | None = None,
     report_only: Callable[[str, float], bool] | None = None,
     config_revision: Callable[[], int | None] | None = None,
@@ -281,8 +341,9 @@ def build_runtime(
     :class:`WatcherRuntime` for why.
 
     The remaining keyword arguments let :class:`WatcherSupervisor` rebuild the
-    runtime in place: *reporter*, the two events and *upgrade_handoff* (what the
-    updater remembers of an upgrade it handed to the Windows worker) are shared
+    runtime in place: *reporter*, the three events, *deregistered_replies* (the run of
+    "deregistered" heartbeat replies) and *upgrade_handoff* (what the updater
+    remembers of an upgrade it handed to the Windows worker) are shared
     across rebuilds, *report_only* marks files for the first scan to report without
     uploading (see :class:`FileMonitor`), and *config_revision* /
     *on_config_revision* connect the heartbeat to the config-revision check.
@@ -323,6 +384,8 @@ def build_runtime(
         shutdown_event = threading.Event()
     if upgrade_restart_event is None:
         upgrade_restart_event = threading.Event()
+    if deregistered_event is None:
+        deregistered_event = threading.Event()
     request_upgrade_restart = _upgrade_restart_requester(shutdown_event, upgrade_restart_event)
 
     updater = Updater(
@@ -442,6 +505,10 @@ def build_runtime(
         on_tick=_on_tick,
         config_revision=config_revision,
         on_config_revision=on_config_revision,
+        on_deregistered=_deregistered_requester(
+            shutdown_event, deregistered_event, uploader.request_stop
+        ),
+        deregistered_replies=deregistered_replies,
     )
 
     return WatcherRuntime(
@@ -456,6 +523,7 @@ def build_runtime(
         config_dir=effective_config_dir,
         shutdown_event=shutdown_event,
         upgrade_restart_event=upgrade_restart_event,
+        deregistered_event=deregistered_event,
         upload_worker=upload_worker,
     )
 
@@ -615,6 +683,13 @@ def start_runtime(
     then, and the file monitor's initial scan, the one long step, ends early (the
     monitor was given the same callable by :func:`build_runtime`). The config sync and
     the first heartbeat are not cut short: each has its HTTP timeout.
+
+    Returns without starting the upload worker or the file monitor when the registration
+    was deleted on Data Hub (``rt.deregistered_event``) by the time the heartbeat loop has
+    started. The run of "deregistered" replies is shared with the loops that came before
+    this runtime's, so its startup heartbeat can be the third in a row. The runtime is then
+    left as it is, for the stop that follows to unwind (`stop_runtime`), and nothing retries
+    the pending uploads or scans the backlog in the meantime.
     """
     if started_message is not None:
         rt.reporter.queue_event(
@@ -636,6 +711,8 @@ def start_runtime(
     rt.detector.hydrate_from_state_db()
 
     rt.heartbeat.start()
+    if rt.deregistered_event.is_set():
+        return
     # Start upload polling before the (potentially long) initial scan so
     # queued uploads keep draining while the scan walks the backlog. Not for a
     # watcher that is stopping, which would only start uploads to cut them off.
@@ -738,6 +815,48 @@ def sync_config_to_api(
         checksum=local_checksum,
         config_revision=revision if isinstance(revision, int) else None,
     )
+
+
+# The longest piece of a failed check's message that `watcher_is_deregistered` logs. A proxy or a
+# failed deploy can answer with a whole HTML page.
+_PROBE_MESSAGE_MAX_CHARS = 300
+
+
+def _short(text: str) -> str:
+    """*text* cut to `_PROBE_MESSAGE_MAX_CHARS` characters, with a mark where it was cut."""
+    if len(text) <= _PROBE_MESSAGE_MAX_CHARS:
+        return text
+    omitted = len(text) - _PROBE_MESSAGE_MAX_CHARS
+    return f"{text[:_PROBE_MESSAGE_MAX_CHARS]}… [{omitted} more characters]"
+
+
+def watcher_is_deregistered(client: DataHubClient, watcher_id: str) -> bool:
+    """Whether the server says this watcher's registration was deleted.
+
+    The check that `watch` and the Windows service make at start-up, before they sync
+    the config, so that a watcher that was deregistered while it was stopped refuses to
+    start (`DEREGISTERED_MESSAGE`) instead of running on with 404s. It is true only for
+    the server's "deregistered" reply (`ApiError.is_deregistered_reply`). Any other
+    failure, including a plain `NOT_FOUND` for an ID the server has no row for, a network
+    error or a 5xx, is logged and answered with `False`, so the watcher starts as it did
+    before this check, rather than refusing because of a problem that may pass.
+    """
+    try:
+        client.get_watcher(watcher_id)
+    except ApiError as exc:
+        if exc.is_deregistered_reply:
+            return True
+        logger.warning(
+            "Could not check that this watcher is still registered (%s); starting anyway",
+            _short(exc.message),
+        )
+    except Exception as exc:
+        logger.warning(
+            "Could not check that this watcher is still registered (%s: %s); starting anyway",
+            type(exc).__name__,
+            _short(str(exc)),
+        )
+    return False
 
 
 def _stop_deadline(system_shutdown: bool) -> float:
@@ -848,6 +967,7 @@ def stop_runtime(
     stopped_message: str,
     system_shutdown: bool = False,
     stop_reason: str | None = None,
+    deregistered: bool = False,
 ) -> None:
     """Shut everything down in reverse order and flush pending events.
 
@@ -872,6 +992,13 @@ def stop_runtime(
        *stop_reason*.
     7. The state database is closed, unless a thread that uploads is still running.
 
+    A watcher that was *deregistered* on Data Hub (its registration was deleted) has
+    nobody to report to: the server answers the event and the final heartbeat with the
+    same 404 as the heartbeats before them. Its stop runs steps 1 to 4 as a Windows
+    shutdown does (uploads are cut off first, every join takes at most 1 s) and skips 5
+    and 6. The stop itself sends nothing to Data Hub, queued events included, and the
+    state database is closed as in any stop.
+
     Steps 4 to 6 are `_stop_heartbeat_and_report`. In auto mode a file whose upload was
     cut off is uploaded after the next start, from its `pending_uploads` row. A file that
     someone requested is cancelled by the plain `stopped` heartbeat of a normal stop, and
@@ -882,10 +1009,13 @@ def stop_runtime(
     deadline = _stop_deadline(system_shutdown)
     if system_shutdown:
         stop_reason = SYSTEM_SHUTDOWN_STATUS_REASON
+    if system_shutdown or deregistered:
         # The stability checker can be uploading a file on its own thread. Cut that
         # off, and the worker's uploads with it, before any join, so each join below
         # is short: with no time to wait for the parts in flight, they are cut off
-        # at their next read and the file is retried after the restart.
+        # at their next read, and an auto-mode file is retried at the next start. A
+        # deregistered watcher takes the same short stop: it has nothing left to wait
+        # for, and its uploads have to stop at once.
         rt.uploader.abort()
         monitor_stopped = rt.monitor.stop(
             timeout=SYSTEM_SHUTDOWN_JOIN_SECONDS, observer_timeout=SYSTEM_SHUTDOWN_JOIN_SECONDS
@@ -917,14 +1047,19 @@ def stop_runtime(
             "File monitor still running at shutdown; leaving the state DB open so "
             "the upload it is running can end without a closed-DB error"
         )
-    _stop_heartbeat_and_report(
-        rt.heartbeat,
-        rt.reporter,
-        stopped_message=stopped_message,
-        system_shutdown=system_shutdown,
-        stop_reason=stop_reason,
-        deadline=deadline,
-    )
+    if deregistered:
+        # The loop ended itself when it saw the 404s. Nothing is sent: not the event, and
+        # not the final heartbeat.
+        rt.heartbeat.stop_loop(join_timeout=STOP_MIN_WAIT_SECONDS)
+    else:
+        _stop_heartbeat_and_report(
+            rt.heartbeat,
+            rt.reporter,
+            stopped_message=stopped_message,
+            system_shutdown=system_shutdown,
+            stop_reason=stop_reason,
+            deadline=deadline,
+        )
     if upload_worker_stopped and monitor_stopped:
         rt.state_db.close()
 
@@ -1069,6 +1204,13 @@ class WatcherSupervisor:
         self.reporter = EventReporter(client, self.watcher_id)
         self.shutdown_event = threading.Event()
         self.upgrade_restart_event = threading.Event()
+        # Set, with `shutdown_event`, when the heartbeats show that the registration was
+        # deleted on Data Hub. Shared by every runtime and by the waiting state.
+        self.deregistered_event = threading.Event()
+        # The run of heartbeats the server answered with its "deregistered" reply, shared by
+        # every heartbeat loop this supervisor builds (watching or waiting), so a watcher that
+        # changes state can't postpone its stop by starting the count again.
+        self._deregistered_replies = DeregisteredReplies()
         # What the updater remembers of an upgrade it handed to the Windows worker.
         # Every updater this supervisor builds gets it, so a rebuilt runtime keeps it.
         self._handoff = upgrade_handoff if upgrade_handoff is not None else UpgradeHandoff()
@@ -1168,8 +1310,17 @@ class WatcherSupervisor:
         self._wake.set()
 
     def _stopping(self) -> bool:
-        """A stop was requested, or the runtime asked to shut down for an update."""
-        return self._stop_requested.is_set() or self.shutdown_event.is_set()
+        """A stop was requested, or the runtime asked to shut down.
+
+        That is an update restart, or the registration having been deleted on Data Hub. A
+        deregistration sets `deregistered_event` first and `shutdown_event` a moment later,
+        so both are read: nothing is built or started in between.
+        """
+        return (
+            self._stop_requested.is_set()
+            or self.shutdown_event.is_set()
+            or self.deregistered_event.is_set()
+        )
 
     def start(self) -> None:
         """Sync config, apply a pending revision, then start watching or waiting."""
@@ -1214,9 +1365,9 @@ class WatcherSupervisor:
         """Handle pending work, waiting up to *timeout* for some.
 
         Returns `True` once the runtime asks to shut down (an auto-update
-        restart), so the caller can stop and exit. Once :meth:`request_stop` has
-        been called it leaves pending work alone and returns `False`: the caller
-        is about to stop.
+        restart, or the registration having been deleted on Data Hub), so the
+        caller can stop and exit. Once :meth:`request_stop` has been called it
+        leaves pending work alone and returns `False`: the caller is about to stop.
         """
         self._wake.wait(timeout)
         self._wake.clear()
@@ -1256,6 +1407,8 @@ class WatcherSupervisor:
     def classify_shutdown(self) -> ShutdownReason:
         if self.rt is not None:
             return classify_shutdown(self.rt, role=self.role)
+        if self.deregistered_event.is_set():
+            return _deregistered_shutdown(self.role)
         if self.upgrade_restart_event.is_set():
             return ShutdownReason(
                 is_upgrade_restart=True,
@@ -1282,6 +1435,11 @@ class WatcherSupervisor:
         operator asked for (*operator_stop*, Ctrl+C in the CLI) is never marked, even
         with an update in progress.
 
+        When the registration was deleted on Data Hub (`deregistered_event` is set),
+        whatever the cause of the stop, no `watcher_stopped` event and no final
+        heartbeat are sent, because the server would answer both with a 404. The stop
+        is short (see `stop_runtime`), and the state database is closed as usual.
+
         The updater is frozen first, and the reason is chosen once, here, before the
         stop begins to wind anything down: the heartbeat loop keeps ticking while uploads
         finish, and a tick that runs during the rest of the stop can't dispatch an update
@@ -1291,25 +1449,30 @@ class WatcherSupervisor:
         stop_reason = self._final_stop_reason(
             system_shutdown=system_shutdown, operator_stop=operator_stop, handed_off=handed_off
         )
+        deregistered = self.deregistered_event.is_set()
         if self.rt is not None:
             stop_runtime(
                 self.rt,
                 stopped_message=stopped_message,
                 system_shutdown=system_shutdown,
                 stop_reason=stop_reason,
+                deregistered=deregistered,
             )
             self.rt = None
         elif self._waiting is not None:
             # Only the heartbeat loop runs while waiting: the same limit and the same order
             # apply, with no uploads to wait for.
-            _stop_heartbeat_and_report(
-                self._waiting.heartbeat,
-                self.reporter,
-                stopped_message=stopped_message,
-                system_shutdown=system_shutdown,
-                stop_reason=stop_reason,
-                deadline=_stop_deadline(system_shutdown),
-            )
+            if deregistered:
+                self._waiting.heartbeat.stop_loop(join_timeout=STOP_MIN_WAIT_SECONDS)
+            else:
+                _stop_heartbeat_and_report(
+                    self._waiting.heartbeat,
+                    self.reporter,
+                    stopped_message=stopped_message,
+                    system_shutdown=system_shutdown,
+                    stop_reason=stop_reason,
+                    deadline=_stop_deadline(system_shutdown),
+                )
             self._waiting = None
         # The state DB of a runtime that was cut off, once its threads have exited.
         self._reap_cut_off()
@@ -1456,6 +1619,12 @@ class WatcherSupervisor:
             logger.exception("Could not switch to config revision %d", number)
             self._roll_back(old_cfg, previous_file, restart=running)
             self._reject(number, f"Could not start with the new config: {exc}")
+            return False
+        if self.deregistered_event.is_set():
+            # The registration was deleted while the old loops were stopping, so
+            # `_start_watching_or_wait` started nothing, and the watcher is stopping for
+            # good. The revision is neither recorded nor reported: nothing runs it, and the
+            # server would answer with the same 404.
             return False
         # Kept only once the new config runs. When called from `start`, before
         # anything runs, `start` builds the first runtime with them next.
@@ -1799,7 +1968,19 @@ class WatcherSupervisor:
         *already_started* is for the rebuild of a runtime of a watcher that was
         running: when the folder is missing, the waiting state it moves to queues
         no started event, because nothing has resumed.
+
+        Builds nothing once the registration was deleted on Data Hub
+        (`deregistered_event`). A rebuild can be in `_teardown_for_rebuild`, waiting for
+        uploads or for the heartbeat loop to stop, when the third reply arrives, and
+        the runtime it then builds would retry the pending uploads and scan and upload the
+        backlog while the watcher stops.
+
+        The runtime's own startup heartbeat can be the third reply too (`start_runtime`). It
+        is then kept in `self.rt`, with no thread of it running, for the stop to unwind, and
+        the started event is not queued: it could never be sent.
         """
+        if self.deregistered_event.is_set():
+            return
         rules = self._report_only_rules if report_only_rules is None else report_only_rules
         folder = self.cfg.instrument.watch_directory
         # The look is bounded (`FolderProbe`) but is not cut short by a stop: this is the
@@ -1827,6 +2008,8 @@ class WatcherSupervisor:
             reporter=self.reporter,
             shutdown_event=self.shutdown_event,
             upgrade_restart_event=self.upgrade_restart_event,
+            deregistered_event=self.deregistered_event,
+            deregistered_replies=self._deregistered_replies,
             upgrade_handoff=self._handoff,
             report_only=_any_rule(rules),
             config_revision=lambda: self._applied,
@@ -1855,6 +2038,8 @@ class WatcherSupervisor:
         # the next check, and the runtime is rebuilt with a scan of the new one.
         self._watch_identity = None if self._identity_untrusted else look.identity
         self._watching_since = time.monotonic()
+        if self.deregistered_event.is_set():
+            return
         if announce_late:
             self.reporter.queue_event(
                 WatcherEvent(event_type=EventType.WATCHER_STARTED, message=started_message)
@@ -1873,7 +2058,13 @@ class WatcherSupervisor:
 
         A watcher that was already running passes no *started_message*: it has
         started, so the move to waiting queues the error only.
+
+        Does nothing once the registration was deleted on Data Hub (see
+        `_start_watching_or_wait`): a waiting loop would only send heartbeats that get the
+        same 404.
         """
+        if self.deregistered_event.is_set():
+            return
         self._watch_identity = None
         self._waiting_problem_looks = 0
         new_stretch = self._waiting_event_reason is None
@@ -1922,6 +2113,8 @@ class WatcherSupervisor:
             status_reason=reason,
             config_revision=lambda: self._applied,
             on_config_revision=self._on_heartbeat_revision,
+            on_deregistered=_deregistered_requester(self.shutdown_event, self.deregistered_event),
+            deregistered_replies=self._deregistered_replies,
         )
         if new_stretch and started_message is not None:
             self.reporter.queue_event(
