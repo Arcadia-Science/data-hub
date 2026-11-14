@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { WatcherRosterItem } from "@/lib/api/watcher-roster";
 import {
   type ComputerWatcher,
   rolloutPill,
@@ -6,6 +7,7 @@ import {
   sharedComputerMarker,
   sharedComputerWithByWatcher,
   sortActiveWatchers,
+  splitWatcherRoster,
 } from "@/lib/watchers/roster";
 
 describe("rolloutPill", () => {
@@ -33,13 +35,33 @@ describe("rolloutPill", () => {
     ).toEqual({ text: "1 of 2 on 1.4.2", tone: "behind" });
   });
 
-  it("counts a watcher ahead of the latest version as behind", () => {
+  it("counts a watcher ahead of the latest version as current", () => {
+    // After a rollback (latest 1.4.2 down to 1.4.1) a watcher never
+    // downgrades, so the ones that already updated stay on the latest.
     expect(
       rolloutPill({
-        activeVersions: ["1.5.0", "1.4.2"],
+        activeVersions: ["1.4.2", "1.4.1", "1.4.1"],
+        latestVersion: "1.4.1",
+      })
+    ).toEqual({ text: "3 of 3 on 1.4.1", tone: "current" });
+    expect(
+      rolloutPill({
+        activeVersions: ["1.5.0", "1.4.0"],
         latestVersion: "1.4.2",
       })
     ).toEqual({ text: "1 of 2 on 1.4.2", tone: "behind" });
+  });
+
+  it("counts a version that can't be compared as behind unless it matches", () => {
+    expect(
+      rolloutPill({
+        activeVersions: ["dev-build", "", "1.4.2"],
+        latestVersion: "1.4.2",
+      })
+    ).toEqual({ text: "1 of 3 on 1.4.2", tone: "behind" });
+    expect(
+      rolloutPill({ activeVersions: [" 1.4.2 "], latestVersion: "1.4.2" })
+    ).toEqual({ text: "1 of 1 on 1.4.2", tone: "current" });
   });
 
   it("is hidden when no latest version is set", () => {
@@ -169,6 +191,39 @@ describe("sharedComputerWithByWatcher", () => {
     expect(shared.get("w2")).toEqual([]);
   });
 
+  it("treats a blank hostname as missing, so blank ones don't pair up", () => {
+    const shared = sharedComputerWithByWatcher([
+      watcher("w1", "plate-a", ""),
+      watcher("w2", "plate-b", "   "),
+      watcher("w3", "plate-c", ""),
+    ]);
+    expect(shared.get("w1")).toEqual([]);
+    expect(shared.get("w2")).toEqual([]);
+    expect(shared.get("w3")).toEqual([]);
+  });
+
+  it("pairs hostnames that differ only in surrounding spaces", () => {
+    const shared = sharedComputerWithByWatcher([
+      watcher("w1", "plate-a", "LAB-PC-04 "),
+      watcher("w2", "plate-b", " lab-pc-04"),
+    ]);
+    expect(shared.get("w1")?.map((other) => other.instrumentId)).toEqual([
+      "plate-b",
+    ]);
+  });
+
+  it("sorts numbers in instrument names by value", () => {
+    const numbered = sharedComputerWithByWatcher([
+      watcher("w1", "reader-1", "PC-8", { displayName: "Reader 1" }),
+      watcher("w2", "reader-10", "PC-8", { displayName: "Reader 10" }),
+      watcher("w3", "reader-2", "PC-8", { displayName: "Reader 2" }),
+    ]);
+    expect(numbered.get("w1")?.map((other) => other.displayName)).toEqual([
+      "Reader 2",
+      "Reader 10",
+    ]);
+  });
+
   it("sorts each list by instrument name", () => {
     const shared = sharedComputerWithByWatcher([
       watcher("w1", "z-plate", "PC-7", { displayName: "Zeta Plate" }),
@@ -234,6 +289,22 @@ describe("sortActiveWatchers", () => {
     ]);
   });
 
+  it("treats a blank computer name as missing and sorts it last", () => {
+    const blank = [
+      row("blank", "Alpha", "  "),
+      row("empty", "Beta", ""),
+      row("named", "Gamma", "PC-1"),
+    ];
+    expect(sortActiveWatchers(blank, "ascending").map((r) => r.label)).toEqual([
+      "named",
+      "blank",
+      "empty",
+    ]);
+    expect(sortActiveWatchers(blank, "descending").map((r) => r.label)).toEqual(
+      ["named", "blank", "empty"]
+    );
+  });
+
   it("breaks a tie between computers by instrument name", () => {
     const tied = [row("w-b", "Beta", "PC-1"), row("w-a", "Alpha", "pc-1")];
     expect(sortActiveWatchers(tied, "ascending").map((r) => r.label)).toEqual([
@@ -246,5 +317,71 @@ describe("sortActiveWatchers", () => {
     const before = rows.map((r) => r.label);
     sortActiveWatchers(rows, "ascending");
     expect(rows.map((r) => r.label)).toEqual(before);
+  });
+});
+
+describe("splitWatcherRoster", () => {
+  const base = {
+    configState: "none" as const,
+    deregisteredByName: null,
+    effectiveStatus: "online" as const,
+    hostname: "PC-1",
+    instrumentDisplayName: "Plate Reader A",
+    instrumentId: "plate-a",
+    lastHeartbeatAt: null,
+    sharedComputerWith: [],
+    statusReason: null,
+    watcherVersion: "1.4.2",
+  };
+  const asItem = (value: object) => value as unknown as WatcherRosterItem;
+
+  it("sends only the fields each table uses", () => {
+    const { active, deregistered } = splitWatcherRoster([
+      // Fields the tables don't read must not cross to the client.
+      asItem({ ...base, id: "w1", deletedAt: null, configRevision: 3 }),
+      asItem({
+        ...base,
+        id: "w2",
+        deletedAt: new Date("2026-02-01T00:00:00Z"),
+        configRevision: 4,
+      }),
+    ]);
+    expect(Object.keys(active[0]).sort()).toEqual([
+      "configState",
+      "effectiveStatus",
+      "hostname",
+      "id",
+      "instrumentDisplayName",
+      "instrumentId",
+      "lastHeartbeatAt",
+      "sharedComputerWith",
+      "statusReason",
+      "watcherVersion",
+    ]);
+    expect(Object.keys(deregistered[0]).sort()).toEqual([
+      "deletedAt",
+      "deregisteredByName",
+      "hostname",
+      "id",
+      "instrumentDisplayName",
+      "instrumentId",
+      "watcherVersion",
+    ]);
+  });
+
+  it("lists deregistered watchers newest deregistration first", () => {
+    const at = (day: number) => new Date(Date.UTC(2026, 0, day));
+    const { deregistered } = splitWatcherRoster(
+      [
+        { id: "old", deletedAt: at(2) },
+        { id: "newest", deletedAt: at(20) },
+        { id: "middle", deletedAt: at(10) },
+      ].map((item) => asItem({ ...base, ...item }))
+    );
+    expect(deregistered.map((watcher) => watcher.id)).toEqual([
+      "newest",
+      "middle",
+      "old",
+    ]);
   });
 });

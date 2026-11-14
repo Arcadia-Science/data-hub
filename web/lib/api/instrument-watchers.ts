@@ -20,10 +20,21 @@ import { instruments, watchers } from "@/lib/db/schema";
 import {
   type Connection,
   type ConnectionWatcher,
+  compareInstrumentNames,
   computeConnection,
   deriveConfigState,
   type InstrumentWatcher,
 } from "@/lib/instruments/connection";
+
+/**
+ * The computer a watcher runs on, for matching watchers on the same one:
+ * trimmed, without case, and null when the hostname is blank. The same rule as
+ * `computerKey` in `lib/instruments/connection.ts`, which Settings › Watchers
+ * uses in JS. Change them together.
+ */
+const hostKeySql = sql<
+  string | null
+>`lower(nullif(trim(${watchers.hostname}), ''))`;
 
 /** The most recently deregistered watcher of an instrument. */
 export interface PastWatcherRef {
@@ -73,7 +84,7 @@ export async function getInstrumentWatcherInfo(
         id: watchers.id,
         instrumentId: watchers.instrumentId,
         hostname: watchers.hostname,
-        hostKey: sql<string | null>`lower(${watchers.hostname})`,
+        hostKey: hostKeySql,
         osInfo: watchers.osInfo,
         watcherVersion: watchers.watcherVersion,
         status: watchers.status,
@@ -126,15 +137,12 @@ export async function getInstrumentWatcherInfo(
           .select({
             instrumentId: watchers.instrumentId,
             displayName: instruments.displayName,
-            hostKey: sql<string>`lower(${watchers.hostname})`,
+            hostKey: hostKeySql,
           })
           .from(watchers)
           .innerJoin(instruments, eq(instruments.id, watchers.instrumentId))
           .where(
-            and(
-              isNull(watchers.deletedAt),
-              inArray(sql`lower(${watchers.hostname})`, hostKeys)
-            )
+            and(isNull(watchers.deletedAt), inArray(hostKeySql, hostKeys))
           );
 
   const pastByInstrument = new Map(
@@ -181,11 +189,7 @@ export async function getInstrumentWatcherInfo(
             instrumentId: other.instrumentId,
             displayName: other.displayName,
           }))
-          .sort(
-            (a, b) =>
-              a.displayName.localeCompare(b.displayName) ||
-              a.instrumentId.localeCompare(b.instrumentId)
-          ),
+          .sort(compareInstrumentNames),
       };
     }
 

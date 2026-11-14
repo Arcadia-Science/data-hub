@@ -7,10 +7,29 @@ import {
   DeregisteredWatchersTable,
   WatchersTableSkeleton,
 } from "@/components/watchers/watchers-table";
-import type { WatcherRosterItem } from "@/lib/api/watcher-roster";
+import type {
+  ActiveWatcherRow,
+  DeregisteredWatcherRow,
+} from "@/lib/watchers/roster";
 
+// The loaded layout without its data: the tab bar (labels only, no counts) and
+// the active table's columns, so the list doesn't shift when it arrives.
 export function WatchersViewSkeleton() {
-  return <WatchersTableSkeleton />;
+  return (
+    <Tabs value="active">
+      <TabsList aria-hidden="true" variant="line">
+        <TabsTrigger disabled tabIndex={-1} value="active">
+          Active
+        </TabsTrigger>
+        <TabsTrigger disabled tabIndex={-1} value="deregistered">
+          Deregistered
+        </TabsTrigger>
+      </TabsList>
+      <div className="mt-2">
+        <WatchersTableSkeleton />
+      </div>
+    </Tabs>
+  );
 }
 
 const TABS = ["active", "deregistered"] as const;
@@ -23,8 +42,8 @@ export function WatchersView({
   activeData,
   deregisteredData,
 }: {
-  activeData: WatcherRosterItem[];
-  deregisteredData: WatcherRosterItem[];
+  activeData: ActiveWatcherRow[];
+  deregisteredData: DeregisteredWatcherRow[];
 }) {
   const [tab, setTab] = useQueryState(
     "tab",

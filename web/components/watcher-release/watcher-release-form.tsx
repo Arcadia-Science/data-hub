@@ -143,7 +143,7 @@ export function WatcherReleaseForm({
     >
       <Card>
         <CardHeader>
-          <h2 className="font-medium text-base leading-normal">
+          <h2 className="font-semibold text-base leading-normal">
             Release version
           </h2>
           <CardDescription>
@@ -170,7 +170,7 @@ export function WatcherReleaseForm({
                       id={field.name}
                       isInvalid={isInvalid}
                       label="Latest version"
-                      noneLabel="None — disable self-updates"
+                      noneLabel="None — pause updates"
                       onBlur={field.handleBlur}
                       onChange={field.handleChange}
                       placeholder="e.g. 0.4.2"
@@ -198,7 +198,7 @@ export function WatcherReleaseForm({
                       id={field.name}
                       isInvalid={isInvalid}
                       label="Minimum supported version"
-                      noneLabel="None — no version floor"
+                      noneLabel="None — no minimum"
                       onBlur={field.handleBlur}
                       onChange={field.handleChange}
                       placeholder="e.g. 0.1.0"

@@ -61,6 +61,36 @@ export interface SharedComputerInstrument {
 }
 
 /**
+ * Orders instruments by name for any list that names them: case-insensitive,
+ * numbers by value ("Reader 2" before "Reader 10"), then by id. The watcher
+ * page, the instrument list's tooltip and Settings › Watchers all name shared
+ * instruments through this one rule, so they list them in the same order.
+ */
+export function compareInstrumentNames(
+  a: SharedComputerInstrument,
+  b: SharedComputerInstrument
+): number {
+  return (
+    a.displayName.localeCompare(b.displayName, undefined, {
+      numeric: true,
+      sensitivity: "base",
+    }) || a.instrumentId.localeCompare(b.instrumentId)
+  );
+}
+
+/**
+ * The computer a hostname names, for comparing computers: trimmed and without
+ * case, as Windows compares names. Null when the hostname is missing or blank,
+ * since registration accepts an empty string. The shared-computer join in
+ * `lib/api/instrument-watchers.ts` applies the same rule in SQL
+ * (`lower(nullif(trim(hostname), ''))`), so change them together.
+ */
+export function computerKey(hostname: string | null): string | null {
+  const trimmed = hostname?.trim() ?? "";
+  return trimmed === "" ? null : trimmed.toLowerCase();
+}
+
+/**
  * The one active watcher of an instrument. `status` is the effective status
  * (see `computeEffectiveStatus`), so it can be `stale`, which the database
  * never stores.

@@ -33,11 +33,12 @@ import {
   RestartPendingBadge,
 } from "@/components/watchers/watcher-config-status";
 import { WatcherStatusBadge } from "@/components/watchers/watcher-status-badge";
-import type { WatcherRosterItem } from "@/lib/api/watcher-roster";
 import { formatDate } from "@/lib/date";
 import type { InstrumentWatcherConfigState } from "@/lib/instruments/connection";
 import {
+  type ActiveWatcherRow,
   type ComputerSort,
+  type DeregisteredWatcherRow,
   type SharedComputerMarker,
   sharedComputerMarker,
   sortActiveWatchers,
@@ -62,6 +63,9 @@ export function WatchersTableSkeleton({ rows = 7 }: { rows?: number }) {
             <TableHead>Status</TableHead>
             <TableHead>Settings</TableHead>
             <TableHead>Last heartbeat</TableHead>
+            <TableHead className="w-12">
+              <span className="sr-only">Actions</span>
+            </TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -85,6 +89,9 @@ export function WatchersTableSkeleton({ rows = 7 }: { rows?: number }) {
               <TableCell>
                 <Skeleton className="h-4 w-20" />
               </TableCell>
+              <TableCell>
+                <Skeleton className="ml-auto size-7" />
+              </TableCell>
             </TableRow>
           ))}
         </TableBody>
@@ -98,8 +105,14 @@ function Dash() {
   return <span className="text-muted-foreground">—</span>;
 }
 
+/** The computer's name, or a dash when the watcher reported none or a blank one. */
+function ComputerName({ hostname }: { hostname: string | null }) {
+  const name = hostname?.trim();
+  return name ? <span className="font-mono text-xs">{name}</span> : <Dash />;
+}
+
 /** Active watchers, sortable by computer. Rows open the instrument's watcher page. */
-export function ActiveWatchersTable({ rows }: { rows: WatcherRosterItem[] }) {
+export function ActiveWatchersTable({ rows }: { rows: ActiveWatcherRow[] }) {
   const [computerSort, setComputerSort] = useState<ComputerSort>(null);
   const sorted = useMemo(
     () => sortActiveWatchers(rows, computerSort),
@@ -151,11 +164,7 @@ export function ActiveWatchersTable({ rows }: { rows: WatcherRosterItem[] }) {
                 </TableCell>
                 <TableCell>
                   <div className="flex flex-wrap items-center gap-2">
-                    {row.hostname ? (
-                      <span className="font-mono text-xs">{row.hostname}</span>
-                    ) : (
-                      <Dash />
-                    )}
+                    <ComputerName hostname={row.hostname} />
                     {marker ? (
                       <RowControl>
                         <SharedComputerBadge marker={marker} />
@@ -204,7 +213,7 @@ export function ActiveWatchersTable({ rows }: { rows: WatcherRosterItem[] }) {
 export function DeregisteredWatchersTable({
   rows,
 }: {
-  rows: WatcherRosterItem[];
+  rows: DeregisteredWatcherRow[];
 }) {
   const timeZone = useViewerTimeZone();
 
@@ -241,11 +250,7 @@ export function DeregisteredWatchersTable({
                 </RowLink>
               </TableCell>
               <TableCell>
-                {row.hostname ? (
-                  <span className="font-mono text-xs">{row.hostname}</span>
-                ) : (
-                  <Dash />
-                )}
+                <ComputerName hostname={row.hostname} />
               </TableCell>
               <TableCell className="font-mono text-xs">
                 {row.watcherVersion ?? <Dash />}

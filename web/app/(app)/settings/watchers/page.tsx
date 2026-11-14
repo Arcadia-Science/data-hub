@@ -16,7 +16,7 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { users, watcherReleaseConfig } from "@/lib/db/schema";
 import { fetchWatcherVersions } from "@/lib/pypi";
-import { rolloutPill } from "@/lib/watchers/roster";
+import { rolloutPill, splitWatcherRoster } from "@/lib/watchers/roster";
 
 const description =
   "The program on each instrument PC that uploads files, and the version they all run.";
@@ -150,8 +150,7 @@ async function AllWatchersSection() {
     getWatcherRoster(),
     getLatestWatcherVersion(),
   ]);
-  const active = roster.filter((watcher) => watcher.deletedAt === null);
-  const deregistered = roster.filter((watcher) => watcher.deletedAt !== null);
+  const { active, deregistered } = splitWatcherRoster(roster);
 
   const pill = rolloutPill({
     activeVersions: active.map((watcher) => watcher.watcherVersion),

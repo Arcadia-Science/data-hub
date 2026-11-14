@@ -6,7 +6,9 @@ import {
 } from "@/lib/api/watcher-status";
 import {
   type Connection,
+  compareInstrumentNames,
   computeConnection,
+  computerKey,
   deriveConfigState,
   type InstrumentBadgeState,
   type InstrumentLifecycleStatus,
@@ -425,5 +427,46 @@ describe("deriveConfigState", () => {
 
   it("is none for a superseded current revision", () => {
     expect(deriveConfigState("superseded", false)).toBe("none");
+  });
+});
+
+describe("compareInstrumentNames", () => {
+  const named = (displayName: string, instrumentId = displayName) => ({
+    displayName,
+    instrumentId,
+  });
+
+  it("orders names without case and with numbers by value", () => {
+    const sorted = [
+      named("Reader 10"),
+      named("reader 2"),
+      named("Alpha"),
+      named("Reader 1"),
+    ].sort(compareInstrumentNames);
+    expect(sorted.map((item) => item.displayName)).toEqual([
+      "Alpha",
+      "Reader 1",
+      "reader 2",
+      "Reader 10",
+    ]);
+  });
+
+  it("breaks a tie between equal names by instrument id", () => {
+    const sorted = [named("Plate", "b"), named("plate", "a")].sort(
+      compareInstrumentNames
+    );
+    expect(sorted.map((item) => item.instrumentId)).toEqual(["a", "b"]);
+  });
+});
+
+describe("computerKey", () => {
+  it("ignores case and surrounding spaces", () => {
+    expect(computerKey(" LAB-PC-01 ")).toBe("lab-pc-01");
+  });
+
+  it("is null for a missing or blank hostname", () => {
+    expect(computerKey(null)).toBeNull();
+    expect(computerKey("")).toBeNull();
+    expect(computerKey("   ")).toBeNull();
   });
 });

@@ -1,16 +1,16 @@
 // Every watcher, active and deregistered, for Settings › Watchers. One query
 // reads the watchers with their instruments and with who deregistered each.
 // The computers that active watchers share come from the same rows, so the list
-// makes no query per row. `getWatcherList` keeps its shape for the MCP tools.
+// makes no query per row. `getWatcherList` keeps its shape for the MCP tools:
+// both build their rows from the same columns and mapper.
 
 import { desc, eq } from "drizzle-orm";
 import { actorDisplayName, resolveActor } from "@/lib/api/actor";
 import {
-  currentRevisionStatusSql,
-  pcEditAwaitingRestartSql,
-} from "@/lib/api/watcher-config/revisions";
-import { computeEffectiveStatus } from "@/lib/api/watcher-status";
-import type { WatcherListItem } from "@/lib/api/watchers";
+  toWatcherListItem,
+  type WatcherListItem,
+  watcherListColumns,
+} from "@/lib/api/watchers";
 import { db } from "@/lib/db";
 import {
   instruments,
@@ -45,20 +45,7 @@ export interface WatcherRosterItem extends WatcherListItem {
 export async function getWatcherRoster(): Promise<WatcherRosterItem[]> {
   const rows = await db
     .select({
-      id: watchers.id,
-      instrumentId: watchers.instrumentId,
-      instrumentDisplayName: instruments.displayName,
-      hostname: watchers.hostname,
-      watcherVersion: watchers.watcherVersion,
-      status: watchers.status,
-      statusReason: watchers.statusReason,
-      configRevision: watchers.configRevision,
-      appliedConfigRevision: watchers.appliedConfigRevision,
-      configRevisionStatus: currentRevisionStatusSql,
-      pcEditAwaitingRestart: pcEditAwaitingRestartSql,
-      lastHeartbeatAt: watchers.lastHeartbeatAt,
-      createdAt: watchers.createdAt,
-      deletedAt: watchers.deletedAt,
+      ...watcherListColumns,
       deregisteredByUserId: watchers.deregisteredBy,
       deregisteredByTokenId: watchers.deregisteredByToken,
       deregisteredByName: users.name,
@@ -99,20 +86,7 @@ export async function getWatcherRoster(): Promise<WatcherRosterItem[]> {
       tokenRevokedAt: row.deregisteredByTokenRevokedAt,
     });
     return {
-      id: row.id,
-      instrumentId: row.instrumentId,
-      instrumentDisplayName: row.instrumentDisplayName,
-      hostname: row.hostname,
-      watcherVersion: row.watcherVersion,
-      effectiveStatus: computeEffectiveStatus(row),
-      statusReason: row.statusReason,
-      configRevision: row.configRevision,
-      appliedConfigRevision: row.appliedConfigRevision,
-      configRevisionStatus: row.configRevisionStatus,
-      pcEditAwaitingRestart: row.pcEditAwaitingRestart,
-      lastHeartbeatAt: row.lastHeartbeatAt,
-      createdAt: row.createdAt,
-      deletedAt: row.deletedAt,
+      ...toWatcherListItem(row),
       configState: deriveConfigState(
         row.configRevisionStatus,
         row.pcEditAwaitingRestart

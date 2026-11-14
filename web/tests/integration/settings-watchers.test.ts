@@ -1,3 +1,4 @@
+import { and, eq, isNull } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { instruments, watchers } from "@/lib/db/schema";
 import {
@@ -27,6 +28,13 @@ describe("Settings › Watchers and the old /watchers list", () => {
       isAdmin: true,
       name: "Admin",
       email: "admin@settings-watchers.test",
+    });
+    // Who deregistered the past watchers. A separate name, so the check that
+    // the list names them can't match the signed-in admin's own name.
+    const deregistrar = await seedTestUser({
+      isAdmin: true,
+      name: "Past Deregistrar",
+      email: "deregistrar@settings-watchers.test",
     });
     const member = await seedTestUser({
       name: "Member",
@@ -87,7 +95,7 @@ describe("Settings › Watchers and the old /watchers list", () => {
         status: "watching",
         lastHeartbeatAt: new Date(now - MINUTE_MS),
       },
-      // A deregistered watcher with no current one, deregistered by the admin.
+      // A deregistered watcher with no current one, deregistered by another admin.
       {
         instrumentId: "roster-scanner-d",
         hostname: "ROSTER-PC-04",
@@ -95,7 +103,18 @@ describe("Settings › Watchers and the old /watchers list", () => {
         status: "stopped",
         createdAt: new Date(now - 10 * DAY_MS),
         deletedAt: new Date(now - 2 * DAY_MS),
-        deregisteredBy: admin.userId,
+        deregisteredBy: deregistrar.userId,
+      },
+      // A deregistered watcher whose hostname matches an active watcher's
+      // (differing in case). It must not add a shared-computer marker.
+      {
+        instrumentId: "roster-balance-c",
+        hostname: "roster-pc-03",
+        watcherVersion: "9.9.0",
+        status: "stopped",
+        createdAt: new Date(now - 20 * DAY_MS),
+        deletedAt: new Date(now - DAY_MS),
+        deregisteredBy: deregistrar.userId,
       },
     ]);
   });
@@ -160,13 +179,18 @@ describe("Settings › Watchers and the old /watchers list", () => {
       expect(html).not.toContain("couldn’t load");
       expect(html).toContain("Release version");
       expect(html).toContain("All watchers");
-      // Three active watchers and one deregistered one.
+      // Three active watchers and two deregistered ones.
       expect(html).toContain("Active (3)");
-      expect(html).toContain("Deregistered (1)");
+      expect(html).toContain("Deregistered (2)");
       // Two of the three active watchers run the latest version.
       expect(html).toContain("2 of 3 on 9.9.9");
-      // The two watchers on one computer each carry the shared marker.
-      expect(html).toContain("2 on this computer");
+      // The two watchers on one computer each carry the shared marker. The
+      // third active watcher's computer matches a deregistered watcher's
+      // hostname, which counts for nothing, so it has no marker.
+      expect(html.match(/\d on this computer/g)).toEqual([
+        "2 on this computer",
+        "2 on this computer",
+      ]);
       // Each active row links to its instrument's watcher page.
       expect(html).toContain('href="/instruments/roster-plate-a/watcher"');
     });
@@ -184,6 +208,55 @@ describe("Settings › Watchers and the old /watchers list", () => {
       const html = await res.text();
       expect(res.status).toBe(200);
       expect(html).not.toContain('href="/watchers"');
+    });
+
+    it("lists deregistered watchers on ?tab=deregistered, with who deregistered each", async () => {
+      const [scanner] = await getTestDb()
+        .select({ id: watchers.id })
+        .from(watchers)
+        .where(eq(watchers.instrumentId, "roster-scanner-d"));
+
+      const res = await page(
+        "/settings/watchers?tab=deregistered",
+        adminCookie
+      );
+      const html = await res.text();
+      expect(res.status).toBe(200);
+      expect(html).toContain("Deregistered by");
+      // Both rows were deregistered by the same person, and the column names
+      // them.
+      expect(html.match(/>Past Deregistrar</g)).toHaveLength(2);
+      // Each row opens the registration it names, not the instrument's
+      // current watcher.
+      expect(html).toContain(
+        `href="/instruments/roster-scanner-d/watcher?watcher=${scanner.id}"`
+      );
+    });
+  });
+
+  describe("deregistering from the row menu", () => {
+    it("is refused for a member, and leaves the watcher registered", async () => {
+      const [active] = await getTestDb()
+        .select({ id: watchers.id })
+        .from(watchers)
+        .where(
+          and(
+            eq(watchers.instrumentId, "roster-balance-c"),
+            isNull(watchers.deletedAt)
+          )
+        );
+
+      const res = await api(`/api/v1/watchers/${active.id}`, {
+        method: "DELETE",
+        headers: { Cookie: memberCookie },
+      });
+      expect(res.status).toBe(403);
+
+      const [after] = await getTestDb()
+        .select({ deletedAt: watchers.deletedAt })
+        .from(watchers)
+        .where(eq(watchers.id, active.id));
+      expect(after.deletedAt).toBeNull();
     });
   });
 });

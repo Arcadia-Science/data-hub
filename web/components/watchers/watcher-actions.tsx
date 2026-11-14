@@ -10,21 +10,17 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { DeregisterDialog } from "@/components/watchers/deregister-dialog";
-import type { WatcherRosterItem } from "@/lib/api/watcher-roster";
+import type { ActiveWatcherRow } from "@/lib/watchers/roster";
 
 export type WatcherActionTarget = Pick<
-  WatcherRosterItem,
-  "deletedAt" | "hostname" | "id" | "instrumentDisplayName" | "instrumentId"
+  ActiveWatcherRow,
+  "hostname" | "id" | "instrumentDisplayName" | "instrumentId"
 >;
 
 export function WatcherActions({ watcher }: { watcher: WatcherActionTarget }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [deregisterOpen, setDeregisterOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
-
-  if (watcher.deletedAt) {
-    return null;
-  }
 
   const instrumentName = watcher.instrumentDisplayName ?? watcher.instrumentId;
 
