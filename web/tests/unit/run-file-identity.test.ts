@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
+  type DismissedRunFile,
   decideStoredNames,
   type IncomingRunFile,
+  isSameAsDismissed,
+  recordDetectedFiles,
   type StoredRunFile,
   taggedFilename,
 } from "@/lib/api/run-file-identity";
+import type { DbExecutor } from "@/lib/db";
 
 function incoming(
   relativePath: string,
@@ -30,6 +34,20 @@ function stored(
     id,
     relativePath,
     filename,
+    ...overrides,
+  };
+}
+
+function dismissed(
+  relativePath: string,
+  overrides: Partial<DismissedRunFile> = {}
+): DismissedRunFile {
+  return {
+    relativePath,
+    filename: relativePath.slice(relativePath.lastIndexOf("/") + 1),
+    s3Key: null,
+    sizeBytes: 100,
+    fileCreatedAt: new Date("2026-09-21T17:00:00.000Z"),
     ...overrides,
   };
 }
@@ -113,5 +131,321 @@ describe("decideStoredNames", () => {
       fileId: 4,
       filename: tagged,
     });
+  });
+});
+
+describe("isSameAsDismissed", () => {
+  const file = { sizeBytes: 100, fileCreatedAt: new Date("2026-09-21T17:00Z") };
+
+  it("is the same file when the size and creation time both match", () => {
+    expect(isSameAsDismissed(file, { ...file })).toBe(true);
+  });
+
+  it("is a different file when the size differs", () => {
+    expect(isSameAsDismissed(file, { ...file, sizeBytes: 101 })).toBe(false);
+  });
+
+  it("is a different file when the creation time differs", () => {
+    expect(
+      isSameAsDismissed(file, {
+        ...file,
+        fileCreatedAt: new Date("2026-09-21T17:00:01Z"),
+      })
+    ).toBe(false);
+  });
+
+  it("compares creation times as the stored value comes back", () => {
+    // The watcher reports microseconds. `new Date` keeps the first three
+    // digits, so the stored value and the new report agree.
+    const stored = new Date("2026-09-21T17:00:00.123456+00:00");
+    const reported = new Date("2026-09-21T17:00:00.123999+00:00");
+    expect(stored.getTime()).toBe(reported.getTime());
+    expect(
+      isSameAsDismissed(
+        { sizeBytes: 5, fileCreatedAt: reported },
+        { sizeBytes: 5, fileCreatedAt: stored }
+      )
+    ).toBe(true);
+    expect(
+      isSameAsDismissed(
+        { sizeBytes: 5, fileCreatedAt: new Date("2026-09-21T17:00:00.124Z") },
+        { sizeBytes: 5, fileCreatedAt: stored }
+      )
+    ).toBe(false);
+  });
+
+  it("compares only the values both sides have", () => {
+    const noTime = { ...file, fileCreatedAt: null };
+    // A row from before creation times were stored: the size decides.
+    expect(isSameAsDismissed(file, noTime)).toBe(true);
+    expect(isSameAsDismissed(file, { ...noTime, sizeBytes: 7 })).toBe(false);
+    // A report without a size: the creation time decides.
+    const noSize = { ...file, sizeBytes: null };
+    expect(isSameAsDismissed(noSize, { ...file })).toBe(true);
+    expect(
+      isSameAsDismissed(noSize, {
+        ...file,
+        fileCreatedAt: new Date("2026-09-22T17:00Z"),
+      })
+    ).toBe(false);
+    // Nothing to compare: stays dismissed, as it did before.
+    expect(
+      isSameAsDismissed(
+        { sizeBytes: null, fileCreatedAt: null },
+        { sizeBytes: null, fileCreatedAt: null }
+      )
+    ).toBe(true);
+    expect(
+      isSameAsDismissed({ sizeBytes: null, fileCreatedAt: null }, { ...file })
+    ).toBe(true);
+  });
+});
+
+describe("decideStoredNames with dismissed files", () => {
+  const path = "alice/day-1/capture-a/sample.tif";
+
+  it("inserts a different file at a dismissed path under the plain name", () => {
+    const [decision] = decideStoredNames(
+      [incoming(path, { sizeBytes: 250 })],
+      [],
+      [dismissed(path)]
+    );
+    expect(decision).toEqual({ action: "insert", filename: "sample.tif" });
+  });
+
+  it("inserts a file with a newer creation time at a dismissed path", () => {
+    const [decision] = decideStoredNames(
+      [incoming(path, { fileCreatedAt: new Date("2026-09-22T09:00:00.000Z") })],
+      [],
+      [dismissed(path)]
+    );
+    expect(decision).toEqual({ action: "insert", filename: "sample.tif" });
+  });
+
+  it("skips the same file reported again", () => {
+    const [decision] = decideStoredNames(
+      [incoming(path)],
+      [],
+      [dismissed(path)]
+    );
+    expect(decision).toEqual({ action: "dismissed" });
+  });
+
+  it("skips a file that matches any of several dismissed rows at the path", () => {
+    const rows = [
+      dismissed(path, { sizeBytes: 10 }),
+      dismissed(path, { sizeBytes: 20 }),
+      dismissed(path, { sizeBytes: 30 }),
+    ];
+    expect(
+      decideStoredNames([incoming(path, { sizeBytes: 20 })], [], rows)
+    ).toEqual([{ action: "dismissed" }]);
+    expect(
+      decideStoredNames([incoming(path, { sizeBytes: 40 })], [], rows)
+    ).toEqual([{ action: "insert", filename: "sample.tif" }]);
+  });
+
+  it("ignores a dismissed row at another path", () => {
+    const [decision] = decideStoredNames(
+      [incoming(path)],
+      [],
+      [dismissed("alice/day-2/capture-b/sample.tif")]
+    );
+    expect(decision).toEqual({ action: "insert", filename: "sample.tif" });
+  });
+
+  it("maps to the active row at a path before it looks at dismissed ones", () => {
+    const [decision] = decideStoredNames(
+      [incoming(path, { sizeBytes: 250 })],
+      [stored(9, path, "sample.tif")],
+      [dismissed(path, { sizeBytes: 250 })]
+    );
+    expect(decision).toEqual({
+      action: "existing",
+      fileId: 9,
+      filename: "sample.tif",
+    });
+  });
+
+  it("tags a new file at a dismissed path when another folder has the plain name", () => {
+    const other = "alice/day-2/capture-b/sample.tif";
+    const [decision] = decideStoredNames(
+      [incoming(path, { sizeBytes: 250 })],
+      [stored(3, other, "sample.tif")],
+      [dismissed(path)]
+    );
+    expect(decision).toEqual({
+      action: "insert",
+      filename: taggedFilename("sample.tif", path),
+    });
+  });
+
+  it("lets a skipped file leave the plain name to the next file in the batch", () => {
+    const later = "alice/day-2/capture-b/sample.tif";
+    const decisions = decideStoredNames(
+      [incoming(path), incoming(later, { sizeBytes: 11 })],
+      [],
+      [dismissed(path)]
+    );
+    expect(decisions).toEqual([
+      { action: "dismissed" },
+      { action: "insert", filename: "sample.tif" },
+    ]);
+  });
+
+  it("gives a new file and a different file at a dismissed path their own names", () => {
+    const later = "alice/day-2/capture-b/sample.tif";
+    const decisions = decideStoredNames(
+      [incoming(path, { sizeBytes: 250 }), incoming(later, { sizeBytes: 11 })],
+      [],
+      [dismissed(path)]
+    );
+    expect(decisions).toEqual([
+      { action: "insert", filename: "sample.tif" },
+      { action: "insert", filename: taggedFilename("sample.tif", later) },
+    ]);
+  });
+
+  describe("when a dismissed file reached S3", () => {
+    const heldKey = "inst/RUN001/sample.tif";
+
+    it("gives a different file at the path another name than the dismissed file's", () => {
+      const [decision] = decideStoredNames(
+        [incoming(path, { sizeBytes: 250 })],
+        [],
+        [dismissed(path, { s3Key: heldKey })]
+      );
+      expect(decision).toEqual({
+        action: "insert",
+        filename: taggedFilename("sample.tif", path),
+      });
+    });
+
+    it("still skips the dismissed file itself", () => {
+      const [decision] = decideStoredNames(
+        [incoming(path)],
+        [],
+        [dismissed(path, { s3Key: heldKey })]
+      );
+      expect(decision).toEqual({ action: "dismissed" });
+    });
+
+    it("keeps the name from a file at another path", () => {
+      const later = "alice/day-2/capture-b/sample.tif";
+      const [decision] = decideStoredNames(
+        [incoming(later, { sizeBytes: 250 })],
+        [],
+        [dismissed(path, { s3Key: heldKey })]
+      );
+      expect(decision).toEqual({
+        action: "insert",
+        filename: taggedFilename("sample.tif", later),
+      });
+    });
+
+    it("widens the tag when the dismissed file also held the short tagged name", () => {
+      const tagged = taggedFilename("sample.tif", path);
+      const [decision] = decideStoredNames(
+        [incoming(path, { sizeBytes: 250 })],
+        [],
+        [
+          dismissed(path, { s3Key: heldKey }),
+          dismissed(path, { filename: tagged, s3Key: `inst/RUN001/${tagged}` }),
+        ]
+      );
+      expect(decision).toEqual({
+        action: "insert",
+        filename: taggedFilename("sample.tif", path, 16),
+      });
+    });
+
+    it("keeps a dismissed row without an S3 key from holding its name", () => {
+      const [decision] = decideStoredNames(
+        [incoming(path, { sizeBytes: 250 })],
+        [],
+        [dismissed(path)]
+      );
+      expect(decision).toEqual({ action: "insert", filename: "sample.tif" });
+    });
+
+    it("maps a re-report to the active row that took the other name", () => {
+      const tagged = taggedFilename("sample.tif", path);
+      const [decision] = decideStoredNames(
+        [incoming(path, { sizeBytes: 250 })],
+        [stored(12, path, tagged)],
+        [dismissed(path, { s3Key: heldKey })]
+      );
+      expect(decision).toEqual({
+        action: "existing",
+        fileId: 12,
+        filename: tagged,
+      });
+    });
+  });
+});
+
+// A stand-in for the database that hands out one prepared answer per select
+// and counts the writes, to show which queries a report makes.
+function fakeExecutor(answers: unknown[][]) {
+  const calls = { selects: 0, inserted: 0 };
+  const executor = {
+    select: () => ({
+      from: () => ({
+        where: () => Promise.resolve(answers[calls.selects++] ?? []),
+      }),
+    }),
+    insert: () => ({
+      values: (rows: unknown[]) => ({
+        onConflictDoNothing: () => ({
+          returning: () => {
+            calls.inserted += rows.length;
+            return Promise.resolve(rows.map((_, id) => ({ id })));
+          },
+        }),
+      }),
+    }),
+    update: () => ({ set: () => ({ where: () => Promise.resolve() }) }),
+  };
+  return { calls, executor: executor as unknown as DbExecutor };
+}
+
+describe("recordDetectedFiles for a watcher older than 1.1.0", () => {
+  const reportedFile = {
+    relative_path: "sample.tif",
+    filename: "sample.tif",
+    size_bytes: 100,
+    file_created_at: "2026-09-21T17:00:00.000Z",
+  };
+
+  it("looks at the run's active files only when it re-reports files the run has", async () => {
+    const { calls, executor } = fakeExecutor([
+      [{ id: 1, relativePath: "sample.tif", filename: "sample.tif" }],
+    ]);
+    await recordDetectedFiles(executor, "run", [reportedFile], false);
+    expect(calls).toEqual({ selects: 1, inserted: 0 });
+  });
+
+  it("also looks at dismissed files when a file has no row yet", async () => {
+    const { calls, executor } = fakeExecutor([[], []]);
+    await recordDetectedFiles(executor, "run", [reportedFile], false);
+    expect(calls).toEqual({ selects: 2, inserted: 1 });
+  });
+
+  it("stores nothing for the file a dismissed row at its path stands for", async () => {
+    const { calls, executor } = fakeExecutor([
+      [],
+      [dismissed("sample.tif", { filename: "sample.tif" })],
+    ]);
+    await recordDetectedFiles(executor, "run", [reportedFile], false);
+    expect(calls).toEqual({ selects: 2, inserted: 0 });
+  });
+
+  it("stores a different file at the dismissed path", async () => {
+    const { calls, executor } = fakeExecutor([
+      [],
+      [dismissed("sample.tif", { sizeBytes: 5 })],
+    ]);
+    await recordDetectedFiles(executor, "run", [reportedFile], false);
+    expect(calls).toEqual({ selects: 2, inserted: 1 });
   });
 });

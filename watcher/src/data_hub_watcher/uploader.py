@@ -24,14 +24,16 @@ from typing import Any, Generic, TypeVar, cast
 import requests as http_requests
 from requests.adapters import HTTPAdapter
 
-from data_hub_watcher.api_client import ApiError, DataHubClient
+from data_hub_watcher.api_client import ApiError, DataHubClient, is_run_deleted
 from data_hub_watcher.constants import (
     MAX_PENDING_UPLOAD_ATTEMPTS,
     MAX_QUEUE_FILE_ATTEMPTS,
+    RUN_DELETED_REASON,
     UPLOAD_POLL_INTERVAL_SECONDS,
     UPLOAD_RETRY_BASE_DELAY,
     UPLOAD_RETRY_MAX,
 )
+from data_hub_watcher.deleted_runs import DeletedRuns
 from data_hub_watcher.events import EventReporter, EventType, WatcherEvent
 from data_hub_watcher.heartbeat import WatcherCounters
 from data_hub_watcher.models import (
@@ -324,7 +326,9 @@ class _Transfer:
 
     It starts when the first upload slot is taken and ends when the file's
     bytes are in S3. Hashing and the wait for that first slot are left out;
-    later waits for a slot, and backoff between attempts, count.
+    later waits for a slot, and backoff between attempts, count. So does the
+    second hash of a restart after a rejected checksum, because it runs after
+    the first parts were sent.
     """
 
     def __init__(self) -> None:
@@ -527,12 +531,33 @@ class _QueueAttempt:
     reason: str
 
 
+class _LastRefusal(threading.local):
+    """The run Data Hub last refused an upload of as deleted, on each thread.
+
+    A failed upload returns only ``False``. `_process_queued_file` reads this after the
+    call, so that this refusal is not an attempt while any other failure is, even one for
+    a run that is in the set of deleted runs: a file someone requested is asked for
+    whatever the set says.
+    """
+
+    run_id: str | None = None
+
+
 @dataclass(frozen=True)
 class _WaitingFile:
     """An auto-mode file that was found unreadable, until a poll can read it."""
 
     path: Path
     run_id: str
+
+
+@dataclass(frozen=True)
+class _Hashed:
+    """A file as it was when it was hashed: its digests and the stat taken just before."""
+
+    sha256: str
+    crc64nvme: str
+    stat: os.stat_result
 
 
 def _guess_content_type(path: Path) -> str:
@@ -592,6 +617,20 @@ class Uploader:
         value keep their previous behaviour. Production wiring (see
         ``runtime.build_runtime``) reads this from the per-instrument
         config.
+    watch_folder_unavailable:
+        Called before the uploader gives up on a file it can't find or counts a failed
+        attempt against it. Returns whether the watch folder itself is gone or not
+        answering (and asks the supervisor to check it), in which case the file isn't
+        missing, the folder is: the file's `pending_uploads` row or place in the
+        server's queue stays, and nothing is counted. `None` (unit tests) means
+        the folder is never gone. It is not called once a stop was requested: a stop
+        isn't a missing file either, and the same applies without a look.
+    deleted_runs:
+        The runs the server refused because they were deleted on Data Hub. Share the
+        run detector's. An upload-URL request refused for that reason adds its run, and
+        no auto-mode or pending file of a run in the set is uploaded. A file whose upload
+        was requested from the web is always asked for once, and the run leaves the set
+        when the server answers that request. Defaults to a set of its own.
     """
 
     def __init__(
@@ -606,6 +645,8 @@ class Uploader:
         watch_directory: Path,
         upload_parallelism: int = 1,
         stop_event: threading.Event | None = None,
+        watch_folder_unavailable: Callable[[], bool] | None = None,
+        deleted_runs: DeletedRuns | None = None,
     ) -> None:
         self._client = client
         self._state_db = state_db
@@ -614,6 +655,7 @@ class Uploader:
         self._instrument_id = instrument_id
         self._watcher_id = watcher_id
         self._watch_dir = watch_directory
+        self._watch_folder_unavailable = watch_folder_unavailable
         if upload_parallelism < 1:
             raise ValueError(f"upload_parallelism must be >= 1, got {upload_parallelism}")
         self._parallelism = upload_parallelism
@@ -625,6 +667,11 @@ class Uploader:
         self._stop_event = stop_event
         # Set by `abort`, when the owner can't wait for those parts any longer.
         self._abort = threading.Event()
+        # Added to by any upload thread and read by all of them, and by the run
+        # detector's thread too; the set has its own lock.
+        self._deleted_runs = deleted_runs if deleted_runs is not None else DeletedRuns()
+        # Set by `_note_run_deleted` on the thread that was refused.
+        self._last_refusal = _LastRefusal()
         # Track consecutive upload-queue poll failures so the watcher
         # surfaces a ``kind=upload_queue_poll_failed`` event on the
         # 1st failure and every 10th repeat. The unthrottled case
@@ -636,9 +683,10 @@ class Uploader:
         # Per-file upload-queue attempt bookkeeping, keyed by server file id.
         # Bounds retries before giving up (see ``_process_queued_file``) and
         # doubles as the emit-once throttle for the missing-file error. Pruned
-        # each poll, so a re-requested id starts fresh. ``poll_upload_queue``
-        # replaces the dict before it starts the file tasks and returns only
-        # after they finish, and each task touches only its own file id.
+        # each poll, and a successful cancel also removes the file's record, so
+        # a re-requested id starts fresh. ``poll_upload_queue`` replaces the
+        # dict before it starts the file tasks and returns only after they
+        # finish, and each task touches only its own file id.
         self._queue_attempts: dict[int, _QueueAttempt] = {}
         # The ids in the queue the last poll saw, so an unchanged queue is not
         # logged at INFO on every poll. Used by `poll_upload_queue` alone.
@@ -689,13 +737,6 @@ class Uploader:
         )
         self._s3_session.mount("https://", adapter)
         self._s3_session.mount("http://", adapter)
-        # Counter mutations from upload worker threads are protected
-        # by the GIL on the underlying ``int`` increment, but use an
-        # explicit lock anyway so we can later move to ``threading.
-        # Lock``-free atomics or ``itertools.count`` without a behaviour
-        # change. Cheap enough at the per-file cadence that the
-        # serialisation cost is negligible.
-        self._counters_lock = threading.Lock()
         # Files with an upload in progress, keyed by resolved path. The auto
         # path and the queue worker can reach the same file, and a second
         # multipart start makes the server abort the first one.
@@ -903,6 +944,9 @@ class Uploader:
         path = waiting.path
         key = relative_key(path, self._watch_dir)
         if not _is_file(path):
+            if self._folder_is_gone():
+                # Not the file that is missing. It keeps waiting, and its row stays.
+                return
             self._stop_waiting(waiting)
             self._drop_missing_pending(key, waiting.run_id, path)
             return
@@ -923,6 +967,22 @@ class Uploader:
         # failed for another reason was reported or logged when it failed, and
         # its row stays for the next start's retry, as for any failed upload.
         self._stop_waiting(waiting)
+
+    def _folder_is_gone(self) -> bool:
+        """Whether a file that can't be found is not missing, because of the folder or a stop.
+
+        Asked before a file that can't be found is dropped, or counts against its attempts:
+        in the time between the folder disappearing and the supervisor moving to the
+        waiting state, every file in it looks missing. The callback says whether the
+        folder itself is gone or not answering, and asks the supervisor to check it at once.
+
+        A stop is not a missing file either. It answers `True` at once, without a look at
+        the folder: the look has a limit of its own, which `abort` can't cut short, and
+        this thread is wanted back before the stop's limit.
+        """
+        if self._stop_requested():
+            return True
+        return self._watch_folder_unavailable is not None and self._watch_folder_unavailable()
 
     def _drop_missing_pending(self, relative_path: str, run_id: str, path: Path) -> None:
         """Give up on a pending upload whose file is no longer on disk."""
@@ -955,6 +1015,9 @@ class Uploader:
         # for traversal the way server-supplied queue paths are.
         path = self._watch_dir / pending.relative_path
         if not _is_file(path):
+            if self._folder_is_gone():
+                # Not the file that is missing: the row stays for the next start.
+                return
             self._drop_missing_pending(pending.relative_path, pending.run_id, path)
             return
         try:
@@ -971,8 +1034,15 @@ class Uploader:
             uploaded = False
         if uploaded:
             return
-        if self._stop_requested():
-            # An interrupted upload is not a failed attempt.
+        if self._stop_requested() or pending.run_id in self._deleted_runs:
+            # Neither is a failed attempt: an interrupted upload, or a run Data Hub refuses
+            # because it was deleted. The row stays, so once the run is restored the next
+            # start uploads the file. A run that stays deleted costs one or a few requests per
+            # start (up to `upload_parallelism` from the rows before the first refusal fills
+            # the set, and one from the detector), with no event for each of its files.
+            return
+        if self._folder_is_gone():
+            # Neither is one that failed because its folder went away.
             return
         attempts = self._state_db.bump_pending_upload_attempts(pending.relative_path)
         if attempts < MAX_PENDING_UPLOAD_ATTEMPTS:
@@ -1145,6 +1215,16 @@ class Uploader:
         A file that is on disk but can't be read yet (an instrument holds it
         open) is not an attempt. It is reported once, stays queued, and is
         tried again on every poll, with no limit.
+
+        A request from the web is always asked of the server, even for a run in the
+        set of deleted runs. The server cancels the requests of a run when it is
+        deleted and refuses new ones, so a queue that lists a file of such a run
+        means the run was restored since, and the request is the user's way of saying
+        so. The upload goes out as any other (see `_upload_single`), and when the
+        server answers the run leaves the set. A refusal because the run was deleted
+        again is not an attempt, and says nothing when the run is in the set already. It
+        needs the queue to have been fetched just before the delete, and the server has
+        cancelled the request since, so the file leaves the queue.
         """
         attempt = self._queue_attempts.get(qf.id)
         attempt_count = attempt.count if attempt else 0
@@ -1180,17 +1260,24 @@ class Uploader:
             self._cancel_queued_file(qf, "unsafe_path")
             return
 
+        refused = False
         if _exists(local_path):
+            self._last_refusal.run_id = None
             try:
-                ok = self._upload_single(local_path, qf.run_id)
+                ok = self._upload_single(local_path, qf.run_id, requested=True)
             except CantReadYet as exc:
                 # Not a failed attempt, so it never counts toward the cap. The
                 # request stays queued and the next poll tries the file again,
                 # for as long as it can't be read.
                 self._report_cant_read(local_path, qf.run_id, exc, file_id=qf.id)
                 return
+            refused = self._last_refusal.run_id == qf.run_id
             reason = "upload_failed"
         else:
+            if self._folder_is_gone():
+                # Not the file that is missing. The request stays queued, and the next
+                # poll (or the next runtime) tries it again. No error, no attempt.
+                return
             ok = False
             reason = "missing"
             # Throttle: surface the visible "missing" error only on the
@@ -1216,10 +1303,15 @@ class Uploader:
         if ok:
             self._queue_attempts.pop(qf.id, None)
             return
-        if self._stop_requested():
+        if self._stop_requested() or refused:
             # A stop, or a config rebuild, cut the upload off. That isn't a
             # failed attempt, so it can't use up the last one and cancel the
-            # request: the file stays queued for the next poll or runtime.
+            # request: the file stays queued for the next poll or runtime. Nor is
+            # an upload that Data Hub refused just now because the run was deleted.
+            return
+        if self._folder_is_gone():
+            # An upload that failed because its folder went away isn't the file's
+            # failure either.
             return
 
         attempt_count += 1
@@ -1233,7 +1325,9 @@ class Uploader:
         Reverts the file to ``detected`` server-side so it leaves the upload
         queue. On API failure the attempt record is left in place so the next
         poll retries the cancel; the give-up event fires only on a successful
-        cancel, so a retried cancel doesn't re-flood the log.
+        cancel, so a retried cancel doesn't re-flood the log. After a successful
+        cancel the record is removed, so a file requested again right away starts
+        over with ``MAX_QUEUE_FILE_ATTEMPTS`` attempts.
         """
         try:
             self._client.cancel_upload_request(qf.id)
@@ -1247,6 +1341,7 @@ class Uploader:
             self._bump_errors()
             return
 
+        self._queue_attempts.pop(qf.id, None)
         logger.warning(
             "Gave up on queued file after %d attempts: %s (reason=%s)",
             MAX_QUEUE_FILE_ATTEMPTS,
@@ -1293,19 +1388,16 @@ class Uploader:
     # ------------------------------------------------------------------
 
     def _bump_errors(self) -> None:
-        """Increment the shared error counter under ``_counters_lock``.
+        """Count an error for the next heartbeat.
 
-        Centralised so the parallel upload threads
-        never race the heartbeat thread reading these values for its
-        per-tick payload.
+        `WatcherCounters` takes its own lock, so the parallel upload threads never race the
+        heartbeat thread, which takes the counts out for its payload.
         """
-        with self._counters_lock:
-            self._counters.errors += 1
+        self._counters.add_errors()
 
     def _bump_files_uploaded(self) -> None:
-        """Increment the shared success counter under ``_counters_lock``."""
-        with self._counters_lock:
-            self._counters.files_uploaded += 1
+        """Count an uploaded file for the next heartbeat."""
+        self._counters.add_files_uploaded()
 
     def _backoff(self, attempt: int) -> None:
         self._wait(UPLOAD_RETRY_BASE_DELAY * (2**attempt))
@@ -1379,8 +1471,58 @@ class Uploader:
         )
         self._bump_errors()
 
-    def _fail_presign(self, path: Path, exc: ApiError) -> None:
+    def _note_run_deleted(self, run_id: str, exc: ApiError) -> None:
+        """Remember that Data Hub refused an upload because *run_id* was deleted, and say so once.
+
+        From now on `_upload_single` skips every file of the run before any request, unless
+        its upload was requested from the web. A file whose request was already out when
+        this one came back is refused too, and says nothing: only the call that adds the
+        run reports it, so a run with many files costs one event and one error, not one per
+        file. The detector's reports and updates stop for the run as well, because they
+        share the set.
+        """
+        self._last_refusal.run_id = run_id
+        if not self._deleted_runs.add(run_id):
+            logger.debug("Run %s was already known to be deleted on Data Hub", run_id)
+            return
+        logger.warning(
+            "Upload refused: %s (run %s was deleted on Data Hub, so its files are not "
+            "uploaded until the watcher restarts or an upload requested for the run is "
+            "accepted)",
+            exc.message,
+            run_id,
+        )
+        self._bump_errors()
+        self._reporter.queue_event(
+            WatcherEvent(
+                event_type=EventType.UPLOAD_FAILED,
+                message=f"Upload refused: run {run_id} was deleted on Data Hub",
+                details={"error": exc.message, "reason": RUN_DELETED_REASON, "run_id": run_id},
+            )
+        )
+
+    def _note_run_accepted(self, run_id: str) -> None:
+        """Take *run_id* out of the set of deleted runs: the server gave an upload URL for it.
+
+        The server refuses that request for a deleted run, so the run was restored. From now
+        on the detector reports the run's files that become stable and, in auto mode, the
+        uploader uploads them, until the next refusal. Nothing else is retried at once. A
+        file the detector skipped while the run was in the set was not recorded, so the next
+        start's initial scan reports it, and a `pending_uploads` row is retried at the next
+        start too.
+        """
+        if self._deleted_runs.discard(run_id):
+            logger.info(
+                "Run %s is no longer deleted on Data Hub: the server gave an upload URL for it, "
+                "so the watcher reports and uploads its files again",
+                run_id,
+            )
+
+    def _fail_presign(self, path: Path, exc: ApiError, run_id: str) -> None:
         """Report a refused upload-URL request."""
+        if is_run_deleted(exc):
+            self._note_run_deleted(run_id, exc)
+            return
         logger.error("Failed to get presigned URL for %s: %s", path.name, exc.message)
         self._bump_errors()
         self._reporter.queue_event(
@@ -1425,6 +1567,29 @@ class Uploader:
                 details={"error": str(exc)},
             )
         )
+
+    def _take_digests(
+        self,
+        path: Path,
+        compute: Callable[[], tuple[str, str]],
+        presigned: PresignedUploadResponse | None = None,
+    ) -> tuple[str, str] | None:
+        """Run *compute*, which hashes *path*, and return its ``(sha256, crc64nvme)``.
+
+        Returns ``None`` when there is nothing to upload from: a stop cut the hash
+        off, which is not a failure and is logged only, or the hash failed, which
+        `_fail_hash` has reported. Raises `CantReadYet` for a file that can't be
+        read yet. *presigned* is passed on to `_fail_hash`.
+        """
+        try:
+            return compute()
+        except DigestCancelled:
+            # `abort` cut the hash off. Nothing was sent or recorded.
+            logger.info("Upload cut off; deferring %s", path.name)
+            return None
+        except Exception as exc:
+            self._fail_hash(path, exc, presigned)
+            return None
 
     @staticmethod
     def _raise_if_cant_read(path: Path, exc: BaseException) -> None:
@@ -1488,79 +1653,137 @@ class Uploader:
         self,
         path: Path,
         presigned: PresignedUploadResponse,
-        crc64nvme: str,
-        size_bytes: int,
+        hashed: _Hashed,
         content_type: str | None,
         relative_path: str | None,
         run_id: str,
         transfer: _Transfer,
-    ) -> bool:
+    ) -> tuple[_Hashed, PresignedUploadResponse] | None:
+        """Upload *path* in parts and have the server complete the upload.
+
+        Returns the file as it was when the checksum of the finished upload was
+        made, with the response for that upload, or ``None`` when the upload did
+        not finish (a stop, or a failure that is already reported). The file is
+        *hashed* unless the server rejected its checksum. The restart after a
+        rejection hashes the file again, and the result then holds that hash, the
+        stat taken before it, and the restarted upload.
+        """
         upload = presigned
-        if not upload.upload_id or not upload.part_size or not upload.part_count:
+        upload_id = upload.upload_id
+        if not upload_id or not upload.part_size or not upload.part_count:
             self._fail_upload(
                 path.name,
                 upload.s3_key,
                 RuntimeError("incomplete multipart response"),
             )
-            return False
+            return None
 
         # One restart when S3 says the assembled file does not match. A second
         # mismatch is a real failure.
         for digest_attempt in range(2):
             if self._stop_requested():
-                return False
+                return None
             try:
-                parts = self._put_parts(path, upload, size_bytes, transfer)
+                parts = self._put_parts(path, upload, hashed.stat.st_size, transfer)
             except _UploadStopped:
-                return False
+                return None
             except CantReadYet:
                 # The file can't be read yet, so the upload is not a failure: it
                 # is started over once the file can be read. The parts already
                 # sent are no use to that upload, so free them now, and pass
                 # this on once every part worker has exited.
-                self._abort_quietly(upload.file_id, upload.upload_id)
+                self._abort_quietly(upload.file_id, upload_id)
                 raise
             except Exception as exc:
                 # ``_put_parts`` returns or raises only after every part worker
                 # has exited, so no PUT is still in flight when the upload is
                 # aborted. S3 says to abort only after the parts are done.
-                self._abort_quietly(upload.file_id, upload.upload_id)
+                self._abort_quietly(upload.file_id, upload_id)
                 self._fail_upload(path.name, upload.s3_key, exc)
-                return False
+                return None
             try:
-                self._complete_with_retries(upload, parts, crc64nvme)
-                return True
+                self._complete_with_retries(upload, parts, hashed.crc64nvme)
+                return hashed, upload
             except ApiError as exc:
                 code = exc.detail.code if exc.detail else ""
                 if code == "BadDigest" and digest_attempt == 0:
                     logger.warning("Checksum rejected for %s; starting the upload over", path.name)
-                    self._abort_quietly(upload.file_id, upload.upload_id)
-                    try:
-                        stat = path.stat()
-                        upload = self._client.request_upload_url(
-                            self._instrument_id,
-                            run_id,
-                            path.name,
-                            content_type=content_type,
-                            size_bytes=size_bytes,
-                            file_created_at_ts=file_created_at(stat),
-                            relative_path=relative_path,
-                        )
-                    except ApiError as restart_exc:
-                        self._fail_upload(path.name, upload.s3_key, restart_exc)
-                        return False
-                    if upload.upload_type != "multipart" or not upload.upload_id:
-                        self._fail_upload(
-                            path.name,
-                            upload.s3_key,
-                            RuntimeError("restart did not return a multipart upload"),
-                        )
-                        return False
+                    self._abort_quietly(upload.file_id, upload_id)
+                    restarted = self._restart_multipart(
+                        path, upload.s3_key, content_type, relative_path, run_id
+                    )
+                    if restarted is None:
+                        return None
+                    hashed, upload, upload_id = restarted
                     continue
-                self._abort_quietly(upload.file_id, upload.upload_id)
+                self._abort_quietly(upload.file_id, upload_id)
                 self._fail_upload(path.name, upload.s3_key, exc)
-                return False
-        return False
+                return None
+        return None
+
+    def _restart_multipart(
+        self,
+        path: Path,
+        s3_key: str,
+        content_type: str | None,
+        relative_path: str | None,
+        run_id: str,
+    ) -> tuple[_Hashed, PresignedUploadResponse, str] | None:
+        """Hash *path* as it is now and start a new multipart upload for those bytes.
+
+        The server rejected the checksum of the first attempt, so the file is not what
+        was hashed: it changed while the parts were sent. Its size may have changed
+        too, so the new upload is requested with the size the file has now.
+
+        The caller has aborted the first upload. If that abort failed, the server aborts
+        the stored upload ID itself at the file's next upload-URL request. A stop is
+        checked before the file is read again and after it is hashed (`request_stop`
+        doesn't cut a hash off, `abort` does), so a stop that is already requested never
+        opens a new upload, and neither does a failed hash or a file that can't be read
+        yet. A stop that comes during the request itself leaves the upload it opened to
+        the server, which aborts it at the file's next request, as for a first upload.
+
+        Returns the new digests and stat with the new upload and its ID, or ``None`` when
+        the restart can't go on. *s3_key* is the first upload's, for the failure event.
+        Raises `CantReadYet` for a file that can't be read yet.
+        """
+        if self._stop_requested():
+            logger.info("Stop requested; deferring %s", path.name)
+            return None
+        stat = _stat(path)
+        digests = self._take_digests(path, partial(file_digests, path, self._abort))
+        if digests is None:
+            return None
+        if self._stop_requested():
+            # `request_stop` doesn't cut the hash off, so a stop that came during it
+            # is seen here. A new upload now would be one nothing aborts.
+            logger.info("Stop requested; deferring %s", path.name)
+            return None
+        sha, crc64nvme = digests
+        try:
+            upload = self._client.request_upload_url(
+                self._instrument_id,
+                run_id,
+                path.name,
+                content_type=content_type,
+                size_bytes=stat.st_size,
+                file_created_at_ts=file_created_at(stat),
+                relative_path=relative_path,
+            )
+        except ApiError as exc:
+            if is_run_deleted(exc):
+                self._note_run_deleted(run_id, exc)
+            else:
+                self._fail_upload(path.name, s3_key, exc)
+            return None
+        if upload.upload_type != "multipart" or not upload.upload_id:
+            self._fail_upload(
+                path.name,
+                upload.s3_key,
+                RuntimeError("restart did not return a multipart upload"),
+            )
+            return None
+        return _Hashed(sha, crc64nvme, stat), upload, upload.upload_id
 
     def _abort_quietly(self, file_id: int, upload_id: str) -> None:
         try:
@@ -1740,7 +1963,14 @@ class Uploader:
                 self._in_flight.discard(key)
                 self._in_flight_changed.notify_all()
 
-    def _upload_single(self, path: Path, run_id: str) -> bool:
+    def _skips_deleted_run(self, path: Path, run_id: str) -> bool:
+        """Whether *run_id* is in the set of deleted runs, which skips the upload of *path*."""
+        if run_id not in self._deleted_runs:
+            return False
+        logger.debug("Skipping %s: run %s was deleted on Data Hub", path.name, run_id)
+        return True
+
+    def _upload_single(self, path: Path, run_id: str, *, requested: bool = False) -> bool:
         """Upload one file unless another thread is already uploading it.
 
         A caller that had to wait skips the upload when the other thread
@@ -1749,8 +1979,22 @@ class Uploader:
         `CantReadYet` when the file is on disk but can't be read yet. That is
         neither: nothing was recorded or counted as a failure, and the caller
         decides how to wait.
+
+        Returns `False` at once, without a request, for a file of a run in the set of
+        deleted runs, both before the file is taken and, for a thread that had to wait
+        for it, after: another thread may have been refused in the meantime. That is
+        neither a failure nor an attempt, so the callers that count attempts check the
+        run too. *requested* is for a file someone asked to have uploaded from the web.
+        It is always asked of the server, because the run may have been restored, and the
+        server's answer settles the run (`_note_run_accepted`, `_note_run_deleted`). Its
+        caller tells a refusal from another failure with `_last_refusal`.
         """
+        if not requested and self._skips_deleted_run(path, run_id):
+            return False
         with self._exclusive(path) as waited:
+            # A thread that waited for the file may have been refused in the meantime.
+            if not requested and self._skips_deleted_run(path, run_id):
+                return False
             uploaded = self._upload_locked(path, run_id, waited)
             if uploaded:
                 # Still under the file's lock, so a thread that gets the file next
@@ -1806,16 +2050,18 @@ class Uploader:
         if blocked is not None:
             raise _cant_read(path, blocked) from blocked
 
-        request_url = partial(
-            self._client.request_upload_url,
-            self._instrument_id,
-            run_id,
-            path.name,
-            content_type=content_type,
-            size_bytes=stat.st_size,
-            file_created_at_ts=file_created_at(stat),
-            relative_path=rel_path,
-        )
+        def request_url() -> PresignedUploadResponse:
+            presigned = self._client.request_upload_url(
+                self._instrument_id,
+                run_id,
+                path.name,
+                content_type=content_type,
+                size_bytes=stat.st_size,
+                file_created_at_ts=file_created_at(stat),
+                relative_path=rel_path,
+            )
+            self._note_run_accepted(run_id)
+            return presigned
 
         prep_started = time.monotonic()
         if self._was_found_unreadable(path):
@@ -1824,18 +2070,13 @@ class Uploader:
             # every poll. Hash it first: a request made before that would cost the
             # server a request per poll, and for a large file would start a
             # multipart upload only to abort it.
-            try:
-                sha, crc64nvme = file_digests(path, self._abort)
-            except DigestCancelled:
-                logger.info("Upload cut off; deferring %s", path.name)
-                return False
-            except Exception as exc:
-                self._fail_hash(path, exc)
+            digests = self._take_digests(path, partial(file_digests, path, self._abort))
+            if digests is None:
                 return False
             try:
                 presigned = request_url()
             except ApiError as exc:
-                self._fail_presign(path, exc)
+                self._fail_presign(path, exc, run_id)
                 return False
         else:
             # Kick off both the SHA-256 and the presigned-URL request in
@@ -1858,20 +2099,16 @@ class Uploader:
                         sha_future.result()
                     except Exception:
                         pass
-                    self._fail_presign(path, exc)
+                    self._fail_presign(path, exc, run_id)
                     return False
 
-                try:
-                    sha, crc64nvme = sha_future.result()
-                except DigestCancelled:
-                    # `abort` cut the hash off. Nothing was sent or recorded.
-                    logger.info("Upload cut off; deferring %s", path.name)
-                    return False
-                except Exception as exc:
-                    self._fail_hash(path, exc, presigned)
+                digests = self._take_digests(path, sha_future.result, presigned)
+                if digests is None:
                     return False
         # Both are done: the URL request and the hash.
         prep_seconds = time.monotonic() - prep_started
+        sha, crc64nvme = digests
+        hashed = _Hashed(sha, crc64nvme, stat)
 
         s3_key = presigned.s3_key
         s3_bucket = presigned.s3_bucket
@@ -1905,17 +2142,15 @@ class Uploader:
         transfer = _Transfer()
         is_multipart = presigned.upload_type == "multipart"
         if is_multipart:
-            if not self._upload_multipart(
-                path,
-                presigned,
-                crc64nvme,
-                stat.st_size,
-                content_type,
-                rel_path,
-                run_id,
-                transfer,
-            ):
+            finished = self._upload_multipart(
+                path, presigned, hashed, content_type, rel_path, run_id, transfer
+            )
+            if finished is None:
                 return False
+            # A checksum the server rejected starts the upload over from the file as it
+            # is then, so what was uploaded may not be what was hashed first. Record and
+            # report the file that was uploaded, with the upload that finished.
+            hashed, presigned = finished
             transfer.finish()
         else:
             if not self._upload_single_put(path, presigned, content_type, s3_key, transfer):
@@ -1947,11 +2182,11 @@ class Uploader:
 
         self._state_db.record_upload(
             path.name,
-            sha,
+            hashed.sha256,
             s3_key,
             relative_path=rel_path,
-            size_bytes=stat.st_size,
-            mtime=stat.st_mtime,
+            size_bytes=hashed.stat.st_size,
+            mtime=hashed.stat.st_mtime,
         )
         self._bump_files_uploaded()
         self._reporter.queue_event(
@@ -1960,8 +2195,8 @@ class Uploader:
                 message=f"Uploaded {path.name}",
                 details={
                     "s3_key": s3_key,
-                    "sha256": sha,
-                    "size_bytes": stat.st_size,
+                    "sha256": hashed.sha256,
+                    "size_bytes": hashed.stat.st_size,
                     # Hashing and the upload-URL request. They run together, except for a
                     # file that was found unreadable before: those run one after the other.
                     "prep_seconds": round(prep_seconds, 3),
@@ -2006,9 +2241,23 @@ class UploadQueueWorker:
         self._thread: threading.Thread | None = None
 
     def start(self) -> None:
-        self._stop_event.clear()
+        """Start the thread, which runs until the stop event is set.
+
+        A stop that was requested before this call stays requested: the thread polls nothing
+        and uploads nothing, because the uploader starts no file once the event is set. The
+        event is not cleared here, since a heartbeat that learns the watcher was deregistered
+        sets it (`Uploader.request_stop`) and a start must not undo that. A worker is not
+        restarted after `stop`: each runtime builds its own worker and event.
+        """
         self._thread = threading.Thread(target=self._run, daemon=True, name="upload-worker")
         self._thread.start()
+
+    def has_exited(self) -> bool:
+        """Whether the thread is gone: it never started, or it ended after a stop.
+
+        Signals nothing, unlike `stop`, so it can be asked again and again.
+        """
+        return self._thread is None or not self._thread.is_alive()
 
     def stop(self, timeout: float | None = None) -> bool:
         """Signal the loop and join it. Returns whether the thread exited.

@@ -1,8 +1,8 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { taggedFilename } from "@/lib/api/run-file-identity";
 import { WATCHER_VERSION_HEADER } from "@/lib/api/watcher-compat";
-import { files, instruments } from "@/lib/db/schema";
+import { files as filesTable, instruments } from "@/lib/db/schema";
 import {
   api,
   closeTestDb,
@@ -320,52 +320,553 @@ describe("same-named files from different folders", () => {
     expect(await filenames(runId)).toEqual(["sample.tif"]);
   });
 
-  it("returns 409 when a dismissed file already uses the path", async () => {
-    const runId = "dismissed-path";
+  describe("a file at the path of a dismissed file", () => {
+    interface RunFile {
+      deleted_at: string | null;
+      filename: string;
+      id: number;
+      relative_path: string | null;
+      size_bytes: number | null;
+      status: string;
+    }
+
     const relativePath = "capture/sample.tif";
-    const created = await api(`/api/v1/instruments/${instrumentId}/runs`, {
-      method: "POST",
-      token,
-      headers: watcherHeaders,
-      body: {
-        run_id: runId,
-        source: "watcher",
-        detected_files: [
-          {
-            relative_path: relativePath,
-            filename: "sample.tif",
-            size_bytes: 1,
-          },
-        ],
-      },
-    });
-    expect(created.status).toBe(201);
+    const firstCreatedAt = "2026-09-21T17:00:00.123456+00:00";
+    const laterCreatedAt = "2026-09-22T09:30:00.000000+00:00";
 
-    const detail = await api(
-      `/api/v1/instruments/${instrumentId}/runs/${runId}`,
-      { token }
-    );
-    const before = await detail.json();
-    await getTestDb()
-      .update(files)
-      .set({ deletedAt: new Date() })
-      .where(eq(files.id, before.files[0].id));
+    function reported(
+      sizeBytes: number,
+      createdAt = firstCreatedAt,
+      path = relativePath
+    ) {
+      return {
+        relative_path: path,
+        filename: path.slice(path.lastIndexOf("/") + 1),
+        size_bytes: sizeBytes,
+        file_created_at: createdAt,
+      };
+    }
 
-    const upload = await api(
-      `/api/v1/instruments/${instrumentId}/runs/${runId}/request-upload-url`,
-      {
+    async function runFiles(runId: string): Promise<RunFile[]> {
+      const detail = await api(
+        `/api/v1/instruments/${instrumentId}/runs/${runId}`,
+        { token }
+      );
+      const body = await detail.json();
+      return body.files;
+    }
+
+    async function createRunWith(
+      runId: string,
+      file: ReturnType<typeof reported>,
+      headers: Record<string, string> = watcherHeaders
+    ) {
+      const created = await api(`/api/v1/instruments/${instrumentId}/runs`, {
         method: "POST",
         token,
-        headers: watcherHeaders,
-        body: {
-          filename: "sample.tif",
-          relative_path: relativePath,
-          size_bytes: 1,
-        },
+        headers,
+        body: { run_id: runId, source: "watcher", detected_files: [file] },
+      });
+      expect(created.status).toBe(201);
+    }
+
+    // The way a watcher reports files for a run the server already has.
+    async function report(
+      runId: string,
+      file: ReturnType<typeof reported>,
+      headers: Record<string, string> = watcherHeaders
+    ) {
+      const res = await api(`/api/v1/instruments/${instrumentId}/runs`, {
+        method: "POST",
+        token,
+        headers,
+        body: { run_id: runId, source: "watcher", detected_files: [file] },
+      });
+      expect(res.status).toBe(200);
+    }
+
+    async function dismissAll(runId: string) {
+      for (const file of await runFiles(runId)) {
+        if (!file.deleted_at) {
+          const res = await api(`/api/v1/files/${file.id}`, {
+            method: "DELETE",
+            token,
+          });
+          expect(res.status).toBe(200);
+        }
       }
-    );
-    expect(upload.status).toBe(409);
-    expect(await filenames(runId)).toEqual(["sample.tif"]);
+    }
+
+    function requestUpload(
+      runId: string,
+      file: ReturnType<typeof reported>,
+      headers: Record<string, string> = watcherHeaders
+    ) {
+      return api(
+        `/api/v1/instruments/${instrumentId}/runs/${runId}/request-upload-url`,
+        {
+          method: "POST",
+          token,
+          headers,
+          body: file,
+        }
+      );
+    }
+
+    it("stores a different file a watcher reports there as a new detected row", async () => {
+      const runId = "dismissed-path-report";
+      await createRunWith(runId, reported(1));
+      const [dismissed] = await runFiles(runId);
+      await dismissAll(runId);
+
+      await report(runId, reported(900, laterCreatedAt));
+
+      const rows = await runFiles(runId);
+      expect(rows).toHaveLength(2);
+      const old = rows.find((row) => row.id === dismissed.id);
+      expect(old?.deleted_at).toBeTruthy();
+      expect(old?.size_bytes).toBe(1);
+      const fresh = rows.find((row) => row.id !== dismissed.id);
+      expect(fresh).toMatchObject({
+        status: "detected",
+        deleted_at: null,
+        relative_path: relativePath,
+        filename: "sample.tif",
+        size_bytes: 900,
+      });
+    });
+
+    it("stores a file with the same size and a later creation time as a new row", async () => {
+      const runId = "dismissed-path-created-at";
+      await createRunWith(runId, reported(5));
+      await dismissAll(runId);
+
+      await report(runId, reported(5, laterCreatedAt));
+
+      const rows = await runFiles(runId);
+      expect(rows.map((row) => row.deleted_at === null)).toEqual([false, true]);
+    });
+
+    it("keeps the same file dismissed when a watcher reports it again", async () => {
+      const runId = "dismissed-path-same-file";
+      await createRunWith(runId, reported(5));
+      await dismissAll(runId);
+
+      // The watcher sends microseconds. The stored time is in milliseconds.
+      await report(runId, reported(5));
+      const patched = await api(
+        `/api/v1/instruments/${instrumentId}/runs/${runId}`,
+        {
+          method: "PATCH",
+          token,
+          headers: watcherHeaders,
+          body: { detected_files: [reported(5)] },
+        }
+      );
+      expect(patched.status).toBe(200);
+
+      const rows = await runFiles(runId);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.deleted_at).toBeTruthy();
+    });
+
+    it("compares a report with every dismissed file at the path", async () => {
+      const runId = "dismissed-path-several";
+      await createRunWith(runId, reported(10));
+      await dismissAll(runId);
+      await report(runId, reported(20, laterCreatedAt));
+      await dismissAll(runId);
+
+      // Both earlier files stay dismissed. A third one is new.
+      await report(runId, reported(10));
+      await report(runId, reported(20, laterCreatedAt));
+      expect(await runFiles(runId)).toHaveLength(2);
+
+      await report(runId, reported(30, "2026-09-23T08:00:00.000000+00:00"));
+      const rows = await runFiles(runId);
+      expect(
+        rows.map((row) => [row.size_bytes, row.deleted_at === null])
+      ).toEqual([
+        [10, false],
+        [20, false],
+        [30, true],
+      ]);
+    });
+
+    it("reports a different file at the path through the run update too", async () => {
+      const runId = "dismissed-path-patch";
+      await createRunWith(runId, reported(1));
+      await dismissAll(runId);
+
+      const patched = await api(
+        `/api/v1/instruments/${instrumentId}/runs/${runId}`,
+        {
+          method: "PATCH",
+          token,
+          headers: watcherHeaders,
+          body: { detected_files: [reported(2, laterCreatedAt)] },
+        }
+      );
+      expect(patched.status).toBe(200);
+
+      const rows = await runFiles(runId);
+      expect(
+        rows.map((row) => [row.size_bytes, row.deleted_at === null])
+      ).toEqual([
+        [1, false],
+        [2, true],
+      ]);
+    });
+
+    it("applies the same rule to a watcher older than 1.1.0", async () => {
+      const runId = "dismissed-path-old-watcher";
+      const oldWatcher = { [WATCHER_VERSION_HEADER]: "1.0.0" };
+      await createRunWith(runId, reported(1), oldWatcher);
+      await dismissAll(runId);
+
+      await report(runId, reported(1), oldWatcher);
+      expect(await runFiles(runId)).toHaveLength(1);
+
+      await report(runId, reported(2, laterCreatedAt), oldWatcher);
+      const rows = await runFiles(runId);
+      expect(
+        rows.map((row) => [row.size_bytes, row.deleted_at === null])
+      ).toEqual([
+        [1, false],
+        [2, true],
+      ]);
+    });
+
+    it("gives the new file a valid name when another folder holds the plain name", async () => {
+      const runId = "dismissed-path-naming";
+      const dismissedPath = "day-1/sample.tif";
+      const otherPath = "day-2/sample.tif";
+      await createRunWith(runId, reported(1, firstCreatedAt, dismissedPath));
+      await dismissAll(runId);
+      // The dismissed file doesn't hold the plain name, so this file gets it.
+      await report(runId, reported(2, laterCreatedAt, otherPath));
+
+      await report(runId, reported(3, laterCreatedAt, dismissedPath));
+
+      const rows = await runFiles(runId);
+      expect(
+        rows.map((row) => [
+          row.relative_path,
+          row.filename,
+          row.deleted_at === null,
+        ])
+      ).toEqual([
+        [dismissedPath, "sample.tif", false],
+        [otherPath, "sample.tif", true],
+        [dismissedPath, taggedFilename("sample.tif", dismissedPath), true],
+      ]);
+    });
+
+    it("gives a different file an upload URL and a row of its own", async () => {
+      const runId = "dismissed-path-upload-different";
+      await createRunWith(runId, reported(1));
+      const [dismissed] = await runFiles(runId);
+      await dismissAll(runId);
+
+      const upload = await requestUpload(runId, reported(900, laterCreatedAt));
+      expect(upload.status).toBe(200);
+      const body = await upload.json();
+      expect(body.already_uploaded).toBe(false);
+      expect(body.upload_url).toBeTruthy();
+      expect(body.s3_key).toBe(`${instrumentId}/${runId}/sample.tif`);
+      expect(body.file_id).not.toBe(dismissed.id);
+
+      const rows = await runFiles(runId);
+      expect(rows).toHaveLength(2);
+      expect(rows.find((row) => row.id === body.file_id)).toMatchObject({
+        deleted_at: null,
+        size_bytes: 900,
+      });
+      expect(
+        rows.find((row) => row.id === dismissed.id)?.deleted_at
+      ).toBeTruthy();
+
+      // A second request for the same file reuses the new row.
+      const again = await requestUpload(runId, reported(900, laterCreatedAt));
+      expect((await again.json()).file_id).toBe(body.file_id);
+      expect(await runFiles(runId)).toHaveLength(2);
+    });
+
+    it("returns 409 for the same file and stores nothing", async () => {
+      const runId = "dismissed-path-upload-same";
+      await createRunWith(runId, reported(1));
+      await dismissAll(runId);
+
+      const upload = await requestUpload(runId, reported(1));
+      expect(upload.status).toBe(409);
+      const rows = await runFiles(runId);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.deleted_at).toBeTruthy();
+    });
+
+    it("lets the Lambda add a file whose name matches a dismissed row's path", async () => {
+      const runId = "dismissed-path-lambda";
+      await createRunWith(runId, reported(1, firstCreatedAt, "result.csv"));
+      const [dismissed] = await runFiles(runId);
+      await dismissAll(runId);
+
+      const lambdaBody = {
+        s3_bucket: "test-bucket",
+        s3_key: `${instrumentId}/${runId}/result.csv`,
+        filename: "result.csv",
+        size_bytes: 40,
+      };
+      const lambdaPost = () =>
+        api(`/api/v1/instruments/${instrumentId}/runs/${runId}/files`, {
+          method: "POST",
+          token,
+          body: lambdaBody,
+        });
+      const created = await lambdaPost();
+      expect(created.status).toBe(201);
+      const createdBody = await created.json();
+      expect(createdBody.id).not.toBe(dismissed.id);
+      expect(createdBody.status).toBe("uploaded");
+
+      // A retry finds the row it made. There is still one active row.
+      const retried = await lambdaPost();
+      expect(retried.status).toBe(200);
+      expect((await retried.json()).id).toBe(createdBody.id);
+      const rows = await runFiles(runId);
+      expect(rows.filter((row) => row.deleted_at === null)).toHaveLength(1);
+      expect(rows).toHaveLength(2);
+    });
+
+    // A dismissed row can end up with an S3 key: the processor adopts the file
+    // between the dismiss reading its status and updating it, or an upload
+    // finishes after the dismiss. S3 keys are unique and built from the stored
+    // name, so a different file at that path must not get the same name.
+    async function markReachedS3(fileId: number, runId: string, name: string) {
+      await getTestDb()
+        .update(filesTable)
+        .set({
+          status: "uploaded",
+          s3Bucket: "test-bucket",
+          s3Key: `${instrumentId}/${runId}/${name}`,
+          uploadedAt: new Date(),
+        })
+        .where(eq(filesTable.id, fileId));
+    }
+
+    it("gives a different file another name when the dismissed file reached S3", async () => {
+      const runId = "dismissed-path-reached-s3";
+      await createRunWith(runId, reported(1));
+      const [dismissed] = await runFiles(runId);
+      await dismissAll(runId);
+      await markReachedS3(dismissed.id, runId, "sample.tif");
+      const taggedName = taggedFilename("sample.tif", relativePath);
+
+      await report(runId, reported(900, laterCreatedAt));
+
+      const rows = await runFiles(runId);
+      expect(
+        rows.map((row) => [row.filename, row.deleted_at === null])
+      ).toEqual([
+        ["sample.tif", false],
+        [taggedName, true],
+      ]);
+
+      // The new file uploads under its own key, so the Lambda can register it
+      // without clashing with the key the dismissed row holds.
+      const upload = await requestUpload(runId, reported(900, laterCreatedAt));
+      expect(upload.status).toBe(200);
+      const uploadBody = await upload.json();
+      expect(uploadBody.s3_key).toBe(`${instrumentId}/${runId}/${taggedName}`);
+      const adopted = await api(
+        `/api/v1/instruments/${instrumentId}/runs/${runId}/files`,
+        {
+          method: "POST",
+          token,
+          body: {
+            s3_bucket: "test-bucket",
+            s3_key: uploadBody.s3_key,
+            filename: taggedName,
+            size_bytes: 900,
+          },
+        }
+      );
+      expect(adopted.status).toBe(200);
+      const adoptedBody = await adopted.json();
+      expect(adoptedBody.id).toBe(uploadBody.file_id);
+      expect(adoptedBody.status).toBe("uploaded");
+    });
+
+    it("keeps a file at another path from taking the name of a dismissed file that reached S3", async () => {
+      const runId = "dismissed-path-reached-s3-other-path";
+      const dismissedPath = "day-1/sample.tif";
+      const otherPath = "day-2/sample.tif";
+      await createRunWith(runId, reported(1, firstCreatedAt, dismissedPath));
+      const [dismissed] = await runFiles(runId);
+      await dismissAll(runId);
+      await markReachedS3(dismissed.id, runId, "sample.tif");
+
+      await report(runId, reported(2, laterCreatedAt, otherPath));
+
+      const rows = await runFiles(runId);
+      expect(rows.map((row) => [row.relative_path, row.filename])).toEqual([
+        [dismissedPath, "sample.tif"],
+        [otherPath, taggedFilename("sample.tif", otherPath)],
+      ]);
+    });
+
+    it("keeps the dismissed file dismissed when it reached S3", async () => {
+      const runId = "dismissed-path-reached-s3-same";
+      await createRunWith(runId, reported(1));
+      const [dismissed] = await runFiles(runId);
+      await dismissAll(runId);
+      await markReachedS3(dismissed.id, runId, "sample.tif");
+
+      await report(runId, reported(1));
+      expect((await requestUpload(runId, reported(1))).status).toBe(409);
+
+      expect(await runFiles(runId)).toHaveLength(1);
+    });
+
+    it("does not dismiss a file that reaches S3 while the dismiss is waiting", async () => {
+      const runId = "dismissed-path-dismiss-race";
+      await createRunWith(runId, reported(1));
+      const [row] = await runFiles(runId);
+      const db = getTestDb();
+
+      // Hold the row so the dismiss, which has already read it as `detected`,
+      // waits at its update. Meanwhile the processor adopts the file.
+      let dismissal: Promise<Response> | undefined;
+      await db.transaction(async (tx) => {
+        await tx
+          .select({ id: filesTable.id })
+          .from(filesTable)
+          .where(eq(filesTable.id, row.id))
+          .for("update");
+        dismissal = api(`/api/v1/files/${row.id}`, { method: "DELETE", token });
+        await waitForBlockedUpdate();
+        await tx
+          .update(filesTable)
+          .set({
+            status: "uploaded",
+            s3Bucket: "test-bucket",
+            s3Key: `${instrumentId}/${runId}/sample.tif`,
+            uploadedAt: new Date(),
+          })
+          .where(eq(filesTable.id, row.id));
+      });
+
+      expect((await dismissal)?.status).toBe(409);
+      const [after] = await db
+        .select({
+          deletedAt: filesTable.deletedAt,
+          status: filesTable.status,
+        })
+        .from(filesTable)
+        .where(eq(filesTable.id, row.id));
+      expect(after).toEqual({ deletedAt: null, status: "uploaded" });
+    });
+
+    // True once a statement that updates `files` waits for a row lock.
+    async function waitForBlockedUpdate() {
+      for (let attempt = 0; attempt < 100; attempt++) {
+        const waiting = await getTestDb().execute(
+          sql`select 1 from pg_stat_activity
+              where datname = current_database()
+                and wait_event_type = 'Lock'
+                and query ilike 'update "files"%'`
+        );
+        if (waiting.rows.length > 0) {
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      throw new Error("The dismiss never waited for the row lock");
+    }
+
+    describe("for a watcher older than 1.1.0", () => {
+      const oldWatcher = { [WATCHER_VERSION_HEADER]: "1.0.0" };
+      // Such a watcher uploads by filename only, so a file sits at the path
+      // that equals its name.
+      const rootPath = "sample.tif";
+
+      it("refuses the dismissed file's upload and stores nothing", async () => {
+        const runId = "dismissed-path-old-upload-same";
+        await createRunWith(
+          runId,
+          reported(1, firstCreatedAt, rootPath),
+          oldWatcher
+        );
+        await dismissAll(runId);
+
+        const upload = await requestUpload(
+          runId,
+          reported(1, firstCreatedAt, rootPath),
+          oldWatcher
+        );
+        expect(upload.status).toBe(409);
+        const rows = await runFiles(runId);
+        expect(rows).toHaveLength(1);
+        expect(rows[0]?.deleted_at).toBeTruthy();
+      });
+
+      it("gives a different file an upload URL and a row of its own", async () => {
+        const runId = "dismissed-path-old-upload-different";
+        await createRunWith(
+          runId,
+          reported(1, firstCreatedAt, rootPath),
+          oldWatcher
+        );
+        const [dismissed] = await runFiles(runId);
+        await dismissAll(runId);
+
+        const upload = await requestUpload(
+          runId,
+          reported(900, laterCreatedAt, rootPath),
+          oldWatcher
+        );
+        expect(upload.status).toBe(200);
+        const body = await upload.json();
+        expect(body.upload_url).toBeTruthy();
+        expect(body.s3_key).toBe(`${instrumentId}/${runId}/sample.tif`);
+        expect(body.file_id).not.toBe(dismissed.id);
+        expect(await runFiles(runId)).toHaveLength(2);
+
+        // A second request finds the row it made.
+        const again = await requestUpload(
+          runId,
+          reported(900, laterCreatedAt, rootPath),
+          oldWatcher
+        );
+        expect((await again.json()).file_id).toBe(body.file_id);
+        expect(await runFiles(runId)).toHaveLength(2);
+      });
+
+      it("leaves out a file whose name a dismissed file that reached S3 holds", async () => {
+        const runId = "dismissed-path-old-reached-s3";
+        await createRunWith(
+          runId,
+          reported(1, firstCreatedAt, rootPath),
+          oldWatcher
+        );
+        const [dismissed] = await runFiles(runId);
+        await dismissAll(runId);
+        await markReachedS3(dismissed.id, runId, "sample.tif");
+
+        // It can't be stored under another name, and the S3 key is taken.
+        await report(
+          runId,
+          reported(900, laterCreatedAt, rootPath),
+          oldWatcher
+        );
+        const upload = await requestUpload(
+          runId,
+          reported(900, laterCreatedAt, rootPath),
+          oldWatcher
+        );
+        expect(upload.status).toBe(409);
+        expect(await runFiles(runId)).toHaveLength(1);
+      });
+    });
   });
 
   async function filenames(runId: string): Promise<string[]> {

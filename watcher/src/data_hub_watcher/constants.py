@@ -70,6 +70,31 @@ WATCHER_LOG_DIR = _resolve_watcher_log_dir()
 SUPPORTED_ENVIRONMENTS: tuple[str, ...] = ("staging", "production", "preview")
 
 HEARTBEAT_INTERVAL_SECONDS = 60
+# The `code` in the JSON body of the 404 that Data Hub sends for a watcher whose registration
+# was deleted: deregistered in the web app, or by retiring its instrument. A watcher ID that
+# the server has no row for at all gets `NOT_FOUND` instead, so rows that went missing from
+# the server's database (a restore to an older point, say) never stop a watcher for good.
+# The server's `WATCHER_DEREGISTERED` in `web/lib/api/errors.ts` must say the same.
+WATCHER_DEREGISTERED_ERROR_CODE = "WATCHER_DEREGISTERED"
+# A deregistered watcher can't report anything again: the server answers every heartbeat with
+# that 404. One such reply could come from a bad deploy, so the watcher stops only after this
+# many heartbeats in a row get it. That is about 3 minutes at the production interval. Any
+# other result, a success or any other error, starts the count again.
+DEREGISTERED_HEARTBEAT_THRESHOLD = 3
+# What the watcher says, in the log and at the command line, when it stops or refuses to
+# start for that reason. The word "init" is what the person on the PC has to act on.
+DEREGISTERED_MESSAGE = (
+    "This watcher was deregistered on Data Hub, so its registration no longer exists. "
+    "Run 'data-hub-watcher init' to register it again."
+)
+# The exit code of `data-hub-watcher watch` when it stops, or refuses to start, because the
+# watcher was deregistered. It differs from 0 (a stop that was asked for) and from 1 (an update
+# was installed and the watcher has to start again, which is also what a start that fails for
+# another reason returns), so a wrapper script or a systemd unit (`RestartPreventExitStatus=3`)
+# can tell that restarting the watcher won't help until `init` has run. The Windows service
+# exits 0 for a stop of this kind instead, so that the SCM's recovery actions, which restart a
+# service that fails, leave it stopped. Its refused start exits 1, so that the SCM tries again.
+DEREGISTERED_EXIT_CODE = 3
 # The `status_reason` on the final `stopped` heartbeat when the stop was caused by
 # Windows shutting down or restarting. A server that knows the value keeps the
 # instrument's requested uploads queued, for the watcher to upload after the PC
@@ -111,6 +136,10 @@ STOP_FINAL_HEARTBEAT_SECONDS = 5
 # The least a join gets in a stop that has run out of time: after the uploads are cut off,
 # and for a heartbeat in progress.
 STOP_MIN_WAIT_SECONDS = 1
+# The most a stop waits, at its very end and only if the stop budget has time left, for an
+# event flush that a heartbeat tick left running, so that the flush can delete the saved
+# events it sends if the server takes them (`EventReporter.detach_store`).
+STOP_FLUSH_WAIT_SECONDS = 2
 SERVICE_STOP_WAIT_HINT_MILLISECONDS = 30_000
 # Windows waits for the service to stop, at a restart or a shutdown, for the
 # preshutdown timeout: 10 s by default from Windows 10 build 15063 and 180 s
@@ -141,6 +170,44 @@ UPLOAD_POLL_INTERVAL_SECONDS = 60
 # still running, and the rebuild waits for their threads to exit before it
 # starts the new runtime.
 CONFIG_APPLY_DRAIN_TIMEOUT_SECONDS = 120
+# The same wait when the watch folder has disappeared under a running watcher.
+# Every part of a large file opens the file again, so once the folder is gone the
+# parts that haven't started can't open it and the upload can't finish either way:
+# waiting longer only keeps the watcher reporting `watching` while its folder is
+# missing. The files that were cut off are uploaded again once the folder is back
+# (`pending_uploads` rows, or the server's queue).
+WATCH_FOLDER_GONE_DRAIN_TIMEOUT_SECONDS = 10
+# What the move to the waiting state, and the rebuild of a runtime that can't see its
+# folder, give each of the other waits that a folder on a dead share can hold up, after
+# the drain: the threads of uploads that were cut off (`Uploader.abort`, which can't
+# reach a thread that is blocked reading the share), the file monitor's observer, and the
+# heartbeat tick in progress. A thread that is still running then is left behind and the
+# watcher goes on without it, instead of keeping the `poll` thread, which is the one that
+# sees a stop, in the wait. A runtime that starts on the same folder does not start until
+# the cut-off threads have exited. A stop ends each of these waits at once.
+WATCH_FOLDER_GONE_JOIN_SECONDS = 5
+# A look at the watch folder (`FolderProbe`) runs on its own thread and is given this
+# long. A stat or a listing on a share that has hung can block for the SMB timeout
+# (about a minute on Windows) or, on a hard NFS mount, forever, and the `poll` thread
+# has to stay free to see a stop. A look that takes longer counts as a problem:
+# "not responding". A stop ends the wait for a look sooner in the supervisor's folder
+# checks and in the uploader's looks. The look that starts a runtime keeps the full limit.
+FOLDER_PROBE_TIMEOUT_SECONDS = 10
+# A running watcher moves to the waiting state only when a second look, this long
+# after the first one that found a problem, finds one too. A share that drops and
+# comes back within seconds, or a folder that is still being deleted, costs it nothing:
+# the move cuts off every upload in progress and rescans the folder at the next start.
+# The reason reported is the one of the second look.
+FOLDER_CONFIRM_DELAY_SECONDS = 3
+# A runtime that went blind (watchdog stopped watching its folder, or the folder is
+# not the one it started on) is rebuilt once. If the rebuilt runtime has not been
+# watching this long when it goes blind again, rebuilding again would not help, and
+# would send a heartbeat and a full scan at every check. When watchdog has stopped
+# watching, the folder can't be watched: the watcher waits with that reason and retries
+# on the waiting state's backoff. When watchdog is still watching and only the folder's
+# identity changed, the filesystem doesn't give it a lasting one: the watcher keeps
+# the runtime and stops comparing the identity, until a config change or a restart.
+MONITOR_RESTART_WINDOW_SECONDS = 120
 # While waiting with the watch folder present, a start that keeps failing is
 # retried after 1, 2, 4 and 8 heartbeat intervals, then every 15 minutes, so a
 # persistent failure doesn't rebuild the runtime and log a traceback every
@@ -214,6 +281,13 @@ MAX_PENDING_UPLOAD_ATTEMPTS = 3
 # delay doubles from the base, then stays at the cap.
 RUN_REPORT_RETRY_BASE_DELAY_SECONDS = 5
 RUN_REPORT_RETRY_MAX_DELAY_SECONDS = 300
+# The `error.details.reason` of the 409 the server answers when a request is
+# about a run that was deleted on Data Hub: a run report, a run update or an
+# upload-URL request. A watcher that sees it stops sending requests about that
+# run until it restarts, or until the server accepts an upload that someone
+# requested for the run. The server's reason (`web/lib/api/errors.ts`) must say
+# the same.
+RUN_DELETED_REASON = "run_deleted"
 # Upload records older than this are pruned from the local state DB
 # to prevent unbounded growth on long-running watcher instances.
 PRUNE_DAYS = 90

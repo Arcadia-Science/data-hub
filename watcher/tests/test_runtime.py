@@ -18,11 +18,12 @@ wiring contract per `upload_mode` so any future drift fails loudly:
 
 from __future__ import annotations
 import json
+import logging
 import threading
 import time
 from pathlib import Path
 from typing import Any, Literal
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -30,6 +31,8 @@ from data_hub_watcher.api_client import DEFAULT_TIMEOUT, ApiError
 from data_hub_watcher.constants import (
     DEFAULT_CHECK_INTERVAL_TICKS,
     DEFAULT_IDLE_TICKS_REQUIRED,
+    DEREGISTERED_HEARTBEAT_THRESHOLD,
+    DEREGISTERED_MESSAGE,
     HEARTBEAT_INTERVAL_SECONDS,
     STOP_BUDGET_SECONDS,
     STOP_FINAL_HEARTBEAT_SECONDS,
@@ -40,19 +43,28 @@ from data_hub_watcher.constants import (
     SYSTEM_SHUTDOWN_STOP_BUDGET_SECONDS,
     UPLOAD_POLL_INTERVAL_SECONDS,
 )
+from data_hub_watcher.deleted_runs import DeletedRuns
 from data_hub_watcher.events import EventType
-from data_hub_watcher.heartbeat import HeartbeatLoop, WatcherCounters
-from data_hub_watcher.models import InstrumentConfig, RunDetectionConfig, WatcherConfig
+from data_hub_watcher.heartbeat import DeregisteredReplies, HeartbeatLoop, WatcherCounters
+from data_hub_watcher.models import (
+    ApiErrorDetail,
+    InstrumentConfig,
+    RunDetectionConfig,
+    WatcherConfig,
+    WatcherResponse,
+)
 from data_hub_watcher.monitor import FileMonitor
 from data_hub_watcher.run_detector import RunDetector
 from data_hub_watcher.runtime import (
     ShutdownReason,
     WatcherRuntime,
+    _deregistered_requester,
     _summarize_worker_failure,
     build_runtime,
     classify_shutdown,
     start_runtime,
     stop_runtime,
+    watcher_is_deregistered,
 )
 from data_hub_watcher.state import StateDB
 from data_hub_watcher.updater import Updater, write_upgrade_marker
@@ -93,6 +105,34 @@ def _make_config(
 @pytest.fixture
 def db_path(tmp_path: Path) -> Path:
     return tmp_path / "state.sqlite"
+
+
+class TestBuildRuntimeDeletedRuns:
+    """The detector and the uploader share the set of runs Data Hub refused as deleted."""
+
+    @pytest.mark.parametrize("upload_mode", ["auto", "manual"])
+    def test_they_share_one_set(
+        self, tmp_path: Path, db_path: Path, upload_mode: Literal["auto", "manual"]
+    ) -> None:
+        cfg = _make_config(tmp_path, upload_mode=upload_mode)
+        rt = build_runtime(client=MagicMock(), cfg=cfg, db_path=db_path)
+
+        try:
+            rt.uploader._deleted_runs.add("RUN001")
+            assert "RUN001" in rt.detector._deleted_runs
+        finally:
+            rt.state_db.close()
+
+    def test_a_set_passed_in_is_the_one_they_use(self, tmp_path: Path, db_path: Path) -> None:
+        cfg = _make_config(tmp_path, upload_mode="auto")
+        deleted = DeletedRuns()
+        rt = build_runtime(client=MagicMock(), cfg=cfg, db_path=db_path, deleted_runs=deleted)
+
+        try:
+            assert rt.detector._deleted_runs is deleted
+            assert rt.uploader._deleted_runs is deleted
+        finally:
+            rt.state_db.close()
 
 
 class TestBuildRuntimeAutoMode:
@@ -720,6 +760,428 @@ class TestStopRuntimeForASystemShutdown:
         assert parts.heartbeat.send_final_heartbeat.call_args.kwargs["deadline"] is not None
 
 
+class TestStopRuntimeForADeregisteredWatcher:
+    """A watcher whose registration was deleted sends nothing when it stops.
+
+    The server answers the `watcher_stopped` event and the final `stopped` heartbeat with the
+    same 404 as the heartbeats that showed the registration was gone. The uploads are cut off
+    at once and every join is short, and the state database is still closed.
+    """
+
+    def test_no_event_and_no_final_heartbeat_are_sent(self) -> None:
+        rt, parts = _runtime_of_mocks()
+
+        stop_runtime(rt, stopped_message="Service stopped", deregistered=True)
+
+        assert _steps(parts) == [
+            "uploader.abort",
+            "monitor.stop",
+            "upload_worker.stop",
+            "heartbeat.stop_loop",
+            "state_db.close",
+        ]
+        parts.reporter.queue_event.assert_not_called()
+        parts.reporter.flush.assert_not_called()
+        parts.heartbeat.send_final_heartbeat.assert_not_called()
+
+    def test_uploads_are_cut_off_first_and_every_wait_is_short(self) -> None:
+        rt, parts = _runtime_of_mocks()
+
+        stop_runtime(rt, stopped_message="Service stopped", deregistered=True)
+
+        parts.uploader.abort.assert_called_once_with()
+        parts.monitor.stop.assert_called_once_with(
+            timeout=SYSTEM_SHUTDOWN_JOIN_SECONDS, observer_timeout=SYSTEM_SHUTDOWN_JOIN_SECONDS
+        )
+        parts.upload_worker.stop.assert_called_once_with(timeout=SYSTEM_SHUTDOWN_JOIN_SECONDS)
+        parts.heartbeat.stop_loop.assert_called_once_with(join_timeout=STOP_MIN_WAIT_SECONDS)
+
+    @pytest.mark.parametrize(
+        ("monitor_stopped", "worker_stopped", "closed"),
+        [(True, True, True), (False, True, False), (True, False, False)],
+        ids=["both-stopped", "monitor-still-running", "worker-still-running"],
+    )
+    def test_the_state_db_is_closed_unless_an_upload_thread_still_runs(
+        self, monitor_stopped: bool, worker_stopped: bool, closed: bool
+    ) -> None:
+        rt, parts = _runtime_of_mocks(
+            monitor_stopped=monitor_stopped, worker_stopped=worker_stopped
+        )
+
+        stop_runtime(rt, stopped_message="Service stopped", deregistered=True)
+
+        assert parts.state_db.close.called is closed
+        parts.heartbeat.send_final_heartbeat.assert_not_called()
+
+    def test_a_deregistered_watcher_also_sends_nothing_for_a_windows_shutdown(self) -> None:
+        rt, parts = _runtime_of_mocks()
+
+        stop_runtime(rt, stopped_message="Service stopped", system_shutdown=True, deregistered=True)
+
+        assert "heartbeat.send_final_heartbeat" not in _steps(parts)
+        assert "reporter.queue_event" not in _steps(parts)
+
+    def test_without_an_upload_worker_it_is_still_short(self) -> None:
+        rt, parts = _runtime_of_mocks()
+        rt.upload_worker = None
+
+        stop_runtime(rt, stopped_message="Service stopped", deregistered=True)
+
+        assert _steps(parts)[:2] == ["uploader.abort", "monitor.stop"]
+        parts.state_db.close.assert_called_once_with()
+
+    def test_the_stop_of_a_watcher_that_is_not_deregistered_is_unchanged(self) -> None:
+        rt, parts = _runtime_of_mocks()
+
+        stop_runtime(rt, stopped_message="Service stopped", deregistered=False)
+
+        assert "heartbeat.send_final_heartbeat" in _steps(parts)
+        assert "reporter.queue_event" in _steps(parts)
+
+
+def _deregistered() -> ApiError:
+    return ApiError(
+        "Watcher 'w-test' was deregistered",
+        status_code=404,
+        detail=ApiErrorDetail(
+            code="WATCHER_DEREGISTERED", message="Watcher 'w-test' was deregistered"
+        ),
+    )
+
+
+def _plain_not_found() -> ApiError:
+    return ApiError(
+        "Watcher 'w-test' not found",
+        status_code=404,
+        detail=ApiErrorDetail(code="NOT_FOUND", message="Watcher 'w-test' not found"),
+    )
+
+
+class TestDeregisteredRequester:
+    """What the heartbeat thread does when the registration was deleted."""
+
+    def test_it_sets_the_events_and_stops_the_uploads(self) -> None:
+        shutdown, deregistered = threading.Event(), threading.Event()
+        stop_uploads = MagicMock()
+
+        _deregistered_requester(shutdown, deregistered, stop_uploads)()
+
+        assert shutdown.is_set()
+        assert deregistered.is_set()
+        stop_uploads.assert_called_once_with()
+
+    def test_the_uploads_are_stopped_before_the_main_loop_can_see_the_shutdown(self) -> None:
+        shutdown, deregistered = threading.Event(), threading.Event()
+        seen: list[bool] = []
+
+        def stop_uploads() -> None:
+            seen.append(shutdown.is_set())
+
+        _deregistered_requester(shutdown, deregistered, stop_uploads)()
+
+        assert seen == [False]
+
+    def test_without_uploads_to_stop_it_still_sets_the_events(self) -> None:
+        shutdown, deregistered = threading.Event(), threading.Event()
+
+        _deregistered_requester(shutdown, deregistered)()
+
+        assert shutdown.is_set() and deregistered.is_set()
+
+    def test_a_second_call_stops_what_it_owns_but_logs_nothing_more(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # Two loops of one watcher can both reach the threshold, because they share the run of
+        # replies and the first one's stop is still unwinding.
+        shutdown, deregistered = threading.Event(), threading.Event()
+        first_uploads, second_uploads = MagicMock(), MagicMock()
+
+        with caplog.at_level(logging.INFO, logger="data_hub_watcher.runtime"):
+            _deregistered_requester(shutdown, deregistered, first_uploads)()
+            _deregistered_requester(shutdown, deregistered, second_uploads)()
+
+        assert [r.levelno for r in caplog.records] == [logging.ERROR]
+        first_uploads.assert_called_once_with()
+        second_uploads.assert_called_once_with()
+
+    def test_two_loops_that_reach_the_threshold_at_once_log_it_once(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        class SlowToAnswer(threading.Event):
+            """An event whose `is_set` takes a while, so that a check and a set can interleave."""
+
+            def is_set(self) -> bool:
+                answer = super().is_set()
+                time.sleep(0.2)
+                return answer
+
+        shutdown, deregistered = threading.Event(), SlowToAnswer()
+        callbacks = [_deregistered_requester(shutdown, deregistered) for _ in range(2)]
+        threads = [threading.Thread(target=callback) for callback in callbacks]
+
+        with caplog.at_level(logging.INFO, logger="data_hub_watcher.runtime"):
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(10)
+
+        assert [r.levelno for r in caplog.records] == [logging.ERROR]
+        assert deregistered.is_set()
+
+    def test_it_logs_one_error_that_says_to_run_init(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.INFO, logger="data_hub_watcher.runtime"):
+            _deregistered_requester(threading.Event(), threading.Event())()
+
+        errors = [r for r in caplog.records if r.levelno >= logging.WARNING]
+        assert len(errors) == 1
+        assert errors[0].levelno == logging.ERROR
+        message = errors[0].getMessage()
+        assert DEREGISTERED_MESSAGE in message
+        assert "deregistered" in message
+        assert "data-hub-watcher init" in message
+
+
+class TestBuildRuntimeDeregistered:
+    """`build_runtime` connects the heartbeat loop to the stop."""
+
+    @staticmethod
+    def _beat(rt: WatcherRuntime, times: int) -> None:
+        for _ in range(times):
+            rt.heartbeat._send_heartbeat()
+
+    def test_three_deregistered_heartbeats_stop_uploads_and_ask_for_a_shutdown(
+        self, tmp_path: Path, db_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        client = MagicMock()
+        client.send_heartbeat.side_effect = _deregistered()
+        cfg = _make_config(tmp_path, upload_mode="auto")
+        rt = build_runtime(client=client, cfg=cfg, db_path=db_path)
+        try:
+            with caplog.at_level(logging.WARNING):
+                self._beat(rt, DEREGISTERED_HEARTBEAT_THRESHOLD - 1)
+                assert not rt.shutdown_event.is_set()
+                assert not rt.uploader._stop_requested()
+                self._beat(rt, 1)
+                # A reply after the loop has been told is logged as a failed heartbeat,
+                # but not as a second deregistration.
+                self._beat(rt, 1)
+
+            assert rt.deregistered_event.is_set()
+            assert rt.shutdown_event.is_set()
+            # Nothing new is uploaded from the moment the heartbeat loop knows, without
+            # waiting for the main thread to get to the stop.
+            assert rt.uploader._stop_requested()
+            assert not rt.upgrade_restart_event.is_set()
+            deregistered_errors = [
+                r for r in caplog.records if DEREGISTERED_MESSAGE in r.getMessage()
+            ]
+            assert len(deregistered_errors) == 1
+        finally:
+            rt.state_db.close()
+
+    def test_three_plain_not_found_heartbeats_leave_the_watcher_running(
+        self, tmp_path: Path, db_path: Path
+    ) -> None:
+        client = MagicMock()
+        client.send_heartbeat.side_effect = _plain_not_found()
+        cfg = _make_config(tmp_path, upload_mode="auto")
+        rt = build_runtime(client=client, cfg=cfg, db_path=db_path)
+        try:
+            self._beat(rt, DEREGISTERED_HEARTBEAT_THRESHOLD + 2)
+
+            assert not rt.deregistered_event.is_set()
+            assert not rt.shutdown_event.is_set()
+            assert not rt.uploader._stop_requested()
+        finally:
+            rt.state_db.close()
+
+    def test_two_deregistered_heartbeats_then_a_success_leave_the_watcher_running(
+        self, tmp_path: Path, db_path: Path
+    ) -> None:
+        client = MagicMock()
+        client.send_heartbeat.side_effect = [
+            _deregistered(),
+            _deregistered(),
+            MagicMock(),
+            _deregistered(),
+        ]
+        cfg = _make_config(tmp_path, upload_mode="auto")
+        rt = build_runtime(client=client, cfg=cfg, db_path=db_path)
+        try:
+            self._beat(rt, 4)
+
+            assert not rt.deregistered_event.is_set()
+            assert not rt.shutdown_event.is_set()
+            assert not rt.uploader._stop_requested()
+        finally:
+            rt.state_db.close()
+
+    def test_the_loop_counts_with_the_run_of_replies_it_is_given(
+        self, tmp_path: Path, db_path: Path
+    ) -> None:
+        replies = DeregisteredReplies()
+        client = MagicMock()
+        client.send_heartbeat.side_effect = _deregistered()
+        rt = build_runtime(
+            client=client,
+            cfg=_make_config(tmp_path, upload_mode="auto"),
+            db_path=db_path,
+            deregistered_replies=replies,
+        )
+        try:
+            # Two replies that an earlier loop of the same watcher counted: this loop's first
+            # reply is the third.
+            replies.add()
+            replies.add()
+            self._beat(rt, 1)
+
+            assert rt.deregistered_event.is_set()
+        finally:
+            rt.state_db.close()
+
+    @pytest.mark.parametrize("upload_mode", ["auto", "manual"])
+    def test_a_start_whose_first_heartbeat_is_the_third_reply_starts_no_more_threads(
+        self, tmp_path: Path, db_path: Path, upload_mode: Literal["auto", "manual"]
+    ) -> None:
+        replies = DeregisteredReplies()
+        # Two replies that the loops before this runtime's counted.
+        replies.add()
+        replies.add()
+        client = MagicMock()
+        client.send_heartbeat.side_effect = _deregistered()
+        rt = build_runtime(
+            client=client,
+            cfg=_make_config(tmp_path, upload_mode=upload_mode),
+            db_path=db_path,
+            deregistered_replies=replies,
+        )
+        try:
+            with patch.object(FileMonitor, "start") as monitor_start:
+                start_runtime(rt, started_message="Watcher started on test")
+
+            assert rt.deregistered_event.is_set()
+            assert rt.shutdown_event.is_set()
+            # The stop that the reply asked for is still in force: nothing was started that
+            # could have undone it, and nothing retried the pending uploads.
+            assert rt.uploader._stop_requested()
+            assert rt.upload_worker is not None
+            assert rt.upload_worker._thread is None
+            monitor_start.assert_not_called()
+            assert rt.heartbeat._thread is None
+            # The started event that start_runtime queued was not flushed.
+            client.send_events.assert_not_called()
+
+            # The stop that follows has nothing to wait for.
+            stop_runtime(rt, stopped_message="Watcher stopped", deregistered=True)
+
+            client.send_events.assert_not_called()
+            assert client.send_heartbeat.call_count == 1
+        finally:
+            rt.state_db.close()
+
+    def test_the_runtime_shares_the_event_it_is_given(self, tmp_path: Path, db_path: Path) -> None:
+        event = threading.Event()
+        rt = build_runtime(
+            client=MagicMock(),
+            cfg=_make_config(tmp_path, upload_mode="auto"),
+            db_path=db_path,
+            deregistered_event=event,
+        )
+        try:
+            assert rt.deregistered_event is event
+        finally:
+            rt.state_db.close()
+
+
+class TestWatcherIsDeregistered:
+    """The start-up check: only the server's "deregistered" reply refuses."""
+
+    def test_a_registered_watcher_is_not_deregistered(self) -> None:
+        client = MagicMock()
+        client.get_watcher.return_value = WatcherResponse(id="w-test")
+
+        assert watcher_is_deregistered(client, "w-test") is False
+        client.get_watcher.assert_called_once_with("w-test")
+
+    def test_the_servers_deregistered_reply_means_deregistered(self) -> None:
+        client = MagicMock()
+        client.get_watcher.side_effect = _deregistered()
+
+        assert watcher_is_deregistered(client, "w-test") is True
+
+    def test_a_plain_not_found_lets_the_watcher_start(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # A watcher ID that the server has no row for, as after its database was restored to
+        # an older point, is not a deregistration. Refusing would tell every operator to run
+        # `init` for what is a problem on the server.
+        client = MagicMock()
+        client.get_watcher.side_effect = _plain_not_found()
+
+        with caplog.at_level(logging.WARNING, logger="data_hub_watcher.runtime"):
+            assert watcher_is_deregistered(client, "w-test") is False
+
+        assert [r.levelno for r in caplog.records] == [logging.WARNING]
+        assert "starting anyway" in caplog.records[0].getMessage()
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            ApiError("<html>404</html>", status_code=404),
+            ApiError("down", status_code=503),
+            ApiError("no", status_code=403, detail=ApiErrorDetail(code="FORBIDDEN", message="no")),
+            ApiError("Connection error: refused", status_code=0),
+            ValueError("a reply the client could not read"),
+        ],
+        ids=["html-404", "5xx", "403", "network", "unreadable-reply"],
+    )
+    def test_any_other_failure_lets_the_watcher_start(
+        self, error: Exception, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        client = MagicMock()
+        client.get_watcher.side_effect = error
+
+        with caplog.at_level(logging.WARNING, logger="data_hub_watcher.runtime"):
+            assert watcher_is_deregistered(client, "w-test") is False
+
+        # Said once, so a problem with the check itself is not silent.
+        assert [r.levelno for r in caplog.records] == [logging.WARNING]
+        assert "starting anyway" in caplog.records[0].getMessage()
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            ApiError("<html>" + "x" * 5000 + "</html>", status_code=502),
+            ValueError("y" * 5000),
+        ],
+        ids=["api-error", "other-exception"],
+    )
+    def test_a_long_message_is_cut_before_it_is_logged(
+        self, error: Exception, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # A proxy or a failed deploy can answer with a whole HTML page.
+        client = MagicMock()
+        client.get_watcher.side_effect = error
+
+        with caplog.at_level(logging.WARNING, logger="data_hub_watcher.runtime"):
+            assert watcher_is_deregistered(client, "w-test") is False
+
+        (record,) = caplog.records
+        assert len(record.getMessage()) < 500
+        assert "more characters" in record.getMessage()
+
+    def test_a_short_message_is_logged_whole(self, caplog: pytest.LogCaptureFixture) -> None:
+        client = MagicMock()
+        client.get_watcher.side_effect = ApiError("Server error: down", status_code=503)
+
+        with caplog.at_level(logging.WARNING, logger="data_hub_watcher.runtime"):
+            watcher_is_deregistered(client, "w-test")
+
+        assert "(Server error: down)" in caplog.records[0].getMessage()
+
+
 class TestBuildRuntimeSharedDependencies:
     """Cross-object wiring invariants that apply to both upload modes."""
 
@@ -1075,6 +1537,44 @@ class TestClassifyShutdown:
             # would look weird on Windows where the dashboard already
             # shows the watcher's host as a service.
             assert decision.stopped_message == "Service restarting for auto-update"
+        finally:
+            rt.state_db.close()
+
+    def test_a_deregistered_watcher_is_its_own_reason(self, tmp_path: Path, db_path: Path) -> None:
+        cfg = _make_config(tmp_path, upload_mode="auto")
+        rt = build_runtime(client=MagicMock(), cfg=cfg, db_path=db_path)
+        try:
+            rt.deregistered_event.set()
+            decision = classify_shutdown(rt, role="Service")
+            assert decision.is_deregistered is True
+            assert decision.is_upgrade_restart is False
+            assert decision.stopped_message == (
+                "Service stopped: its registration was deleted on Data Hub"
+            )
+        finally:
+            rt.state_db.close()
+
+    def test_a_deregistered_watcher_wins_over_a_pending_update_restart(
+        self, tmp_path: Path, db_path: Path
+    ) -> None:
+        # There is no registration left for the new version to run under, and the exit
+        # code of a restart would send the supervisor round again.
+        cfg = _make_config(tmp_path, upload_mode="auto")
+        rt = build_runtime(client=MagicMock(), cfg=cfg, db_path=db_path)
+        try:
+            rt.upgrade_restart_event.set()
+            rt.deregistered_event.set()
+            decision = classify_shutdown(rt, role="Watcher")
+            assert decision.is_deregistered is True
+            assert decision.is_upgrade_restart is False
+        finally:
+            rt.state_db.close()
+
+    def test_an_ordinary_stop_is_not_deregistered(self, tmp_path: Path, db_path: Path) -> None:
+        cfg = _make_config(tmp_path, upload_mode="auto")
+        rt = build_runtime(client=MagicMock(), cfg=cfg, db_path=db_path)
+        try:
+            assert classify_shutdown(rt, role="Watcher").is_deregistered is False
         finally:
             rt.state_db.close()
 

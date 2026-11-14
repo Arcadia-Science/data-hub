@@ -6,8 +6,8 @@ import { authorize, authorizeToken } from "@/lib/api/auth";
 import {
   apiError,
   apiErrorFromResult,
-  CONFLICT,
   NOT_FOUND,
+  runDeletedError,
 } from "@/lib/api/errors";
 import {
   foldEarlierAcquiredAt,
@@ -143,7 +143,9 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
   }
 
   if (run.deletedAt) {
-    return apiError(409, CONFLICT, "Cannot update a soft-deleted run");
+    return runDeletedError(
+      "This run was deleted on Data Hub. Restore it to make changes."
+    );
   }
 
   const body = await readJsonBody(request, patchRunBody);

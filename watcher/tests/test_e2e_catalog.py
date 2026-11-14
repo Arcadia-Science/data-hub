@@ -919,8 +919,9 @@ def test_the_real_tests_hide_nothing() -> None:
 def test_the_real_known_bug_tests_follow_the_pattern() -> None:
     tests, _ = collect_tests(E2E_DIR)
 
+    # The real catalog has no known bug while every bug that was found is fixed, and then
+    # there is nothing to check in this loop. The check below still holds.
     bug_tests = [t for t in tests if t.xfail]
-    assert bug_tests
     for test in bug_tests:
         assert test.strict_xfail, test.label
         assert test.xfail_raises_known_bug, test.label
@@ -934,7 +935,9 @@ def test_the_real_known_bug_tests_follow_the_pattern() -> None:
             assert all(t.status != "xfail_bug" for t in named), test.label
 
 
-def test_the_real_catalog_has_a_transition_for_every_kind_of_status() -> None:
+def test_the_real_catalog_uses_only_the_known_kinds_of_status() -> None:
     kinds: set[str] = {t.status for t in catalog.ALL_TRANSITIONS}
-    assert kinds == {"covered", "xfail_bug", "excluded"}
+    # `xfail_bug` is a known gap, and the catalog has none once every bug that was found is
+    # fixed.
+    assert {"covered", "excluded"} <= kinds <= {"covered", "xfail_bug", "excluded"}
     assert isinstance(catalog.ALL_TRANSITIONS[0], Transition)

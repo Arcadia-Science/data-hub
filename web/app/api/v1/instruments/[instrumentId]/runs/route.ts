@@ -1,7 +1,12 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { after, type NextRequest } from "next/server";
 import { authorize, authorizeToken } from "@/lib/api/auth";
-import { apiError, NOT_FOUND, VALIDATION_ERROR } from "@/lib/api/errors";
+import {
+  apiError,
+  NOT_FOUND,
+  runDeletedError,
+  VALIDATION_ERROR,
+} from "@/lib/api/errors";
 import {
   buildRunListQuery,
   foldEarlierAcquiredAt,
@@ -34,7 +39,9 @@ interface RouteContext {
 //   - Watcher: { run_id, source: "watcher", watcher_id, detected_files[] }
 // If the run already exists (same instrument_id + run_id), returns 200 with
 // the existing record instead of 201. This handles the race where a Lambda
-// auto-creates a run that was already reported by the watcher.
+// auto-creates a run that was already reported by the watcher. A report of a
+// deleted run that carries files, an acquired_at, or the watcher's source gets
+// 409 and changes nothing. The Lambda's { run_id, source } call still gets 200.
 //
 // PAT-only: the dashboard never creates runs. Session `*` would let any
 // member insert fake runs (and fire Slack / in-app notifications).
@@ -134,6 +141,22 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
           )
         )
         .limit(1);
+
+  // Refuse before anything is written, so a report of a deleted run attaches
+  // no files and doesn't move the run's acquired_at. The Lambda only needs the
+  // run's ID, so a body with nothing but { run_id, source: "lambda" } still
+  // gets the run back. `source` alone can't be trusted to tell the two apart.
+  if (
+    !isNew &&
+    run.deletedAt &&
+    (source === "watcher" ||
+      (body.detected_files?.length ?? 0) > 0 ||
+      body.acquired_at !== undefined)
+  ) {
+    return runDeletedError(
+      "This run was deleted on Data Hub. Restore it to add files."
+    );
+  }
 
   if (!isNew && incomingAcquiredAt) {
     await foldEarlierAcquiredAt(run.id, incomingAcquiredAt);

@@ -21,6 +21,8 @@ from data_hub_watcher.config_io import config_checksum, load_config, save_config
 from data_hub_watcher.constants import (
     DEFAULT_CONFIG_DIR,
     DEFAULT_STABILITY_PERIOD_SECONDS,
+    DEREGISTERED_EXIT_CODE,
+    DEREGISTERED_MESSAGE,
     RUN_DETECTION_PRESETS,
     SUPPORTED_ENVIRONMENTS,
     WATCHER_VERSION,
@@ -45,7 +47,7 @@ from data_hub_watcher.models import (
     watch_directory_problem,
 )
 from data_hub_watcher.remote_config import editable_settings_problem
-from data_hub_watcher.runtime import WatcherSupervisor, run_supervisor
+from data_hub_watcher.runtime import WatcherSupervisor, run_supervisor, watcher_is_deregistered
 from data_hub_watcher.self_update import (
     InstallMethod,
     UvExecutableNotFoundError,
@@ -1165,11 +1167,29 @@ def config_path_cmd(ctx: click.Context) -> None:
 # ---------------------------------------------------------------------------
 
 
+class DeregisteredStartError(click.ClickException):
+    """A start that is refused because the watcher's registration was deleted on Data Hub.
+
+    It exits with `DEREGISTERED_EXIT_CODE`, as a running watcher that finds out does, and
+    not with the 1 of any other `ClickException`. 1 is also the code of "an update was
+    installed, start again", so a systemd unit that restarts the watcher on 1 and lists 3 in
+    `RestartPreventExitStatus` would restart a deregistered watcher in a loop, from every
+    boot until someone runs `init`.
+    """
+
+    exit_code = DEREGISTERED_EXIT_CODE
+
+
 @cli.command()
 @click.option("--dry-run", is_flag=True, help="Validate and log but don't start monitoring.")
 @click.pass_context
 def watch(ctx: click.Context, dry_run: bool) -> None:
-    """Start watching for new files."""
+    """Start watching for new files.
+
+    If the watcher's registration was deleted on Data Hub, a running watcher stops and
+    exits with code 3, and one that is started refuses to start and exits with code 3 as
+    well. Either way it says to run 'data-hub-watcher init' to register again.
+    """
     cfg, client, path = _load_and_client(ctx)
     inst = cfg.instrument
 
@@ -1188,6 +1208,13 @@ def watch(ctx: click.Context, dry_run: bool) -> None:
             f"Instrument {inst.id!r} is still pending activation. "
             "Please wait for it to be activated before starting the watcher."
         )
+
+    # A watcher that was deregistered while it was stopped would run on with 404s, so it
+    # refuses to start and says how to register it again. It exits with the code of a
+    # deregistered stop, so a systemd unit with `RestartPreventExitStatus=3` doesn't start it
+    # in a loop. Any other failure of this check lets the watcher start as before.
+    if watcher_is_deregistered(client, cfg.watcher_id):
+        raise DeregisteredStartError(DEREGISTERED_MESSAGE)
 
     # Step 2 (dry-run only): sync config checksum without a reporter
     # so dry-run still validates the API path. The watch path defers
@@ -1227,31 +1254,40 @@ def watch(ctx: click.Context, dry_run: bool) -> None:
         role="Watcher",
         host=platform.node(),
     )
-    click.echo("Syncing config to Data Hub and scanning for existing files…")
-    supervisor.start()
-
-    if supervisor.waiting_reason is not None:
-        click.echo(
-            click.style(
-                f"Waiting: {supervisor.waiting_reason}. Heartbeats continue, and watching "
-                "starts once the folder exists or a config change from Data Hub fixes it.",
-                fg="yellow",
-            )
-        )
-    else:
-        running = supervisor.cfg.instrument
-        click.echo(f"Watcher is running (instrument={running.id}, dir={running.watch_directory})…")
-    click.echo("Press Ctrl+C to stop.")
-
-    stop_requested = threading.Event()
+    # Installed before `start`, so a stop during start-up is recorded and acted on as soon
+    # as `start` returns, as any other stop is. With the default handlers, SIGTERM would end
+    # the process at once and Ctrl+C would raise KeyboardInterrupt, and neither would send
+    # the final `stopped` heartbeat or the `watcher_stopped` event. `request_stop` is the
+    # supervisor's one stop signal: it also ends the start-up scan early, so `start` returns
+    # within moments instead of when a large folder has been scanned.
+    stop_requested = supervisor.stop_requested
 
     def _shutdown(signum: int, frame: Any) -> None:
         click.echo("\nShutting down…")
-        stop_requested.set()
-        supervisor.wake()
+        supervisor.request_stop()
 
     signal.signal(signal.SIGINT, _shutdown)
     signal.signal(signal.SIGTERM, _shutdown)
+
+    click.echo("Syncing config to Data Hub and scanning for existing files…")
+    supervisor.start()
+
+    # A stop during start-up makes these status lines untrue, so they are skipped.
+    if not stop_requested.is_set():
+        if supervisor.waiting_reason is not None:
+            click.echo(
+                click.style(
+                    f"Waiting: {supervisor.waiting_reason}. Heartbeats continue, and watching "
+                    "starts once the folder exists or a config change from Data Hub fixes it.",
+                    fg="yellow",
+                )
+            )
+        else:
+            running = supervisor.cfg.instrument
+            click.echo(
+                f"Watcher is running (instrument={running.id}, dir={running.watch_directory})…"
+            )
+        click.echo("Press Ctrl+C to stop.")
 
     # Poll until Ctrl+C or until the runtime asks to shut down (the in-process
     # auto-updater requests a restart from the heartbeat thread). Each poll
@@ -1270,6 +1306,12 @@ def watch(ctx: click.Context, dry_run: bool) -> None:
     # Windows service path in `service._run_service_loop`, so the two
     # entrypoints can't drift on the WATCHER_STOPPED message text.
     decision = supervisor.classify_shutdown()
+    if decision.is_deregistered:
+        # The error that says why was logged when the heartbeats showed it. The stop sends
+        # nothing to Data Hub. Exit with a code of its own: restarting the watcher is no use,
+        # it needs `init` first.
+        supervisor.stop(stopped_message=decision.stopped_message)
+        raise SystemExit(DEREGISTERED_EXIT_CODE)
     if decision.is_upgrade_restart:
         # Foreground `data-hub-watcher watch` doesn't have an SCM to
         # auto-restart it, so the message has to cover both audiences:
@@ -1329,6 +1371,9 @@ def upload(ctx: click.Context, file_path: str | None, run_id: str | None, dry_ru
     db_path = resolve_state_db_path(state_db_dir(path, service=False), cfg.environment)
     state_db = StateDB(db_path)
     counters = WatcherCounters()
+    # Memory only, unlike the supervisor's reporter: this command can run while the
+    # watcher is running and has the same database open, and two processes that each
+    # sent the saved events would send them twice.
     reporter = EventReporter(client, cfg.watcher_id)
     # Set on Ctrl-C, so upload threads that are still running start no more
     # files or parts before the process exits.

@@ -7,12 +7,15 @@ service when its preshutdown timeout passes. Any other stop keeps the defaults.
 from __future__ import annotations
 import logging
 import threading
+import time
 from collections.abc import Generator
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
+from data_hub_watcher import monitor as monitor_module
 from data_hub_watcher.monitor import FileMonitor
 from data_hub_watcher.state import StateDB
 
@@ -45,8 +48,20 @@ def _monitor_with_running_threads(
     return monitor, observer, checker
 
 
+@pytest.fixture()
+def frozen_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stop time in the monitor module, so the observer's share of a wait is what it was given.
+
+    The observer's stop and its thread share one limit, so its thread gets what the stop has
+    left of it. Without a clock that moves, that is the limit itself.
+    """
+    monkeypatch.setattr(monitor_module, "time", SimpleNamespace(monotonic=lambda: 1000.0))
+
+
 class TestStopTimeouts:
-    def test_the_defaults_wait_5_seconds_for_each(self, tmp_path: Path, state_db: StateDB) -> None:
+    def test_the_defaults_wait_5_seconds_for_each(
+        self, tmp_path: Path, state_db: StateDB, frozen_clock: None
+    ) -> None:
         monitor, observer, checker = _monitor_with_running_threads(tmp_path, state_db)
 
         monitor.stop()
@@ -54,7 +69,9 @@ class TestStopTimeouts:
         observer.join.assert_called_once_with(timeout=5.0)
         checker.join.assert_called_once_with(timeout=5.0)
 
-    def test_short_timeouts_apply_to_both_waits(self, tmp_path: Path, state_db: StateDB) -> None:
+    def test_short_timeouts_apply_to_both_waits(
+        self, tmp_path: Path, state_db: StateDB, frozen_clock: None
+    ) -> None:
         monitor, observer, checker = _monitor_with_running_threads(tmp_path, state_db)
 
         monitor.stop(timeout=1, observer_timeout=2)
@@ -70,6 +87,112 @@ class TestStopTimeouts:
         # The thread mock still says it is alive after the join: an upload that it is
         # running outlasts the wait.
         assert monitor.stop(timeout=1, observer_timeout=1) is False
+
+
+class TestObserverStopIsBounded:
+    """watchdog's `Observer.stop` joins its emitter threads with no timeout.
+
+    An emitter that is blocked on a hung share doesn't end, so the stop runs on its own thread
+    and the monitor waits for it for *observer_timeout* only.
+    """
+
+    def test_an_observer_stop_that_hangs_does_not_hold_the_monitors_stop(
+        self, tmp_path: Path, state_db: StateDB, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        monitor, observer, _checker = _monitor_with_running_threads(tmp_path, state_db)
+        release = threading.Event()
+        observer.stop.side_effect = lambda: release.wait(30)
+        try:
+            started = time.monotonic()
+            with caplog.at_level(logging.WARNING, logger="data_hub_watcher.monitor"):
+                monitor.stop(timeout=0.2, observer_timeout=0.3)
+
+            assert time.monotonic() - started < 5
+            assert "did not stop within 0.3s" in caplog.text
+        finally:
+            release.set()
+
+    def test_the_stop_runs_off_the_calling_thread(self, tmp_path: Path, state_db: StateDB) -> None:
+        monitor, observer, _checker = _monitor_with_running_threads(tmp_path, state_db)
+        threads: list[threading.Thread] = []
+        observer.stop.side_effect = lambda: threads.append(threading.current_thread())
+
+        monitor.stop(timeout=0.2, observer_timeout=1)
+
+        assert len(threads) == 1
+        assert threads[0] is not threading.current_thread()
+
+    def test_an_observer_that_fails_to_stop_is_logged_and_the_monitor_still_stops(
+        self, tmp_path: Path, state_db: StateDB, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        monitor, observer, checker = _monitor_with_running_threads(tmp_path, state_db)
+        observer.stop.side_effect = RuntimeError("boom")
+        checker.is_alive.side_effect = [True, False]
+
+        with caplog.at_level(logging.ERROR, logger="data_hub_watcher.monitor"):
+            assert monitor.stop() is True
+
+        assert "Stopping the file observer failed" in caplog.text
+
+
+class TestObserverStopEndsWhenToldTo:
+    """A stop of the watcher ends the wait for the observer at once (watcher 1.4.3)."""
+
+    def test_a_cancel_ends_the_wait_for_an_observer_stop_that_hangs(
+        self, tmp_path: Path, state_db: StateDB, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        monitor, observer, _checker = _monitor_with_running_threads(tmp_path, state_db)
+        release = threading.Event()
+        observer.stop.side_effect = lambda: release.wait(30)
+        cancel = threading.Event()
+        threading.Timer(0.3, cancel.set).start()
+        try:
+            started = time.monotonic()
+            with caplog.at_level(logging.WARNING, logger="data_hub_watcher.monitor"):
+                # A limit far past the test, so the cancel is what ends the wait.
+                monitor.stop(timeout=0.0, observer_timeout=30, should_cancel=cancel.is_set)
+
+            assert 0.25 <= time.monotonic() - started < 3
+            assert "because the watcher is stopping" in caplog.text
+            # The observer's thread is not waited for either.
+            observer.join.assert_not_called()
+        finally:
+            release.set()
+
+    def test_a_cancel_that_never_fires_changes_nothing(
+        self, tmp_path: Path, state_db: StateDB, frozen_clock: None
+    ) -> None:
+        monitor, observer, _checker = _monitor_with_running_threads(tmp_path, state_db)
+
+        monitor.stop(timeout=0.0, observer_timeout=2, should_cancel=lambda: False)
+
+        observer.stop.assert_called_once()
+        observer.join.assert_called_once_with(timeout=2)
+
+
+class TestHasExited:
+    def test_it_says_whether_the_checker_is_gone_and_logs_nothing(
+        self, tmp_path: Path, state_db: StateDB, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        monitor, _observer, checker = _monitor_with_running_threads(tmp_path, state_db)
+
+        with caplog.at_level(logging.DEBUG, logger="data_hub_watcher.monitor"):
+            assert monitor.has_exited() is False
+            checker.is_alive.return_value = False
+            for _ in range(5):
+                assert monitor.has_exited() is True
+
+        # `join` says "FileMonitor stopped" each time it finds the checker gone.
+        assert caplog.records == []
+        checker.join.assert_not_called()
+
+    def test_a_monitor_that_never_started_has_exited(
+        self, tmp_path: Path, state_db: StateDB
+    ) -> None:
+        monitor, _observer, _checker = _monitor_with_running_threads(tmp_path, state_db)
+        monitor._checker_thread = None
+
+        assert monitor.has_exited() is True
 
 
 class TestStoppedIsLoggedOnlyOnceItIsTrue:

@@ -12,7 +12,9 @@ import { isValidUUID } from "@/lib/api/validators";
 import {
   computeEffectiveStatus,
   deregisterWatcherRow,
-  findActiveWatcher,
+  findWatcherIncludingDeleted,
+  watcherDeregisteredResponse,
+  watcherNotFoundResponse,
 } from "@/lib/api/watchers";
 import { db } from "@/lib/db";
 import { instruments, watchers } from "@/lib/db/schema";
@@ -31,9 +33,16 @@ export async function GET(
     return apiError(400, VALIDATION_ERROR, "Invalid watcher ID format");
   }
 
-  const watcher = await findActiveWatcher(watcherId);
+  const watcher = await findWatcherIncludingDeleted(watcherId);
   if (!watcher) {
-    return apiError(404, NOT_FOUND, `Watcher '${watcherId}' not found`);
+    return watcherNotFoundResponse(watcherId);
+  }
+  if (watcher.deletedAt) {
+    // This route has no binding check: any caller with `watchers:read` reads any
+    // active watcher, and already sees a deregistered one, with its
+    // `deleted_at`, in `GET /watchers?include_deleted=true`. So telling that
+    // caller the watcher was deregistered shows it nothing new.
+    return watcherDeregisteredResponse(watcherId);
   }
 
   const [instrument] = await db

@@ -45,7 +45,7 @@ What the **Watchers** page shows for each watcher, derived from its most recent 
 | **Online**       | A heartbeat arrived in the last 5 minutes.                                                        |
 | **Unresponsive** | No heartbeat for more than 5 minutes. The process crashed, the PC is off, or the network is blocking the API. A watcher that stopped for a Windows restart or shutdown, or for an automatic update, shows **Unresponsive** after 15 minutes instead. |
 | **Stopped**      | The watcher shut down cleanly and said so in its last heartbeat. After a stop you chose, such as `data-hub-watcher service stop`, it keeps showing **Stopped**, however long ago that was, until it starts again. After a Windows restart or shutdown, or the stop of an automatic update, it shows **Stopped** for 15 minutes, then **Unresponsive** if it hasn’t returned. |
-| **Waiting: folder not found** | The watcher is running and sending heartbeats, but its watch folder is missing, so it isn’t watching anything. Watcher 1.4.0 and later. |
+| **Waiting: folder not found** | The watcher is running and sending heartbeats, but its watch folder is missing, so it isn’t watching anything. A watcher goes into this state when it starts without the folder (watcher 1.4.0 and later), and when the folder disappears while it runs (watcher 1.4.3 and later). It starts watching again once the folder is back. |
 | **Registered**   | The watcher registered but hasn’t sent its first heartbeat yet.                                   |
 
 A watcher that stopped because Windows is restarting or shutting down (watcher 1.4.1 and later), or because it is installing an automatic update (watcher 1.4.2 and later), is expected back. It shows **Stopped**, and hovering over the badge tells you when it starts showing **Unresponsive** if it hasn’t returned: 15 minutes after its last heartbeat. Any other stop, such as `data-hub-watcher service stop` or Ctrl+C, shows **Stopped** until the watcher starts again.
@@ -56,11 +56,11 @@ Instrument pages and the instruments table sum this up per instrument: **Online*
 
 ### Heartbeat [#heartbeat]
 
-A status ping the watcher sends to the API every 60 seconds. It carries the watcher version, instrument ID, watch directory, upload mode, activity counters, and uptime, and it drives the **Last Heartbeat** column and the online health shown on the dashboard. The same tick runs the auto-updater. The upload queue is checked separately, also once a minute, so a slow upload can’t delay a heartbeat.
+A status ping the watcher sends to the API every 60 seconds. It carries the watcher version, instrument ID, watch directory, upload mode, activity counters, and uptime, and it drives the **Last Heartbeat** column and the online health shown on the dashboard. The same tick runs the auto-updater. The upload queue is checked separately, also once a minute, so a slow upload can’t delay a heartbeat. With watcher 1.4.3 and later, the counts of a heartbeat that fails to send go out with the next one, so an outage doesn’t lose them. Older watchers lose them.
 
 ### Events [#events]
 
-A per-watcher log of lifecycle moments and errors: `watcher_started`, `run_reported`, `file_uploaded`, `update_succeeded`, and `error` (with a `details.kind` discriminator), among others. Events are batched and flushed on each heartbeat and are visible on the dashboard, which makes them the primary tool for diagnosing a watcher remotely. Data Hub writes some events itself, such as `upload_requests_cancelled`, which it records when someone deletes a run that has requested uploads. See [Troubleshoot a watcher](/docs/troubleshoot-a-watcher).
+A per-watcher log of lifecycle moments and errors: `watcher_started`, `run_reported`, `file_uploaded`, `update_succeeded`, and `error` (with a `details.kind` discriminator), among others. Events are batched and flushed on each heartbeat and are visible on the dashboard, which makes them the primary tool for diagnosing a watcher remotely. With watcher 1.4.3 and later, the watcher keeps the events it hasn’t sent in its state file on the PC. An event that Data Hub couldn’t take at the time is sent with a later heartbeat while the watcher runs, and one that was queued when the watcher was stopped or killed is sent after the next start. Either way it keeps its original time. An event that Data Hub refuses as invalid isn’t sent again, and nor is one that Data Hub answers with a server error three heartbeats in a row; an `events_dropped` event records how many were lost. Older watchers lose those events. Data Hub writes some events itself, such as `upload_requests_cancelled`, which it records when someone deletes a run that has requested uploads. See [Troubleshoot a watcher](/docs/troubleshoot-a-watcher).
 
 ### Environment [#environment]
 
@@ -142,7 +142,14 @@ What the watcher does with files already sitting in the watch directory the firs
 
 ### Dismiss [#dismiss]
 
-For instruments in [manual upload mode](#upload-mode), dismissing a detected file tells the watcher not to upload it. Dismissing differs from deleting: the file never reached Data Hub storage, so there’s nothing to restore. See [Manage the watcher fleet](/docs/manage-watchers#approving-manual-uploads).
+For instruments in [manual upload mode](#upload-mode), dismissing a detected file tells the watcher not to upload it. Dismissing differs from deleting: the file never reached Data Hub storage, so there’s nothing to restore. A dismissed file stays dismissed, even if the watcher reports it again. See [Manage the watcher fleet](/docs/manage-watchers#approving-manual-uploads).
+
+The watcher reports a path only once, so a different file that the instrument later writes at the same path doesn’t appear on its own. It appears when the watcher reports that path again, which happens after `data-hub-watcher state forget`, or when the watcher starts without its saved record of what it has reported, for example after a reinstall. Data Hub then detects the file as new when its size or creation time differs from the dismissed file’s. On Linux, the modification time stands in for the creation time. The dismissed file stays dismissed.
+
+Because Data Hub compares only size and time, two cases can surprise you:
+
+- A new file the same size as the dismissed one counts as the same file when it keeps the old creation time, so it stays dismissed. On Windows and macOS this happens when the instrument overwrites the file in place. On Windows it can also happen when the file is deleted and written again, or saved through a temporary copy, within about 15 seconds.
+- Copying a folder, for example with Explorer or `xcopy` on Windows or `cp` without `-p` on Linux, gives the copies new times. After you replace an instrument PC or restore its folder from a backup, a new watcher that scans the copied folder reports the files you dismissed as new detected files. Dismiss them again.
 
 ### Soft delete [#soft-delete]
 

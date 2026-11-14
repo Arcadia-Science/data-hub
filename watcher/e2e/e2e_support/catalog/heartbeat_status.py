@@ -9,7 +9,7 @@ waiting for the server's timers.
 
 from __future__ import annotations
 
-from e2e_support.catalog.model import Transition, covered, excluded, xfail_bug
+from e2e_support.catalog.model import Transition, covered, excluded
 
 MACHINE = "heartbeat_status"
 
@@ -100,20 +100,18 @@ TRANSITIONS: tuple[Transition, ...] = (
         "Each heartbeat reports the files uploaded, runs reported and errors since the "
         "previous one, and the next heartbeat starts counting from zero.",
     ),
-    xfail_bug(
+    covered(
         MACHINE,
         "heartbeat.failed->counts_carried",
         "The counts from a heartbeat that failed to send are added to the next successful "
         "heartbeat instead of being lost.",
-        "ENG-2112",
     ),
-    xfail_bug(
+    covered(
         MACHINE,
         "heartbeat.in_flight->counts_kept",
         "A count added while a heartbeat request is in flight (a file uploaded during a "
-        "slow heartbeat) is reported by the next heartbeat instead of being reset away "
-        "when the request returns.",
-        "ENG-2125",
+        "slow heartbeat) is reported by the next heartbeat. It is not reset when the "
+        "request returns.",
     ),
     covered(
         MACHINE,
