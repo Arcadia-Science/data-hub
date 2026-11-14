@@ -503,8 +503,9 @@ describe("getWatcherHealth", () => {
       for (const slot of [4, 5]) {
         expect(blocks[slot]).toMatchObject({
           state: "no_data",
-          noData: "too_soon",
+          noData: "skipped",
           heartbeats: 0,
+          minutes: 0,
         });
       }
       blocks.forEach((block, slot) => {
@@ -539,6 +540,8 @@ describe("getWatcherHealth", () => {
       );
       // 1:30 AM runs from 1:30 PDT to 2:00 PST: an hour and a half.
       expect(blocks[3].heartbeats).toBe(90);
+      expect(blocks[3].minutes).toBe(90);
+      expect(blocks[2].minutes).toBe(30);
       for (const [slot, block] of blocks.entries()) {
         if (slot !== 3) {
           expect(block.heartbeats, `block ${slot}`).toBe(30);
@@ -547,6 +550,221 @@ describe("getWatcherHealth", () => {
       expect(blocks.reduce((sum, block) => sum + block.heartbeats, 0)).toBe(
         25 * 60
       );
+    });
+  });
+
+  describe("an outage that is still going on", () => {
+    // Heartbeats every minute from 10:00 to 13:33 on the 10th, then nothing.
+    const day = "2026-03-10";
+    const lastHeartbeat = at("2026-03-10T13:33");
+    let ongoingId: string;
+    let stoppedId: string;
+
+    async function watcherWithHeartbeats(
+      instrumentId: string,
+      lastStatus: string
+    ): Promise<string> {
+      const db = getTestDb();
+      await db.insert(instruments).values({
+        id: instrumentId,
+        displayName: instrumentId,
+        status: "active",
+      });
+      const [watcher] = await db
+        .insert(watchers)
+        .values({
+          instrumentId,
+          hostname: "ONGOING-PC",
+          status: "watching",
+          createdAt: at("2026-03-09T00:00"),
+        })
+        .returning({ id: watchers.id });
+      const rows: (typeof watcherHeartbeats.$inferInsert)[] = [];
+      for (
+        let time = at("2026-03-10T10:00").getTime();
+        time <= lastHeartbeat.getTime();
+        time += MIN
+      ) {
+        rows.push({
+          watcherId: watcher.id,
+          timestamp: new Date(time),
+          status: time === lastHeartbeat.getTime() ? lastStatus : "watching",
+        });
+      }
+      await db.insert(watcherHeartbeats).values(rows);
+      return watcher.id;
+    }
+
+    beforeAll(async () => {
+      ongoingId = await watcherWithHeartbeats(
+        "ongoing-outage-instrument",
+        "watching"
+      );
+      stoppedId = await watcherWithHeartbeats(
+        "ongoing-stopped-instrument",
+        "stopped"
+      );
+    });
+
+    const range = (now: string, deregisteredAt: Date | null = null) => ({
+      deregisteredAt,
+      endExclusive: at("2026-03-11T00:00"),
+      fromDay: day,
+      now: at(now),
+      start: at("2026-03-10T00:00"),
+      timeZone: "UTC",
+      toDay: day,
+    });
+
+    it("turns the block that holds the last heartbeat red, as the badge reads Unresponsive", async () => {
+      const { days } = await getWatcherHealth(
+        ongoingId,
+        range("2026-03-10T13:40")
+      );
+      const { blocks } = days[0];
+      // 13:30 to 14:00 holds four heartbeats and seven quiet minutes, the last
+      // two of them past the five the badge allows.
+      expect(blocks[27]).toMatchObject({
+        state: "unresponsive",
+        heartbeats: 4,
+      });
+      expect(blocks[26].state).toBe("checked_in");
+      expect(blocks[28]).toMatchObject({ state: "no_data", noData: "future" });
+    });
+
+    it("keeps the block green until the badge would read Unresponsive, and the minute after", async () => {
+      for (const now of ["2026-03-10T13:36", "2026-03-10T13:38"]) {
+        const { days } = await getWatcherHealth(ongoingId, range(now));
+        expect(days[0].blocks[27].state, now).toBe("checked_in");
+      }
+    });
+
+    it("stays green for a watcher someone stopped", async () => {
+      const { days } = await getWatcherHealth(
+        stoppedId,
+        range("2026-03-10T13:40")
+      );
+      expect(days[0].blocks[27].state).toBe("checked_in");
+    });
+
+    it("stops counting the silence at the deregistration", async () => {
+      const { days } = await getWatcherHealth(
+        ongoingId,
+        range("2026-03-10T13:40", at("2026-03-10T13:35"))
+      );
+      expect(days[0].blocks[27].state).toBe("checked_in");
+    });
+
+    it("stops counting at the end of a range that is over", async () => {
+      // Long after, but the range ends at 13:35: the series closes there, two
+      // minutes after the last heartbeat, which is still green.
+      const { days } = await getWatcherHealth(ongoingId, {
+        ...range("2026-03-10T18:00"),
+        endExclusive: at("2026-03-10T13:35"),
+      });
+      expect(days[0].blocks[27].state).toBe("checked_in");
+    });
+  });
+
+  describe("a watcher left down after a restart from before the range", () => {
+    // Its last heartbeat, a minute before the stop on the 1st, said `stopped`.
+    // The range is a week later.
+    const range = {
+      deregisteredAt: null,
+      endExclusive: at("2026-03-09T00:00"),
+      fromDay: "2026-03-08",
+      now: at("2026-03-09T12:00"),
+      start: at("2026-03-08T00:00"),
+      timeZone: "UTC",
+      toDay: "2026-03-08",
+    };
+
+    async function downSince(
+      instrumentId: string,
+      stop: {
+        details?: Record<string, unknown>;
+        message: string;
+        before?: Record<string, unknown>;
+      }
+    ): Promise<string> {
+      const db = getTestDb();
+      await db.insert(instruments).values({
+        id: instrumentId,
+        displayName: instrumentId,
+        status: "active",
+      });
+      const [watcher] = await db
+        .insert(watchers)
+        .values({
+          instrumentId,
+          hostname: "DOWN-PC",
+          status: "stopped",
+          createdAt: at("2026-02-28T00:00"),
+        })
+        .returning({ id: watchers.id });
+      await db.insert(watcherHeartbeats).values([
+        {
+          watcherId: watcher.id,
+          timestamp: at("2026-03-01T09:59"),
+          status: "watching",
+        },
+        {
+          watcherId: watcher.id,
+          timestamp: at("2026-03-01T10:00"),
+          status: "stopped",
+        },
+      ]);
+      if (stop.before) {
+        await db.insert(watcherEvents).values({
+          watcherId: watcher.id,
+          eventType: "update_started",
+          message: "Dispatching upgrade via worker",
+          details: stop.before,
+          timestamp: at("2026-03-01T09:58"),
+        });
+      }
+      await db.insert(watcherEvents).values({
+        watcherId: watcher.id,
+        eventType: "watcher_stopped",
+        message: stop.message,
+        details: stop.details ?? null,
+        timestamp: at("2026-03-01T10:00"),
+      });
+      return watcher.id;
+    }
+
+    it("is unresponsive after an update's stop, as the badge reads", async () => {
+      const id = await downSince("down-after-update", {
+        message: "Service stopped",
+        details: { stop_reason: "auto_update" },
+      });
+      const { days } = await getWatcherHealth(id, range);
+      for (const block of days[0].blocks) {
+        expect(block, `${block.state} ${block.noData}`).toMatchObject({
+          state: "unresponsive",
+        });
+      }
+    });
+
+    it("is unresponsive after a stop that followed an update handed to the worker", async () => {
+      const id = await downSince("down-after-worker", {
+        message: "Service stopped",
+        before: { via_worker: true },
+      });
+      const { days } = await getWatcherHealth(id, range);
+      expect(days[0].blocks.map((block) => block.state)).toEqual(
+        new Array(BLOCKS_PER_DAY).fill("unresponsive")
+      );
+    });
+
+    it("is still no data when someone stopped it", async () => {
+      const id = await downSince("down-by-someone", {
+        message: "Service stopped",
+      });
+      const { days } = await getWatcherHealth(id, range);
+      for (const block of days[0].blocks) {
+        expect(block).toMatchObject({ state: "no_data", noData: "stopped" });
+      }
     });
   });
 });

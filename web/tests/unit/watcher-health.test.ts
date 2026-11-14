@@ -14,6 +14,7 @@ import {
   restartsNote,
   restartWindow,
   SILENCE_TOLERANCE_MS,
+  seriesEnd,
   silenceInBlock,
   stopIsRestart,
   unexplainedSilences,
@@ -177,15 +178,15 @@ describe("classifyBlock", () => {
     ).toEqual({ state: "no_data", noData: "too_soon" });
   });
 
-  it("a block a clock change skipped is no data", () => {
+  it("a block a clock change skipped is no data, and says so", () => {
     expect(
       classifyBlock({
         ...BASE,
         start: at("10:30"),
         end: at("10:00"),
         heartbeats: 0,
-      }).state
-    ).toBe("no_data");
+      })
+    ).toEqual({ state: "no_data", noData: "skipped" });
   });
 });
 
@@ -694,8 +695,46 @@ describe("stampNewStopEvents", () => {
     expect(stampNewStopEvents(events, restartingWatcher, NOW)).toEqual(events);
   });
 
+  it("leaves a stop whose message names another cause", () => {
+    for (const message of [
+      "Stopped by user (Ctrl+C)",
+      "Service stopped: registration was deleted",
+      "Environment switched",
+      "Service stopped: Windows is shutting down",
+    ]) {
+      const events = [{ ...stop("11:59"), message }];
+      expect(stampNewStopEvents(events, restartingWatcher, NOW)).toEqual(
+        events
+      );
+    }
+  });
+
+  it("leaves a stop that the watcher started again after, before the heartbeat", () => {
+    // Stopped at 11:56 (someone's stop), started at 11:57, and this heartbeat
+    // at 11:59 belongs to the new session.
+    const events = [
+      stop("11:56"),
+      { ...stop("11:57"), eventType: "watcher_started" },
+    ];
+    expect(stampNewStopEvents(events, restartingWatcher, NOW)).toEqual(events);
+    // A start before the stop doesn't matter.
+    const [, , stamped] = stampNewStopEvents(
+      [
+        { ...stop("11:55"), eventType: "watcher_started" },
+        stop("11:56"),
+        stop("11:58"),
+      ],
+      restartingWatcher,
+      NOW
+    );
+    expect(stamped.details).toEqual({ stop_reason: "auto_update" });
+  });
+
   it("knows which stops it may stamp", () => {
     expect(canStampStop(stop("11:59"))).toBe(true);
+    expect(canStampStop({ ...stop("11:59"), message: "Stopped by user" })).toBe(
+      false
+    );
     expect(canStampStop(stop("11:59", { stop_reason: "auto_update" }))).toBe(
       false
     );
@@ -785,10 +824,65 @@ describe("unexplainedSilences", () => {
     ).toEqual([]);
   });
 
+  it("reads an outage that is still going on, from the last heartbeat to where the series closes", () => {
+    // The last heartbeat was at 13:33 and it is 13:40: quiet from 13:38.
+    const now = at("13:40");
+    const closing = gap("13:33", "13:40");
+    expect(closing.to).toEqual(seriesEnd(now, at("14:00", "2026-11-10"), null));
+    expect(silences([closing])).toEqual([["13:38", "13:40"]]);
+    // Under the five minutes the badge needs, or the minute of tolerance, it
+    // is only a heartbeat that hasn't come yet.
+    expect(silences([gap("13:33", "13:37")])).toEqual([]);
+    expect(
+      unexplainedSilences(
+        [
+          {
+            from: at("13:33"),
+            to: new Date(at("13:38").getTime() + 30_000),
+            previousStatus: "watching",
+          },
+        ],
+        [],
+        [],
+        2 * 60 * 1000
+      )
+    ).toEqual([]);
+  });
+
+  it("an outage that is still going on, after a stop that a restart explains, is quiet once the grace period ends", () => {
+    expect(
+      silences(
+        [gap("14:00", "14:40", "stopped")],
+        [restartWindow(at("14:00"), "update", null)]
+      )
+    ).toEqual([["14:15", "14:40"]]);
+    // Where someone stopped it, there is nothing to say.
+    expect(silences([gap("14:00", "14:40", "stopped")])).toEqual([]);
+  });
+
   it("knows whether a stop is the one a restart records", () => {
     const restarts = [restartWindow(at("14:00"), "update", null)];
     expect(stopIsRestart(restarts, at("14:01"), 2 * 60 * 1000)).toBe(true);
     expect(stopIsRestart(restarts, at("14:30"), 2 * 60 * 1000)).toBe(false);
+  });
+});
+
+describe("seriesEnd", () => {
+  const now = at("13:40");
+
+  it("is now for a watcher that is still going, in a range that has not ended", () => {
+    expect(seriesEnd(now, at("00:00", "2026-11-11"), null)).toEqual(now);
+  });
+
+  it("is the end of a range that is over", () => {
+    expect(seriesEnd(now, at("12:00"), null)).toEqual(at("12:00"));
+  });
+
+  it("is the deregistration, when it came first", () => {
+    expect(seriesEnd(now, at("00:00", "2026-11-11"), at("11:00"))).toEqual(
+      at("11:00")
+    );
+    expect(seriesEnd(now, at("00:00", "2026-11-11"), at("13:50"))).toEqual(now);
   });
 });
 

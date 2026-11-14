@@ -36,6 +36,7 @@ export type NoDataReason =
   | "before_first_check_in"
   | "after_deregistered"
   | "stopped"
+  | "skipped"
   | "too_soon";
 
 /** A stop for a restart: from the stop to when the watcher is expected back. */
@@ -158,7 +159,7 @@ export function classifyBlock(facts: BlockFacts): ClassifiedBlock {
   }
   if (end.getTime() <= start.getTime()) {
     // A block that doesn't exist: a clock change skipped it.
-    return { state: "no_data", noData: "too_soon" };
+    return { state: "no_data", noData: "skipped" };
   }
   if (
     !facts.firstHeartbeatAt ||
@@ -209,6 +210,26 @@ export function classifyBlock(facts: BlockFacts): ClassifiedBlock {
  * less than this is one that came late.
  */
 export const SILENCE_TOLERANCE_MS = 60 * 1000;
+
+/**
+ * Where a watcher's heartbeats stop being expected: the earliest of now, the
+ * end of the range and the watcher's deregistration. When nothing follows the
+ * last heartbeat, the silence after it runs to here, so an outage that is still
+ * going on is a gap like any other (`HeartbeatGap`, with `to` set to this).
+ */
+export function seriesEnd(
+  now: Date,
+  endExclusive: Date,
+  deregisteredAt: Date | null
+): Date {
+  return new Date(
+    Math.min(
+      now.getTime(),
+      endExclusive.getTime(),
+      deregisteredAt?.getTime() ?? Number.POSITIVE_INFINITY
+    )
+  );
+}
 
 /** Two consecutive heartbeats at least `STALE_THRESHOLD_MS` apart. */
 export interface HeartbeatGap {
@@ -328,6 +349,11 @@ export function silenceInBlock(
 export interface HealthBlock extends ClassifiedBlock {
   /** Heartbeats in the block. */
   heartbeats: number;
+  /**
+   * How long the block lasts, in minutes: 30, except on a day the clocks change,
+   * when one lasts 90 or none at all. Absent means 30.
+   */
+  minutes?: number;
   missed?: { gapSeconds: number; recoveredAt: Date };
   restart?: { reason: RestartReason; stoppedAt: Date; resumedAt: Date | null };
 }

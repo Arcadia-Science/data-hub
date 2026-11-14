@@ -292,7 +292,9 @@ export function ConnectivityGrid({ days }: { days: HealthDay[] }) {
           >
             <GridRows days={days} stop={stop} timeZone={timeZone} />
             <div aria-hidden="true" className="flex gap-3">
-              <span className="w-16 shrink-0" />
+              {/* Sticky like the day labels above, so the hours scroll under
+                  the same strip and never show in the label column. */}
+              <span className="sticky left-0 z-10 w-16 shrink-0 bg-card shadow-[12px_0_0_0_var(--card)]" />
               <div className="flex flex-1 justify-between text-muted-foreground text-xs">
                 {AXIS_HOURS.map((hour, index) => (
                   // The labels are fixed and in order, and "12 AM" appears twice.

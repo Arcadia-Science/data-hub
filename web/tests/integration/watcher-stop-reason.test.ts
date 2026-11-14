@@ -62,8 +62,10 @@ describe("The reason a watcher stopped, copied onto its stop event", () => {
     return watcher.id;
   }
 
-  function postStopEvent(
+  function postEvent(
     watcherId: string,
+    eventType: string,
+    message: string,
     timestamp: Date,
     details?: Record<string, unknown>
   ) {
@@ -73,14 +75,23 @@ describe("The reason a watcher stopped, copied onto its stop event", () => {
       body: {
         events: [
           {
-            event_type: "watcher_stopped",
-            message: "Service stopped",
+            event_type: eventType,
+            message,
             timestamp: timestamp.toISOString(),
             ...(details ? { details } : {}),
           },
         ],
       },
     });
+  }
+
+  function postStopEvent(
+    watcherId: string,
+    timestamp: Date,
+    details?: Record<string, unknown>,
+    message = "Service stopped"
+  ) {
+    return postEvent(watcherId, "watcher_stopped", message, timestamp, details);
   }
 
   function postStoppedHeartbeat(
@@ -184,6 +195,59 @@ describe("The reason a watcher stopped, copied onto its stop event", () => {
 
     const events = await stopEvents(watcherId);
     expect(events[0].details).toBeNull();
+  });
+
+  it("does not stamp an earlier stop by someone when this stop's own event is late", async () => {
+    const watcherId = await newWatcher();
+    const now = Date.now();
+    // Someone pressed Ctrl+C three minutes ago, and the watcher started again.
+    await postStopEvent(
+      watcherId,
+      new Date(now - 3 * MINUTE_MS),
+      undefined,
+      "Stopped by user (Ctrl+C)"
+    );
+    await postEvent(
+      watcherId,
+      "watcher_started",
+      "Service started",
+      new Date(now - 2 * MINUTE_MS)
+    );
+    // The final heartbeat of this stop gets here before this stop's own event.
+    await postStoppedHeartbeat(watcherId, new Date(now), "auto_update");
+    expect((await stopEvents(watcherId))[0].details).toBeNull();
+    // The event arrives after it and gets the reason.
+    await postStopEvent(watcherId, new Date(now));
+    const events = await stopEvents(watcherId);
+    expect(events).toHaveLength(2);
+    const byTime = events.sort(
+      (a, b) => a.timestamp.getTime() - b.timestamp.getTime()
+    );
+    expect(byTime[0].details).toBeNull();
+    expect(byTime[1].details).toEqual({ stop_reason: "auto_update" });
+  });
+
+  it("does not stamp a stop of an earlier session", async () => {
+    const watcherId = await newWatcher();
+    const now = Date.now();
+    // A stop whose message says nothing, then a start, then this heartbeat.
+    await postStopEvent(watcherId, new Date(now - 3 * MINUTE_MS));
+    await postEvent(
+      watcherId,
+      "watcher_started",
+      "Service started",
+      new Date(now - 2 * MINUTE_MS)
+    );
+    await postStoppedHeartbeat(watcherId, new Date(now), "auto_update");
+    expect((await stopEvents(watcherId))[0].details).toBeNull();
+  });
+
+  it("does not stamp a batch's stop that names another cause", async () => {
+    const watcherId = await newWatcher();
+    const now = new Date();
+    await postStoppedHeartbeat(watcherId, now, "auto_update");
+    await postStopEvent(watcherId, now, undefined, "Stopped by user (Ctrl+C)");
+    expect((await stopEvents(watcherId))[0].details).toBeNull();
   });
 
   it("makes Health count the restart", async () => {

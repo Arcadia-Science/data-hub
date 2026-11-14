@@ -22,8 +22,14 @@ const NO_DATA_DETAILS: Record<NoDataReason, string> = {
   before_first_check_in: "The watcher hadn't checked in yet.",
   after_deregistered: "The watcher had been deregistered.",
   stopped: "The watcher was stopped, so it sent nothing.",
+  skipped: "The clocks went forward, so this half hour didn't happen.",
   too_soon: "Too soon to tell.",
 };
+
+/** "30 minutes", or what a block on a day the clocks change really lasts. */
+function lengthOf(block: HealthBlock): string {
+  return `${block.minutes ?? BLOCK_MINUTES} minutes`;
+}
 
 /**
  * The 30 minutes a block covers, on the viewer's wall clock. `dayLabel` is the
@@ -54,7 +60,7 @@ export function describeBlock(
       return {
         title: "Checked in",
         when,
-        detail: `${block.heartbeats} ${block.heartbeats === 1 ? "heartbeat" : "heartbeats"} in these ${BLOCK_MINUTES} minutes.`,
+        detail: `${block.heartbeats} ${block.heartbeats === 1 ? "heartbeat" : "heartbeats"} in these ${lengthOf(block)}.`,
       };
     case "restarted":
       return {
@@ -79,8 +85,8 @@ export function describeBlock(
         when,
         detail:
           block.heartbeats > 0
-            ? "The watcher went quiet for part of these 30 minutes."
-            : "The watcher didn't check in during these 30 minutes.",
+            ? `The watcher went quiet for part of these ${lengthOf(block)}.`
+            : `The watcher didn't check in during these ${lengthOf(block)}.`,
       };
     case "no_data":
       return {

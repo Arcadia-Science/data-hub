@@ -2,6 +2,7 @@ import { and, desc, eq, gte, lte, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { watcherEvents } from "@/lib/db/schema";
 import {
+  OTHER_STOP_CAUSE_PATTERN,
   STOP_REASON_KEY,
   STOP_STAMP_WINDOW_MS,
   UPLOAD_REQUESTS_CANCELLED_KIND,
@@ -15,6 +16,11 @@ import {
 // handles the heartbeat after the event, and `stampNewStopEvents` in
 // `lib/watchers/stop-reasons.ts` the event after the heartbeat. Neither
 // replaces a reason that is already there, and neither adds a column.
+//
+// One order gets neither: the events request reads the watcher's row before the
+// heartbeat updates it, and inserts after the heartbeat has looked for the
+// event. The stop is then left without a reason, and the classification's other
+// rules (an update handed to the worker, what the message says) still read it.
 
 /**
  * Copies a restart reason from a `stopped` heartbeat onto the watcher's most
@@ -39,6 +45,18 @@ export async function stampStopReasonOnRecentStop(
     lte(watcherEvents.timestamp, new Date(heartbeatAt.getTime() + 60_000)),
     sql`(${details} is null or jsonb_typeof(${details}) = 'object')`,
     sql`coalesce(${details}->>'kind', '') <> ${UPLOAD_REQUESTS_CANCELLED_KIND}`,
+    // A stop that names another cause is never this heartbeat's.
+    sql`${watcherEvents.message} !~* ${OTHER_STOP_CAUSE_PATTERN}`,
+    // Nor is one the watcher started again after, before this heartbeat: the
+    // heartbeat belongs to a later session. The columns are written out in full
+    // because the subquery refers to the row it filters.
+    sql`not exists (
+      select 1 from watcher_events as started
+      where started.watcher_id = "watcher_events"."watcher_id"
+        and started.event_type = 'watcher_started'
+        and started.timestamp > "watcher_events"."timestamp"
+        and started.timestamp <= ${heartbeatAt.toISOString()}::timestamptz
+    )`,
     sql`${details}->>${STOP_REASON_KEY}::text is null`
   );
   const [target] = await db

@@ -152,13 +152,20 @@ export function stampedDetails(
   return { ...detailsOf(details), [STOP_REASON_KEY]: statusReason };
 }
 
-/** Whether the server may copy a reason onto this event: a stop with no reason yet. */
+/**
+ * Whether the server may copy a reason onto this event: a stop with no reason
+ * yet, whose message doesn't name another cause. A stop that says "Stopped by
+ * user" is never the one a restart heartbeat is about, even if it is the nearest
+ * one.
+ */
 export function canStampStop(event: {
   eventType: string;
   details?: unknown;
+  message?: string;
 }): boolean {
   return (
     event.eventType === "watcher_stopped" &&
+    !OTHER_STOP_CAUSE.test(event.message ?? "") &&
     detailsKind(event.details) !== UPLOAD_REQUESTS_CANCELLED_KIND &&
     !hasStopReason(event.details) &&
     (event.details === null ||
@@ -172,11 +179,23 @@ export function canStampStop(event: {
  * onto the batch's last stop when the watcher's final `stopped` heartbeat came
  * first (see `lib/api/watcher-stop-reasons.ts` for the other order). That
  * heartbeat left its reason on the watcher's row, and a stop that is not within
- * `STOP_STAMP_WINDOW_MS` of it, or a watcher that has since sent anything else,
- * gets nothing. A reason already on an event is never replaced.
+ * `STOP_STAMP_WINDOW_MS` of it, a stop that names another cause, a stop that the
+ * batch's own `watcher_started` follows before the heartbeat (a new session, so
+ * the heartbeat is not about it), or a watcher that has since sent anything
+ * else, gets nothing. A reason already on an event is never replaced.
+ *
+ * Neither route stamps in one rare order: the events request reads the watcher's
+ * row before the heartbeat updates it, and inserts after the heartbeat has
+ * looked for the event. The stop then has no reason, and rules 2 and 3 above
+ * still classify it.
  */
 export function stampNewStopEvents<
-  T extends { eventType: string; details?: unknown; timestamp: Date },
+  T extends {
+    eventType: string;
+    details?: unknown;
+    message: string;
+    timestamp: Date;
+  },
 >(
   events: T[],
   watcher: {
@@ -196,11 +215,18 @@ export function stampNewStopEvents<
   ) {
     return events;
   }
+  const startedAt = events
+    .filter((event) => event.eventType === "watcher_started")
+    .map((event) => event.timestamp.getTime());
   let target = -1;
   for (let i = 0; i < events.length; i++) {
     const event = events[i];
+    const stoppedAt = event.timestamp.getTime();
     if (
       canStampStop(event) &&
+      !startedAt.some(
+        (started) => started > stoppedAt && started <= lastHeartbeatAt.getTime()
+      ) &&
       Math.abs(event.timestamp.getTime() - lastHeartbeatAt.getTime()) <=
         STOP_STAMP_WINDOW_MS &&
       (target === -1 || event.timestamp >= events[target].timestamp)

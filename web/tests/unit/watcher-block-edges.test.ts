@@ -75,8 +75,8 @@ describe("blockEdges", () => {
           stoppedBefore: false,
         });
       expect(state(3, 30).state).toBe("checked_in");
-      expect(state(4, 0)).toEqual({ state: "no_data", noData: "too_soon" });
-      expect(state(5, 0)).toEqual({ state: "no_data", noData: "too_soon" });
+      expect(state(4, 0)).toEqual({ state: "no_data", noData: "skipped" });
+      expect(state(5, 0)).toEqual({ state: "no_data", noData: "skipped" });
       expect(state(6, 30).state).toBe("checked_in");
     });
   });

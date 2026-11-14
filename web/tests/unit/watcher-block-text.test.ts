@@ -36,6 +36,26 @@ describe("describeBlock", () => {
     );
   });
 
+  it("words a block by its real length on a day the clocks go back", () => {
+    expect(
+      describeBlock(block({ heartbeats: 90, minutes: 90 }), WHEN, TZ).detail
+    ).toBe("90 heartbeats in these 90 minutes.");
+    expect(
+      describeBlock(
+        block({ state: "unresponsive", heartbeats: 0, minutes: 90 }),
+        WHEN,
+        TZ
+      ).detail
+    ).toBe("The watcher didn't check in during these 90 minutes.");
+    expect(
+      describeBlock(
+        block({ state: "unresponsive", heartbeats: 4, minutes: 90 }),
+        WHEN,
+        TZ
+      ).detail
+    ).toBe("The watcher went quiet for part of these 90 minutes.");
+  });
+
   it("a restart for an update says when it stopped and started again", () => {
     const text = describeBlock(
       block({
@@ -147,6 +167,7 @@ describe("describeBlock", () => {
     ["before_first_check_in", "The watcher hadn't checked in yet."],
     ["after_deregistered", "The watcher had been deregistered."],
     ["stopped", "The watcher was stopped, so it sent nothing."],
+    ["skipped", "The clocks went forward, so this half hour didn't happen."],
     ["too_soon", "Too soon to tell."],
   ] as const)("no data (%s)", (noData, detail) => {
     const text = describeBlock(

@@ -1,4 +1,15 @@
-import { and, desc, eq, gte, inArray, lt, min, sql } from "drizzle-orm";
+import {
+  and,
+  desc,
+  eq,
+  gte,
+  inArray,
+  lt,
+  lte,
+  min,
+  type SQL,
+  sql,
+} from "drizzle-orm";
 import { STALE_THRESHOLD_MS } from "@/lib/api/watcher-status";
 import { db } from "@/lib/db";
 import { watcherEvents, watcherHeartbeats } from "@/lib/db/schema";
@@ -13,6 +24,7 @@ import {
   RESTART_GRACE_MS,
   type RestartWindow,
   restartWindow,
+  seriesEnd,
   silenceInBlock,
   stopIsRestart,
   unexplainedSilences,
@@ -38,6 +50,8 @@ const WINDOW_ROW_LIMIT = 1000;
 // A stop's heartbeat and its event are sent together, so they land within this
 // of each other.
 const STOP_MATCH_MS = 2 * 60 * 1000;
+
+const MIN_MS = 60 * 1000;
 
 const STOP_REASON_FIELD = sql.raw(`'${STOP_REASON_KEY}'`);
 
@@ -96,6 +110,30 @@ const restartReason = sql<RestartReason | null>`case
   when ${watcherEvents.message} ilike ${`%${RESTART_STOP_FRAGMENTS.windows}%`}
     then 'windows'
 end`;
+
+/**
+ * The `watcher_stopped` events that record a restart among those `where`
+ * selects, oldest first, each with the watcher's next start.
+ */
+function restartStops(where: SQL | undefined) {
+  return db
+    .select({
+      stoppedAt: watcherEvents.timestamp,
+      reason: restartReason,
+      // The columns are written out in full: inside a subquery on the same
+      // table, a bare "timestamp" would be the subquery's own.
+      resumedAt: sql<Date | null>`(
+        select min(started.timestamp) from watcher_events as started
+        where started.watcher_id = ${outer("watcher_id")}
+          and started.event_type = 'watcher_started'
+          and started.timestamp > ${outer("timestamp")}
+      )`.mapWith((value) => (value ? new Date(value as string) : null)),
+    })
+    .from(watcherEvents)
+    .where(and(where, sql`${restartReason} is not null`))
+    .orderBy(watcherEvents.timestamp)
+    .limit(WINDOW_ROW_LIMIT);
+}
 
 const isMissedHeartbeat = sql`${watcherEvents.eventType} = 'error'
   and ${watcherEvents.details}->>'kind' = 'heartbeat_recovered'`;
@@ -176,6 +214,7 @@ export async function getWatcherHealth(
 ): Promise<WatcherHealth> {
   const { start, endExclusive, timeZone } = options;
   const now = options.now ?? new Date();
+  const closeAt = seriesEnd(now, endExclusive, options.deregisteredAt);
 
   const dayList = eachDay(options.fromDay, options.toDay);
   const edgesByDay = dayList.map((day) => blockEdges(day, timeZone));
@@ -223,7 +262,10 @@ export async function getWatcherHealth(
       .groupBy(sql`1`),
     // Consecutive heartbeats at least the stale threshold apart. The series
     // starts at the last heartbeat before the range and ends at the first
-    // after it, so a gap over the range's edge is seen from the inside.
+    // after it, so a gap over the range's edge is seen from the inside. When
+    // nothing follows the last heartbeat, the series is closed at `closeAt`
+    // (the earliest of now, the range's end and the deregistration), so an
+    // outage that is still going on is a gap too.
     db.execute<{ from_ms: number; previous_status: string; to_ms: number }>(sql`
       with series as (
         (select "timestamp" as at, status from watcher_heartbeats
@@ -238,6 +280,12 @@ export async function getWatcherHealth(
         (select "timestamp", status from watcher_heartbeats
           where watcher_id = ${watcherId} and "timestamp" >= ${endExclusive.toISOString()}::timestamptz
           order by "timestamp" asc limit 1)
+        union all
+        (select ${closeAt.toISOString()}::timestamptz, null::text
+          where not exists (
+            select 1 from watcher_heartbeats
+            where watcher_id = ${watcherId} and "timestamp" >= ${closeAt.toISOString()}::timestamptz
+          ))
       ), paired as (
         select lag(at) over (order by at) as "from",
           lag(status) over (order by at) as previous_status,
@@ -278,33 +326,16 @@ export async function getWatcherHealth(
     // Restarts from a grace period before the range too: one that began just
     // before it still explains the quiet at its start. The counts above are
     // the range's alone.
-    db
-      .select({
-        stoppedAt: watcherEvents.timestamp,
-        reason: restartReason,
-        // The columns are written out in full: inside a subquery on the same
-        // table, a bare "timestamp" would be the subquery's own.
-        resumedAt: sql<Date | null>`(
-          select min(started.timestamp) from watcher_events as started
-          where started.watcher_id = ${outer("watcher_id")}
-            and started.event_type = 'watcher_started'
-            and started.timestamp > ${outer("timestamp")}
-        )`.mapWith((value) => (value ? new Date(value as string) : null)),
-      })
-      .from(watcherEvents)
-      .where(
-        and(
-          eq(watcherEvents.watcherId, watcherId),
-          gte(
-            watcherEvents.timestamp,
-            new Date(start.getTime() - RESTART_GRACE_MS)
-          ),
-          lt(watcherEvents.timestamp, endExclusive),
-          sql`${restartReason} is not null`
-        )
+    restartStops(
+      and(
+        eq(watcherEvents.watcherId, watcherId),
+        gte(
+          watcherEvents.timestamp,
+          new Date(start.getTime() - RESTART_GRACE_MS)
+        ),
+        lt(watcherEvents.timestamp, endExclusive)
       )
-      .orderBy(watcherEvents.timestamp)
-      .limit(WINDOW_ROW_LIMIT),
+    ),
     db
       .select({
         recoveredAt: watcherEvents.timestamp,
@@ -338,6 +369,33 @@ export async function getWatcherHealth(
   for (const row of restartRows) {
     if (row.reason) {
       restarts.push(restartWindow(row.stoppedAt, row.reason, row.resumedAt));
+    }
+  }
+  // The watcher's last word before the range may be a stop for a restart from
+  // long before it: the watcher was left down after an update, and the range
+  // opens in the middle of that. The grace period before the range doesn't reach
+  // it, so find the stop's event on its own, by its time alone.
+  if (
+    heartbeatBefore?.status === "stopped" &&
+    !stopIsRestart(restarts, heartbeatBefore.at, STOP_MATCH_MS)
+  ) {
+    const [earlier] = await restartStops(
+      and(
+        eq(watcherEvents.watcherId, watcherId),
+        gte(
+          watcherEvents.timestamp,
+          new Date(heartbeatBefore.at.getTime() - STOP_MATCH_MS)
+        ),
+        lte(
+          watcherEvents.timestamp,
+          new Date(heartbeatBefore.at.getTime() + STOP_MATCH_MS)
+        )
+      )
+    );
+    if (earlier?.reason) {
+      restarts.push(
+        restartWindow(earlier.stoppedAt, earlier.reason, earlier.resumedAt)
+      );
     }
   }
   const missed: MissedWindow[] = missedRows.map((row) =>
@@ -397,7 +455,13 @@ export async function getWatcherHealth(
         silent: heartbeats > 0 && silenceInBlock(silences, bounds),
         stoppedBefore: stopped,
       });
-      const block: HealthBlock = { ...classified, heartbeats };
+      const block: HealthBlock = {
+        ...classified,
+        heartbeats,
+        minutes: Math.round(
+          (bounds.end.getTime() - bounds.start.getTime()) / MIN_MS
+        ),
+      };
       if (classified.state === "restarted" && restart) {
         block.restart = {
           reason: restart.reason,
