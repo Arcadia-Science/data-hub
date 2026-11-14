@@ -7,6 +7,7 @@
 // The server has only seen files that matched an older config, so files on
 // the PC that never matched can't appear here.
 
+import { runIdForPathGuarded } from "./guarded-run-id";
 import type { WatcherConfigSettings } from "./settings";
 
 const REGEX_SPECIALS = /[.*+?^${}()|[\]\\/]/g;
@@ -139,12 +140,6 @@ export function compileFilePatternMatcher(
   return (name) => regex.test(name);
 }
 
-/** `re.search(pattern, path).group(1)`, or null on a miss or empty group. */
-export function extractRunId(regex: RegExp, relativePath: string) {
-  const match = regex.exec(relativePath);
-  return match?.[1] ? match[1] : null;
-}
-
 export interface PreviewFile {
   matches: boolean;
   relative_path: string;
@@ -155,14 +150,16 @@ export interface PreviewFile {
  * Runs `settings` against relative paths (newest first). A file matches when
  * its name matches a pattern and, for a non-recursive watcher, it sits at the
  * top of the folder. Matching files get the run ID the watcher would derive;
- * files that don't match aren't detected, so they get no run ID.
+ * files that don't match aren't detected, so they get no run ID. The run
+ * pattern comes from the watcher's pushed config and isn't checked, so each
+ * match runs under a timeout (`runIdForPathGuarded`); a pattern that runs too
+ * long, or doesn't compile, gives no run ID.
  */
 export function previewSettings(
   settings: Pick<WatcherConfigSettings, "file_patterns" | "run_detection">,
   relativePaths: readonly string[]
 ): PreviewFile[] {
   const matchesName = compileFilePatternMatcher(settings.file_patterns);
-  const runRegex = new RegExp(settings.run_detection.pattern);
   return relativePaths.map((raw) => {
     const relativePath = raw.replaceAll("\\", "/");
     const name = relativePath.slice(relativePath.lastIndexOf("/") + 1);
@@ -172,7 +169,9 @@ export function previewSettings(
     return {
       relative_path: relativePath,
       matches,
-      run_id: matches ? extractRunId(runRegex, relativePath) : null,
+      run_id: matches
+        ? runIdForPathGuarded(settings.run_detection.pattern, relativePath)
+        : null,
     };
   });
 }
