@@ -3,6 +3,7 @@ import {
   isWatcherId,
   isWatcherPagePath,
   legacyWatcherRedirect,
+  legacyWatchersRedirect,
   watcherPageHref,
 } from "@/lib/watchers/routes";
 
@@ -138,5 +139,39 @@ describe("isWatcherId", () => {
     ` ${WATCHER_ID}`,
   ])("rejects %j", (value) => {
     expect(isWatcherId(value)).toBe(false);
+  });
+});
+
+// The old `/watchers` list: admins go to Settings › Watchers, members to the
+// instruments, and only the Deregistered tab's parameter is kept.
+describe("legacyWatchersRedirect", () => {
+  it("sends an admin to Settings › Watchers", () => {
+    expect(legacyWatchersRedirect({ isAdmin: true, tab: null })).toBe(
+      "/settings/watchers"
+    );
+  });
+
+  it("keeps ?tab=deregistered for an admin", () => {
+    expect(legacyWatchersRedirect({ isAdmin: true, tab: "deregistered" })).toBe(
+      "/settings/watchers?tab=deregistered"
+    );
+  });
+
+  it("drops any other ?tab= value for an admin", () => {
+    expect(legacyWatchersRedirect({ isAdmin: true, tab: "active" })).toBe(
+      "/settings/watchers"
+    );
+    expect(legacyWatchersRedirect({ isAdmin: true, tab: "nonsense" })).toBe(
+      "/settings/watchers"
+    );
+  });
+
+  it("sends a member to the instruments, with or without the tab", () => {
+    expect(legacyWatchersRedirect({ isAdmin: false, tab: null })).toBe(
+      "/instruments"
+    );
+    expect(
+      legacyWatchersRedirect({ isAdmin: false, tab: "deregistered" })
+    ).toBe("/instruments");
   });
 });

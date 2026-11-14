@@ -10,11 +10,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { DeregisterDialog } from "@/components/watchers/deregister-dialog";
-import type { WatcherListItem } from "@/lib/api/watchers";
+import type { WatcherRosterItem } from "@/lib/api/watcher-roster";
 
 export type WatcherActionTarget = Pick<
-  WatcherListItem,
-  "deletedAt" | "hostname" | "id"
+  WatcherRosterItem,
+  "deletedAt" | "hostname" | "id" | "instrumentDisplayName" | "instrumentId"
 >;
 
 export function WatcherActions({ watcher }: { watcher: WatcherActionTarget }) {
@@ -26,12 +26,14 @@ export function WatcherActions({ watcher }: { watcher: WatcherActionTarget }) {
     return null;
   }
 
+  const instrumentName = watcher.instrumentDisplayName ?? watcher.instrumentId;
+
   return (
     <div className="flex items-center justify-end">
       <DropdownMenu onOpenChange={setMenuOpen} open={menuOpen}>
         <DropdownMenuTrigger asChild>
           <Button
-            aria-label="More actions"
+            aria-label={`Actions for the ${instrumentName} watcher`}
             className="size-7"
             ref={triggerRef}
             size="icon"

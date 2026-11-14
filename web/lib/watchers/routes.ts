@@ -62,6 +62,23 @@ export function legacyWatcherRedirect(options: {
   });
 }
 
+/**
+ * Where the old `/watchers` list goes. An admin finds the list in Settings ›
+ * Watchers, on its Deregistered tab when the old URL asked for that tab. A
+ * member has no list, so goes to the instruments.
+ */
+export function legacyWatchersRedirect(options: {
+  isAdmin: boolean;
+  tab: string | null | undefined;
+}): string {
+  if (!options.isAdmin) {
+    return "/instruments";
+  }
+  return options.tab === "deregistered"
+    ? "/settings/watchers?tab=deregistered"
+    : "/settings/watchers";
+}
+
 const WATCHER_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

@@ -42,10 +42,10 @@ const publicPrefixes = [
 
 // Paths that are public for the index URL only — descendants stay
 // proxy-gated. The root dashboard is here because adding `/` to
-// `publicPrefixes` would match every path. `/watchers` is exact-only so
-// the index page renders metadata for link unfurls while `/watchers/[id]`
-// stays proxy-gated (it only redirects to the instrument's watcher page).
-const publicExactPaths = new Set(["/", "/watchers"]);
+// `publicPrefixes` would match every path. `/watchers` and `/watchers/[id]` are
+// not here: both only redirect, so there's nothing to unfurl, and a signed-out
+// visitor goes to sign-in first.
+const publicExactPaths = new Set(["/"]);
 
 // Paths under a public prefix that are gated anyway. A watcher's pages show its
 // computer name, folder and config YAML, and aren't shared for link previews.

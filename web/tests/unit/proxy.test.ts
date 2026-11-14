@@ -42,6 +42,11 @@ describe("proxy", () => {
       "/login?callbackURL=%2Funknown%2Fpage%3Fa%3D1%26b%3D2",
     ],
     ["/watchers/abc", "/login?callbackURL=%2Fwatchers%2Fabc"],
+    ["/watchers", "/login?callbackURL=%2Fwatchers"],
+    [
+      "/watchers?tab=deregistered",
+      "/login?callbackURL=%2Fwatchers%3Ftab%3Dderegistered",
+    ],
     [
       "/instruments/plate-reader-a/watcher",
       "/login?callbackURL=%2Finstruments%2Fplate-reader-a%2Fwatcher",
@@ -69,11 +74,18 @@ describe("proxy", () => {
     "/instruments/plate-reader-a",
     "/instruments/plate-reader-a/watchers",
     "/settings/tokens",
-    "/watchers",
   ])("passes public route %s through with its address", (path) => {
     const response = proxy(request(path));
     expect(response.status).toBe(200);
     expect(forwardedPath(response)).toBe(path);
+  });
+
+  it("passes a signed-in visitor through to the old watchers list", () => {
+    const response = proxy(
+      request("/watchers?tab=deregistered", { cookie: SESSION_COOKIE })
+    );
+    expect(response.status).toBe(200);
+    expect(forwardedPath(response)).toBe("/watchers?tab=deregistered");
   });
 
   it("passes a signed-in visitor through to a watcher page", () => {
@@ -124,7 +136,6 @@ describe("proxy", () => {
       "/api/cron/reprocess-queue",
       "/instruments/x/runs/Q%2541",
       "/settings/tokens",
-      "/watchers",
       "/",
     ])("is set on the public path %s without its query", (path) => {
       const response = proxy(request(`${path}?tab=files&q=%2541`));

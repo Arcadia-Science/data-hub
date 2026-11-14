@@ -3,22 +3,29 @@ import type { Metadata } from "next/types";
 import { Suspense } from "react";
 import { SignInRequired } from "@/components/auth/sign-in-required";
 import { AdminsOnly } from "@/components/settings/admins-only";
-import { SettingsPageContent } from "@/components/settings/settings-page-content";
 import { WatcherReleaseForm } from "@/components/watcher-release/watcher-release-form";
 import { WatcherReleaseFormSkeleton } from "@/components/watcher-release/watcher-release-form-skeleton";
+import { RolloutPill } from "@/components/watchers/rollout-pill";
+import {
+  WatchersView,
+  WatchersViewSkeleton,
+} from "@/components/watchers/watchers-view";
+import { getLatestWatcherVersion } from "@/lib/api/watcher-release";
+import { getWatcherRoster } from "@/lib/api/watcher-roster";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { users, watcherReleaseConfig } from "@/lib/db/schema";
 import { fetchWatcherVersions } from "@/lib/pypi";
+import { rolloutPill } from "@/lib/watchers/roster";
 
 const description =
-  "Set the watcher version that installed watchers update themselves to.";
+  "The program on each instrument PC that uploads files, and the version they all run.";
 
 export const metadata: Metadata = {
-  title: "Watcher updates",
+  title: "Watchers",
   description,
-  openGraph: { title: "Watcher updates", description },
-  twitter: { title: "Watcher updates", description },
+  openGraph: { title: "Watchers", description },
+  twitter: { title: "Watchers", description },
 };
 
 export default async function WatchersSettingsPage() {
@@ -35,38 +42,21 @@ export default async function WatchersSettingsPage() {
     return <AdminsOnly>change watcher settings</AdminsOnly>;
   }
 
-  // Page-level heading + description match the layout used by
-  // `/settings/tokens` and `/settings/members` so the h2 aligns
-  // vertically with the "Settings" label in the sidebar. The form below
-  // is content-only (Card body + footer) — same pattern as the table
-  // components those sibling pages render.
   return (
-    <SettingsPageContent>
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="font-semibold text-lg tracking-tight">
-            Watcher Version
-          </h1>
-          <p className="text-muted-foreground text-sm">
-            Configure the release advertised by{" "}
-            <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs dark:bg-background/40">
-              GET /api/v1/watchers/:id/update-check
-            </code>
-            . Watchers compare their installed version against{" "}
-            <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs dark:bg-background/40">
-              latest_version
-            </code>{" "}
-            and self-upgrade when a newer release is offered.
-          </p>
-        </div>
+    <div className="flex flex-col gap-6">
+      <div>
+        <h1 className="font-semibold text-lg tracking-tight">Watchers</h1>
+        <p className="text-muted-foreground text-sm">{description}</p>
       </div>
 
-      <div className="mt-6">
-        <Suspense fallback={<WatcherReleaseFormSkeleton />}>
-          <WatcherReleaseSection />
-        </Suspense>
-      </div>
-    </SettingsPageContent>
+      <Suspense fallback={<WatcherReleaseFormSkeleton />}>
+        <WatcherReleaseSection />
+      </Suspense>
+
+      <Suspense fallback={<AllWatchersFallback />}>
+        <AllWatchersSection />
+      </Suspense>
+    </div>
   );
 }
 
@@ -117,5 +107,64 @@ async function WatcherReleaseSection() {
       }
       pypiReachable={pypi.ok}
     />
+  );
+}
+
+/** The list's heading, shown while the list loads so the page doesn't shift. */
+function AllWatchersFallback() {
+  return (
+    <section
+      aria-labelledby="all-watchers-heading"
+      className="flex flex-col gap-4"
+    >
+      <ListHeading />
+      <WatchersViewSkeleton />
+    </section>
+  );
+}
+
+function ListHeading({ pill }: { pill?: React.ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-end justify-between gap-3">
+      <div>
+        <h2
+          className="font-semibold text-lg tracking-tight"
+          id="all-watchers-heading"
+        >
+          All watchers
+        </h2>
+        <p className="text-muted-foreground text-sm">
+          One per instrument. Open a row to see its activity, health, and
+          settings.
+        </p>
+      </div>
+      {pill}
+    </div>
+  );
+}
+
+async function AllWatchersSection() {
+  // One read for every watcher, with the computers they share and who
+  // deregistered each, and the release's latest version for the pill.
+  const [roster, latestVersion] = await Promise.all([
+    getWatcherRoster(),
+    getLatestWatcherVersion(),
+  ]);
+  const active = roster.filter((watcher) => watcher.deletedAt === null);
+  const deregistered = roster.filter((watcher) => watcher.deletedAt !== null);
+
+  const pill = rolloutPill({
+    activeVersions: active.map((watcher) => watcher.watcherVersion),
+    latestVersion,
+  });
+
+  return (
+    <section
+      aria-labelledby="all-watchers-heading"
+      className="flex flex-col gap-4"
+    >
+      <ListHeading pill={pill ? <RolloutPill pill={pill} /> : null} />
+      <WatchersView activeData={active} deregisteredData={deregistered} />
+    </section>
   );
 }

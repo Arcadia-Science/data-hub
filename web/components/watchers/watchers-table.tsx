@@ -1,8 +1,17 @@
-import { SearchX } from "lucide-react";
-import type { ReactNode } from "react";
+"use client";
+
+import {
+  ChevronDown,
+  ChevronsUpDown,
+  ChevronUp,
+  Layers,
+  SearchX,
+} from "lucide-react";
+import { useMemo, useState } from "react";
 import { RelativeTime } from "@/components/dashboard/relative-time";
 import { EmptyState } from "@/components/empty-state";
 import { RowControl, RowLink } from "@/components/row-link";
+import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -13,29 +22,34 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { useViewerTimeZone } from "@/components/viewer-time-zone-provider";
+import { WatcherActions } from "@/components/watchers/watcher-actions";
+import {
   ConfigChangeBadge,
   RestartPendingBadge,
 } from "@/components/watchers/watcher-config-status";
 import { WatcherStatusBadge } from "@/components/watchers/watcher-status-badge";
-import type { WatcherListItem } from "@/lib/api/watchers";
-import { cn } from "@/lib/utils";
+import type { WatcherRosterItem } from "@/lib/api/watcher-roster";
+import { formatDate } from "@/lib/date";
+import type { InstrumentWatcherConfigState } from "@/lib/instruments/connection";
+import {
+  type ComputerSort,
+  type SharedComputerMarker,
+  sharedComputerMarker,
+  sortActiveWatchers,
+} from "@/lib/watchers/roster";
 import { watcherPageHref } from "@/lib/watchers/routes";
 
-/**
- * Placeholder mirroring `WatchersTable` columns and row height so streamed
- * content swaps in without layout shift.
- */
-export function WatchersTableSkeleton({
-  rows = 7,
-  ariaLabel = "Loading watchers",
-}: {
-  rows?: number;
-  ariaLabel?: string;
-}) {
+/** Placeholder with the active table's columns, so the rows swap in without a shift. */
+export function WatchersTableSkeleton({ rows = 7 }: { rows?: number }) {
   return (
     <div
       aria-busy="true"
-      aria-label={ariaLabel}
+      aria-label="Loading watchers"
       className="rounded-lg border bg-background dark:bg-muted"
       role="status"
     >
@@ -43,10 +57,11 @@ export function WatchersTableSkeleton({
         <TableHeader>
           <TableRow>
             <TableHead>Instrument</TableHead>
-            <TableHead>Hostname</TableHead>
+            <TableHead>Computer</TableHead>
             <TableHead>Version</TableHead>
             <TableHead>Status</TableHead>
-            <TableHead>Last Heartbeat</TableHead>
+            <TableHead>Settings</TableHead>
+            <TableHead>Last heartbeat</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -67,6 +82,9 @@ export function WatchersTableSkeleton({
               <TableCell>
                 <Skeleton className="h-4 w-20" />
               </TableCell>
+              <TableCell>
+                <Skeleton className="h-4 w-20" />
+              </TableCell>
             </TableRow>
           ))}
         </TableBody>
@@ -75,22 +93,21 @@ export function WatchersTableSkeleton({
   );
 }
 
-export function WatchersTable({
-  data,
-  emptyMessage = "No active watchers.",
-  renderRowActions,
-}: {
-  data: WatcherListItem[];
-  /** Message shown in the empty state; per-tab callers override the default. */
-  emptyMessage?: string;
-  /**
-   * Optional per-row action cell. When omitted, the trailing actions column
-   * is hidden entirely — used for the deregistered tab and for non-admins.
-   */
-  renderRowActions?: (row: WatcherListItem) => ReactNode;
-}) {
-  if (data.length === 0) {
-    return <EmptyState icon={SearchX}>{emptyMessage}</EmptyState>;
+/** The em dash that stands for a value a watcher doesn't have. */
+function Dash() {
+  return <span className="text-muted-foreground">—</span>;
+}
+
+/** Active watchers, sortable by computer. Rows open the instrument's watcher page. */
+export function ActiveWatchersTable({ rows }: { rows: WatcherRosterItem[] }) {
+  const [computerSort, setComputerSort] = useState<ComputerSort>(null);
+  const sorted = useMemo(
+    () => sortActiveWatchers(rows, computerSort),
+    [rows, computerSort]
+  );
+
+  if (rows.length === 0) {
+    return <EmptyState icon={SearchX}>No active watchers.</EmptyState>;
   }
 
   return (
@@ -99,30 +116,124 @@ export function WatchersTable({
         <TableHeader>
           <TableRow>
             <TableHead>Instrument</TableHead>
-            <TableHead>Hostname</TableHead>
+            <TableHead aria-sort={computerSort ?? "none"}>
+              <button
+                className="inline-flex items-center gap-1.5 rounded-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                onClick={() => setComputerSort(nextComputerSort(computerSort))}
+                type="button"
+              >
+                Computer
+                <SortIcon sort={computerSort} />
+              </button>
+            </TableHead>
             <TableHead>Version</TableHead>
             <TableHead>Status</TableHead>
-            <TableHead>Last Heartbeat</TableHead>
-            {renderRowActions ? <TableHead className="w-[100px]" /> : null}
+            <TableHead>Settings</TableHead>
+            <TableHead>Last heartbeat</TableHead>
+            <TableHead className="w-12">
+              <span className="sr-only">Actions</span>
+            </TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {data.map((row) => (
-            <TableRow
-              className={cn("relative text-sm", row.deletedAt && "opacity-60")}
-              key={row.id}
-            >
+          {sorted.map((row) => {
+            const marker = sharedComputerMarker(row.sharedComputerWith);
+            return (
+              <TableRow className="relative text-sm" key={row.id}>
+                <TableCell>
+                  <RowLink href={watcherPageHref(row.instrumentId)}>
+                    {row.instrumentDisplayName ?? (
+                      <span className="font-mono text-muted-foreground">
+                        {row.instrumentId}
+                      </span>
+                    )}
+                  </RowLink>
+                </TableCell>
+                <TableCell>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {row.hostname ? (
+                      <span className="font-mono text-xs">{row.hostname}</span>
+                    ) : (
+                      <Dash />
+                    )}
+                    {marker ? (
+                      <RowControl>
+                        <SharedComputerBadge marker={marker} />
+                      </RowControl>
+                    ) : null}
+                  </div>
+                </TableCell>
+                <TableCell className="font-mono text-xs">
+                  {row.watcherVersion ?? <Dash />}
+                </TableCell>
+                <TableCell>
+                  <RowControl>
+                    <WatcherStatusBadge
+                      className="text-xs"
+                      lastOnlineAt={row.lastHeartbeatAt}
+                      reason={row.statusReason}
+                      status={row.effectiveStatus}
+                    />
+                  </RowControl>
+                </TableCell>
+                <TableCell>
+                  <ConfigStateBadge state={row.configState} />
+                </TableCell>
+                <TableCell>
+                  {row.lastHeartbeatAt ? (
+                    <RelativeTime date={row.lastHeartbeatAt.toISOString()} />
+                  ) : (
+                    <Dash />
+                  )}
+                </TableCell>
+                <TableCell>
+                  <RowControl>
+                    <WatcherActions watcher={row} />
+                  </RowControl>
+                </TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
+/** Deregistered watchers, read-only. Rows open the registration they name. */
+export function DeregisteredWatchersTable({
+  rows,
+}: {
+  rows: WatcherRosterItem[];
+}) {
+  const timeZone = useViewerTimeZone();
+
+  if (rows.length === 0) {
+    return <EmptyState icon={SearchX}>No deregistered watchers.</EmptyState>;
+  }
+
+  return (
+    <div className="rounded-lg border bg-background dark:bg-muted">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Instrument</TableHead>
+            <TableHead>Computer</TableHead>
+            <TableHead>Last version</TableHead>
+            <TableHead>Deregistered on</TableHead>
+            <TableHead>Deregistered by</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.map((row) => (
+            <TableRow className="relative text-sm" key={row.id}>
               <TableCell>
                 <RowLink
                   href={watcherPageHref(row.instrumentId, {
-                    // A deregistered watcher opens by its own ID. An active one
-                    // is the instrument's current watcher.
-                    watcherId: row.deletedAt ? row.id : null,
+                    watcherId: row.id,
                   })}
                 >
-                  {row.instrumentDisplayName ? (
-                    row.instrumentDisplayName
-                  ) : (
+                  {row.instrumentDisplayName ?? (
                     <span className="font-mono text-muted-foreground">
                       {row.instrumentId}
                     </span>
@@ -130,54 +241,71 @@ export function WatchersTable({
                 </RowLink>
               </TableCell>
               <TableCell>
-                {row.hostname ?? (
-                  <span className="text-muted-foreground">—</span>
+                {row.hostname ? (
+                  <span className="font-mono text-xs">{row.hostname}</span>
+                ) : (
+                  <Dash />
                 )}
               </TableCell>
               <TableCell className="font-mono text-xs">
-                {row.watcherVersion ?? (
-                  <span className="text-muted-foreground">—</span>
-                )}
+                {row.watcherVersion ?? <Dash />}
               </TableCell>
               <TableCell>
-                <RowControl>
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <WatcherStatusBadge
-                      className="text-xs"
-                      lastOnlineAt={row.lastHeartbeatAt}
-                      // A deregistered watcher reads Stopped whatever it
-                      // reported last, so its reason doesn't apply.
-                      reason={row.deletedAt ? null : row.statusReason}
-                      status={row.effectiveStatus}
-                    />
-                    {row.deletedAt ? null : (
-                      <ConfigChangeBadge
-                        className="text-xs"
-                        status={row.configRevisionStatus}
-                      />
-                    )}
-                    {!row.deletedAt && row.pcEditAwaitingRestart ? (
-                      <RestartPendingBadge className="text-xs" />
-                    ) : null}
-                  </div>
-                </RowControl>
+                {row.deletedAt ? formatDate(row.deletedAt, timeZone) : <Dash />}
               </TableCell>
-              <TableCell>
-                {row.lastHeartbeatAt ? (
-                  <RelativeTime date={row.lastHeartbeatAt.toISOString()} />
-                ) : (
-                  <span className="text-muted-foreground">—</span>
-                )}
-              </TableCell>
-              {renderRowActions ? (
-                <TableCell>
-                  <RowControl>{renderRowActions(row)}</RowControl>
-                </TableCell>
-              ) : null}
+              <TableCell>{row.deregisteredByName ?? <Dash />}</TableCell>
             </TableRow>
           ))}
         </TableBody>
       </Table>
     </div>
   );
+}
+
+// The marker is focusable, so a keyboard user can open its tooltip too.
+function SharedComputerBadge({ marker }: { marker: SharedComputerMarker }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Badge className="cursor-default" tabIndex={0} variant="secondary">
+          <Layers />
+          {marker.label}
+        </Badge>
+      </TooltipTrigger>
+      <TooltipContent>{marker.tooltip}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function ConfigStateBadge({ state }: { state: InstrumentWatcherConfigState }) {
+  if (state === "pending" || state === "rejected") {
+    return <ConfigChangeBadge className="text-xs" status={state} />;
+  }
+  if (state === "edited_on_pc") {
+    return <RestartPendingBadge className="text-xs" />;
+  }
+  return <Dash />;
+}
+
+function SortIcon({ sort }: { sort: ComputerSort }) {
+  if (sort === "ascending") {
+    return <ChevronUp aria-hidden="true" className="size-3" />;
+  }
+  if (sort === "descending") {
+    return <ChevronDown aria-hidden="true" className="size-3" />;
+  }
+  return (
+    <ChevronsUpDown
+      aria-hidden="true"
+      className="size-3 text-muted-foreground"
+    />
+  );
+}
+
+/** The header click cycles: none, then ascending, then descending, then none. */
+function nextComputerSort(sort: ComputerSort): ComputerSort {
+  if (sort === null) {
+    return "ascending";
+  }
+  return sort === "ascending" ? "descending" : null;
 }

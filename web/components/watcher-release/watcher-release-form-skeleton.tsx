@@ -1,4 +1,9 @@
-import { Card, CardContent, CardFooter } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardFooter,
+  CardHeader,
+} from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 
 function VersionFieldSkeleton({
@@ -45,10 +50,16 @@ export function WatcherReleaseFormSkeleton() {
       aria-label="Loading watcher release settings"
       role="status"
     >
+      <CardHeader>
+        <Skeleton className="h-4 w-36" />
+        <Skeleton className="h-4 w-72" />
+      </CardHeader>
       <CardContent>
         <div className="flex flex-col gap-7">
-          <VersionFieldSkeleton labelWidth="w-28" />
-          <VersionFieldSkeleton labelWidth="w-44" />
+          <div className="grid gap-7 sm:grid-cols-2 sm:gap-x-4">
+            <VersionFieldSkeleton labelWidth="w-28" />
+            <VersionFieldSkeleton labelWidth="w-44" />
+          </div>
           <MandatoryUpdateFieldSkeleton />
         </div>
       </CardContent>
