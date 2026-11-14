@@ -6,7 +6,7 @@ contentType: How-to
 
 <Audience>Administrators</Audience>
 
-Lab PCs upgrade themselves toward the version you advertise per environment. You control that from **Settings → Watchers**. How an individual PC installs or runs `self-update` is in [Install and update the watcher](/docs/install-the-watcher).
+Lab PCs upgrade themselves toward the version you advertise per environment. You control that from **Settings → Watchers**, which also lists every watcher with its version, so you can watch a release catch up. How an individual PC installs or runs `self-update` is in [Install and update the watcher](/docs/install-the-watcher).
 
 ## How fleet upgrades reach a PC [#how-fleet-upgrades-reach-a-pc]
 
@@ -15,7 +15,7 @@ The in-process updater runs from the heartbeat tick on every platform (not only 
 1. Asks the server for the latest version and compares it to its own
 2. Upgrades only if a newer version is available, no files have uploaded for several heartbeats, and no run was reported recently (the activity-window guard). Releases flagged **mandatory** skip this guard
 3. Installs the new wheel and restarts into it (Windows services restart via failure-actions policy)
-4. Emits `update_started`, then `update_succeeded` or `update_failed`, visible on the dashboard
+4. Emits `update_started`, then `update_succeeded` or `update_failed`, which a watcher’s **Activity** tab shows as **Update started**, **Update finished**, or **Update failed**
 
 Auto-update is disabled in the `preview` environment so pull-request preview deployments cannot push code to lab PCs.
 
@@ -45,7 +45,7 @@ Approve the `pypi` deployment under **Actions → Publish watcher** in GitHub.
 <Step>
 In **Settings → Watchers**, pick the new version under **Latest version**. The list comes straight from PyPI, so a release shows up as soon as PyPI publishes it. If PyPI can’t be reached, the field accepts a typed version instead. Each environment has its own database, so set `staging` and `production` separately to roll the fleet gradually.
 
-![Settings Watchers page with Latest version and release controls](/images/watcher-settings.webp)
+![Settings Watchers page with Latest version and release controls, above the list of all watchers](/images/settings-watchers.webp)
 </Step>
 
 </Steps>
@@ -61,6 +61,10 @@ Always tag → publish → verify on PyPI → save. Saving **Latest version** be
 | **Latest version** | The version watchers upgrade to. Leave it blank to pause self-updates. |
 | **Minimum supported version** | Optional. A watcher older than this has its heartbeats rejected with `426 Upgrade Required`, so it shows as unresponsive until it updates. It still checks for updates every hour, so it upgrades itself as long as **Latest version** is newer. Leave it blank for no minimum. |
 | **Mandatory update** | Skips the activity-window guard; see below. Has no effect while **Latest version** is blank. |
+
+## Watch the rollout [#watch-the-rollout]
+
+Below the release form, **All watchers** has a pill that reads “*N* of *M* on” the latest version. It is green when every active watcher runs that version and amber while some are behind. The **Version** column shows each watcher’s version. A watcher’s own page says **Up to date**, or **Update available** with the latest version, beside its version. After a rollback, the pill counts the watchers on the older version you set. See [Manage the watcher fleet](/docs/manage-watchers#all-watchers).
 
 ## Mandatory updates [#mandatory-updates]
 

@@ -41,6 +41,8 @@ import {
   addSampleTokens,
   createWorld,
   keepWatchersOnline,
+  setCurrentWatcherVersion,
+  settleWaitingFiles,
   startFakeLinear,
   type World,
 } from "./setup";
@@ -172,6 +174,8 @@ async function main(): Promise<number> {
     });
     if (seed) {
       await addSampleTokens(world);
+      await setCurrentWatcherVersion(world);
+      await settleWaitingFiles(world);
     }
 
     if (args.serve) {

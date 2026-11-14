@@ -122,9 +122,9 @@ For run detection options, see [Configure run detection and uploads](/docs/confi
 
 The wizard then registers the watcher, saves the config to `~/.data-hub/config.yaml` (`C:\Users\<Username>\.data-hub\config.yaml` on Windows), and syncs it to Data Hub. When it reports that setup is complete, start watching.
 
-## 4. Confirm the instrument’s registration
+## 4. Confirm the instrument’s registration [#confirm-the-instruments-registration]
 
-A pending instrument cannot upload to Data Hub until an admin confirms it from the web app.
+A pending instrument cannot upload to Data Hub until an admin confirms it from the web app. Until then its badge reads **Pending**, and its page shows a **Waiting for confirmation** card in place of the runs table. Members see one line saying the instrument is waiting for an admin.
 
 <Steps>
 
@@ -133,20 +133,26 @@ Open the Data Hub web app and navigate to **Instruments > View all** from the ap
 </Step>
 
 <Step>
-Select the “Pending” tab and find your instrument. It should show a yellow `pending` badge.
+Select the “Pending” tab and find your instrument. It should show an amber **Pending** badge.
 </Step>
 
 <Step>
-Click **Confirm**. The instrument should move to the “Active” tab and appear as online shortly.
+Click **Confirm…**. A window shows what the watcher registered: the computer, the watch folder, the file patterns, how files become runs, and the upload mode. Check that it matches what you entered in the wizard. If it doesn’t, choose **Change settings first** to fix it.
+</Step>
+
+<Step>
+Choose an **Instrument type**, which is required, then click **Confirm instrument**. The instrument moves to the “Active” tab.
 </Step>
 
 </Steps>
 
-![Instruments page on the Pending tab, with a pending instrument showing a yellow Pending badge and a Confirm button](/images/instruments-pending.webp)
+![Instruments page on the Pending tab, with a pending instrument showing an amber Pending badge and a Confirm button](/images/instruments-pending.webp)
 
-Open the instrument’s page and check the watched folder and file patterns shown under its name. They should match what you entered in the wizard; files outside that folder, or with names that don’t match a pattern, won’t reach Data Hub.
+![The Confirm window, with the instrument’s ID, where the watcher registered from, its watch folder, file patterns, how files become runs, and the instrument type to choose](/images/instrument-confirm-dialog.webp)
 
-Some instruments also get automated preprocessing (metadata extraction, image conversion, and related outputs). To choose a processor, an admin opens the three-dot menu, selects **Edit details**, and picks a supported instrument type. What each type produces is in [Instrument data preprocessing](/docs/instrument-preprocessing).
+The instrument’s badge reads **Connecting** until the watcher service is running and checks in, which step 5 starts, and then **Online**. Open the instrument’s page and check the watched folder and file patterns shown under its name. They should match what you entered in the wizard; files outside that folder, or with names that don’t match a pattern, won’t reach Data Hub.
+
+Admins can change an instrument’s type later: open the three-dot menu, select **Edit details**, and pick a supported type. What each type produces is in [Instrument data preprocessing](/docs/instrument-preprocessing).
 
 <Callout type="info">
 Adding a new processor requires code changes; see [Adding a new instrument](https://github.com/Arcadia-Science/data-hub/blob/production/docs/developer/lambda.md#adding-a-new-instrument) in the developer docs.
@@ -154,7 +160,7 @@ Adding a new processor requires code changes; see [Adding a new instrument](http
 
 See [Manage instruments](/docs/manage-instruments) for more info.
 
-## 5. Start the watcher service
+## 5. Start the watcher service [#start-the-watcher-service]
 
 First, preview what the watcher will do without starting it:
 
@@ -186,5 +192,5 @@ The watcher detects new files, groups them into runs, uploads them (in auto mode
 - Raw files upload to cloud storage
 - Instrument runs and files appear in the web dashboard
 - Watcher service automatically restarts on PC restart
-- Watcher health (heartbeats, events) appears under **Watchers**
+- The watcher’s activity, health, and settings appear on the instrument’s **Watcher** page, and the instrument’s badge shows whether new files can arrive
 - Subscribed users can get in-app and Slack notifications for new runs

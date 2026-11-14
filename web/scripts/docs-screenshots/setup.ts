@@ -6,7 +6,7 @@ import {
   LINEAR_TEAM_ID,
   startLinearFakeServer,
 } from "@arcadiascience/app-feedback-toolkit/testing";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { SCOPE_PRESETS } from "@/lib/api/scope-catalog";
@@ -241,6 +241,63 @@ export async function keepWatchersOnline(world: World): Promise<void> {
   });
 }
 
+// The seed's watchers report a test version, below the 1.4.0 that turns on the
+// settings form. The docs describe watchers on a current release, so move every
+// watcher, and the version the fleet is told to update to, to one.
+export const DOCS_WATCHER_VERSION = "1.4.3";
+
+export async function setCurrentWatcherVersion(world: World): Promise<void> {
+  await world.db
+    .update(schema.watchers)
+    .set({ watcherVersion: DOCS_WATCHER_VERSION });
+  await world.db.execute(
+    sql`UPDATE watcher_release_config SET latest_version = ${DOCS_WATCHER_VERSION}`
+  );
+}
+
+// The seed has two runs with files that never left their instrument PC, to show
+// the run page's offline and restarting states. They count as pending uploads
+// on Home, and a docs page that shows a backlog in red on its first screen is
+// not what these shots are for. This marks every waiting file uploaded. Shots
+// that need the files waiting turn them back on with `setWaitingRunFiles`.
+export async function settleWaitingFiles(world: World): Promise<void> {
+  await world.db
+    .update(schema.files)
+    .set({ status: "uploaded" })
+    .where(inArray(schema.files.status, ["detected", "upload_requested"]));
+}
+
+// The run with files waiting while its watcher is offline.
+export const WAITING_RUN = {
+  instrumentId: "balance-f",
+  runId: "weighing-batch-a",
+} as const;
+
+export async function setWaitingRunFiles(
+  world: World,
+  waiting: boolean
+): Promise<void> {
+  const [run] = await world.db
+    .select({ id: schema.instrumentRuns.id })
+    .from(schema.instrumentRuns)
+    .where(
+      and(
+        eq(schema.instrumentRuns.instrumentId, WAITING_RUN.instrumentId),
+        eq(schema.instrumentRuns.runId, WAITING_RUN.runId)
+      )
+    )
+    .limit(1);
+  if (!run) {
+    throw new Error(
+      `The seed has no run ${WAITING_RUN.runId} on ${WAITING_RUN.instrumentId}`
+    );
+  }
+  await world.db
+    .update(schema.files)
+    .set({ status: waiting ? "detected" : "uploaded" })
+    .where(eq(schema.files.instrumentRunId, run.id));
+}
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 // The seed's admin token has the old full-access scope and a name that looks
@@ -292,9 +349,11 @@ export async function addSampleTokens(world: World): Promise<void> {
 
 const PENDING_RUN_ID = "20260316_101845_330";
 
-// The seed has no files waiting for approval, and the Hina microscope uploads
-// only after someone approves each file. The run is removed again afterwards
-// so the dashboard's pending count goes back to zero for the other shots.
+// The seed's waiting files all sit on instruments with a quiet or restarting
+// watcher (see `settleWaitingFiles`), and the Hina microscope uploads only after
+// someone approves each file. This adds a run of files waiting for approval on
+// it. The run is removed again afterwards, so the dashboard's pending count
+// goes back to zero for the other shots.
 export async function addPendingUploadRun(world: World): Promise<void> {
   const [watcher] = await world.db
     .select({ id: schema.watchers.id })

@@ -14,13 +14,13 @@ Short definitions of the vocabulary the rest of these docs use. If you’ve arri
 
 A piece of lab equipment registered in Data Hub, identified by a kebab-case **instrument ID** (e.g., `akta-fplc`, `bio-rad-cfx96`). The ID is permanent, because it becomes the storage key prefix and the identifier used across the system. A human-readable display name sits alongside it.
 
-An instrument has three states. The dashboard groups instruments into a tab per state and shows connection health separately:
+An instrument has three states. The **Instruments** page groups them into a tab per state, and a status badge beside each name shows whether new files can reach Data Hub:
 
 | State      | Shown as                                        | Meaning                                                             |
 | ---------- | ----------------------------------------------- | ------------------------------------------------------------------- |
-| `pending`  | **Pending** tab                                 | Registered but not yet confirmed by an admin. A watcher can’t upload for it. |
-| `active`   | **Active** tab, with Online or Offline health   | Confirmed and accepting uploads.                                    |
-| `inactive` | **Retired** tab                                 | Deactivated. No longer accepting uploads, but its runs stay browsable. |
+| `pending`  | **Pending** tab, with a **Pending** badge       | Registered but not yet confirmed by an admin. A watcher can’t upload for it. |
+| `active`   | **Active** tab, with an **Online**, **Restarting**, **Connecting**, or **Offline** badge | Confirmed and accepting uploads.                                    |
+| `inactive` | **Retired** tab, with a **Retired** badge       | Deactivated. No longer accepting uploads, but its runs stay browsable. |
 
 See [Set up an instrument](/docs/set-up-an-instrument), [Manage instruments](/docs/manage-instruments), and [Retire an instrument](/docs/retire-an-instrument).
 
@@ -30,15 +30,30 @@ Separate from the instrument ID. The type tells Data Hub which [preprocessor](#p
 
 Admins set it from the instrument page: open the three-dot menu, choose **Edit details**, and pick a supported type. An instrument with no matching type still stores and serves raw files. It gets no extracted metadata and no processed artifacts. See [Instrument data preprocessing](/docs/instrument-preprocessing).
 
+### Instrument status [#instrument-status]
+
+The badge beside an instrument’s name, in the instruments table, on Home, and in search results. It answers one question: will new files from this instrument show up? It is built for the people who use the instrument, so it doesn’t show the watcher’s detail. Select the badge to open the instrument’s [watcher page](/docs/manage-watchers#the-watcher-page). Hover over it, or focus it with the keyboard, for a one-sentence explanation.
+
+| Badge | When it shows | What it means |
+| ----- | ------------- | ------------- |
+| **Pending** | The instrument isn’t confirmed yet. This wins over everything below, even when its watcher is checking in. | Waiting for an admin to confirm this instrument. |
+| **Retired** | The instrument is retired. This wins over the watcher’s state. | This instrument no longer takes new runs. Its runs stay browsable. |
+| **Connecting** | The watcher registered but hasn’t sent its first heartbeat. | The watcher was just set up and hasn’t checked in yet. |
+| **Restarting** | The watcher stopped for a Windows restart or an automatic update less than 15 minutes ago. | The instrument PC is restarting or updating. This usually takes a minute or two. |
+| **Online** | The watcher is watching and its last heartbeat is less than 5 minutes old. | New files upload automatically, or when someone requests them if the instrument is in manual upload mode. |
+| **Offline** | Anything else: the instrument has no watcher, or its watcher was deregistered; the watcher is silent, stopped by someone, or can’t find its watch folder. | New files won’t appear right now. A notice on the instrument page says why. |
+
+Only the watcher’s own state decides **Online**, **Restarting**, **Connecting**, and **Offline**. A pending change to the watcher’s settings never changes the badge. An instrument that is **Offline** shows a notice with the reason; see [Check that new files will arrive](/docs/browse-runs#check-files-will-arrive).
+
 ### Watcher [#watcher]
 
 The `data-hub-watcher` command-line program that runs on an instrument PC. It monitors a directory, groups new files into runs, uploads them to cloud storage, and reports status to the API. Each instrument can have at most one active watcher at a time.
 
-A watcher is registered with the API and carries one registration ID per [environment](#environment). Deregistering a watcher is a [soft delete](#soft-delete): its history stays visible for auditing. See [Manage the watcher fleet](/docs/manage-watchers).
+A watcher is registered with the API and carries one registration ID per [environment](#environment). Each instrument’s watcher has its own page, under the instrument, with its activity, health, and settings. Deregistering a watcher is a [soft delete](#soft-delete): the instrument keeps it as a past watcher, and its history stays visible for auditing. See [Manage the watcher fleet](/docs/manage-watchers).
 
 ### Watcher status [#watcher-status]
 
-What the **Watchers** page shows for each watcher, derived from its most recent [heartbeat](#heartbeat):
+What a watcher’s page, and **Settings → Watchers** for admins, show for each watcher, derived from its most recent [heartbeat](#heartbeat):
 
 | Status           | Meaning                                                                                          |
 | ---------------- | ------------------------------------------------------------------------------------------------ |
@@ -47,20 +62,21 @@ What the **Watchers** page shows for each watcher, derived from its most recent 
 | **Stopped**      | The watcher shut down cleanly and said so in its last heartbeat. After a stop you chose, such as `data-hub-watcher service stop`, it keeps showing **Stopped**, however long ago that was, until it starts again. After a Windows restart or shutdown, or the stop of an automatic update, it shows **Stopped** for 15 minutes, then **Unresponsive** if it hasn’t returned. |
 | **Waiting: folder not found** | The watcher is running and sending heartbeats, but its watch folder is missing, so it isn’t watching anything. A watcher goes into this state when it starts without the folder (watcher 1.4.0 and later), and when the folder disappears while it runs (watcher 1.4.3 and later). It starts watching again once the folder is back. |
 | **Registered**   | The watcher registered but hasn’t sent its first heartbeat yet.                                   |
+| **Deregistered** | A past watcher. Someone deregistered it, or retired its instrument. Its page is read-only.        |
 
 A watcher that stopped because Windows is restarting or shutting down (watcher 1.4.1 and later), or because it is installing an automatic update (watcher 1.4.2 and later), is expected back. It shows **Stopped**, and hovering over the badge tells you when it starts showing **Unresponsive** if it hasn’t returned: 15 minutes after its last heartbeat. Any other stop, such as `data-hub-watcher service stop` or Ctrl+C, shows **Stopped** until the watcher starts again.
 
 An unresponsive watcher keeps its registration and history, so you can read its last events to work out what happened. See [Troubleshoot a watcher](/docs/troubleshoot-a-watcher).
 
-Instrument pages and the instruments table sum this up per instrument: **Online** if any of its watchers is online, **Offline** if none is, and **No Watcher** if none has registered.
+Instruments show a simpler summary of this status, the [instrument status](#instrument-status) badge. An instrument has one active watcher, so the badge follows that watcher; an instrument with no active watcher reads **Offline**.
 
 ### Heartbeat [#heartbeat]
 
-A status ping the watcher sends to the API every 60 seconds. It carries the watcher version, instrument ID, watch directory, upload mode, activity counters, and uptime, and it drives the **Last Heartbeat** column and the online health shown on the dashboard. The same tick runs the auto-updater. The upload queue is checked separately, also once a minute, so a slow upload can’t delay a heartbeat. With watcher 1.4.3 and later, the counts of a heartbeat that fails to send go out with the next one, so an outage doesn’t lose them. Older watchers lose them.
+A status ping the watcher sends to the API every 60 seconds. It carries the watcher version, instrument ID, watch directory, upload mode, activity counters, and uptime, and it drives **Last heartbeat** on the watcher’s page, the status badges, and the connectivity grid on the **Health** tab. The same tick runs the auto-updater. The upload queue is checked separately, also once a minute, so a slow upload can’t delay a heartbeat. With watcher 1.4.3 and later, the counts of a heartbeat that fails to send go out with the next one, so an outage doesn’t lose them. Older watchers lose them.
 
 ### Events [#events]
 
-A per-watcher log of lifecycle moments and errors: `watcher_started`, `run_reported`, `file_uploaded`, `update_succeeded`, and `error` (with a `details.kind` discriminator), among others. Events are batched and flushed on each heartbeat and are visible on the dashboard, which makes them the primary tool for diagnosing a watcher remotely. With watcher 1.4.3 and later, the watcher keeps the events it hasn’t sent in its state file on the PC. An event that Data Hub couldn’t take at the time is sent with a later heartbeat while the watcher runs, and one that was queued when the watcher was stopped or killed is sent after the next start. Either way it keeps its original time. An event that Data Hub refuses as invalid isn’t sent again, and nor is one that Data Hub answers with a server error three heartbeats in a row; an `events_dropped` event records how many were lost. Older watchers lose those events. Data Hub writes some events itself, such as `upload_requests_cancelled`, which it records when someone deletes a run that has requested uploads. See [Troubleshoot a watcher](/docs/troubleshoot-a-watcher).
+A per-watcher log of lifecycle moments and errors: `watcher_started`, `run_reported`, `file_uploaded`, `update_succeeded`, and `error` (with a `details.kind` discriminator), among others. Events are batched and flushed on each heartbeat and are shown on the watcher’s **Activity** tab, with a plain label and message for each, which makes them the primary tool for diagnosing a watcher remotely. With watcher 1.4.3 and later, the watcher keeps the events it hasn’t sent in its state file on the PC. An event that Data Hub couldn’t take at the time is sent with a later heartbeat while the watcher runs, and one that was queued when the watcher was stopped or killed is sent after the next start. Either way it keeps its original time. An event that Data Hub refuses as invalid isn’t sent again, and nor is one that Data Hub answers with a server error three heartbeats in a row; an `events_dropped` event records how many were lost. Older watchers lose those events. Data Hub writes some events itself, such as `upload_requests_cancelled`, which it records when someone deletes a run that has requested uploads. See [Troubleshoot a watcher](/docs/troubleshoot-a-watcher).
 
 ### Environment [#environment]
 
@@ -80,7 +96,7 @@ How far a run’s files have got from the instrument to the dashboard. These are
 | -------------- | ---------------------------------------------------------------------------------------- |
 | Failed         | At least one file stopped on an error. [Reprocess](/docs/browse-runs#reprocess-and-delete) after a fix. |
 | Stalled        | At least one file has been processing for more than 20 minutes without finishing. Reprocess it to try again. |
-| Pending upload | The watcher found the files but hasn’t sent them yet.                                     |
+| Pending upload | The watcher found the files but hasn’t sent them yet. On the run page, each of those files reads **Waiting to upload**. |
 | Uploaded       | The files are in storage. Processing hasn’t started, or this instrument type has no preprocessor. |
 | Queued         | You chose **Reprocess**, and the files are waiting for a free processing slot. They start as other files finish. See [How reprocessing is queued](/docs/browse-runs#reprocess-queue). |
 | Processing     | The preprocessor is reading the files, extracting metadata, and building reports.          |

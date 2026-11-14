@@ -93,6 +93,17 @@ Any client that speaks Streamable HTTP and the MCP authorization spec needs one 
 
 Clients that speak MCP but not OAuth can bridge through [`mcp-remote`](https://www.npmjs.com/package/mcp-remote), which runs the browser flow on their behalf.
 
+## Instruments and their watcher [#instrument-connection]
+
+`list_instruments` and `get_instrument` describe an instrument’s one active watcher with a `watcher` object, which is `null` when it has none, and say whether new files can reach Data Hub with `connection`, whose `state` is `online`, `restarting`, `connecting`, or `offline`, with a `reason` when it is offline. Both also return `pastWatcherCount`. The fields match the REST API’s, in camelCase; see [Instruments and their watcher](/docs/api#instrument-connection).
+
+These older fields still come back with the values they had, but are deprecated, and the [tools catalog](/docs/mcp/tools) marks each one with the field to use instead:
+
+- `watcherCount`, `watchersOnline`, `watchersOffline`, `hasDeregisteredWatcher`, and `lastWatcherHeartbeatAt`
+- `activeWatcherId`, `activeWatcherHostname`, `activeWatcherWatchDirectory`, and `activeWatcherDeregistered`
+- the top-level `filePatterns`, which `watcher.filePatterns` replaces
+- `watcherStatus` and `lastWatcherHeartbeatAt` on an instrument result of `global_search`, which `connection` replaces
+
 ## Questions about Data Hub [#questions-about-data-hub]
 
 The assistant can answer questions about Data Hub itself, such as how to install a watcher, what a run status means, or what changed last week. It searches the documentation or the [changelog](/docs/send-feedback#changelog), reads what fits, and links it in its answer. Three tools do this, and all need only the `read` scope:

@@ -8,7 +8,7 @@ contentType: How-to
 
 Tune three behaviors that decide what becomes a run and when bytes leave the instrument PC: run detection, stability period, and upload mode. Field-by-field schema lives in [Watcher configuration](/docs/configuration-reference); this page is the intent guide.
 
-Admins can change these from the web app with watcher 1.4.0 and later: on the watcher’s **Configuration** tab, or with **Edit watcher config** on the instrument page. See [Change a watcher’s config](/docs/manage-watchers#change-a-watchers-config). On the PC, set them during `data-hub-watcher init`, with `data-hub-watcher config edit`, or by editing `~/.data-hub/config.yaml` then syncing.
+Admins can change these from the web app with watcher 1.4.0 and later: on the **Settings** tab of the instrument’s watcher page. See [Change a watcher’s settings](/docs/manage-watchers#change-a-watchers-config). On the PC, set them during `data-hub-watcher init`, with `data-hub-watcher config edit`, or by editing `~/.data-hub/config.yaml` then syncing.
 
 ## Group files into runs
 
@@ -23,7 +23,7 @@ Presets and custom regex options are listed under [Run detection](/docs/configur
 
 When a run gathers files from several folders, two files can share a name, such as a `run.json` in each capture folder. Watcher 1.1.0 and later keep every copy and add a short tag to the later names, such as `sample~3f9a1c2b.tif`. Older watchers kept only the first; see [Files with the same name were skipped](/docs/troubleshoot-a-watcher#files-with-the-same-name-were-skipped).
 
-If files appear on disk but never become runs, check for `pattern_mismatch` events on the watcher detail page and run `data-hub-watcher watch --dry-run`.
+If files appear on disk but never become runs, check for `pattern_mismatch` events on the watcher’s **Activity** tab and run `data-hub-watcher watch --dry-run`.
 
 ## Wait until writes finish
 
@@ -31,7 +31,7 @@ If files appear on disk but never become runs, check for `pattern_mismatch` even
 
 A file that keeps changing past `max_stability_wait_seconds` (default 300, or 5 minutes) is abandoned with a `stability_timeout` error event. Raise that cap for instruments whose writes take longer; it must be at least the stability period.
 
-A file that the instrument keeps open after its last write can look finished while the watcher still can’t read it. The watcher shows one **Upload Failed** event on its page for each such file, saying it can’t read the file yet, and shows another for it each time the watcher starts or its config changes. It tries the file again every minute for as long as it takes, and uploads it once the instrument lets go. A file someone requests with **Upload** on the run page stays requested in the meantime. Watcher 1.4.2 and later do this. Older watchers try such a file again only at the next start, and cancel a request for it after three tries.
+A file that the instrument keeps open after its last write can look finished while the watcher still can’t read it. The watcher’s **Activity** tab shows one **File not ready** event for each such file, saying the watcher can’t read it yet and will try again, and shows another for it each time the watcher starts or its config changes. It tries the file again every minute for as long as it takes, and uploads it once the instrument lets go. A file someone requests with **Upload** on the run page stays requested in the meantime. Watcher 1.4.2 and later do this. Older watchers try such a file again only at the next start, and cancel a request for it after three tries.
 
 ## Choose auto or manual upload
 
@@ -40,7 +40,7 @@ A file that the instrument keeps open after its last write can look finished whi
 | **auto** | Upload as soon as a file is detected and stable. With watcher 1.2.1 and later, the watcher also picks up files someone requests with **Upload** on the run page, and retries uploads that a restart cut off. |
 | **manual** | Report the run, but wait for server approval before uploading bytes. The watcher checks the upload queue once a minute. |
 
-Use manual mode when someone must approve which files leave the instrument PC. Admins manage the queue from the dashboard; see [Manage the watcher fleet](/docs/manage-watchers#approving-manual-uploads).
+Use manual mode when someone must approve which files leave the instrument PC. Anyone signed in can approve files from the run page, and an instrument in manual mode carries a note beside its file patterns saying files upload when someone requests them; see [Manage the watcher fleet](/docs/manage-watchers#approving-manual-uploads).
 
 ## Existing files on first setup
 

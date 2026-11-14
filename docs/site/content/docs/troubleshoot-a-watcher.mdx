@@ -6,22 +6,37 @@ contentType: Troubleshooting
 
 <Audience>Lab operators and admins</Audience>
 
-Find your symptom below. When you are stuck, the [logs](#where-are-the-logs) are the fastest way in. Admins can also inspect heartbeats and events under **Watchers** in the web app.
+Find your symptom below. When you are stuck, the [logs](#where-are-the-logs) are the fastest way in. Admins can also inspect events, heartbeats, and settings on the instrument’s watcher page: select the status badge beside the instrument’s name, or choose **Watcher** from its three-dot menu. Members can open that page too, to read it.
+
+## An instrument shows Offline [#instrument-shows-offline]
+
+An instrument’s badge reads **Offline** when new files can’t reach Data Hub right now. A notice under the instrument’s name says why, and **See details** opens the watcher’s **Activity** tab. Find the notice below.
+
+| Notice | What it means | What to do |
+| --- | --- | --- |
+| **New files aren’t being picked up** | The watcher is running but can’t find its watch folder. | Create or reconnect the folder on the PC, or let an admin choose **Change folder**. See [The watcher shows “Waiting: folder not found”](#waiting-folder-not-found). |
+| **The watcher isn’t checking in** | No heartbeat for 5 minutes, or the watcher didn’t come back within 15 minutes of a restart or an update. The PC may be off, the watcher may have crashed, or the network may be blocking Data Hub. | On the PC, check that the watcher is running (`data-hub-watcher service status` on Windows) and that it can reach Data Hub; see [“Connection error” or “Request timed out”](#connection-error-or-request-timed-out). Its last events are on the **Activity** tab. |
+| **Uploads from this instrument are paused** | Someone stopped the watcher, for example with `data-hub-watcher service stop` or Ctrl+C. | Start it again: `data-hub-watcher service start` on Windows, or `data-hub-watcher watch`. |
+| **This instrument isn’t connected to a watcher** | The instrument never had a watcher, or its watcher was deregistered, which the notice dates and credits. | Run `data-hub-watcher init` on the PC; see [The watcher stopped and says it was deregistered](#the-watcher-was-deregistered). Admins can follow **Connect a watcher**. |
+
+**Restarting** and **Connecting** aren’t problems. See [The instrument shows Restarting after a restart](#the-instrument-shows-restarting-after-a-restart). Files saved on the PC while an instrument is offline stay there, and the watcher picks them up once it runs again.
+
+![Instrument page with a red Offline badge and a notice that the watcher can’t find its watch folder, with Change folder and See details](/images/instrument-offline-notice.webp)
 
 ## Setup and registration
 
 ### “Instrument is still pending activation”
 
-The instrument was registered but an admin has not confirmed it. Ask an admin to open **Instruments** and click **Confirm**. See [Manage instruments](/docs/manage-instruments).
+The instrument was registered but an admin has not confirmed it. Its badge reads **Pending**. Ask an admin to open **Instruments**, click **Confirm…**, pick an instrument type, and choose **Confirm instrument**. See [Manage instruments](/docs/manage-instruments#confirm-a-pending-instrument).
 
 ### “Instrument already has an active watcher”
 
 Each instrument can have at most one active watcher. An earlier install (often on another PC, or before a reimage) is still registered. The CLI prints the existing watcher id; deregister it before re-running `init`:
 
-- **Web app**: **Watchers**, open the existing watcher, click **Deregister**
+- **Web app**: open the instrument’s watcher page (the CLI’s message gives its address) and choose **Deregister** from the page’s menu. Only admins see that menu
 - **API**: `DELETE /api/v1/watchers/<existing_watcher_id>` with a bearer token that has `watchers:admin`
 
-Deregistration is a soft-delete: history stays under **Watchers → Deregistered**.
+Deregistration is a soft-delete: the history stays with the instrument as a past watcher, and on the **Deregistered** tab of **Settings → Watchers**.
 
 ### `init` rejects my API key
 
@@ -36,7 +51,7 @@ The wizard rejects values that do not start with `dhub_`, and strips zero-width 
 
 ## The watcher stopped and says it was deregistered [#the-watcher-was-deregistered]
 
-Someone deleted the watcher’s registration on Data Hub. This happens when an admin deregisters the watcher in the web app, or retires its instrument (see [Deregister a watcher](/docs/manage-watchers#deregister-a-watcher)). Watcher 1.4.3 and later stop by themselves when this happens. The watcher logs one error:
+Someone deleted the watcher’s registration on Data Hub. The instrument reads **Offline**, and its notice says its watcher was deregistered. This happens when an admin deregisters the watcher in the web app, or retires its instrument (see [Deregister a watcher](/docs/manage-watchers#deregister-a-watcher)). Watcher 1.4.3 and later stop by themselves when this happens. The watcher logs one error:
 
 `This watcher was deregistered on Data Hub, so its registration no longer exists. Run 'data-hub-watcher init' to register it again.`
 
@@ -50,12 +65,12 @@ Watchers older than 1.4.3 don’t stop. They keep running and get errors from Da
 
 ## The watcher shows “Waiting: folder not found” [#waiting-folder-not-found]
 
-Watcher 1.4.0 and later start even when the watch folder is missing, for example when a network drive isn’t connected yet or the folder was renamed. The watcher keeps sending heartbeats but watches nothing, and the **Watchers** page shows **Waiting: folder not found**. Hover over the badge to see which folder it’s looking for.
+Watcher 1.4.0 and later start even when the watch folder is missing, for example when a network drive isn’t connected yet or the folder was renamed. The watcher keeps sending heartbeats but watches nothing. Its page shows **Waiting: folder not found**, and the instrument reads **Offline** with the notice “New files aren’t being picked up”. Hover over the watcher’s badge to see which folder it’s looking for; the notice names it too.
 
 The watcher checks for the folder again once a minute and starts watching as soon as it appears. To fix it:
 
 - Create or reconnect the folder on the PC, or
-- Point the watcher at the right folder from the web app; see [Change a watcher’s config](/docs/manage-watchers#change-a-watchers-config)
+- Point the watcher at the right folder from the web app: an admin chooses **Change folder** in the notice, which opens the watcher’s **Settings** tab with the **Watch folder** field selected; see [Change a watcher’s settings](/docs/manage-watchers#change-a-watchers-config)
 
 Watcher 1.4.3 and later also go back to this state when the folder disappears while they run, for example when a network drive drops or the folder is deleted. The watcher notices within a minute, looks again a few seconds later so that a drop of a moment doesn’t count, stops watching, and shows **Waiting: folder not found**. It gives a file that was uploading at that moment up to 10 seconds to finish, cuts it off if it isn’t done, and uploads it again once the folder is back. When the folder returns, the watcher starts watching it again without a restart, and queues a `watcher_started` event that says it resumed.
 
@@ -63,11 +78,11 @@ Older watchers exit at startup instead, with an error that the watch directory d
 
 ## A config change shows “Change rejected” [#change-rejected]
 
-The watcher checked a change made in the web app and refused it, so it kept its previous settings. The reason shows on the watcher’s **Configuration** tab and as an `error` event with `details.kind` set to `config_revision_rejected`. The most common reason is a folder that doesn’t exist or can’t be read on the PC. Fix the cause, then save the change again or **Restore** an earlier version from the history.
+The watcher checked a change made in the web app and refused it, so it kept its previous settings. The reason shows in a **Change rejected** notice on the watcher’s **Settings** tab and as an `error` event with `details.kind` set to `config_revision_rejected`. The most common reason is a folder that doesn’t exist or can’t be read on the PC. Fix the cause, then save the change again or **Restore** an earlier version from the history.
 
 ## “Data Hub can’t read the watcher’s config file” [#config-file-unreadable]
 
-The watcher’s **Configuration** tab shows this when the `config.yaml` the watcher sent breaks the rules the web app checks, for example a relative watch folder, more than 50 file patterns, or a run detection pattern with Python-only syntax such as `(?P<name>…)`. The notice names each field that needs fixing, by its key in the file.
+The watcher’s **Settings** tab shows this when the `config.yaml` the watcher sent breaks the rules the web app checks, for example a relative watch folder, more than 50 file patterns, or a run detection pattern with Python-only syntax such as `(?P<name>…)`. The notice names each field that needs fixing, by its key in the file.
 
 Until it’s fixed, edits made on the PC aren’t recorded in the history, and if Data Hub has no earlier revision of the settings, there are none to edit there. Fix the file on the instrument PC, for example with `data-hub-watcher config edit`.
 
@@ -75,16 +90,18 @@ Until it’s fixed, edits made on the PC aren’t recorded in the history, and i
 
 The watcher picks up a change after its next heartbeat, within about a minute. If it stays pending:
 
-- Check that the watcher is **Online**. An offline watcher applies the change when it next starts.
+- Check that the watcher is **Online** on its page. An offline watcher applies the change when it next starts.
 - Check that the watcher runs 1.4.0 or later. The web app won’t save changes for older watchers.
 
-## The watcher shows Offline right after a restart
+## The instrument shows Restarting after a restart [#the-instrument-shows-restarting-after-a-restart]
 
-The watcher checks in once a minute, so a watcher that was just restarted can take up to a minute to show as **Online**. Refresh the page after a minute. If it still shows **Offline** or **Unresponsive**, check that the process is running and see [“Connection error” or “Request timed out”](#connection-error-or-request-timed-out).
+When the PC restarts, or the watcher stops to install an automatic update, the instrument’s badge reads **Restarting** for up to 15 minutes, not **Offline**. Nothing is wrong. The watcher checks in once a minute, so it can take up to a minute after the service starts to show as **Online**. Refresh the page after a minute. A new watcher reads **Connecting** until its first check-in.
+
+If the badge turns **Offline** with the notice “The watcher isn’t checking in”, the watcher didn’t come back. Check that the process is running and see [“Connection error” or “Request timed out”](#connection-error-or-request-timed-out). Older watchers don’t say they are restarting, so they read **Offline** from the moment the PC goes down; see [When the PC restarts or shuts down](/docs/windows-service#when-the-pc-restarts-or-shuts-down).
 
 ## Heartbeats fail with `426 Upgrade Required`
 
-The watcher is older than the **Minimum supported version** an admin set under **Settings → Watchers**, so the server rejects its heartbeats and it shows as unresponsive. It keeps checking for updates every hour and upgrades itself if **Latest version** is newer. To upgrade now, run `data-hub-watcher self-update`. See [Roll out watcher releases](/docs/watcher-releases#release-config-fields).
+The watcher is older than the **Minimum supported version** an admin set under **Settings → Watchers**, so the server rejects its heartbeats and it shows as unresponsive. Its instrument reads **Offline**. It keeps checking for updates every hour and upgrades itself if **Latest version** is newer. To upgrade now, run `data-hub-watcher self-update`. See [Roll out watcher releases](/docs/watcher-releases#release-config-fields).
 
 ## “Connection error” or “Request timed out” [#connection-error-or-request-timed-out]
 
@@ -121,11 +138,13 @@ To stop the errors without restoring the run, move the run’s files out of the 
 - Check file patterns. Globs are case-sensitive (`*.csv` does not match `data.CSV`)
 - If files live in subfolders, set run detection to recursive; see [Configure run detection and uploads](/docs/configure-run-detection)
 - Run `data-hub-watcher watch --dry-run` to preview matches
-- Look for `pattern_mismatch` events on the dashboard
+- Look for `pattern_mismatch` events on the watcher’s **Activity** tab
 
 ## Files are detected but not uploading
 
 - In **manual** mode, files wait for approval in the upload queue; see [Manage the watcher fleet](/docs/manage-watchers#approving-manual-uploads)
+- On the run page, the **Upload** buttons are turned off while the instrument is **Connecting**, **Offline**, **Pending**, or **Retired**, with the reason beside them. Fix the watcher first; see [An instrument shows Offline](#instrument-shows-offline). While the instrument is **Restarting** they stay on, and the request waits for the watcher
+- Files read **Waiting to upload** until they reach storage
 - Check the log for `upload_failed`
 - A `state_write_failed` event in the watcher’s event log means the PC’s disk is full or the watcher’s state file can’t be written. Free up space; the watcher retries on its own and uploads the files once it can write again
 - A revoked or expired token surfaces as `401 Unauthorized`. Create a new token and re-run `init`; see [Issue and revoke tokens](/docs/manage-tokens#after-revoking-a-token)
@@ -147,9 +166,9 @@ Watcher 1.2.1 and later retry an automatic upload that didn’t finish the next 
 
 Older watchers don’t retry; use **Upload** on the run page instead.
 
-### A file stays Pending after the watcher restarted [#a-file-stays-pending-after-the-watcher-restarted]
+### A file stays on Waiting to upload after the watcher restarted [#a-file-stays-pending-after-the-watcher-restarted]
 
-Watchers before 1.4.1 could lose track of a file in an automatic upload when the watcher stopped without shutting down cleanly, such as after a reboot, a power cut, or a crash, just after it reported the run. The run is in Data Hub, but the file shows **Pending** and nothing uploads it, because after the restart the watcher treats the file as already handled. Watcher 1.4.1 and later record a run and its files on the PC together, so a restart like that doesn’t leave a file behind.
+Watchers before 1.4.1 could lose track of a file in an automatic upload when the watcher stopped without shutting down cleanly, such as after a reboot, a power cut, or a crash, just after it reported the run. The run is in Data Hub, but the file reads **Waiting to upload** and nothing uploads it, because after the restart the watcher treats the file as already handled. Watcher 1.4.1 and later record a run and its files on the PC together, so a restart like that doesn’t leave a file behind.
 
 Updating doesn’t pick up files that an older watcher already lost this way. Ask for them from the run page:
 
@@ -160,7 +179,7 @@ If the watcher is older than 1.2.1, update it first. Older watchers in auto mode
 </Step>
 
 <Step>
-Open the run, select the files that show **Pending**, and choose **Upload**. To ask for the files of several runs at once, select the runs in the run list and choose **Upload**. See [Request an upload](/docs/browse-runs#request-upload).
+Open the run, select the files that read **Waiting to upload**, and choose **Upload**. To ask for the files of several runs at once, select the runs in the run list and choose **Upload**. See [Request an upload](/docs/browse-runs#request-upload).
 </Step>
 
 <Step>
@@ -199,7 +218,7 @@ Check, in order:
 - Prefer a long-running service (or scheduled) install; a one-off console session may not stay up for the hourly tick
 - Environment is not `preview`: auto-update is hard-disabled there
 - Activity-window guard is not holding it up: run `data-hub-watcher self-update`, or ask an admin to flag the release **mandatory**
-- **Last Heartbeat** on the dashboard is recent; a stale watcher is not ticking
+- **Last heartbeat** on the watcher’s page is recent; a stale watcher is not ticking
 
 Upgrade failure modes (`update_started` → `update_failed`, editable installs, missing Scheduled Task) are covered in [Install and update the watcher](/docs/install-the-watcher#manual-update-self-update) and [Roll out watcher releases](/docs/watcher-releases).
 

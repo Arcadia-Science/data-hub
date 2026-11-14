@@ -48,6 +48,16 @@ curl https://datahub.example.com/api/v1/openapi.json
 
 The document covers the integrator surface: instruments, runs, comments, lab notebook links, files, watchers, archive jobs, search, and `POST /notifications/dispatch`. Routes that only the dashboard uses are left out: `/tokens`, `/users`, `/feedback`, `/settings/*`, and the notification inbox. The MCP transport is documented separately.
 
+## Instruments and their watcher [#instrument-connection]
+
+An instrument has at most one active watcher, so `GET /instruments` and `GET /instruments/:id` describe it with one object, not counts:
+
+- `watcher`: the instrument’s active watcher, or `null` when it has none. It carries `id`, `hostname`, `os_info`, `version`, `status`, `status_reason`, `last_heartbeat_at`, `watch_directory`, `file_patterns`, `upload_mode`, `config_state`, and `shared_computer_with`.
+- `connection`: whether new files can reach Data Hub. `state` is `online`, `restarting`, `connecting`, or `offline`, and `reason` says why it is offline (`folder_missing`, `unresponsive`, `stopped`, `no_watcher`, or `deregistered`) and is `null` otherwise. The rules are the ones behind the badge in the web app; see [Instrument status](/docs/concepts#instrument-status). `connection` ignores the instrument’s own `status`, so a `pending` instrument can be `online`. The web app shows **Pending** or **Retired** first, and `connection.state` only after that.
+- `past_watcher_count`: how many deregistered watchers the instrument has had.
+
+`GET /instruments/:id` still returns `watcher_count`, but it is deprecated. It keeps its old value for now. A later release will remove it, and the changelog will announce the date first. Read `watcher` instead, which is `null` when there is none.
+
 ## Actions taken by a token [#actions-taken-by-a-token]
 
 A token acts under its own name, not as a person, so responses name the token when it did something:

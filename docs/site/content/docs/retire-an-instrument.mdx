@@ -14,8 +14,9 @@ When you retire an instrument:
 
 - Status becomes `inactive` (UI: **Retired**), with `retiredAt` / `retiredBy` audit fields
 - It stops accepting new runs and watchers
+- Its badge reads **Retired**, and its Upload buttons on run pages are turned off
 - All existing runs and files stay browsable
-- Every active watcher on that instrument is deregistered in the same request so they stop heartbeating
+- Its watcher is deregistered in the same request so it stops checking in. The watcher stays on the instrument’s watcher page as a past watcher
 
 Instrument IDs stay permanent. Retire rather than trying to rename or delete an instrument that has already produced data.
 
@@ -24,15 +25,15 @@ Instrument IDs stay permanent. Retire rather than trying to rename or delete an 
 <Steps>
 
 <Step>
-Open the instrument’s detail page.
+Open the instrument’s page.
 </Step>
 
 <Step>
-Open the admin actions menu and choose **Retire**.
+Open the three-dot menu, which only admins see, and choose **Retire**. The row menu on **Instruments** has the same item.
 </Step>
 
 <Step>
-Confirm in the dialog. The dialog lists run count and how many watchers will be deregistered.
+Confirm in the dialog. It lists how many runs are kept, says nothing is deleted from storage, and, when the instrument has a watcher, says its watcher will be deregistered so it stops checking in.
 </Step>
 
 </Steps>
@@ -43,9 +44,9 @@ The instrument moves to the **Retired** tab on **Instruments**.
 
 ## Reactivate
 
-From a retired instrument’s detail page, choose **Reactivate**. Status returns to `active` and the instrument reappears in the sidebar and dashboard.
+From a retired instrument’s page, open the three-dot menu and choose **Reactivate**. The row menu on the **Retired** tab has the same item. Status returns to `active` and the instrument reappears in the sidebar and dashboard.
 
-Watchers deregistered at retirement do **not** reconnect automatically. An operator must re-register (usually `data-hub-watcher init` on the instrument PC) after reactivation.
+The watcher deregistered at retirement does **not** reconnect automatically. An operator must re-register it (usually `data-hub-watcher init` on the instrument PC) after reactivation. Until then the instrument’s badge reads **Offline**, with a notice that it isn’t connected to a watcher, and admins can follow **Connect a watcher** to [Set up an instrument](/docs/set-up-an-instrument).
 
 ## Via the API
 
