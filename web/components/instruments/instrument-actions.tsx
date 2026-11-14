@@ -3,10 +3,10 @@
 import { EllipsisVertical } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
+import { ConfirmInstrumentDialog } from "@/components/instruments/confirm-instrument-dialog";
 import { EditInstrumentDialog } from "@/components/instruments/edit-instrument-dialog";
 import { ReactivateInstrumentDialog } from "@/components/instruments/reactivate-instrument-dialog";
 import { RetireInstrumentDialog } from "@/components/instruments/retire-instrument-dialog";
-import { StatusActions } from "@/components/instruments/status-actions";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -51,7 +51,20 @@ export function InstrumentActions({
       }
     >
       {instrument.status === "pending" ? (
-        <StatusActions instrumentId={instrument.id} />
+        <ConfirmInstrumentDialog
+          displayName={instrument.displayName}
+          instrumentId={instrument.id}
+        >
+          <Button
+            className="h-7 gap-1 text-xs"
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            Confirm…
+            <span className="sr-only"> {instrument.displayName}</span>
+          </Button>
+        </ConfirmInstrumentDialog>
       ) : null}
 
       <DropdownMenu onOpenChange={setMenuOpen} open={menuOpen}>

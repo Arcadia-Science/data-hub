@@ -23,25 +23,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { type InstrumentType, VALID_INSTRUMENT_TYPES } from "@/lib/db/schema";
+import { INSTRUMENT_TYPE_LABELS } from "@/lib/instruments/instrument-type-labels";
 import { isProcessableInstrumentType } from "@/lib/instruments/processable-types";
-
-const TYPE_LABELS: Record<InstrumentType, string> = {
-  generic: "Generic",
-  plate_reader: "Plate Reader",
-  gel_doc: "Gel Doc",
-  qpcr: "qPCR",
-  tape_station: "TapeStation",
-  hina_microscope: "Hina Microscope",
-  epson_v700_scanner: "Epson V700 Scanner",
-  instant_raman: "InstantRaman",
-  fplc: "FPLC",
-  dishcam: "DishCam",
-  aunty: "Aunty",
-};
 
 const INSTRUMENT_TYPE_OPTIONS = VALID_INSTRUMENT_TYPES.map((value) => ({
   value,
-  label: TYPE_LABELS[value],
+  label: INSTRUMENT_TYPE_LABELS[value],
 }));
 
 function processingBoundaryWarning(
@@ -54,7 +41,7 @@ function processingBoundaryWarning(
     return "Files will no longer be processed automatically.";
   }
   if (!wasProcessable && willBeProcessable) {
-    return `New uploads will be processed by the ${TYPE_LABELS[toType]} processor.`;
+    return `New uploads will be processed by the ${INSTRUMENT_TYPE_LABELS[toType]} processor.`;
   }
   return null;
 }

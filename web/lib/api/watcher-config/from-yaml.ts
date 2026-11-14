@@ -85,19 +85,26 @@ export function parseSettingsFromYaml(
   return result.ok ? result.settings : null;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
 export interface InstrumentConfigFields {
   /** In the order the config lists them, with no clean-up. */
   filePatterns: string[];
+  /** The run detection pattern, and whether it searches subfolders. Null when there is no pattern. */
+  runDetection: { pattern: string; recursive: boolean } | null;
   uploadMode: "auto" | "manual";
   watchDirectory: string | null;
 }
 
 /**
- * The folder, file patterns and upload mode in a watcher's `config.yaml`, for
- * showing an instrument's state. Unlike `readSettingsFromYaml` it doesn't
- * check the values against the rules in `settings.ts`: a config the web app
- * can't edit still says which folder the watcher uses. Missing, unparseable
- * or oddly shaped YAML gives no folder, no patterns and the default mode.
+ * The folder, file patterns, run detection and upload mode in a watcher's
+ * `config.yaml`, for showing an instrument's state. Unlike `readSettingsFromYaml`
+ * it doesn't check the values against the rules in `settings.ts`: a config the
+ * web app can't edit still says which folder the watcher uses. Missing,
+ * unparseable or oddly shaped YAML gives no folder, no patterns, no run
+ * detection and the default mode.
  */
 export function readInstrumentConfigFields(
   configYaml: string | null
@@ -105,6 +112,7 @@ export function readInstrumentConfigFields(
   const fields: InstrumentConfigFields = {
     watchDirectory: null,
     filePatterns: [],
+    runDetection: null,
     uploadMode: WATCHER_DEFAULTS.upload_mode,
   };
   if (!configYaml) {
@@ -126,6 +134,16 @@ export function readInstrumentConfigFields(
   const patterns = instrument?.file_patterns;
   if (Array.isArray(patterns)) {
     fields.filePatterns = patterns.map(String);
+  }
+  const detection = instrument?.run_detection;
+  if (isRecord(detection) && typeof detection.pattern === "string") {
+    fields.runDetection = {
+      pattern: detection.pattern,
+      recursive:
+        typeof detection.recursive === "boolean"
+          ? detection.recursive
+          : WATCHER_DEFAULTS.recursive,
+    };
   }
   if (instrument?.upload_mode === "manual") {
     fields.uploadMode = "manual";
