@@ -17,16 +17,13 @@ import {
 import { useViewerTimeZone } from "@/components/viewer-time-zone-provider";
 import { isGridKey, nextGridCell } from "@/lib/grid-keyboard";
 import { cn } from "@/lib/utils";
+import { BLOCKS_PER_DAY } from "@/lib/watchers/block-edges";
 import {
   blockSentence,
   blockWhen,
   describeBlock,
 } from "@/lib/watchers/block-text";
-import {
-  BLOCKS_PER_DAY,
-  type BlockState,
-  type HealthDay,
-} from "@/lib/watchers/health";
+import type { BlockState, HealthDay } from "@/lib/watchers/health";
 import { longDayLabel, shortDayLabel } from "@/lib/watchers/range";
 
 const BLOCK_CLASSNAMES: Record<BlockState, string> = {
@@ -109,8 +106,11 @@ const GridRows = memo(function GridRows({
         role="row"
         tabIndex={-1}
       >
+        {/* Stays at the left edge when a narrow screen scrolls the blocks. The
+            shadow covers the gap, so a block never shows between the label and
+            the edge. */}
         <span
-          className="w-16 shrink-0 whitespace-nowrap text-muted-foreground text-xs"
+          className="sticky left-0 z-10 flex w-16 shrink-0 items-center self-stretch whitespace-nowrap bg-card text-muted-foreground text-xs shadow-[12px_0_0_0_var(--card)]"
           role="rowheader"
           tabIndex={-1}
         >

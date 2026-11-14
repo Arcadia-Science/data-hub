@@ -6,7 +6,7 @@ import {
   watcherHeartbeats,
   watchers,
 } from "@/lib/db/schema";
-import { BLOCKS_PER_DAY } from "@/lib/watchers/health";
+import { BLOCKS_PER_DAY } from "@/lib/watchers/block-edges";
 import { addDays, startOfDay } from "@/lib/watchers/range";
 import { closeTestDb, getTestDb, resetDb } from "@/tests/integration/helpers";
 
@@ -56,13 +56,22 @@ describe("getWatcherHealth", () => {
         inside("2026-03-10T14:00", "2026-03-10T14:10") ||
         // Someone stopped the watcher at 20:00 until 22:00 on the 10th.
         inside("2026-03-10T20:00", "2026-03-10T22:00") ||
+        // A restart for an update through the upgrade worker, 16:00 to 16:10
+        // on the 10th.
+        inside("2026-03-10T16:00", "2026-03-10T16:10") ||
+        // A restart that begins before the 11th, 23:55 to 00:40.
+        inside("2026-03-10T23:55", "2026-03-11T00:40") ||
         // Silence nobody explains, 05:35 to 07:00 on the 11th.
-        inside("2026-03-11T05:35", "2026-03-11T07:00")
+        inside("2026-03-11T05:35", "2026-03-11T07:00") ||
+        // A power cut that wrote no stop event, 09:20 to 09:45 on the 11th.
+        inside("2026-03-11T09:20", "2026-03-11T09:45")
       );
     };
     const stops = new Set([
       at("2026-03-10T14:00").getTime(),
+      at("2026-03-10T16:00").getTime(),
       at("2026-03-10T20:00").getTime(),
+      at("2026-03-10T23:55").getTime(),
     ]);
     const heartbeats: (typeof watcherHeartbeats.$inferInsert)[] = [];
     for (
@@ -145,6 +154,43 @@ describe("getWatcherHealth", () => {
         message: "Service started on HEALTH-PC",
         timestamp: at("2026-03-10T14:10"),
       },
+      // A restart for an update through the Windows upgrade worker: the
+      // watcher hands the update over, and the worker stops the service from
+      // outside, so the stop's message says only that the service stopped.
+      {
+        watcherId,
+        eventType: "update_started",
+        message: "Dispatching upgrade 1.4.1 -> 1.4.2 via worker",
+        details: { via_worker: true },
+        timestamp: at("2026-03-10T15:58"),
+      },
+      {
+        watcherId,
+        eventType: "watcher_stopped",
+        message: "Service stopped",
+        timestamp: at("2026-03-10T16:00"),
+      },
+      {
+        watcherId,
+        eventType: "watcher_started",
+        message: "Service started on HEALTH-PC",
+        timestamp: at("2026-03-10T16:10"),
+      },
+      // A restart that begins at 23:55 on the 10th, for an update, whose final
+      // heartbeat's reason is on the event.
+      {
+        watcherId,
+        eventType: "watcher_stopped",
+        message: "Service stopped",
+        details: { stop_reason: "auto_update" },
+        timestamp: at("2026-03-10T23:55"),
+      },
+      {
+        watcherId,
+        eventType: "watcher_started",
+        message: "Service started on HEALTH-PC",
+        timestamp: at("2026-03-11T00:40"),
+      },
       // A stop by someone, which is not a restart.
       {
         watcherId,
@@ -204,8 +250,10 @@ describe("getWatcherHealth", () => {
     expect(totals.daysWithFiles).toEqual(["2026-03-10", "2026-03-11"]);
     // The file that can't be read yet is waited for, not failed.
     expect(totals.uploadFailures).toBe(1);
+    // The update that stamped its reason, the one that followed an update
+    // handed to the upgrade worker, and the one whose message says so: three.
     // A stop by someone and the server's note are not restarts.
-    expect(totals.restarts).toEqual({ update: 1, windows: 1 });
+    expect(totals.restarts).toEqual({ update: 3, windows: 1 });
     // The other kind of error is not a missed heartbeat.
     expect(totals.missedHeartbeats).toBe(1);
     expect(totals.longestMissedSeconds).toBe(3300);
@@ -249,6 +297,10 @@ describe("getWatcherHealth", () => {
     });
     // The restart holds one block, 14:00, and the next has heartbeats again.
     expect(states(tenth, 28, 29)).toEqual(["restarted", "checked_in"]);
+    // The restart whose stop says only "Service stopped" is gray too: it follows
+    // the update handed to the upgrade worker.
+    expect(states(tenth, 32, 33)).toEqual(["restarted", "checked_in"]);
+    expect(tenth.blocks[32].restart?.reason).toBe("update");
     expect(tenth.blocks[28].restart).toEqual({
       reason: "update",
       stoppedAt: at("2026-03-10T14:00"),
@@ -263,8 +315,19 @@ describe("getWatcherHealth", () => {
     ]);
     expect(tenth.blocks[41].noData).toBe("stopped");
 
-    // Quiet nobody explains is unresponsive, from 06:00 to 07:00.
+    // Quiet nobody explains is unresponsive: the watcher read Unresponsive from
+    // 05:40, which is in the 05:30 block, to 07:00.
     expect(states(eleventh, 11, 14)).toEqual([
+      "unresponsive",
+      "unresponsive",
+      "unresponsive",
+      "checked_in",
+    ]);
+    // A power cut with no stop event: heartbeats at 09:20 and 09:45 leave both
+    // blocks red, though each holds a heartbeat.
+    expect(eleventh.blocks[18].heartbeats).toBeGreaterThan(0);
+    expect(eleventh.blocks[19].heartbeats).toBeGreaterThan(0);
+    expect(states(eleventh, 17, 20)).toEqual([
       "checked_in",
       "unresponsive",
       "unresponsive",
@@ -318,6 +381,21 @@ describe("getWatcherHealth", () => {
     expect(days[1].blocks[0].noData).toBe("after_deregistered");
   });
 
+  it("colours the first quiet block gray when a restart began before the range", async () => {
+    const { days } = await getWatcherHealth(watcherId, {
+      ...utcRange,
+      fromDay: "2026-03-11",
+      start: at("2026-03-11T00:00"),
+    });
+    // The update stopped the watcher at 23:55 on the 10th, which is before the
+    // range, and it was back at 00:40. The stop's own heartbeat is before the
+    // range too, but the restart explains it: gray, not "stopped".
+    expect(days[0].blocks[0].state).toBe("restarted");
+    expect(days[0].blocks[0].restart?.stoppedAt).toEqual(
+      at("2026-03-10T23:55")
+    );
+  });
+
   describe("in the viewer's time zone", () => {
     // Los Angeles is on daylight time from March 8: seven hours behind UTC.
     const zone = "America/Los_Angeles";
@@ -347,20 +425,121 @@ describe("getWatcherHealth", () => {
         at("2026-03-10T14:00")
       );
     });
+  });
 
-    it("handles a day that is 23 hours long", async () => {
-      // 2026-03-08: clocks go forward at 02:00.
-      const springForward = "2026-03-08";
-      const { days } = await getWatcherHealth(watcherId, {
-        ...losAngeles,
-        fromDay: springForward,
-        toDay: springForward,
-        start: startOfDay(springForward, zone),
-        endExclusive: startOfDay(addDays(springForward, 1), zone),
+  describe("on a day the clocks change", () => {
+    // A watcher that checks in every minute across both of Los Angeles's clock
+    // changes in 2026. Every block that holds time should hold one heartbeat a
+    // minute of it, and the blocks a skipped hour leaves empty hold nothing.
+    const zone = "America/Los_Angeles";
+    const AFTER = new Date("2027-01-01T00:00:00Z");
+    let dstWatcherId: string;
+
+    async function insertMinutely(id: string, from: string, to: string) {
+      const rows: (typeof watcherHeartbeats.$inferInsert)[] = [];
+      for (
+        let time = new Date(from).getTime();
+        time < new Date(to).getTime();
+        time += MIN
+      ) {
+        rows.push({
+          watcherId: id,
+          timestamp: new Date(time),
+          status: "watching",
+        });
+      }
+      await getTestDb().insert(watcherHeartbeats).values(rows);
+    }
+
+    beforeAll(async () => {
+      const [watcher] = await getTestDb()
+        .insert(watchers)
+        .values({
+          instrumentId: "health-test-instrument",
+          hostname: "DST-PC",
+          status: "watching",
+          createdAt: at("2026-03-01T00:00"),
+        })
+        .returning({ id: watchers.id });
+      dstWatcherId = watcher.id;
+      await insertMinutely(
+        dstWatcherId,
+        "2026-03-07T18:00:00Z",
+        "2026-03-09T12:00:00Z"
+      );
+      await insertMinutely(
+        dstWatcherId,
+        "2026-10-31T12:00:00Z",
+        "2026-11-02T12:00:00Z"
+      );
+    });
+
+    function range(day: string) {
+      return {
+        deregisteredAt: null,
+        endExclusive: startOfDay(addDays(day, 1), zone),
+        fromDay: day,
+        now: AFTER,
+        start: startOfDay(day, zone),
+        timeZone: zone,
+        toDay: day,
+      };
+    }
+
+    it("spring forward: the two skipped blocks are no data, and every other block is checked in", async () => {
+      const { days } = await getWatcherHealth(
+        dstWatcherId,
+        range("2026-03-08")
+      );
+      const { blocks } = days[0];
+      expect(blocks).toHaveLength(BLOCKS_PER_DAY);
+      // 2:00 and 2:30 AM never happened.
+      for (const slot of [4, 5]) {
+        expect(blocks[slot]).toMatchObject({
+          state: "no_data",
+          noData: "too_soon",
+          heartbeats: 0,
+        });
+      }
+      blocks.forEach((block, slot) => {
+        if (slot !== 4 && slot !== 5) {
+          expect(block.state, `block ${slot}`).toBe("checked_in");
+          expect(block.heartbeats, `block ${slot}`).toBe(30);
+        }
       });
-      expect(days[0].blocks).toHaveLength(BLOCKS_PER_DAY);
-      expect(days[0].blocks.every((block) => block.state === "no_data")).toBe(
-        true
+    });
+
+    it("spring forward: the day holds the 23 hours that happened", async () => {
+      const { days } = await getWatcherHealth(
+        dstWatcherId,
+        range("2026-03-08")
+      );
+      const heartbeats = days[0].blocks.reduce(
+        (sum, block) => sum + block.heartbeats,
+        0
+      );
+      expect(heartbeats).toBe(23 * 60);
+    });
+
+    it("fall back: each block of an hour holds its own heartbeats, and the repeated hour joins 1:30 AM", async () => {
+      const { days } = await getWatcherHealth(
+        dstWatcherId,
+        range("2026-11-01")
+      );
+      const { blocks } = days[0];
+      expect(blocks).toHaveLength(BLOCKS_PER_DAY);
+      expect(blocks.map((block) => block.state)).toEqual(
+        new Array(BLOCKS_PER_DAY).fill("checked_in")
+      );
+      // 1:30 AM runs from 1:30 PDT to 2:00 PST: an hour and a half.
+      expect(blocks[3].heartbeats).toBe(90);
+      for (const [slot, block] of blocks.entries()) {
+        if (slot !== 3) {
+          expect(block.heartbeats, `block ${slot}`).toBe(30);
+        }
+      }
+      expect(blocks.reduce((sum, block) => sum + block.heartbeats, 0)).toBe(
+        25 * 60
       );
     });
   });

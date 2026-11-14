@@ -131,6 +131,17 @@ describe("describeBlock", () => {
     );
   });
 
+  it("unresponsive, with heartbeats, says the watcher went quiet", () => {
+    const text = describeBlock(
+      block({ state: "unresponsive", heartbeats: 4 }),
+      WHEN,
+      TZ
+    );
+    expect(text.detail).toBe(
+      "The watcher went quiet for part of these 30 minutes."
+    );
+  });
+
   it.each([
     ["future", "This part of the day hasn't happened yet."],
     ["before_first_check_in", "The watcher hadn't checked in yet."],

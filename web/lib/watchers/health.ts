@@ -5,13 +5,10 @@
 // database to test, and server pages and client components share them.
 
 import { STALE_THRESHOLD_MS } from "@/lib/api/watcher-status";
+import { BLOCK_MINUTES } from "./block-edges";
 import { describeWithin, pluralize } from "./phrases";
 import { describeRange, formatDay, type WatcherRange } from "./range";
 import type { RestartReason } from "./stop-reasons";
-
-export const BLOCK_MINUTES = 30;
-export const BLOCKS_PER_DAY = 48;
-const BLOCK_MS = BLOCK_MINUTES * 60 * 1000;
 
 /**
  * How long a watcher that stopped for an update or a Windows restart has to come
@@ -124,6 +121,11 @@ export interface BlockFacts {
   now: Date;
   /** A restart that belongs to this block. */
   restarted: boolean;
+  /**
+   * The block holds heartbeats but went quiet for a while that nothing
+   * explains (`silenceInBlock`).
+   */
+  silent?: boolean;
   start: Date;
   /** The watcher's own last word before this block was `stopped`, for no restart. */
   stoppedBefore: boolean;
@@ -141,7 +143,11 @@ export interface ClassifiedBlock {
  *    already deregistered, or it is too early in the block to say it was quiet.
  * 2. Restarted (gray): the watcher stopped for an update or a Windows restart.
  * 3. Missed a heartbeat (amber): a gap that recovered.
- * 4. Checked in (green): it sent a heartbeat.
+ * 4. Checked in (green): it sent a heartbeat, and didn't go quiet for long with
+ *    no reason. A heartbeat at a block's edge doesn't hide an outage: a block
+ *    that was quiet for the part of a gap the badge would have read
+ *    Unresponsive for, with no restart, missed heartbeat or stop to explain it,
+ *    is red.
  * 5. No data again when someone stopped it: a stopped watcher says nothing.
  * 6. Unresponsive (red): it should have checked in and didn't.
  */
@@ -173,7 +179,7 @@ export function classifyBlock(facts: BlockFacts): ClassifiedBlock {
     return { state: "missed" };
   }
   if (facts.heartbeats > 0) {
-    return { state: "checked_in" };
+    return facts.silent ? { state: "unresponsive" } : { state: "checked_in" };
   }
   if (facts.stoppedBefore) {
     return { state: "no_data", noData: "stopped" };
@@ -193,9 +199,126 @@ export function classifyBlock(facts: BlockFacts): ClassifiedBlock {
   return { state: "unresponsive" };
 }
 
-/** The start of the block at `slot` (0 to 47) of a day that starts at `dayStart`. */
-export function blockStart(dayStart: Date, slot: number): Date {
-  return new Date(dayStart.getTime() + slot * BLOCK_MS);
+// ---------------------------------------------------------------------------
+// Silence between heartbeats
+// ---------------------------------------------------------------------------
+
+/**
+ * The shortest stretch of unexplained silence that makes a block red, and the
+ * slack around the windows that explain it: heartbeats come a minute apart, so
+ * less than this is one that came late.
+ */
+export const SILENCE_TOLERANCE_MS = 60 * 1000;
+
+/** Two consecutive heartbeats at least `STALE_THRESHOLD_MS` apart. */
+export interface HeartbeatGap {
+  /** The last heartbeat before the gap. */
+  from: Date;
+  /** The status of the heartbeat before the gap. */
+  previousStatus: string;
+  /** The first heartbeat after the gap. */
+  to: Date;
+}
+
+interface Span {
+  from: number;
+  to: number;
+}
+
+/** Whether a stop at `at` is the one a restart window records. */
+export function stopIsRestart(
+  restarts: RestartWindow[],
+  at: Date,
+  toleranceMs: number
+): boolean {
+  return restarts.some(
+    (window) => Math.abs(window.from.getTime() - at.getTime()) <= toleranceMs
+  );
+}
+
+function subtract(spans: Span[], hole: Span): Span[] {
+  return spans.flatMap((span) => {
+    if (hole.to <= span.from || hole.from >= span.to) {
+      return [span];
+    }
+    const pieces: Span[] = [];
+    if (hole.from > span.from) {
+      pieces.push({ from: span.from, to: hole.from });
+    }
+    if (hole.to < span.to) {
+      pieces.push({ from: hole.to, to: span.to });
+    }
+    return pieces;
+  });
+}
+
+/**
+ * The stretches in which a watcher went quiet and nothing says why. In a gap
+ * between two heartbeats the watcher reads Unresponsive from
+ * `STALE_THRESHOLD_MS` after the first until the second. That is left out
+ * where:
+ *
+ * - the first heartbeat said `stopped` and no restart explains it: someone
+ *   stopped the watcher, and a stopped watcher says nothing;
+ * - a restart window (the stop until the watcher's next start, or the grace
+ *   period) covers it;
+ * - a missed-heartbeat window does: the watcher itself reported that gap.
+ *
+ * What is left, a minute or longer, is an outage nobody explained, such as a
+ * power cut that wrote no stop event.
+ */
+export function unexplainedSilences(
+  gaps: HeartbeatGap[],
+  restarts: RestartWindow[],
+  missed: MissedWindow[],
+  stopMatchMs: number
+): { from: Date; to: Date }[] {
+  const silences: { from: Date; to: Date }[] = [];
+  for (const gap of gaps) {
+    const quietFrom = gap.from.getTime() + STALE_THRESHOLD_MS;
+    const quietTo = gap.to.getTime();
+    if (quietTo - quietFrom <= 0) {
+      continue;
+    }
+    if (
+      gap.previousStatus === "stopped" &&
+      !stopIsRestart(restarts, gap.from, stopMatchMs)
+    ) {
+      continue;
+    }
+    let spans: Span[] = [{ from: quietFrom, to: quietTo }];
+    for (const window of restarts) {
+      spans = subtract(spans, {
+        from: window.from.getTime(),
+        to: window.to.getTime(),
+      });
+    }
+    for (const window of missed) {
+      spans = subtract(spans, {
+        from: window.from.getTime() - SILENCE_TOLERANCE_MS,
+        to: window.to.getTime() + SILENCE_TOLERANCE_MS,
+      });
+    }
+    for (const span of spans) {
+      if (span.to - span.from >= SILENCE_TOLERANCE_MS) {
+        silences.push({ from: new Date(span.from), to: new Date(span.to) });
+      }
+    }
+  }
+  return silences;
+}
+
+/** Whether a block holds at least `SILENCE_TOLERANCE_MS` of unexplained silence. */
+export function silenceInBlock(
+  silences: { from: Date; to: Date }[],
+  block: { start: Date; end: Date }
+): boolean {
+  return silences.some(
+    (silence) =>
+      Math.min(silence.to.getTime(), block.end.getTime()) -
+        Math.max(silence.from.getTime(), block.start.getTime()) >=
+      SILENCE_TOLERANCE_MS
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -271,15 +394,17 @@ function describeDays(days: string[], words: Words): string {
   return `${days.length} days`;
 }
 
-/** Under "Files uploaded": "From 7 runs on Nov 10 and 11". */
+/** Under "Files uploaded": "From 7 runs on Nov 10 and 11", "From 8 runs over 7 days". */
 export function filesNote(totals: HealthTotals, words: Words): string {
   if (totals.files === 0) {
     return none(words);
   }
   const days = describeDays(totals.daysWithFiles, words);
+  // "on Nov 10 and 11", but "over 7 days": a count of days isn't a date.
+  const preposition = totals.daysWithFiles.length > 2 ? "over" : "on";
   return totals.runs > 0
-    ? `From ${pluralize(totals.runs, "run")} on ${days}`
-    : `On ${days}`;
+    ? `From ${pluralize(totals.runs, "run")} ${preposition} ${days}`
+    : `${preposition === "over" ? "Over" : "On"} ${days}`;
 }
 
 const RESTART_PHRASES: Record<RestartReason, { one: string; many: string }> = {

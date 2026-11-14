@@ -4,12 +4,8 @@
 // it, and it needs no browser to test.
 
 import { formatTime } from "@/lib/date";
-import {
-  BLOCK_MINUTES,
-  blockTimeLabel,
-  type HealthBlock,
-  type NoDataReason,
-} from "./health";
+import { BLOCK_MINUTES } from "./block-edges";
+import { blockTimeLabel, type HealthBlock, type NoDataReason } from "./health";
 import { describeDuration } from "./phrases";
 
 export interface BlockText {
@@ -81,7 +77,10 @@ export function describeBlock(
       return {
         title: "Unresponsive",
         when,
-        detail: "The watcher didn't check in during these 30 minutes.",
+        detail:
+          block.heartbeats > 0
+            ? "The watcher went quiet for part of these 30 minutes."
+            : "The watcher didn't check in during these 30 minutes.",
       };
     case "no_data":
       return {

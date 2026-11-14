@@ -11,6 +11,7 @@ import {
 import { enforceWatcherBinding, findActiveWatcher } from "@/lib/api/watchers";
 import { db } from "@/lib/db";
 import { watcherEvents, watcherEventTypeEnum } from "@/lib/db/schema";
+import { stampNewStopEvents } from "@/lib/watchers/stop-reasons";
 
 // Derived from the Drizzle enum so adding a new event type is a one-line
 // schema change — historically this was a hand-maintained Set and drifted
@@ -53,14 +54,15 @@ export async function POST(
     return body;
   }
 
-  const values: (typeof watcherEvents.$inferInsert)[] = [];
+  const received: (typeof watcherEvents.$inferInsert & { timestamp: Date })[] =
+    [];
   for (let i = 0; i < body.events.length; i++) {
     const evt = body.events[i];
     const ts = new Date(evt.timestamp);
     if (Number.isNaN(ts.getTime())) {
       return apiError(400, VALIDATION_ERROR, `Invalid timestamp at index ${i}`);
     }
-    values.push({
+    received.push({
       watcherId,
       eventType: evt.event_type as typeof watcherEvents.$inferInsert.eventType,
       message: evt.message,
@@ -68,6 +70,12 @@ export async function POST(
       timestamp: ts,
     });
   }
+
+  // A watcher that is restarting sends its final `stopped` heartbeat, with the
+  // reason, right after its stop event. When the heartbeat got here first, copy
+  // its reason onto the event (the heartbeat route does the same the other way
+  // round).
+  const values = stampNewStopEvents(received, watcher, new Date());
 
   await db.insert(watcherEvents).values(values);
 

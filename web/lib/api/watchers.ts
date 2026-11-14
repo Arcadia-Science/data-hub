@@ -749,6 +749,11 @@ export async function getWatcherEvents(
     /** Exclusive: events at this moment or later are left out. */
     until?: Date;
     eventTypes?: string[];
+    /**
+     * Leave out the `upload_failed` events of a file the watcher will try again
+     * (`details.will_retry`), which wait for the file and have not failed.
+     */
+    excludeRetries?: boolean;
     page?: number;
     pageSize?: number;
   } = {}
@@ -775,6 +780,12 @@ export async function getWatcherEvents(
     if (filtered.length > 0) {
       conditions.push(inArray(watcherEvents.eventType, filtered));
     }
+  }
+
+  if (opts.excludeRetries) {
+    conditions.push(
+      sql`not (${watcherEvents.eventType} = 'upload_failed' and coalesce(${watcherEvents.details}->>'will_retry', '') = 'true')`
+    );
   }
 
   const [rows, [{ value: total }]] = await Promise.all([

@@ -37,12 +37,16 @@ export function FilesPerDayChart({
   return (
     <>
       <p className="sr-only">{summary}.</p>
+      {/* The chart is hidden from assistive technology, and its summary above is
+          what it hears: recharts' own accessibility layer adds a second
+          focusable element with a garbled name. */}
       <ChartContainer
+        aria-hidden="true"
         className="aspect-auto h-52 w-full text-blue-500 dark:text-blue-400"
         config={chartConfig}
       >
         <BarChart
-          accessibilityLayer
+          accessibilityLayer={false}
           data={data}
           margin={{ top: 20, right: 4, bottom: 0, left: 4 }}
         >

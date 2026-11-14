@@ -44,6 +44,11 @@ export interface EventDescription {
 }
 
 export interface EventInput {
+  /**
+   * For a stop: whether it follows an update handed to the upgrade worker, which
+   * only a query over the neighbouring events can tell (`restartReasonOf`).
+   */
+  afterUpdateStart?: boolean;
   details: unknown;
   eventType: string;
   message: string;
@@ -276,8 +281,17 @@ function describeUploaded(event: EventInput, details: Details): Described {
 
 function describeUploadFailed(event: EventInput, details: Details): Described {
   const message = event.message.trim();
-  const runId = text(details, "run_id");
-  const facts = runFact(runId);
+  // A failed upload carries the file's S3 key, which holds its run, and the
+  // error that stopped it.
+  const runId =
+    text(details, "run_id") ?? runIdFromS3Key(text(details, "s3_key"));
+  const error = text(details, "error");
+  const facts: EventFact[] = [
+    ...runFact(runId),
+    ...(error
+      ? [{ kind: "value" as const, label: "Error", value: error }]
+      : []),
+  ];
 
   if (details.will_retry === true) {
     const name =

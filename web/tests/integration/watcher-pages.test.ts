@@ -125,10 +125,12 @@ describe("Watcher pages", () => {
     // the tab's Suspense boundary, so a tab whose data load threw would still
     // show the frame and fail only on this text.
     const TABS = [
-      { path: "/instruments/watcher-page-a/watcher", loaded: "Event Type" },
+      // The Event log heading is in WatcherActivity, not in its skeleton.
+      { path: "/instruments/watcher-page-a/watcher", loaded: "Event log" },
       {
         path: "/instruments/watcher-page-a/watcher/health",
-        loaded: 'aria-label="Status since"',
+        // The chart's heading is in WatcherHealth, not in its skeleton.
+        loaded: "Files uploaded per day",
       },
       {
         path: "/instruments/watcher-page-a/watcher/settings",

@@ -561,7 +561,12 @@ The watcher page's Activity tab gives every event a plain label and message with
 
 The Health tab reads two things from events, so don't reword them without changing the web app:
 
-- A restart is a `watcher_stopped` event whose message says `restarting for auto-update` or `Windows is shutting down`. The event has no reason field, so `RESTART_STOP_FRAGMENTS` in `web/lib/watchers/stop-reasons.ts` matches the message. Any other stop isn't a restart.
+- A restart is a `watcher_stopped` event that the web app can tie to an update or to Windows shutting down. The event itself has no reason field, and a service that the upgrade worker stops says only `Service stopped`, so the server takes the reason from elsewhere, in this order (`restartReasonOf` in `web/lib/watchers/stop-reasons.ts`, and the same rules in SQL in `web/lib/api/watcher-health.ts`):
+  1. `details.stop_reason`, which the server copies from the `status_reason` of the final `stopped` heartbeat (`auto_update` or `system_shutdown`) onto the watcher's stop event, whichever of the two arrives first (the heartbeat route and the events route; `web/lib/api/watcher-stop-reasons.ts`). It never replaces a value that is already there, and it adds no column.
+  2. A stop within ten minutes after an `update_started` event with `details.via_worker` (the hand-off to the upgrade worker), with no `update_failed` or `watcher_started` in between, unless its message names another cause. This covers events from before the server copied the reason.
+  3. The message: `restarting for auto-update` or `Windows is shutting down` (`RESTART_STOP_FRAGMENTS`).
+
+  Any other stop isn't a restart. Keep the `update_started` event and its `via_worker` flag, and the `status_reason` values, as they are, or change the web app with them.
 - A missed heartbeat is an `error` event with `details.kind="heartbeat_recovered"`. Its `gap_seconds` colours the connectivity grid.
 
 ### File timestamps

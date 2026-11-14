@@ -184,6 +184,44 @@ describe("describeEvent: event types", () => {
       expect(event.text).toBe(text);
     });
 
+    it("a plain stop that the final heartbeat marked as an update", () => {
+      // The upgrade worker stops the Windows service from outside, so the
+      // event's own message can't say why.
+      const event = describe_("watcher_stopped", "Service stopped", {
+        stop_reason: "auto_update",
+      });
+      expect(event.text).toBe("Service stopped to install an update");
+    });
+
+    it("a plain stop that the final heartbeat marked as a Windows shutdown", () => {
+      const event = describe_("watcher_stopped", "Service stopped", {
+        stop_reason: "system_shutdown",
+      });
+      expect(event.text).toBe(
+        "Service stopped because Windows is restarting or shutting down"
+      );
+    });
+
+    it("a plain stop that follows an update handed to the upgrade worker", () => {
+      const event = describeEvent({
+        eventType: "watcher_stopped",
+        message: "Service stopped",
+        details: null,
+        afterUpdateStart: true,
+      });
+      expect(event.text).toBe("Service stopped to install an update");
+    });
+
+    it("a stop by someone is not an update stop, even after an update began", () => {
+      const event = describeEvent({
+        eventType: "watcher_stopped",
+        message: "Watcher stopped by user",
+        details: null,
+        afterUpdateStart: true,
+      });
+      expect(event.text).toBe("Watcher stopped by someone on the PC");
+    });
+
     it("an environment switch", () => {
       const event = describe_(
         "watcher_stopped",
@@ -250,6 +288,25 @@ describe("describeEvent: event types", () => {
       expect(event.label).toBe("Upload failed");
       expect(event.tone).toBe("error");
       expect(event.text).toBe(text);
+    });
+
+    it("shows the run and the error of a failed upload, from its S3 key", () => {
+      const event = describe_("upload_failed", "Upload failed: a.csv", {
+        s3_key: "plate-reader/run-0001/a.csv",
+        error: "Connection reset",
+      });
+      expect(event.facts).toEqual([
+        { kind: "run", runId: "run-0001" },
+        { kind: "value", label: "Error", value: "Connection reset" },
+      ]);
+    });
+
+    it("prefers a run ID in the details to the one in the S3 key", () => {
+      const event = describe_("upload_failed", "Upload failed: a.csv", {
+        run_id: "run-0002",
+        s3_key: "plate-reader/run-0001/a.csv",
+      });
+      expect(event.facts).toEqual([{ kind: "run", runId: "run-0002" }]);
     });
 
     it("a refusal because the run was deleted links the run", () => {

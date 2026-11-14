@@ -3,6 +3,7 @@ import { TablePendingProvider } from "@/components/table-pending";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EventLog } from "@/components/watchers/event-log";
 import { EventLogToolbar } from "@/components/watchers/event-log-toolbar";
+import { getStopsAfterUpdateStart } from "@/lib/api/watcher-health";
 import { getWatcherEvents } from "@/lib/api/watchers";
 import {
   WATCHER_EVENTS_MAX_SHOWN,
@@ -68,14 +69,30 @@ export async function WatcherActivity({
     since: range.start,
     until: range.endExclusive,
     eventTypes: eventTypes.length > 0 ? eventTypes : undefined,
+    // The Health tab's "Upload failures" card links here with this filter, and
+    // counts only the files that failed, so the list leaves out the ones that
+    // wait to be read again (they show with no filter, as "File not ready").
+    excludeRetries: eventTypes.includes("upload_failed"),
     page: 1,
     pageSize,
   });
 
+  // A stop is an update restart when it follows an update handed to the
+  // upgrade worker, which its own message can't say.
+  const stopsAfterUpdate = await getStopsAfterUpdateStart(
+    watcherId,
+    events.rows
+      .filter((event) => event.eventType === "watcher_stopped")
+      .map((event) => event.id)
+  );
+
   const rows = events.rows.map((event) => ({
     id: event.id,
     timestamp: event.timestamp.toISOString(),
-    description: describeEvent(event),
+    description: describeEvent({
+      ...event,
+      afterUpdateStart: stopsAfterUpdate.has(event.id),
+    }),
     // Only an admin is shown the raw event, so only an admin is sent it.
     raw: isAdmin
       ? {

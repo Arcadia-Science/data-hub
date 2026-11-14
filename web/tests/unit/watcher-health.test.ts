@@ -7,14 +7,23 @@ import {
   failuresNote,
   filesNote,
   type HealthTotals,
+  type HeartbeatGap,
   missedNote,
   missedWindow,
   RESTART_GRACE_MS,
   restartsNote,
   restartWindow,
+  SILENCE_TOLERANCE_MS,
+  silenceInBlock,
+  stopIsRestart,
+  unexplainedSilences,
   windowTouchesBlock,
 } from "@/lib/watchers/health";
-import { restartReasonOf } from "@/lib/watchers/stop-reasons";
+import {
+  canStampStop,
+  restartReasonOf,
+  stampNewStopEvents,
+} from "@/lib/watchers/stop-reasons";
 
 const at = (hhmm: string, day = "2026-11-10") => new Date(`${day}T${hhmm}:00Z`);
 
@@ -115,6 +124,23 @@ describe("classifyBlock", () => {
     expect(
       classifyBlock({ ...BASE, heartbeats: 0, stoppedBefore: true })
     ).toEqual({ state: "no_data", noData: "stopped" });
+  });
+
+  it("red: a block with heartbeats that went quiet for a while nothing explains", () => {
+    expect(classifyBlock({ ...BASE, heartbeats: 1, silent: true })).toEqual({
+      state: "unresponsive",
+    });
+  });
+
+  it("a restart or a missed heartbeat still beats a quiet block", () => {
+    expect(
+      classifyBlock({ ...BASE, heartbeats: 1, silent: true, restarted: true })
+        .state
+    ).toBe("restarted");
+    expect(
+      classifyBlock({ ...BASE, heartbeats: 1, silent: true, missed: true })
+        .state
+    ).toBe("missed");
   });
 
   it("a heartbeat in the block is a check-in, even after a stop", () => {
@@ -329,7 +355,20 @@ describe("count card sentences", () => {
           }),
           words
         )
-      ).toBe("From 5 runs on 4 days");
+      ).toBe("From 5 runs over 4 days");
+    });
+
+    it("says over, not on, for a count of days with no runs", () => {
+      expect(
+        filesNote(
+          totals({
+            files: 9,
+            runs: 0,
+            daysWithFiles: ["2026-11-08", "2026-11-09", "2026-11-12"],
+          }),
+          words
+        )
+      ).toBe("Over 3 days");
     });
 
     it("leaves the runs out when none can be read from the events", () => {
@@ -437,29 +476,114 @@ describe("count card sentences", () => {
 });
 
 describe("restartReasonOf", () => {
-  const stopped = (message: string, details: unknown = null) => ({
+  const stopped = (
+    message: string,
+    details: unknown = null,
+    afterUpdateStart = false
+  ) => ({
     eventType: "watcher_stopped",
     message,
     details,
+    afterUpdateStart,
   });
 
-  it("reads an update restart", () => {
-    expect(restartReasonOf(stopped("Service restarting for auto-update"))).toBe(
-      "update"
-    );
-    expect(restartReasonOf(stopped("Watcher restarting for auto-update"))).toBe(
-      "update"
-    );
+  describe("from the reason the server copied from the final heartbeat", () => {
+    it("reads an update stop whose own message says only that the service stopped", () => {
+      // The uv-tool install on Windows: the upgrade worker stops the service
+      // from outside, so the watcher can't write the reason into its message.
+      expect(
+        restartReasonOf(
+          stopped("Service stopped", { stop_reason: "auto_update" })
+        )
+      ).toBe("update");
+    });
+
+    it("reads a Windows shutdown", () => {
+      expect(
+        restartReasonOf(
+          stopped("Service stopped", { stop_reason: "system_shutdown" })
+        )
+      ).toBe("windows");
+    });
+
+    it("wins over a message that says something else", () => {
+      expect(
+        restartReasonOf(
+          stopped("Service stopped: Windows is shutting down", {
+            stop_reason: "auto_update",
+          })
+        )
+      ).toBe("update");
+    });
+
+    it("ignores a reason it doesn't know", () => {
+      expect(
+        restartReasonOf(stopped("Service stopped", { stop_reason: "other" }))
+      ).toBeNull();
+    });
+
+    it("ignores one on the server's own note about cancelled uploads", () => {
+      expect(
+        restartReasonOf(
+          stopped("Cancelled uploads", {
+            kind: "upload_requests_cancelled",
+            stop_reason: "auto_update",
+          })
+        )
+      ).toBeNull();
+    });
   });
 
-  it("reads a Windows shutdown or restart", () => {
-    expect(
-      restartReasonOf(stopped("Service stopped: Windows is shutting down"))
-    ).toBe("windows");
+  describe("from an update the watcher handed to the upgrade worker", () => {
+    it("reads a plain stop that follows one", () => {
+      expect(restartReasonOf(stopped("Service stopped", null, true))).toBe(
+        "update"
+      );
+    });
+
+    it("is not a restart with no update before it", () => {
+      expect(restartReasonOf(stopped("Service stopped"))).toBeNull();
+    });
+
+    it("leaves a stop that names another cause alone", () => {
+      expect(
+        restartReasonOf(stopped("Watcher stopped by user", null, true))
+      ).toBeNull();
+      expect(
+        restartReasonOf(
+          stopped(
+            "Service stopped: its registration was deleted on Data Hub",
+            null,
+            true
+          )
+        )
+      ).toBeNull();
+      expect(
+        restartReasonOf(
+          stopped("Service stopped: Windows is shutting down", null, true)
+        )
+      ).toBe("windows");
+    });
+  });
+
+  describe("from the message, for events with neither", () => {
+    it("reads an update restart", () => {
+      expect(
+        restartReasonOf(stopped("Service restarting for auto-update"))
+      ).toBe("update");
+      expect(
+        restartReasonOf(stopped("Watcher restarting for auto-update"))
+      ).toBe("update");
+    });
+
+    it("reads a Windows shutdown or restart", () => {
+      expect(
+        restartReasonOf(stopped("Service stopped: Windows is shutting down"))
+      ).toBe("windows");
+    });
   });
 
   it("is null for every other stop", () => {
-    expect(restartReasonOf(stopped("Service stopped"))).toBeNull();
     expect(restartReasonOf(stopped("Watcher stopped by user"))).toBeNull();
     expect(
       restartReasonOf(
@@ -473,9 +597,8 @@ describe("restartReasonOf", () => {
       restartReasonOf(
         stopped(
           "Restarting for auto-update: reverted 1 pending upload request(s)",
-          {
-            kind: "upload_requests_cancelled",
-          }
+          { kind: "upload_requests_cancelled" },
+          true
         )
       )
     ).toBeNull();
@@ -486,8 +609,214 @@ describe("restartReasonOf", () => {
       restartReasonOf({
         eventType: "watcher_started",
         message: "Service restarting for auto-update",
+        details: { stop_reason: "auto_update" },
+        afterUpdateStart: true,
       })
     ).toBeNull();
+  });
+});
+
+describe("stampNewStopEvents", () => {
+  const NOW = at("12:00");
+  const heartbeatAt = at("11:59");
+  const stop = (time: string, details: unknown = null) => ({
+    eventType: "watcher_stopped",
+    message: "Service stopped",
+    details,
+    timestamp: at(time),
+  });
+  const restartingWatcher = {
+    status: "stopped",
+    statusReason: "auto_update",
+    lastHeartbeatAt: heartbeatAt,
+  };
+
+  it("copies the reason of a final heartbeat that arrived first onto the stop", () => {
+    const [event] = stampNewStopEvents([stop("11:59")], restartingWatcher, NOW);
+    expect(event.details).toEqual({ stop_reason: "auto_update" });
+    expect(restartReasonOf(event)).toBe("update");
+  });
+
+  it("keeps the event's other details", () => {
+    const [event] = stampNewStopEvents(
+      [stop("11:59", { note: "x" })],
+      { ...restartingWatcher, statusReason: "system_shutdown" },
+      NOW
+    );
+    expect(event.details).toEqual({
+      note: "x",
+      stop_reason: "system_shutdown",
+    });
+  });
+
+  it("never replaces a reason that is already there", () => {
+    const events = [stop("11:59", { stop_reason: "system_shutdown" })];
+    expect(stampNewStopEvents(events, restartingWatcher, NOW)).toEqual(events);
+  });
+
+  it("stamps only the last stop of a batch", () => {
+    const stamped = stampNewStopEvents(
+      [stop("11:57"), stop("11:59"), stop("11:58")],
+      restartingWatcher,
+      NOW
+    );
+    expect(stamped.map((event) => event.details)).toEqual([
+      null,
+      { stop_reason: "auto_update" },
+      null,
+    ]);
+  });
+
+  it("leaves a stop that is not near the heartbeat", () => {
+    const events = [stop("10:00")];
+    expect(stampNewStopEvents(events, restartingWatcher, NOW)).toEqual(events);
+  });
+
+  it("leaves everything when the watcher isn't stopped for a restart, or went quiet long ago", () => {
+    const events = [stop("11:59")];
+    for (const watcher of [
+      { ...restartingWatcher, status: "watching" },
+      { ...restartingWatcher, statusReason: null },
+      { ...restartingWatcher, statusReason: "other" },
+      { ...restartingWatcher, lastHeartbeatAt: null },
+      { ...restartingWatcher, lastHeartbeatAt: at("09:00") },
+    ]) {
+      expect(stampNewStopEvents(events, watcher, NOW)).toEqual(events);
+    }
+  });
+
+  it("leaves other events and the server's own notes alone", () => {
+    const events = [
+      { ...stop("11:59"), eventType: "watcher_started" },
+      stop("11:59", { kind: "upload_requests_cancelled" }),
+      stop("11:59", ["not", "an", "object"]),
+    ];
+    expect(stampNewStopEvents(events, restartingWatcher, NOW)).toEqual(events);
+  });
+
+  it("knows which stops it may stamp", () => {
+    expect(canStampStop(stop("11:59"))).toBe(true);
+    expect(canStampStop(stop("11:59", { stop_reason: "auto_update" }))).toBe(
+      false
+    );
+  });
+});
+
+describe("unexplainedSilences", () => {
+  const gap = (
+    from: string,
+    to: string,
+    previousStatus = "watching"
+  ): HeartbeatGap => ({
+    from: at(from),
+    to: at(to),
+    previousStatus,
+  });
+  const silences = (
+    gaps: HeartbeatGap[],
+    restarts: ReturnType<typeof restartWindow>[] = [],
+    missed: ReturnType<typeof missedWindow>[] = []
+  ) =>
+    unexplainedSilences(gaps, restarts, missed, 2 * 60 * 1000).map(
+      (silence) => [
+        silence.from.toISOString().slice(11, 16),
+        silence.to.toISOString().slice(11, 16),
+      ]
+    );
+
+  it("reads the quiet from the stale threshold after the last heartbeat to the next", () => {
+    // 10:20 to 10:45 with no stop: unresponsive from 10:25.
+    expect(silences([gap("10:20", "10:45")])).toEqual([["10:25", "10:45"]]);
+  });
+
+  it("is nothing for heartbeats exactly the threshold apart", () => {
+    expect(silences([gap("10:00", "10:05")])).toEqual([]);
+  });
+
+  it("is nothing when someone stopped the watcher", () => {
+    expect(silences([gap("20:00", "22:00", "stopped")])).toEqual([]);
+  });
+
+  it("is nothing inside a restart, but what follows the grace period is quiet", () => {
+    // The window runs 14:00 to 14:15, and the watcher is back at 14:40.
+    expect(
+      silences(
+        [gap("14:00", "14:40", "stopped")],
+        [restartWindow(at("14:00"), "update", null)]
+      )
+    ).toEqual([["14:15", "14:40"]]);
+    expect(
+      silences(
+        [gap("14:00", "14:10", "stopped")],
+        [restartWindow(at("14:00"), "update", at("14:10"))]
+      )
+    ).toEqual([]);
+  });
+
+  it("is nothing where the watcher reported the gap itself", () => {
+    // The watcher says it was out of contact for 55 minutes, until 11:00.
+    expect(
+      silences([gap("10:05", "11:00")], [], [missedWindow(at("11:00"), 3300)])
+    ).toEqual([]);
+  });
+
+  it("keeps the part of a gap that a missed heartbeat doesn't cover", () => {
+    // Out of contact for 10 minutes before 11:00, but silent from 10:05.
+    expect(
+      silences([gap("10:05", "11:00")], [], [missedWindow(at("11:00"), 600)])
+    ).toEqual([["10:10", "10:49"]]);
+  });
+
+  it("drops a stretch shorter than the tolerance", () => {
+    expect(SILENCE_TOLERANCE_MS).toBe(60 * 1000);
+    expect(
+      unexplainedSilences(
+        [
+          {
+            from: at("10:00"),
+            to: new Date(at("10:05").getTime() + 30_000),
+            previousStatus: "watching",
+          },
+        ],
+        [],
+        [],
+        2 * 60 * 1000
+      )
+    ).toEqual([]);
+  });
+
+  it("knows whether a stop is the one a restart records", () => {
+    const restarts = [restartWindow(at("14:00"), "update", null)];
+    expect(stopIsRestart(restarts, at("14:01"), 2 * 60 * 1000)).toBe(true);
+    expect(stopIsRestart(restarts, at("14:30"), 2 * 60 * 1000)).toBe(false);
+  });
+});
+
+describe("silenceInBlock", () => {
+  const silence = [{ from: at("10:25"), to: at("10:45") }];
+
+  it("is true for every block the silence reaches by a minute or more", () => {
+    expect(
+      silenceInBlock(silence, { start: at("10:00"), end: at("10:30") })
+    ).toBe(true);
+    expect(
+      silenceInBlock(silence, { start: at("10:30"), end: at("11:00") })
+    ).toBe(true);
+  });
+
+  it("is false for blocks it doesn't reach, or reaches for seconds", () => {
+    expect(
+      silenceInBlock(silence, { start: at("09:30"), end: at("10:00") })
+    ).toBe(false);
+    expect(
+      silenceInBlock(silence, { start: at("10:45"), end: at("11:15") })
+    ).toBe(false);
+    expect(
+      silenceInBlock(
+        [{ from: at("10:25"), to: new Date(at("10:30").getTime() + 20_000) }],
+        { start: at("10:30"), end: at("11:00") }
+      )
+    ).toBe(false);
   });
 });
 
