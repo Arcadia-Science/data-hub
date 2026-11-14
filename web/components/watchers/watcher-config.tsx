@@ -1,12 +1,19 @@
-import { FileText } from "lucide-react";
+import { FileText, Lock } from "lucide-react";
 import { CodeBlock } from "@/components/code-block";
 import { CopyButton } from "@/components/copy-button";
 import { EmptyState } from "@/components/empty-state";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { SettingValue } from "@/components/watchers/setting-value";
 import { WatcherConfigForm } from "@/components/watchers/watcher-config-form";
 import { WatcherConfigHistory } from "@/components/watchers/watcher-config-history";
 import {
-  ConfigChangeCallout,
-  RestartPendingCallout,
+  ConfigStateNotice,
   UnreadableConfigCallout,
 } from "@/components/watchers/watcher-config-status";
 import { WatcherYamlDisclosure } from "@/components/watchers/watcher-yaml-disclosure";
@@ -14,125 +21,164 @@ import type {
   ConfigRevision,
   WatcherConfigState,
 } from "@/lib/api/watcher-config/revisions";
-import { settingsDisplayRows } from "@/lib/api/watcher-config/settings";
 import type { WatcherDetail } from "@/lib/api/watchers";
+import { configNoticeKind } from "@/lib/watchers/config-notice";
+import { currentSettingsRows } from "@/lib/watchers/current-settings";
+
+/** The revision the one notice is about, or null when there is no notice. */
+function noticeFor(state: WatcherConfigState) {
+  const kind = configNoticeKind(
+    state.latest?.status ?? null,
+    state.restartPending !== null
+  );
+  const revision =
+    kind === "edited_on_pc" ? state.restartPending : state.latest;
+  return kind && revision ? { kind, revision } : null;
+}
 
 /**
- * The watcher's Configuration tab: what the watcher last reported, any
- * pending or rejected change, the edit form for admins, the change history,
- * and the raw YAML.
+ * The watcher's Settings tab: the one notice for the latest settings state,
+ * what the watcher is running, the edit form (admins, current watcher only),
+ * the change history, and the raw YAML. A member, or anyone looking at a past
+ * watcher, gets no form and no Restore.
  */
 export function WatcherConfig({
   watcher,
   state,
   history,
   isAdmin,
+  viewerUserId,
+  focusField,
 }: {
   watcher: WatcherDetail;
   state: WatcherConfigState;
   history: ConfigRevision[];
   isAdmin: boolean;
+  viewerUserId: string;
+  /** Puts the cursor in this field of the edit form on load. */
+  focusField?: "watch_directory";
 }) {
   const running = state.running;
-  const isDeregistered = watcher.deletedAt !== null;
-  const canEdit = isAdmin && !isDeregistered;
-  const watcherOnline =
-    watcher.effectiveStatus === "watching" ||
-    watcher.effectiveStatus === "waiting";
+  const isPast = watcher.deletedAt !== null;
+  const canEdit = isAdmin && !isPast;
+  // A past watcher will never pick a change up or restart, so a notice about
+  // one would mislead. Its history still shows every revision's state.
+  const notice = isPast ? null : noticeFor(state);
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-5">
       <UnreadableConfigCallout
         hasSettings={state.baseSettings !== null}
         problem={state.reportedProblem}
       />
-      <ConfigChangeCallout
-        current={running?.settings ?? null}
-        latest={state.latest}
-        watcherOnline={watcherOnline}
-      />
-      <RestartPendingCallout
-        revision={state.restartPending}
-        running={running}
-      />
+      {notice ? (
+        <ConfigStateNotice
+          kind={notice.kind}
+          revision={notice.revision}
+          viewerUserId={viewerUserId}
+        />
+      ) : null}
 
-      <section className="flex flex-col gap-2">
-        <h4 className="font-medium text-sm">Current settings</h4>
-        <p className="text-muted-foreground text-xs">
-          {running?.revision
-            ? `What the watcher is running: revision ${running.revision}.`
-            : "As last reported by the watcher."}
+      {isAdmin ? null : (
+        <p className="flex items-center gap-2 text-muted-foreground">
+          <Lock aria-hidden="true" className="size-4 shrink-0" />
+          Only admins can change watcher settings.
         </p>
-        {running ? (
-          <dl className="grid grid-cols-1 gap-x-6 gap-y-2 rounded-lg border bg-background p-4 text-sm sm:grid-cols-[max-content_1fr] dark:bg-muted">
-            {settingsDisplayRows(running.settings).map((row) => (
-              <div className="contents" key={row.key}>
-                <dt className="text-muted-foreground">{row.label}</dt>
-                <dd className="break-all font-mono text-[13px]">{row.value}</dd>
-              </div>
-            ))}
-          </dl>
-        ) : (
-          <EmptyState icon={FileText} size="compact">
-            {watcher.configYaml
-              ? "The watcher's config file couldn't be read. The raw YAML is below."
-              : "No config pushed yet."}
-          </EmptyState>
-        )}
-      </section>
+      )}
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Current settings</CardTitle>
+          <CardDescription>
+            What the watcher is running now, as it last reported.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {running ? (
+            <dl className="flex flex-col">
+              {currentSettingsRows(running.settings).map((row) => (
+                <div
+                  className="grid grid-cols-1 gap-1 border-t py-2.5 first:border-t-0 first:pt-0 last:pb-0 sm:grid-cols-[minmax(160px,220px)_minmax(0,1fr)] sm:gap-3"
+                  key={row.key}
+                >
+                  <dt className="text-muted-foreground">{row.label}</dt>
+                  <dd className="min-w-0">
+                    <SettingValue value={row.value} />
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          ) : (
+            <EmptyState icon={FileText} size="compact">
+              {watcher.configYaml
+                ? "The watcher's config file couldn't be read. The raw YAML is below."
+                : "No config pushed yet."}
+            </EmptyState>
+          )}
+        </CardContent>
+      </Card>
 
       {canEdit && state.baseSettings ? (
-        <section className="flex flex-col gap-3">
-          <div>
-            <h4 className="font-medium text-sm">Edit settings</h4>
-            <p className="text-muted-foreground text-xs">
+        <Card>
+          <CardHeader>
+            <CardTitle>Edit settings</CardTitle>
+            <CardDescription>
               Saved changes reach the watcher within about a minute. If it
               can&apos;t apply one, it keeps its current settings and the change
               shows as rejected.
-            </p>
-          </div>
-          <div className="rounded-lg border bg-background p-4 dark:bg-muted">
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
             <WatcherConfigForm
               baseRevision={state.configRevision}
               editable={state.editable}
+              focusField={focusField}
               initialSettings={state.baseSettings}
               key={state.configRevision ?? "none"}
               savedSettings={state.savedSettings}
               watcherId={watcher.id}
               watcherVersion={state.watcherVersion}
             />
-          </div>
-        </section>
+          </CardContent>
+        </Card>
       ) : null}
 
-      <section className="flex flex-col gap-3">
-        <h4 className="font-medium text-sm">History</h4>
-        <WatcherConfigHistory
-          canRestore={canEdit && state.editable}
-          restartPendingRevision={state.restartPending?.revision ?? null}
-          revisions={history}
-          savedSettings={state.savedSettings}
-          watcherId={watcher.id}
-        />
-      </section>
-
-      {watcher.configYaml ? (
-        <WatcherYamlDisclosure>
-          <div className="relative">
-            <CopyButton
-              className="absolute top-1.5 right-1.5 z-10 text-muted-foreground"
-              size="icon-sm"
-              value={watcher.configYaml}
-              variant="ghost"
-            />
-            <CodeBlock
-              className="overflow-x-auto rounded-md border bg-background text-sm dark:bg-muted [&_pre]:p-4"
-              code={watcher.configYaml}
-              lang="yaml"
-            />
-          </div>
-        </WatcherYamlDisclosure>
-      ) : null}
+      <Card>
+        <CardHeader>
+          <CardTitle>History</CardTitle>
+          <CardDescription>
+            Every change, from Data Hub or from the config file on the PC.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <WatcherConfigHistory
+            canRestore={canEdit && state.editable}
+            restartPendingRevision={state.restartPending?.revision ?? null}
+            revisions={history}
+            savedSettings={state.savedSettings}
+            watcherId={watcher.id}
+          />
+          {watcher.configYaml ? (
+            <div className="border-t pt-4">
+              <WatcherYamlDisclosure>
+                <div className="relative">
+                  <CopyButton
+                    className="absolute top-1.5 right-1.5 z-10 text-muted-foreground"
+                    size="icon-sm"
+                    value={watcher.configYaml}
+                    variant="ghost"
+                  />
+                  <CodeBlock
+                    className="overflow-x-auto rounded-md border bg-background text-sm dark:bg-muted [&_pre]:p-4"
+                    code={watcher.configYaml}
+                    lang="yaml"
+                  />
+                </div>
+              </WatcherYamlDisclosure>
+            </div>
+          ) : null}
+        </CardContent>
+      </Card>
     </div>
   );
 }

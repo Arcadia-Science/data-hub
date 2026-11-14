@@ -1,6 +1,6 @@
 "use client";
 
-import { History, Loader2, RotateCcw } from "lucide-react";
+import { History, Loader2, Monitor, RotateCcw } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { type MouseEvent, useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -17,7 +17,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { ConfigRevision } from "@/lib/api/watcher-config/revisions";
 import {
@@ -25,11 +24,89 @@ import {
   settingsEqual,
   type WatcherConfigSettings,
 } from "@/lib/api/watcher-config/settings";
-import { ChangeList, ConfigRevisionStatusBadge } from "./watcher-config-status";
+import { ConfigRevisionStatusBadge } from "./watcher-config-status";
+
+/** Who made a revision: a person, or the config file on the instrument PC. */
+function RevisionAuthor({ revision }: { revision: ConfigRevision }) {
+  if (revision.source === "pc") {
+    return (
+      <span className="inline-flex items-center gap-1.5">
+        <Monitor aria-hidden="true" className="size-3.5" />
+        From the instrument PC
+      </span>
+    );
+  }
+  if (revision.createdBy) {
+    return (
+      <ActorLabel
+        actor={revision.createdBy}
+        nameClassName="font-normal text-foreground"
+      />
+    );
+  }
+  return <span>Data Hub</span>;
+}
 
 /**
- * The watcher's config changes, newest first. Admins can restore an older
- * revision, which saves its settings as a new change.
+ * What a revision changed, as one line: "{setting}: {before} → {after}", with
+ * one such pair for each setting that differs. The oldest revision has nothing
+ * before it, so it says where its settings came from.
+ */
+function ChangeSummary({
+  revision,
+  previous,
+  isOldestShown,
+  allShown,
+}: {
+  revision: ConfigRevision;
+  previous: ConfigRevision | undefined;
+  isOldestShown: boolean;
+  /** False when older revisions exist that the list doesn't load. */
+  allShown: boolean;
+}) {
+  if (!previous) {
+    if (isOldestShown && !allShown) {
+      return (
+        <p className="text-muted-foreground text-sm">
+          Older revisions aren&apos;t shown.
+        </p>
+      );
+    }
+    return (
+      <p className="text-sm">
+        {revision.source === "pc"
+          ? "Settings first reported by the watcher"
+          : "First saved settings"}
+      </p>
+    );
+  }
+  const changes = describeSettingsChanges(previous.settings, revision.settings);
+  if (changes.length === 0) {
+    return (
+      <p className="text-muted-foreground text-sm">
+        Same settings as the revision before.
+      </p>
+    );
+  }
+  return (
+    <ul className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+      {changes.map((change) => (
+        <li className="min-w-0 break-words" key={change.key}>
+          <span className="text-muted-foreground">{change.label}:</span>{" "}
+          <span className="font-mono text-[13px]">{change.from}</span>
+          <span aria-hidden="true"> → </span>
+          <span className="sr-only"> to </span>
+          <span className="font-mono text-[13px]">{change.to}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/**
+ * The watcher's config changes, newest first: each revision's number, state,
+ * author, time and a one-line summary of what changed. Admins can restore a
+ * past applied revision, which saves its settings as a new change.
  */
 export function WatcherConfigHistory({
   watcherId,
@@ -61,70 +138,64 @@ export function WatcherConfigHistory({
   }
 
   const latest = revisions[0];
+  const allShown = revisions.length < CONFIG_HISTORY_LIMIT_HINT;
 
   return (
     <>
-      <ol className="flex flex-col divide-y rounded-lg border bg-background dark:bg-muted">
+      <ol className="flex flex-col divide-y">
         {revisions.map((rev, index) => {
           const previous = revisions[index + 1];
-          const changes = previous
-            ? describeSettingsChanges(previous.settings, rev.settings)
-            : [];
-          // Any revision can be restored, including a rejected one once its
-          // cause is fixed, unless the server would refuse it as no change.
+          // Only an applied revision can be restored, and not one whose
+          // settings the server would refuse as no change.
           const restorable =
             canRestore &&
+            rev.status === "applied" &&
             !(savedSettings && settingsEqual(rev.settings, savedSettings));
           return (
-            <li className="flex flex-col gap-2 p-3 text-sm" key={rev.revision}>
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                <span className="font-medium">Revision {rev.revision}</span>
-                <Badge variant="secondary">
-                  {rev.source === "web" ? "Data Hub" : "Instrument PC"}
-                </Badge>
-                <ConfigRevisionStatusBadge status={rev.status} />
-                <span className="flex items-center gap-1.5 text-muted-foreground">
-                  {rev.createdBy ? (
-                    <>
-                      <ActorLabel actor={rev.createdBy} />
-                      <span>·</span>
-                    </>
-                  ) : null}
+            <li
+              className="flex flex-wrap items-start justify-between gap-3 py-3.5 first:pt-0 last:pb-0"
+              key={rev.revision}
+            >
+              <div className="flex min-w-0 flex-col gap-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-medium">Revision {rev.revision}</span>
+                  <ConfigRevisionStatusBadge status={rev.status} />
+                </div>
+                <div className="flex flex-wrap items-center gap-x-1.5 text-[13px] text-muted-foreground">
+                  <RevisionAuthor revision={rev} />
+                  <span aria-hidden="true">·</span>
                   <RelativeTime date={rev.createdAt.toISOString()} />
-                </span>
-                {restorable ? (
-                  <Button
-                    className="ml-auto"
-                    onClick={() => setRestoring(rev)}
-                    size="sm"
-                    type="button"
-                    variant="outline"
-                  >
-                    <RotateCcw data-icon="inline-start" />
-                    Restore
-                  </Button>
+                </div>
+                {rev.statusReason ? (
+                  <p className="break-words text-muted-foreground text-sm">
+                    {rev.statusReason}
+                  </p>
                 ) : null}
+                {rev.revision === restartPendingRevision ? (
+                  <p className="text-muted-foreground text-sm">
+                    Saved to the config file on the PC. Takes effect when the
+                    watcher restarts.
+                  </p>
+                ) : null}
+                <ChangeSummary
+                  allShown={allShown}
+                  isOldestShown={index === revisions.length - 1}
+                  previous={previous}
+                  revision={rev}
+                />
               </div>
-              {rev.statusReason ? (
-                <p className="break-words text-muted-foreground text-xs">
-                  {rev.statusReason}
-                </p>
+              {restorable ? (
+                <Button
+                  aria-label={`Restore revision ${rev.revision}`}
+                  onClick={() => setRestoring(rev)}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                >
+                  <RotateCcw data-icon="inline-start" />
+                  Restore
+                </Button>
               ) : null}
-              {rev.revision === restartPendingRevision ? (
-                <p className="text-muted-foreground text-xs">
-                  Saved to the config file on the PC. Takes effect when the
-                  watcher restarts.
-                </p>
-              ) : null}
-              {previous ? (
-                <ChangeList changes={changes} />
-              ) : (
-                <p className="text-muted-foreground text-xs">
-                  {revisions.length < CONFIG_HISTORY_LIMIT_HINT
-                    ? "First recorded settings."
-                    : "Older revisions aren't shown."}
-                </p>
-              )}
             </li>
           );
         })}

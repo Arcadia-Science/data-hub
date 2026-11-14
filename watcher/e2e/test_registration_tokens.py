@@ -149,6 +149,8 @@ def test_a_second_registration_for_an_instrument_with_a_live_watcher_is_refused(
     assert "already has an active watcher" in result.output
     assert first.watcher_id in result.output
     assert "deregister" in result.output.lower()
+    # It points at the instrument's watcher page, where an admin deregisters it.
+    assert f"/instruments/{instrument_id}/watcher" in result.output
     # The refused PC writes no config, and the instrument still has only the first watcher.
     assert not second.config_path.exists()
     live = server.query(

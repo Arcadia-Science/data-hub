@@ -9,7 +9,15 @@ import { useViewerTimeZone } from "@/components/viewer-time-zone-provider";
 import { todayDateString } from "@/lib/date";
 import { watcherDetailSearchParams } from "@/lib/search-params";
 
-export function StatusToolbar() {
+export function StatusToolbar({
+  defaultSince,
+}: {
+  /**
+   * The day the chart opens on when the URL names none. Today when omitted: a
+   * past watcher passes the day it was deregistered.
+   */
+  defaultSince?: string;
+}) {
   // Tying URL updates to the surrounding TablePendingProvider's transition lets
   // <HeartbeatChart> swap to a loading skeleton while the new server data is in
   // flight, instead of briefly flashing the empty state when the previously
@@ -22,7 +30,7 @@ export function StatusToolbar() {
   });
 
   const timeZone = useViewerTimeZone();
-  const today = todayDateString(timeZone);
+  const today = defaultSince ?? todayDateString(timeZone);
   const isNonDefault = filters.since !== null && filters.since !== today;
 
   return (

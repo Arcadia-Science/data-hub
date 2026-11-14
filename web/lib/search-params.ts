@@ -107,11 +107,12 @@ export const instrumentDetailParamsCache = createSearchParamsCache(
   instrumentDetailSearchParams
 );
 
-// Watcher detail page filters. `event_type` and `events_since` are controlled
-// by EventLogToolbar. `since` (heartbeat time range) is controlled by
-// StatusToolbar; defaults to today when absent.
+// Watcher page filters. `event_type` and `events_since` are controlled by
+// EventLogToolbar on the Activity tab. `since` (heartbeat time range) is
+// controlled by StatusToolbar on the Health tab; both default to today when
+// absent. The tab is the route, and `?watcher=` and `?focus=` are read by the
+// pages themselves.
 export const watcherDetailSearchParams = {
-  tab: parseAsString.withDefault("logs"),
   event_type: parseAsArrayOf(parseAsString).withDefault([]),
   since: parseAsString,
   events_since: parseAsString,

@@ -27,7 +27,15 @@ const EVENT_TYPES = [
   { value: "error", label: "Error" },
 ] as const;
 
-export function EventLogToolbar() {
+export function EventLogToolbar({
+  defaultSince,
+}: {
+  /**
+   * The day the log opens on when the URL names none. Today when omitted: a
+   * past watcher passes the day it was deregistered.
+   */
+  defaultSince?: string;
+}) {
   // shallow: false pushes filter changes to the URL and triggers a full
   // server-side re-render, so the event list refetches with the new filters.
   // startTransition ties the refetch to the surrounding table's pending UI.
@@ -39,7 +47,7 @@ export function EventLogToolbar() {
   });
 
   const timeZone = useViewerTimeZone();
-  const today = todayDateString(timeZone);
+  const today = defaultSince ?? todayDateString(timeZone);
   const hasFilters =
     filters.event_type.length > 0 ||
     (filters.events_since !== null && filters.events_since !== today);

@@ -1,10 +1,18 @@
 "use client";
 
-import { CircleAlert, CircleCheck, Clock, RotateCw, Undo2 } from "lucide-react";
+import {
+  CircleAlert,
+  CircleCheck,
+  Clock,
+  Info,
+  RotateCw,
+  Undo2,
+} from "lucide-react";
 import { RelativeTime } from "@/components/dashboard/relative-time";
 import { ActorLabel } from "@/components/token-actor";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { WatcherNotice } from "@/components/watchers/watcher-notice";
 import type {
   ConfigRevision,
   ConfigRevisionStatus,
@@ -13,16 +21,20 @@ import type {
 import type { WatcherConfigSettings } from "@/lib/api/watcher-config/settings";
 import { describeSettingsChanges } from "@/lib/api/watcher-config/settings";
 import { cn } from "@/lib/utils";
+import {
+  type ConfigNoticeKind,
+  pendingChangeAuthor,
+  rejectionReasonText,
+} from "@/lib/watchers/config-notice";
 
 const STATUS_BADGES: Record<
   ConfigRevisionStatus,
   { label: string; Icon: typeof Clock; className: string }
 > = {
   pending: {
-    label: "Pending",
+    label: "Change pending",
     Icon: Clock,
-    className:
-      "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300",
+    className: "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300",
   },
   applied: {
     label: "Applied",
@@ -96,6 +108,59 @@ export function ConfigChangeBadge({
     );
   }
   return null;
+}
+
+/**
+ * The one notice at the top of the Settings tab for the latest settings state:
+ * a change pending (blue), a change the watcher rejected (red, with its
+ * reason), or an edit made on the PC that waits for a restart (amber). Applied
+ * settings have no notice, so the page doesn't render this for them.
+ *
+ * `revision` is the one the notice is about: the pending or rejected change,
+ * or the PC edit.
+ */
+export function ConfigStateNotice({
+  kind,
+  revision,
+  viewerUserId,
+}: {
+  kind: ConfigNoticeKind;
+  revision: ConfigRevision;
+  viewerUserId: string;
+}) {
+  const time = <RelativeTime date={revision.createdAt.toISOString()} />;
+
+  if (kind === "pending") {
+    return (
+      <WatcherNotice icon={Info} title="Change pending" tone="info">
+        {pendingChangeAuthor(revision.createdBy, viewerUserId)} saved a change{" "}
+        {time}. The watcher picks it up within about a minute, then Current
+        settings updates.
+      </WatcherNotice>
+    );
+  }
+
+  if (kind === "rejected") {
+    const reason = rejectionReasonText(revision.statusReason);
+    return (
+      <WatcherNotice icon={CircleAlert} title="Change rejected" tone="danger">
+        The watcher couldn&apos;t apply the change saved {time}
+        {reason ? `: ${reason}` : ""}. It&apos;s still running its previous
+        settings.
+      </WatcherNotice>
+    );
+  }
+
+  return (
+    <WatcherNotice
+      icon={RotateCw}
+      title="Edited on PC — restart pending"
+      tone="warning"
+    >
+      Someone edited the config file on the instrument PC. The change takes
+      effect after the watcher restarts.
+    </WatcherNotice>
+  );
 }
 
 /**

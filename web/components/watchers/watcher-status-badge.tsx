@@ -167,8 +167,7 @@ export function WatcherStatusBadge({
           {reason ? <p className="break-all font-medium">{reason}</p> : null}
           <p>
             The watcher is running but can&apos;t find its watch folder. Fix the
-            folder on the PC, or change it from the watcher&apos;s Configuration
-            tab.
+            folder on the PC, or change it on the watcher&apos;s Settings tab.
           </p>
         </TooltipContent>
       </Tooltip>
