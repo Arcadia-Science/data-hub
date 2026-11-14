@@ -57,6 +57,17 @@ export function VersionCombobox({
       ? value
       : null;
 
+  // The list's keyboard highlight, as the value of the highlighted row. The
+  // list highlights its first row when it opens, which is "None" and reads as
+  // the current choice, so it starts on the row for the field's own value.
+  const selectedRowValue =
+    currentMissing === null
+      ? value.length === 0
+        ? noneLabel
+        : value
+      : `${currentMissing} current`;
+  const [highlighted, setHighlighted] = useState(selectedRowValue);
+
   function select(next: string) {
     onChange(next);
     setOpen(false);
@@ -66,7 +77,9 @@ export function VersionCombobox({
     <Popover
       onOpenChange={(next) => {
         setOpen(next);
-        if (!next) {
+        if (next) {
+          setHighlighted(selectedRowValue);
+        } else {
           onBlur?.();
         }
       }}
@@ -94,7 +107,7 @@ export function VersionCombobox({
         align="start"
         className="w-[var(--radix-popover-trigger-width)] p-0"
       >
-        <Command>
+        <Command onValueChange={setHighlighted} value={highlighted}>
           <CommandInput placeholder="Search versions…" />
           <CommandList id={listId}>
             <CommandEmpty>No versions found.</CommandEmpty>
