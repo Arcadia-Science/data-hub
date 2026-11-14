@@ -136,6 +136,12 @@ describe("Watcher pages", () => {
       },
     ];
 
+    // React's server render puts `<!-- -->` between adjacent text parts, so
+    // "Watcher for {name}" arrives as "Watcher for <!-- -->{name}".
+    function textOf(html: string) {
+      return html.replaceAll("<!-- -->", "");
+    }
+
     function expectTabLoaded(html: string, loaded: string) {
       // The root error screen, and the load error boundary's own message.
       expect(html).not.toContain("This page couldn’t load");
@@ -148,7 +154,7 @@ describe("Watcher pages", () => {
       const html = await res.text();
       expect(res.status).toBe(200);
       expectTabLoaded(html, loaded);
-      expect(html).toContain("Watcher for Watcher Page Instrument A");
+      expect(textOf(html)).toContain("Watcher for Watcher Page Instrument A");
       // The browser tab title, with the root layout's suffix.
       expect(html).toContain(
         "<title>Watcher Page Instrument A · Watcher | Data Hub</title>"
@@ -166,7 +172,7 @@ describe("Watcher pages", () => {
       const html = await res.text();
       expect(res.status).toBe(200);
       expectTabLoaded(html, loaded);
-      expect(html).toContain("Watcher for Watcher Page Instrument A");
+      expect(textOf(html)).toContain("Watcher for Watcher Page Instrument A");
       expect(html).not.toContain('aria-label="Watcher actions"');
     });
 
