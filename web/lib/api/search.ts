@@ -23,6 +23,7 @@ import {
   users,
 } from "@/lib/db/schema";
 import {
+  type Connection,
   type LegacyWatcherStatus,
   toLegacyWatcherStatus,
 } from "@/lib/instruments/connection";
@@ -98,6 +99,9 @@ export interface SearchFileResult {
 export type InstrumentMatchReason = "name" | "pattern";
 
 export interface SearchInstrumentResult {
+  // How the instrument is connected to its watcher, the same value its
+  // instrument responses carry. The badge reads it, with `status`.
+  connection: Connection;
   displayName: string;
   id: string;
   lastWatcherHeartbeatAt: string | null;
@@ -367,6 +371,7 @@ async function searchInstruments(
           id: row.id,
           displayName: row.displayName,
           status: row.status,
+          connection: row.connection,
           watcherStatus: toLegacyWatcherStatus(row.connection),
           lastWatcherHeartbeatAt:
             row.watcher?.lastHeartbeatAt?.toISOString() ?? null,

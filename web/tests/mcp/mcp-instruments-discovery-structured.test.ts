@@ -334,6 +334,46 @@ describe("instruments + discovery structuredContent", () => {
     expect(globalSearchOutputSchema.parse(parsed)).toEqual(parsed);
   });
 
+  it("global_search instrument results carry the connection their badge reads", () => {
+    const instrument = {
+      type: "instrument",
+      id: "test-plate-reader",
+      displayName: "Test Plate Reader",
+      status: "active",
+      connection: { state: "offline", reason: "folder_missing" },
+      watcherStatus: "offline",
+      lastWatcherHeartbeatAt: "2025-01-01T00:00:00.000Z",
+      runCount: 3,
+      matchReason: "name",
+      matchedPattern: null,
+    };
+    const result = {
+      runs: [],
+      files: [],
+      instruments: [instrument],
+      users: [],
+      comments: [],
+      counts: {
+        runs: 0,
+        files: 0,
+        instruments: 1,
+        users: 0,
+        comments: 0,
+        total: 1,
+      },
+    };
+    expect(globalSearchOutputSchema.parse(result)).toEqual(result);
+
+    // The output schema is strict, so a result without it would be refused.
+    const { connection: _connection, ...withoutConnection } = instrument;
+    expect(
+      globalSearchOutputSchema.safeParse({
+        ...result,
+        instruments: [withoutConnection],
+      }).success
+    ).toBe(false);
+  });
+
   it("get_system_status structuredContent matches text and schema", async () => {
     const result = await client.callTool({
       name: "get_system_status",

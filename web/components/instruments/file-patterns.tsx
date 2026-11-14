@@ -1,3 +1,5 @@
+"use client";
+
 import type { ComponentProps } from "react";
 import { Badge } from "@/components/ui/badge";
 import {

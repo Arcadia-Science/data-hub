@@ -3,6 +3,7 @@ import {
   instrumentStatusSchema,
   isoDateTime,
 } from "@/lib/api/openapi/schemas/common";
+import { instrumentConnectionSchema } from "./instruments.output";
 
 /** Success shape for `get_me` — matches `AuthenticatedUser` from `getUserById`. */
 export const getMeOutputSchema = z.object({
@@ -56,6 +57,7 @@ const searchInstrumentResultSchema = z.object({
   id: z.string(),
   displayName: z.string(),
   status: instrumentStatusSchema,
+  connection: instrumentConnectionSchema,
   watcherStatus: z.enum(["online", "offline", "no_watcher", "deregistered"]),
   lastWatcherHeartbeatAt: isoDateTime.nullable(),
   runCount: z.number().int(),

@@ -16,8 +16,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
-// Sets the instrument back to `active`. Previously deregistered watchers do
-// not reconnect automatically — a watcher must re-register.
+// Sets the instrument back to `active`. The watcher deregistered when it was
+// retired doesn't reconnect: a new one must be set up.
 export function ReactivateInstrumentDialog({
   instrumentId,
   displayName,
@@ -63,8 +63,8 @@ export function ReactivateInstrumentDialog({
           <AlertDialogTitle>Reactivate {displayName}?</AlertDialogTitle>
           <AlertDialogDescription>
             The instrument returns to Active and reappears in the sidebar and
-            dashboard. Any watchers deregistered when it was retired must
-            re-register to reconnect.
+            dashboard. Its watcher was deregistered when it was retired, so a
+            new watcher must be set up before new files arrive.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

@@ -17,27 +17,17 @@ import {
   UPLOAD_REQUEST_REVERT_GRACE_MS,
 } from "@/lib/api/watcher-status";
 import { formatTime } from "@/lib/date";
-import type { LegacyWatcherStatus } from "@/lib/instruments/connection";
 import { cn, formatRelativeTime } from "@/lib/utils";
 
 /**
- * Union of every status this badge can render:
- *   - `LegacyWatcherStatus` is the instrument-level status (online or not, or
- *     no watcher) used in the instruments table and instrument header. See
- *     `toLegacyWatcherStatus` in `lib/instruments/connection.ts`.
- *   - `EffectiveStatus` is the per-watcher state used in the watchers table
- *     and watcher detail header.
+ * Every status this badge can render: the per-watcher state on the watchers
+ * table and the watcher page's header, and `deregistered` for a past watcher.
+ * The instrument's own badge, for scientists, is `InstrumentBadge`.
  *
- * `watching` and `online` collapse to the same green "Online" treatment;
- * `stale` and `offline` collapse to the same destructive treatment but with
- * different labels ("Unresponsive" vs "Offline") since the aggregate badge
- * can't tell why an instrument's watchers are silent, while the per-watcher
- * badge can.
+ * `watching` reads "Online" and `stale` reads "Unresponsive", since the badge
+ * knows why a watcher is silent.
  */
-export type WatcherBadgeStatus =
-  // Includes `deregistered` (an active instrument whose only watcher was
-  // deregistered), which is distinct from `no_watcher` (never had one).
-  LegacyWatcherStatus | EffectiveStatus;
+export type WatcherBadgeStatus = EffectiveStatus | "deregistered";
 
 const ONLINE_CLASSNAME =
   "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300";
@@ -61,20 +51,11 @@ const STATUS_CONFIG: Record<
     className: string;
   }
 > = {
-  // Instrument-level aggregate
-  online: { label: "Online", Icon: Radio, className: ONLINE_CLASSNAME },
-  offline: { label: "Offline", Icon: WifiOff, className: OFFLINE_CLASSNAME },
-  no_watcher: {
-    label: "No Watcher",
-    Icon: WifiOff,
-    className: MUTED_NEUTRAL_CLASSNAME,
-  },
   deregistered: {
     label: "Deregistered",
     Icon: Unplug,
     className: MUTED_NEUTRAL_CLASSNAME,
   },
-  // Per-watcher
   watching: { label: "Online", Icon: Radio, className: ONLINE_CLASSNAME },
   stale: {
     label: "Unresponsive",
@@ -108,7 +89,7 @@ const STATUS_CONFIG: Record<
 // only for a stop after which the watcher is expected back (see
 // `RESTART_STOP_REASONS`). That tooltip says when the watcher starts to read
 // as unresponsive, and it is built separately below.
-const TOOLTIP_STATUSES = new Set<WatcherBadgeStatus>(["offline", "stale"]);
+const TOOLTIP_STATUSES = new Set<WatcherBadgeStatus>(["stale"]);
 
 const RESTART_STOP_LEAD: Record<RestartStopReason, string> = {
   [SYSTEM_SHUTDOWN_STATUS_REASON]: "Stopped for a Windows restart or shutdown.",
@@ -119,7 +100,6 @@ export function WatcherStatusBadge({
   status,
   lastOnlineAt,
   reason,
-  verbose = false,
   className,
 }: {
   status: WatcherBadgeStatus;
@@ -130,32 +110,21 @@ export function WatcherStatusBadge({
   reason?: string | null;
   /**
    * Most recent watcher heartbeat. When the badge is in an "unexpected
-   * silence" state (`offline` / `stale`) and this is provided, the tooltip
+   * silence" state (`stale`) and this is provided, the tooltip
    * leads with it so users can tell at a glance how long the watcher has
    * been silent. For a watcher that stopped for a restart, it sets the time
    * the tooltip gives for when the watcher starts to read as unresponsive.
    */
   lastOnlineAt?: Date | null;
-  /**
-   * When true, prefixes the aggregate online/offline labels with "Watcher"
-   * (e.g. "Watcher Online"). Useful in headers where the badge stands alone
-   * outside a status column. Has no effect on per-watcher labels or on
-   * `no_watcher`, where prefixing would be redundant or wrong.
-   */
-  verbose?: boolean;
   className?: string;
 }) {
   const timeZone = useViewerTimeZone();
   const { label, Icon, className: variantClassName } = STATUS_CONFIG[status];
-  const fullLabel =
-    verbose && (status === "online" || status === "offline")
-      ? `Watcher ${label}`
-      : label;
 
   const badge = (
     <Badge className={cn(variantClassName, className)}>
       <Icon />
-      {fullLabel}
+      {label}
     </Badge>
   );
 

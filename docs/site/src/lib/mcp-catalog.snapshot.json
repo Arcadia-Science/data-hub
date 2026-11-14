@@ -6633,6 +6633,44 @@
                     "inactive"
                   ]
                 },
+                "connection": {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "online",
+                        "restarting",
+                        "connecting",
+                        "offline"
+                      ]
+                    },
+                    "reason": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "folder_missing",
+                            "unresponsive",
+                            "stopped",
+                            "no_watcher",
+                            "deregistered"
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Why the instrument is offline. Null in every other state."
+                    }
+                  },
+                  "required": [
+                    "state",
+                    "reason"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Whether new files can reach Data Hub. `online`: the watcher checked in within 5 minutes. `restarting`: the watcher stopped for a Windows restart or an automatic update less than 15 minutes ago. `connecting`: the watcher registered and hasn't sent a heartbeat yet. `offline`: anything else. This does not take the instrument's status into account: a pending instrument can be `online`."
+                },
                 "watcherStatus": {
                   "type": "string",
                   "enum": [
@@ -6678,6 +6716,7 @@
                 "id",
                 "displayName",
                 "status",
+                "connection",
                 "watcherStatus",
                 "lastWatcherHeartbeatAt",
                 "runCount",

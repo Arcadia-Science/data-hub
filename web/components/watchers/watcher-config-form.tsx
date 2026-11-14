@@ -128,10 +128,9 @@ async function readError(res: Response, fallback: string) {
 }
 
 /**
- * Structured editor for a watcher's web-editable settings, used on the
- * watcher's Settings tab and in the instrument page's dialog. Saving stores a
- * pending revision that the watcher applies after its next heartbeat. Remount
- * it (with `key`) when the base revision changes.
+ * Structured editor for a watcher's web-editable settings, on the watcher's
+ * Settings tab. Saving stores a pending revision that the watcher applies after
+ * its next heartbeat. Remount it (with `key`) when the base revision changes.
  */
 export function WatcherConfigForm({
   watcherId,
@@ -140,7 +139,6 @@ export function WatcherConfigForm({
   savedSettings,
   editable,
   watcherVersion,
-  onSaved,
   focusField,
 }: {
   watcherId: string;
@@ -156,7 +154,6 @@ export function WatcherConfigForm({
   /** False below watcher 1.4.0: the form shows but can't be changed. */
   editable: boolean;
   watcherVersion: string | null;
-  onSaved?: () => void;
   /**
    * Puts the cursor in this field once, when the form first shows. A link
    * such as "Change folder" sets it through `?focus=` in the page's address.
@@ -277,7 +274,6 @@ export function WatcherConfigForm({
       toast.success("Change saved", {
         description: "The watcher applies it within about a minute.",
       });
-      onSaved?.();
       router.refresh();
     });
   }

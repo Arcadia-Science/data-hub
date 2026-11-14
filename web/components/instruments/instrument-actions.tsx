@@ -6,7 +6,6 @@ import {
   Pencil,
   Radio,
   RotateCcw,
-  SlidersHorizontal,
 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
@@ -22,30 +21,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { EditWatcherConfigDialog } from "@/components/watchers/edit-watcher-config-dialog";
 import type { InstrumentListItem } from "@/lib/api/instruments";
-import type { WatcherConfigState } from "@/lib/api/watcher-config/revisions";
 import { watcherPageHref } from "@/lib/watchers/routes";
-
-// Loaded only on the instrument page, for admins, when a live watcher exists.
-export interface InstrumentWatcherConfig {
-  hostname: string | null;
-  online: boolean;
-  state: WatcherConfigState;
-  watcherId: string;
-}
 
 // Both `InstrumentListItem` (table) and `InstrumentDetail` (header) satisfy
 // this, so one component drives both surfaces.
 export type InstrumentActionTarget = Pick<
   InstrumentListItem,
-  | "activeWatcherId"
-  | "displayName"
-  | "id"
-  | "instrumentType"
-  | "runCount"
-  | "status"
-  | "watcherCount"
+  "displayName" | "id" | "instrumentType" | "runCount" | "status" | "watcher"
 >;
 
 // `variant` only changes the trigger: `expanded` is the outline icon used
@@ -53,16 +36,12 @@ export type InstrumentActionTarget = Pick<
 export function InstrumentActions({
   instrument,
   variant = "menu",
-  watcherConfig = null,
 }: {
   instrument: InstrumentActionTarget;
   variant?: "menu" | "expanded";
-  /** Adds "Edit watcher config" when set (instrument page only). */
-  watcherConfig?: InstrumentWatcherConfig | null;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
-  const [watcherConfigOpen, setWatcherConfigOpen] = useState(false);
   const [retireOpen, setRetireOpen] = useState(false);
   const [reactivateOpen, setReactivateOpen] = useState(false);
 
@@ -115,26 +94,12 @@ export function InstrumentActions({
             <Pencil className="size-3.5" />
             Edit details
           </DropdownMenuItem>
-          {watcherConfig ? (
-            <DropdownMenuItem
-              onSelect={(e) => {
-                e.preventDefault();
-                setMenuOpen(false);
-                setWatcherConfigOpen(true);
-              }}
-            >
-              <SlidersHorizontal className="size-3.5" />
-              Edit watcher config
-            </DropdownMenuItem>
-          ) : null}
-          {instrument.activeWatcherId ? (
-            <DropdownMenuItem asChild>
-              <Link href={watcherPageHref(instrument.id)}>
-                <Radio className="size-3.5" />
-                View watcher
-              </Link>
-            </DropdownMenuItem>
-          ) : null}
+          <DropdownMenuItem asChild>
+            <Link href={watcherPageHref(instrument.id)}>
+              <Radio className="size-3.5" />
+              Watcher
+            </Link>
+          </DropdownMenuItem>
           <DropdownMenuSeparator />
           {isRetired ? (
             <DropdownMenuItem
@@ -170,24 +135,13 @@ export function InstrumentActions({
         onOpenChange={setEditOpen}
         open={editOpen}
       />
-      {watcherConfig ? (
-        <EditWatcherConfigDialog
-          hostname={watcherConfig.hostname}
-          instrumentId={instrument.id}
-          onOpenChange={setWatcherConfigOpen}
-          open={watcherConfigOpen}
-          state={watcherConfig.state}
-          watcherId={watcherConfig.watcherId}
-          watcherOnline={watcherConfig.online}
-        />
-      ) : null}
       <RetireInstrumentDialog
         displayName={instrument.displayName}
+        hasWatcher={instrument.watcher !== null}
         instrumentId={instrument.id}
         onOpenChange={setRetireOpen}
         open={retireOpen}
         runCount={instrument.runCount}
-        watcherCount={instrument.watcherCount}
       />
       <ReactivateInstrumentDialog
         displayName={instrument.displayName}

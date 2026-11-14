@@ -10,11 +10,10 @@ import {
   type LucideIcon,
   MessageSquare,
 } from "lucide-react";
-import { InstrumentStatusBadge } from "@/components/instruments/instrument-status-badge";
+import { InstrumentBadgePill } from "@/components/instruments/instrument-badge";
 import { Highlight } from "@/components/search/highlight";
 import { ActorAvatar } from "@/components/token-actor";
 import { UserAvatar } from "@/components/user-avatar";
-import { WatcherStatusBadge } from "@/components/watchers/watcher-status-badge";
 import { type Actor, actorDisplayName } from "@/lib/api/actor";
 import type {
   SearchCommentResult,
@@ -24,6 +23,7 @@ import type {
   SearchUserResult,
 } from "@/lib/api/search";
 import { toUserAvatarUser } from "@/lib/avatar-color";
+import { instrumentBadgeState } from "@/lib/instruments/connection";
 import { cn, formatBytes, formatRelativeTime } from "@/lib/utils";
 
 const IMAGE_EXTENSIONS = new Set([
@@ -173,20 +173,11 @@ export function SearchInstrumentRow({
     <ResultRowShell
       leading={<ResultRowIcon icon={Cpu} />}
       stat={
-        // Lifecycle badge for `pending`/`inactive`, watcher badge otherwise
-        // (mirrors the instruments table).
-        result.status === "active" ? (
-          <WatcherStatusBadge
-            lastOnlineAt={
-              result.lastWatcherHeartbeatAt
-                ? new Date(result.lastWatcherHeartbeatAt)
-                : null
-            }
-            status={result.watcherStatus}
-          />
-        ) : (
-          <InstrumentStatusBadge status={result.status} />
-        )
+        // The instruments table's badge, as a pill: the whole row is already a
+        // link, and a second one inside it would nest one `<a>` in another.
+        <InstrumentBadgePill
+          state={instrumentBadgeState(result.status, result.connection)}
+        />
       }
     >
       <span className={cn("block truncate font-medium text-sm")}>
