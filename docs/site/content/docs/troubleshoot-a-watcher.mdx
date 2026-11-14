@@ -34,6 +34,20 @@ The wizard rejects values that do not start with `dhub_`, and strips zero-width 
 - Confirm the instrument is `active`, not `pending`
 - On Windows, if the **service** will not start, see [Windows service](#windows-service)
 
+## The watcher stopped and says it was deregistered [#the-watcher-was-deregistered]
+
+Someone deleted the watcher’s registration on Data Hub. This happens when an admin deregisters the watcher in the web app, or retires its instrument (see [Deregister a watcher](/docs/manage-watchers#deregister-a-watcher)). Watcher 1.4.3 and later stop by themselves when this happens. The watcher logs one error:
+
+`This watcher was deregistered on Data Hub, so its registration no longer exists. Run 'data-hub-watcher init' to register it again.`
+
+You can find that error in `watcher.log` (see [Where are the logs?](#where-are-the-logs)). On Windows, it is also in the Application event log, and `service status` shows the service as stopped.
+
+The watcher waits for three heartbeats in a row that Data Hub answers with its “deregistered” reply. At the usual one-minute interval, that is about three minutes, so one wrong answer can’t stop the watcher. A different error, including Data Hub saying it has no watcher with that ID, doesn’t stop it. Once it has stopped, it uploads nothing and doesn’t come back on its own. Starting it again is refused with the same message. `watch` exits with code 3 when it stops this way, and when it refuses to start.
+
+To use the PC again, run `data-hub-watcher init` on the PC. This registers a new watcher for the instrument. If the instrument was retired, `init` is refused until an admin reactivates the instrument (see [Reactivate](/docs/retire-an-instrument#reactivate)). The PC keeps its upload history, so files that were already uploaded aren’t uploaded again. If `init` reports that the instrument already has an active watcher, see [Instrument already has an active watcher](#instrument-already-has-an-active-watcher). On Windows, then run `data-hub-watcher service start` from an Administrator terminal.
+
+Watchers older than 1.4.3 don’t stop. They keep running and get errors from Data Hub until someone stops them.
+
 ## The watcher shows “Waiting: folder not found” [#waiting-folder-not-found]
 
 Watcher 1.4.0 and later start even when the watch folder is missing, for example when a network drive isn’t connected yet or the folder was renamed. The watcher keeps sending heartbeats but watches nothing, and the **Watchers** page shows **Waiting: folder not found**. Hover over the badge to see which folder it’s looking for.
@@ -42,6 +56,8 @@ The watcher checks for the folder again once a minute and starts watching as soo
 
 - Create or reconnect the folder on the PC, or
 - Point the watcher at the right folder from the web app; see [Change a watcher’s config](/docs/manage-watchers#change-a-watchers-config)
+
+Watcher 1.4.3 and later also go back to this state when the folder disappears while they run, for example when a network drive drops or the folder is deleted. The watcher notices within a minute, looks again a few seconds later so that a drop of a moment doesn’t count, stops watching, and shows **Waiting: folder not found**. It gives a file that was uploading at that moment up to 10 seconds to finish, cuts it off if it isn’t done, and uploads it again once the folder is back. When the folder returns, the watcher starts watching it again without a restart, and queues a `watcher_started` event that says it resumed.
 
 Older watchers exit at startup instead, with an error that the watch directory doesn’t exist.
 
@@ -84,9 +100,19 @@ Watcher 1.2.2 and later retry a run report that failed because the watcher could
 
 The watcher records one `run_report_failed` event when a run’s report first fails. It doesn’t record another for the same run while it keeps retrying, even if more files in the run finish in the meantime.
 
-A failure that isn’t a connection problem or a server error, such as `401 Unauthorized`, is not retried, because it would fail the same way. Each one is recorded. Fix the cause, then restart the watcher.
+A failure that isn’t a connection problem or a server error, such as `401 Unauthorized`, is not retried, because it would fail the same way. Each one is recorded, except the refusals of a run that was deleted on Data Hub, which watcher 1.4.3 and later record once per run (see [A run was deleted on Data Hub](#a-run-was-deleted-on-data-hub)). Fix the cause, then restart the watcher.
 
 Older watchers try again only when another file in the run finishes or the watcher restarts. Restart the watcher to report the run.
+
+## A run was deleted on Data Hub [#a-run-was-deleted-on-data-hub]
+
+A run report or an upload request that fails with `409 Conflict` and a message that starts “This run was deleted on Data Hub” means someone deleted the run. Data Hub refuses a watcher’s report of a deleted run, and its requests to upload the run’s files, and the files in a refused report aren’t added to the run.
+
+Watcher 1.4.3 and later record one event for the run, a `run_report_failed` event or an `upload_failed` event, whichever the watcher meets first, and stop reporting the run and uploading its files until the watcher restarts. A restart tries once more, and records one more event if the run is still deleted. After you restore the run, restart the watcher to send its files. A file that someone requests with **Upload** on the run page doesn’t wait for the restart: the watcher asks Data Hub for each requested file, and once Data Hub accepts one, the watcher reports and uploads the run’s new files again.
+
+Earlier watchers record one event for each file, and do it again each time they start. After you restore the run, they send its files when another file of the run finishes or the watcher restarts.
+
+To stop the errors without restoring the run, move the run’s files out of the watch folder.
 
 ## Files are not being detected
 
@@ -161,7 +187,7 @@ Run `data-hub-watcher state forget --prefix your_folder_name/` on the instrument
 </Step>
 
 <Step>
-Start the watcher again. It reports the files in that folder again and uploads the ones Data Hub doesn’t have.
+Start the watcher again. It reports the files in that folder again and uploads the ones Data Hub doesn’t have. A run that was deleted on Data Hub refuses its files instead. See [A run was deleted on Data Hub](#a-run-was-deleted-on-data-hub).
 </Step>
 
 </Steps>

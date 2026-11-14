@@ -1,8 +1,11 @@
 """Event reporting: how the watcher's events get to the server, and what is lost on the way.
 
-The watcher queues events in memory and sends them in a batch on each heartbeat tick. These
-tests are about that reporter: batching and order, a flush that fails and the ``events_dropped``
-event that says so, and events that are lost when the watcher is killed.
+The watcher queues events, saves them in its state database until the server has them, and
+sends them in batches on each heartbeat tick. These tests are about that reporter: batching and
+order, a batch that fails (kept for the next flush while nothing reaches the server, dropped
+after three failed flushes when the server fails on it, or dropped at once when the server
+refuses it, with the ``events_dropped`` event that says so), and events that were queued when
+the watcher was killed.
 
 What each event says is shown by the scenario that causes it, in the file of its machine
 (``test_detection.py``, ``test_upload_auto.py``, ``test_upload_queue.py``, ``test_self_update.py``
@@ -22,7 +25,7 @@ from data_hub_watcher import testing_overrides
 from e2e_support.factory import WatcherFactory
 from e2e_support.files import SMALL, write_run
 from e2e_support.server import ServerView
-from e2e_support.waiting import KnownBugStillPresent, known_bug
+from e2e_support.waiting import wait_until
 
 pytestmark = pytest.mark.e2e
 
@@ -102,12 +105,37 @@ def test_events_queued_between_ticks_are_sent_together_on_the_next_one_in_order(
     assert stopped.message == pc.operator_stop_message
 
 
+@pytest.mark.covers("reporter.flush->failed_batch_kept")
+def test_a_batch_that_cannot_reach_the_server_is_kept_and_the_next_flush_sends_it(
+    watcher: WatcherFactory, server: ServerView, proxy: FaultProxy
+) -> None:
+    pc = watcher()
+    # The startup flush and the next two ticks' make three attempts each, and every one gets
+    # a 503. A batch that failed in a way that may have reached the server would be dropped
+    # after these three failed flushes, but nothing reached the server here.
+    with proxy.fault("status", method="POST", path=r"/events$", status=503, count=9) as refused:
+        pc.start()
+        wait_until(
+            lambda: refused.hits >= 9,
+            45,
+            lambda: server.dump(pc.watcher_id),
+            what="three failed flushes",
+        )
+    # The watcher keeps running ...
+    assert pc.is_running()
+    server.wait_for_watcher_status(pc.watcher_id, "watching")
+    # ... and the next tick sends the batch it could not send, as it was.
+    server.wait_for_event(pc.watcher_id, event_type="watcher_started")
+    server.wait_for_event(pc.watcher_id, event_type="config_synced")
+    assert server.events(pc.watcher_id, kind="events_dropped") == []
+
+
 @pytest.mark.covers(
-    "reporter.flush->failed_batch_dropped",
+    "reporter.flush->failing_batch_dropped",
     "reporter.dropped->reported_after_recovery",
     "event.events_dropped->emitted",
 )
-def test_a_batch_that_cannot_be_sent_is_dropped_and_the_next_flush_reports_the_gap(
+def test_a_batch_that_the_server_fails_on_every_time_is_dropped_after_three_flushes(
     watcher: WatcherFactory,
     server: ServerView,
     proxy: FaultProxy,
@@ -115,10 +143,53 @@ def test_a_batch_that_cannot_be_sent_is_dropped_and_the_next_flush_reports_the_g
     watch_dir: Path,
 ) -> None:
     pc = watcher()
-    # The startup flush makes three attempts and every one is refused.
-    with proxy.fault("status", method="POST", path=r"/events$", status=503, count=3) as refused:
+    # The startup flush and the next two ticks' make three attempts each, and every one gets
+    # a 500, as a batch with a value that the database refuses does. The batch stays queued
+    # between the flushes, and after the third it is dropped, so it can't keep every later
+    # event from being sent.
+    with proxy.fault("status", method="POST", path=r"/events$", status=500, count=9) as failing:
         pc.start()
-        assert refused.hits == 3
+        wait_until(
+            lambda: failing.hits >= 9,
+            45,
+            lambda: server.dump(pc.watcher_id),
+            what="three failed flushes",
+        )
+    # The watcher keeps running ...
+    assert pc.is_running()
+    server.wait_for_watcher_status(pc.watcher_id, "watching")
+    # ... and the next tick says that events were lost, and since when.
+    dropped = server.wait_for_event(pc.watcher_id, event_type="error", kind="events_dropped")
+    assert dropped.details["dropped_count"] == 2  # `config_synced` and `watcher_started`
+    assert dropped.message == "Dropped 2 watcher event(s) due to API errors"
+    assert server.events(pc.watcher_id, event_type="watcher_started") == []
+
+    # Events that come after it are stored normally.
+    write_run(watch_dir, "RUN001", {"small.csv": SMALL})
+    reported = server.wait_for_event(pc.watcher_id, event_type="run_reported")
+    assert reported.id > dropped.id
+    assert len(server.events(pc.watcher_id, kind="events_dropped")) == 1
+
+
+@pytest.mark.covers(
+    "reporter.flush->refused_batch_dropped",
+    "reporter.dropped->reported_after_recovery",
+    "event.events_dropped->emitted",
+)
+def test_a_batch_the_server_refuses_is_dropped_and_the_next_flush_reports_the_gap(
+    watcher: WatcherFactory,
+    server: ServerView,
+    proxy: FaultProxy,
+    instrument_id: str,
+    watch_dir: Path,
+) -> None:
+    pc = watcher()
+    # The startup flush sends the batch once and gets a 400. A 4xx is neither sent again nor
+    # kept for later: it would fail the same way, and every event queued after it would wait
+    # behind it.
+    with proxy.fault("status", method="POST", path=r"/events$", status=400, count=1) as refused:
+        pc.start()
+        assert refused.hits == 1
     # The watcher keeps running ...
     assert pc.is_running()
     server.wait_for_watcher_status(pc.watcher_id, "watching")
@@ -137,14 +208,6 @@ def test_a_batch_that_cannot_be_sent_is_dropped_and_the_next_flush_reports_the_g
 
 
 @pytest.mark.covers("reporter.queued->persisted_across_kill")
-@pytest.mark.xfail(
-    strict=True,
-    raises=KnownBugStillPresent,
-    reason=(
-        "ENG-2120: the queue lives in memory only, so events queued but "
-        "not yet sent when the watcher is killed are never delivered"
-    ),
-)
 def test_events_queued_before_a_kill_are_sent_after_the_restart(
     watcher: WatcherFactory, server: ServerView, instrument_id: str, watch_dir: Path
 ) -> None:
@@ -159,9 +222,8 @@ def test_events_queued_before_a_kill_are_sent_after_the_restart(
 
     pc.write_env(overrides={testing_overrides.HEARTBEAT_INTERVAL_ENV_VAR: "2"})
     pc.start()
-    # Intended: the `run_reported` and `file_uploaded` events of the first process are kept
-    # in the state database and sent by the second. Nothing else reports them: the run and
-    # the file are known to the new process and are not reported again.
-    with known_bug():
-        server.wait_for_event(pc.watcher_id, event_type="run_reported", timeout=10)
-        server.wait_for_event(pc.watcher_id, event_type="file_uploaded", timeout=10)
+    # The `run_reported` and `file_uploaded` events of the first process were kept in the state
+    # database and are sent by the second. Nothing else reports them: the run and the file are
+    # known to the new process and are not reported again.
+    server.wait_for_event(pc.watcher_id, event_type="run_reported", timeout=10)
+    server.wait_for_event(pc.watcher_id, event_type="file_uploaded", timeout=10)

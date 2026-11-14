@@ -11,7 +11,7 @@ where the event comes from.
 
 from __future__ import annotations
 
-from e2e_support.catalog.model import Transition, covered, excluded, xfail_bug
+from e2e_support.catalog.model import Transition, covered, excluded
 
 MACHINE = "events"
 
@@ -25,9 +25,26 @@ TRANSITIONS: tuple[Transition, ...] = (
     ),
     covered(
         MACHINE,
-        "reporter.flush->failed_batch_dropped",
-        "A flush that fails all three attempts (503 on the events route) drops that batch "
-        "and the watcher keeps running.",
+        "reporter.flush->failed_batch_kept",
+        "A flush that gets no answer from the server (a connection error, or a 502, 503 or "
+        "504, shown with a 503 on the events route) keeps its batch in the state database for "
+        "as long as it takes, however many flushes fail. The watcher keeps running, and the "
+        "next flush that gets through sends the batch. Nothing is reported as dropped.",
+    ),
+    covered(
+        MACHINE,
+        "reporter.flush->failing_batch_dropped",
+        "A batch that fails in a way that may have reached the server (a 500 on the events "
+        "route; a read timeout is the other) is kept for the next flush, and dropped when its "
+        "events have been in three failed flushes, so a batch that the server can't store "
+        "doesn't keep every later event from being sent. The watcher keeps running.",
+    ),
+    covered(
+        MACHINE,
+        "reporter.flush->refused_batch_dropped",
+        "A batch that the server refuses with a 4xx (400 on the events route) is sent once "
+        "and dropped, not retried and not kept, so it can't keep every later event from being "
+        "sent. The watcher keeps running.",
     ),
     covered(
         MACHINE,
@@ -35,12 +52,11 @@ TRANSITIONS: tuple[Transition, ...] = (
         "The next successful flush starts with an `events_dropped` event that says how many "
         "events were dropped and since when.",
     ),
-    xfail_bug(
+    covered(
         MACHINE,
         "reporter.queued->persisted_across_kill",
         "Events queued but not yet sent when the watcher is killed are kept in the state "
         "database and sent after the restart.",
-        "ENG-2120",
     ),
     excluded(
         MACHINE,

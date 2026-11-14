@@ -8,7 +8,7 @@ Code: ``monitor.py`` (``FileMonitor``: pattern filter, stability check, initial 
 
 from __future__ import annotations
 
-from e2e_support.catalog.model import Transition, covered, xfail_bug
+from e2e_support.catalog.model import Transition, covered
 
 MACHINE = "detection"
 
@@ -144,13 +144,13 @@ TRANSITIONS: tuple[Transition, ...] = (
         "it remembers that the server refused it as deleted. Once the watcher restarts, it "
         "reports the files the refusal left behind, and the next file of the run.",
     ),
-    xfail_bug(
+    covered(
         MACHINE,
         "run.deleted->rereport_conflict",
-        "Reporting a run that an admin soft-deleted (a watcher that starts without that run in "
-        "its state database, for example after `state forget`) is refused with a 409, as "
-        "updating it is, and attaches no files to it.",
-        "ENG-2114",
+        "A watcher whose state database has no record of a run an admin deleted (for example "
+        "after `state forget`) reports that run again. The server refuses the report with a 409, "
+        "as it refuses an update to the run, and attaches none of the report's files. The watcher "
+        "records a `run_report_failed` event for it (`operation: create`, `status_code: 409`).",
     ),
     covered(
         MACHINE,
@@ -160,13 +160,12 @@ TRANSITIONS: tuple[Transition, ...] = (
         "(with `reason: run_deleted`) for the run in each start, and no update for its other "
         "files. After the admin restores the run, the next start sends every file.",
     ),
-    xfail_bug(
+    covered(
         MACHINE,
         "file.dismissed_path->redetected",
-        "A new file at a path whose earlier file was dismissed (a different size or "
-        "modification time), reported by a watcher that forgot the old one with "
-        "`state forget`, appears on the server as `detected`.",
-        "ENG-2115",
+        "A different file at a path whose earlier file was dismissed (a different size or "
+        "creation time), reported by a watcher that forgot the old one with `state forget`, "
+        "appears on the server as a new `detected` file. The dismissed file stays dismissed.",
     ),
     covered(
         MACHINE,

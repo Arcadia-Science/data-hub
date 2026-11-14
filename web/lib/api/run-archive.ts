@@ -68,12 +68,15 @@ export type PrepareRunArchiveResult =
       archiveKey: string;
       // The run's stored ID, which can differ from the request's by spaces.
       runId: string;
+      // Nobody has claimed the run, and it isn't deleted.
+      unclaimed: boolean;
     }
   | {
       ok: true;
       status: "building";
       jobId: string;
       runId: string;
+      unclaimed: boolean;
       // True when this call kicked off the Lambda invocation (vs. joining
       // an in-flight build started by another request). Useful for
       // logging; clients shouldn't branch on it.
@@ -131,6 +134,8 @@ export async function prepareRunArchive(
     };
   }
 
+  const unclaimed = run.attributions.length === 0 && run.deletedAt === null;
+
   const fingerprint = fingerprintFiles(
     downloadable.map((f) => ({ id: f.id, s3Key: f.s3Key }))
   );
@@ -164,6 +169,7 @@ export async function prepareRunArchive(
       archiveBucket,
       archiveKey,
       runId: run.runId,
+      unclaimed,
     };
   }
 
@@ -213,6 +219,7 @@ export async function prepareRunArchive(
     status: "building",
     jobId: job.id,
     runId: run.runId,
+    unclaimed,
     ownsBuild,
     retryAfterSeconds: estimateRetryAfterSeconds({
       fileCount: downloadable.length,

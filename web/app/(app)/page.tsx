@@ -38,6 +38,7 @@ import {
 } from "@/lib/api/instrument-runs";
 import { getRecentActiveInstrumentsForDashboard } from "@/lib/api/instruments";
 import { listCommentFeed } from "@/lib/api/run-comments";
+import { parseHasNotebookLinkParam } from "@/lib/api/validators";
 import { auth } from "@/lib/auth";
 import { startOfTodayISO } from "@/lib/date";
 import { dashboardParamsCache, hasActiveFilters } from "@/lib/search-params";
@@ -179,6 +180,7 @@ async function DashboardRunsSection({
       perPage: params.per_page,
       includeDeleted: params.include_deleted,
       ranBy: params.ran_by ?? undefined,
+      hasNotebookLink: parseHasNotebookLinkParam(params.has_notebook_link),
       statuses: params.status.length > 0 ? params.status : undefined,
       sort: params.sort,
       order: params.order,

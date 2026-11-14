@@ -6,6 +6,10 @@ import {
   type RanByOption,
   RUNS_TABLE_EDGE_PADDING,
 } from "@/components/instruments/runs-table/index";
+import {
+  NOTEBOOK_LINK_FILTER_OPTIONS,
+  NotebookLinksCell,
+} from "@/components/instruments/runs-table/notebook-links-cell";
 import { RanByCell } from "@/components/instruments/runs-table/ran-by-cell";
 import { RawFileColumnHeader } from "@/components/instruments/runs-table/raw-file-column-header";
 import { RunIdCell } from "@/components/instruments/runs-table/run-id-cell";
@@ -96,6 +100,14 @@ export function RunsTable({
                 "Ran By"
               )}
             </TableHead>
+            <TableHead>
+              <FilterableColumnHeader
+                label="Lab Notebook"
+                options={NOTEBOOK_LINK_FILTER_OPTIONS}
+                paramKey="has_notebook_link"
+                paramsSource="dashboard"
+              />
+            </TableHead>
             <RunTimeHeads />
           </TableRow>
         </TableHeader>
@@ -132,6 +144,9 @@ export function RunsTable({
                     runId={row.run_id}
                   />
                 </TableCell>
+                <TableCell>
+                  <NotebookLinksCell links={row.notebook_links} />
+                </TableCell>
                 <RunTimeCells row={row} />
               </TableRow>
             );
@@ -164,6 +179,7 @@ export function RunsTableSkeleton() {
               <RawFileColumnHeader label="Size" />
             </TableHead>
             <TableHead>Ran By</TableHead>
+            <TableHead>Lab Notebook</TableHead>
             <TableHead className="text-right">Run Started</TableHead>
             <TableHead className="text-right">Last Updated</TableHead>
           </TableRow>
@@ -188,6 +204,9 @@ export function RunsTableSkeleton() {
               </TableCell>
               <TableCell>
                 <Skeleton className="h-6 w-16" />
+              </TableCell>
+              <TableCell>
+                <Skeleton className="h-4 w-28" />
               </TableCell>
               <TableCell className="text-right">
                 <Skeleton className="ml-auto h-4 w-20" />

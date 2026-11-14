@@ -10,6 +10,7 @@ import requests
 
 from data_hub_watcher.constants import (
     RUN_DELETED_REASON,
+    WATCHER_DEREGISTERED_ERROR_CODE,
     WATCHER_VERSION,
     WATCHER_VERSION_HEADER,
 )
@@ -29,6 +30,7 @@ from data_hub_watcher.models import (
     RunDetailResponse,
     RunResponse,
     UploadQueueResponse,
+    WatcherResponse,
     WatcherUpdateInfoResponse,
 )
 
@@ -61,6 +63,24 @@ class ApiError(Exception):
         A 4xx needs someone to fix the cause, and replaying it would fail the same way.
         """
         return self.status_code == 0 or self.status_code >= 500
+
+    @property
+    def is_deregistered_reply(self) -> bool:
+        """True for the server's reply to a deregistered watcher.
+
+        That is a 404 with the error code `WATCHER_DEREGISTERED`, which Data Hub sends from the
+        heartbeat route and `GET /watchers/{id}` when the watcher's registration was deleted.
+        A watcher ID that the server has no row for gets a plain `NOT_FOUND` instead, which
+        says nothing about this watcher's registration (rows may have gone missing from the
+        server's database), and neither does a 404 from anything else on the way, such as an
+        HTML page from a proxy or a failed deploy (`detail` is `None`). Any other status or
+        code is some other problem. None of those count.
+        """
+        return (
+            self.status_code == 404
+            and self.detail is not None
+            and self.detail.code == WATCHER_DEREGISTERED_ERROR_CODE
+        )
 
 
 def is_run_deleted(exc: BaseException) -> TypeGuard[ApiError]:
@@ -225,6 +245,17 @@ class DataHubClient:
             payload["os_info"] = os_info
         resp = self._request("POST", "/watchers/register", json=payload)
         return RegisterWatcherResponse.model_validate(resp.json())
+
+    def get_watcher(self, watcher_id: str) -> WatcherResponse:
+        """Fetch a watcher that is still registered (`GET /watchers/{id}`).
+
+        A deregistered watcher gets a 404 with the code `WATCHER_DEREGISTERED`
+        (`ApiError.is_deregistered_reply`), and a watcher ID the server has no row for gets
+        `NOT_FOUND`. The watcher's own token has the scope for it, `watchers:read`, which it
+        already uses for the upload queue.
+        """
+        resp = self._request("GET", f"/watchers/{watcher_id}")
+        return WatcherResponse.model_validate(resp.json())
 
     def push_config(
         self,

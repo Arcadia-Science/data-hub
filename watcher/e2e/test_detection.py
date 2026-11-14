@@ -27,7 +27,7 @@ from e2e_support.factory import WatcherFactory
 from e2e_support.files import LARGE, SMALL, GrowingFile, payload, write_file, write_run
 from e2e_support.proxy_helpers import wait_for_answer
 from e2e_support.server import EventRow, ServerView
-from e2e_support.waiting import KnownBugStillPresent, known_bug, stays_true, wait_until
+from e2e_support.waiting import stays_true, wait_until
 
 pytestmark = pytest.mark.e2e
 
@@ -723,13 +723,7 @@ def test_a_deleted_run_refuses_updates_and_catches_up_after_it_is_restored(
     assert len(error_events(server, pc.watcher_id, "run_report_failed")) == 1
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=KnownBugStillPresent,
-    reason="ENG-2114: the POST of a deleted run returns 200 "
-    "and attaches the files instead of a 409",
-)
-@pytest.mark.covers("run.deleted->rereport_conflict")
+@pytest.mark.covers("run.deleted->rereport_conflict", "event.run_report_failed->emitted")
 def test_reporting_a_deleted_run_again_is_refused_and_attaches_no_files(
     watcher: WatcherFactory,
     server: ServerView,
@@ -769,9 +763,16 @@ def test_reporting_a_deleted_run_again_is_refused_and_attaches_no_files(
         lambda: server.dump(pc.watcher_id, instrument_id),
         what="the server's answer to the run report",
     )
-    with known_bug():
-        assert status == 409, "the server accepted a report of a deleted run"
-        assert server.file(instrument_id, "RUN001", "RUN001/second.csv") is None
+    assert status == 409, "the server accepted a report of a deleted run"
+    assert server.file(instrument_id, "RUN001", "RUN001/second.csv") is None
+
+    # The operator sees the refusal in the Event Log, in the server's own words.
+    failed = server.wait_for_event(pc.watcher_id, event_type="error", kind="run_report_failed")
+    assert failed.details["run_id"] == "RUN001"
+    assert failed.details["operation"] == "create"
+    assert failed.details["status_code"] == 409
+    assert failed.message.startswith("Failed to report run RUN001: ")
+    assert "deleted on Data Hub" in failed.message
 
 
 @pytest.mark.covers("run.deleted->refusal_reported_once_per_start")
@@ -936,12 +937,6 @@ def test_a_run_with_a_space_at_the_end_of_its_id_gets_its_files(
     assert error_events(server, pc.watcher_id) == []
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=KnownBugStillPresent,
-    reason="ENG-2115: the dismissed file's path stays unique in "
-    "its run, so the report of a new file at that path is dropped without a trace",
-)
 @pytest.mark.covers("file.dismissed_path->redetected")
 def test_a_new_file_at_a_dismissed_path_is_detected(
     watcher: WatcherFactory,
@@ -967,11 +962,17 @@ def test_a_new_file_at_a_dismissed_path_is_detected(
     server.wait_for_events(pc.watcher_id, event_type="run_reported", count=2)
 
     row = server.file(instrument_id, "RUN001", "RUN001/a.csv", include_deleted=False)
-    with known_bug():
-        assert row is not None, "the new file at the dismissed path is not on the server"
-        assert row.status == "detected"
-        assert row.size_bytes == 900
-        assert row.id != bad.id
+    assert row is not None, "the new file at the dismissed path is not on the server"
+    assert row.status == "detected"
+    assert row.size_bytes == 900
+    assert row.id != bad.id
+    # The dismissed file stays dismissed and keeps its own size.
+    at_path = server.files(instrument_id, "RUN001", include_deleted=True)
+    old = next((f for f in at_path if f.id == bad.id), None)
+    assert old is not None, "the dismissed file is gone from the server"
+    assert old.deleted_at is not None, "the dismissed file is no longer dismissed"
+    assert old.size_bytes == 700
+    assert len(at_path) == 2
 
 
 # ---------------------------------------------------------------------------

@@ -617,6 +617,14 @@ class Uploader:
         value keep their previous behaviour. Production wiring (see
         ``runtime.build_runtime``) reads this from the per-instrument
         config.
+    watch_folder_unavailable:
+        Called before the uploader gives up on a file it can't find or counts a failed
+        attempt against it. Returns whether the watch folder itself is gone or not
+        answering (and asks the supervisor to check it), in which case the file isn't
+        missing, the folder is: the file's `pending_uploads` row or place in the
+        server's queue stays, and nothing is counted. `None` (unit tests) means
+        the folder is never gone. It is not called once a stop was requested: a stop
+        isn't a missing file either, and the same applies without a look.
     deleted_runs:
         The runs the server refused because they were deleted on Data Hub. Share the
         run detector's. An upload-URL request refused for that reason adds its run, and
@@ -637,6 +645,7 @@ class Uploader:
         watch_directory: Path,
         upload_parallelism: int = 1,
         stop_event: threading.Event | None = None,
+        watch_folder_unavailable: Callable[[], bool] | None = None,
         deleted_runs: DeletedRuns | None = None,
     ) -> None:
         self._client = client
@@ -646,6 +655,7 @@ class Uploader:
         self._instrument_id = instrument_id
         self._watcher_id = watcher_id
         self._watch_dir = watch_directory
+        self._watch_folder_unavailable = watch_folder_unavailable
         if upload_parallelism < 1:
             raise ValueError(f"upload_parallelism must be >= 1, got {upload_parallelism}")
         self._parallelism = upload_parallelism
@@ -727,13 +737,6 @@ class Uploader:
         )
         self._s3_session.mount("https://", adapter)
         self._s3_session.mount("http://", adapter)
-        # Counter mutations from upload worker threads are protected
-        # by the GIL on the underlying ``int`` increment, but use an
-        # explicit lock anyway so we can later move to ``threading.
-        # Lock``-free atomics or ``itertools.count`` without a behaviour
-        # change. Cheap enough at the per-file cadence that the
-        # serialisation cost is negligible.
-        self._counters_lock = threading.Lock()
         # Files with an upload in progress, keyed by resolved path. The auto
         # path and the queue worker can reach the same file, and a second
         # multipart start makes the server abort the first one.
@@ -941,6 +944,9 @@ class Uploader:
         path = waiting.path
         key = relative_key(path, self._watch_dir)
         if not _is_file(path):
+            if self._folder_is_gone():
+                # Not the file that is missing. It keeps waiting, and its row stays.
+                return
             self._stop_waiting(waiting)
             self._drop_missing_pending(key, waiting.run_id, path)
             return
@@ -961,6 +967,22 @@ class Uploader:
         # failed for another reason was reported or logged when it failed, and
         # its row stays for the next start's retry, as for any failed upload.
         self._stop_waiting(waiting)
+
+    def _folder_is_gone(self) -> bool:
+        """Whether a file that can't be found is not missing, because of the folder or a stop.
+
+        Asked before a file that can't be found is dropped, or counts against its attempts:
+        in the time between the folder disappearing and the supervisor moving to the
+        waiting state, every file in it looks missing. The callback says whether the
+        folder itself is gone or not answering, and asks the supervisor to check it at once.
+
+        A stop is not a missing file either. It answers `True` at once, without a look at
+        the folder: the look has a limit of its own, which `abort` can't cut short, and
+        this thread is wanted back before the stop's limit.
+        """
+        if self._stop_requested():
+            return True
+        return self._watch_folder_unavailable is not None and self._watch_folder_unavailable()
 
     def _drop_missing_pending(self, relative_path: str, run_id: str, path: Path) -> None:
         """Give up on a pending upload whose file is no longer on disk."""
@@ -993,6 +1015,9 @@ class Uploader:
         # for traversal the way server-supplied queue paths are.
         path = self._watch_dir / pending.relative_path
         if not _is_file(path):
+            if self._folder_is_gone():
+                # Not the file that is missing: the row stays for the next start.
+                return
             self._drop_missing_pending(pending.relative_path, pending.run_id, path)
             return
         try:
@@ -1015,6 +1040,9 @@ class Uploader:
             # start uploads the file. A run that stays deleted costs one or a few requests per
             # start (up to `upload_parallelism` from the rows before the first refusal fills
             # the set, and one from the detector), with no event for each of its files.
+            return
+        if self._folder_is_gone():
+            # Neither is one that failed because its folder went away.
             return
         attempts = self._state_db.bump_pending_upload_attempts(pending.relative_path)
         if attempts < MAX_PENDING_UPLOAD_ATTEMPTS:
@@ -1246,6 +1274,10 @@ class Uploader:
             refused = self._last_refusal.run_id == qf.run_id
             reason = "upload_failed"
         else:
+            if self._folder_is_gone():
+                # Not the file that is missing. The request stays queued, and the next
+                # poll (or the next runtime) tries it again. No error, no attempt.
+                return
             ok = False
             reason = "missing"
             # Throttle: surface the visible "missing" error only on the
@@ -1276,6 +1308,10 @@ class Uploader:
             # failed attempt, so it can't use up the last one and cancel the
             # request: the file stays queued for the next poll or runtime. Nor is
             # an upload that Data Hub refused just now because the run was deleted.
+            return
+        if self._folder_is_gone():
+            # An upload that failed because its folder went away isn't the file's
+            # failure either.
             return
 
         attempt_count += 1
@@ -1352,19 +1388,16 @@ class Uploader:
     # ------------------------------------------------------------------
 
     def _bump_errors(self) -> None:
-        """Increment the shared error counter under ``_counters_lock``.
+        """Count an error for the next heartbeat.
 
-        Centralised so the parallel upload threads
-        never race the heartbeat thread reading these values for its
-        per-tick payload.
+        `WatcherCounters` takes its own lock, so the parallel upload threads never race the
+        heartbeat thread, which takes the counts out for its payload.
         """
-        with self._counters_lock:
-            self._counters.errors += 1
+        self._counters.add_errors()
 
     def _bump_files_uploaded(self) -> None:
-        """Increment the shared success counter under ``_counters_lock``."""
-        with self._counters_lock:
-            self._counters.files_uploaded += 1
+        """Count an uploaded file for the next heartbeat."""
+        self._counters.add_files_uploaded()
 
     def _backoff(self, attempt: int) -> None:
         self._wait(UPLOAD_RETRY_BASE_DELAY * (2**attempt))
@@ -2208,9 +2241,23 @@ class UploadQueueWorker:
         self._thread: threading.Thread | None = None
 
     def start(self) -> None:
-        self._stop_event.clear()
+        """Start the thread, which runs until the stop event is set.
+
+        A stop that was requested before this call stays requested: the thread polls nothing
+        and uploads nothing, because the uploader starts no file once the event is set. The
+        event is not cleared here, since a heartbeat that learns the watcher was deregistered
+        sets it (`Uploader.request_stop`) and a start must not undo that. A worker is not
+        restarted after `stop`: each runtime builds its own worker and event.
+        """
         self._thread = threading.Thread(target=self._run, daemon=True, name="upload-worker")
         self._thread.start()
+
+    def has_exited(self) -> bool:
+        """Whether the thread is gone: it never started, or it ended after a stop.
+
+        Signals nothing, unlike `stop`, so it can be asked again and again.
+        """
+        return self._thread is None or not self._thread.is_alive()
 
     def stop(self, timeout: float | None = None) -> bool:
         """Signal the loop and join it. Returns whether the thread exited.

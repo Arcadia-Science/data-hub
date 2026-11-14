@@ -37,7 +37,9 @@ Home and the instrument pages share the same four controls:
 - **Add filter**: filter by run status, or turn on **Show deleted runs**
 - **Column headers**: sort by **Run Started**, **Last Updated**, size, who ran it, or any instrument-specific column
 
-**Run Started** is when the instrument acquired the run. **Last Updated** changes when the run’s files change, or when someone edits, claims, or comments on it. The default order is newest run first. The sort order is saved in the page link, so a link you share opens with the same order.
+The **Lab Notebook** column header filters the list to runs that have a [lab notebook link](#lab-notebook), or to runs that don’t.
+
+**Run Started** is when the instrument acquired the run. **Last Updated** changes when the run’s files change, or when someone edits, claims, or comments on it, or changes its lab notebook links. The default order is newest run first. The sort order is saved in the page link, so a link you share opens with the same order.
 
 ### What each run status means [#run-status]
 
@@ -60,13 +62,15 @@ A run with files in several states shows the first status in this table that app
 
 Press **⌘&nbsp;K** (macOS) or **Ctrl&nbsp;K** (Windows/Linux) to open global search from any page. Results are grouped into runs, files, instruments, users, and comments. That means you can also look up a colleague’s work or the text of a lab note. A file hit opens the parent run with the files table already filtered to that file.
 
+Runs also match on their [lab notebook links](#lab-notebook). Paste a notebook page’s URL to find every run linked to it, or search for a link’s label.
+
 ![Global search modal with results for runs and files](/images/search-modal.webp)
 
 ## Open a run and inspect results [#open-run-detail]
 
 Each run has a details page at `/instruments/your_instrument_id/runs/your_run_id`. The arrows beside the run name step you to the next or previous run without going back to the list.
 
-The top of the page lists who ran it, the number of raw files, and their total size. What you see below that depends on the instrument type and whether a processor ran:
+The top of the page lists who ran it, the number of raw files, and their total size. Below that, the **Lab notebooks** section links to the notebook pages for the experiment; see [Link a run to its lab notebook](#lab-notebook). What you see after that depends on the instrument type and whether a processor ran:
 
 - Metadata tags for extracted fields, such as experiment type, wavelength, or temperature
 - Processed reports such as tables, images, PDFs, and videos, including interactive plate maps for plate readers and a video player for DishCam runs
@@ -96,6 +100,27 @@ While files are uploading, queued, or processing, the run page checks for update
 
 Use **Claim** on the run details page to attribute yourself. You can claim or unclaim your own user only, so nobody else can attribute a run to you. Claims show on the run and appear in “ran by” filters on Home and elsewhere. API tokens can’t claim runs; a signed-in person has to.
 
+### Asked after a download [#claim-prompt]
+
+When you download a run archive or a file from a run nobody has claimed, Data Hub asks **Did you run this?** in a card near the bottom of the page. Choose **I ran this** to claim the run, or **Not me** so that browser doesn’t ask about the run again. Downloading several runs from a runs list asks once about all the unclaimed ones, and **I ran these** claims them all.
+
+An AI assistant connected to the [MCP server](/docs/mcp) learns the same thing when it downloads from an unclaimed run, so it can ask you and claim the run for you.
+
+## Link a run to its lab notebook [#lab-notebook]
+
+A run can link to the lab notebook pages for its experiment, so whoever analyzes it can read how it was set up. Any web page works, such as a Notion or Google Docs page.
+
+On the run page, choose **Add link** in the **Lab notebooks** section, paste the page’s URL, and give it a label if you like. Without a label, the link is named after the last part of its URL, which for a Notion page is its title. Tick **I ran this run** to claim the run at the same time. Each link shows who added it and when; use its **⋯** menu to edit, copy, or remove it.
+
+- A run can have up to 20 links, but only one to each page.
+- Two URLs count as the same page when they differ only in `http` or `https`, `www.`, a trailing slash, the part after `#`, or tracking parameters such as `utm_source`. Notion links count as the same page when they have the same page ID, so a link copied before the page was renamed still matches.
+- Anyone signed in can add, edit, or remove any link.
+- A deleted run keeps its links, but they can’t change until the run is restored.
+
+Runs tables show each run’s first link in the **Lab Notebook** column, with **+1**, **+2**, and so on when there are more. Filter that column to **No link** to find runs that still need one. To link many runs at once, select them and choose **Add notebook link**; see [Act on several runs at once](#bulk-actions).
+
+Scripts can manage links through the [REST API](/docs/api) with a token that has the `runs:link` scope. An AI assistant connected to the [MCP server](/docs/mcp) can add, edit, and remove them with the `add_notebook_link`, `update_notebook_link`, and `remove_notebook_link` tools.
+
 ## Download files [#download-files]
 
 From the files table you can:
@@ -117,9 +142,11 @@ Select the checkbox on one or more run rows to open an action bar at the bottom 
 - **Upload**: ask the watcher to upload files that are still on the instrument PC
 - **Download**: download a zip of each selected run
 - **Reprocess**: run server-side processing again, including on runs whose files have stalled
+- **Add notebook link**: link every selected run to the same [lab notebook](#lab-notebook) page. Runs that already link to it keep their link and are skipped
+- **Remove notebook link**: choose from the links on the selected runs, and remove them from every selected run
 - **Delete**: mark the selected runs deleted
 
-**Upload**, **Download**, **Reprocess**, and **Delete** appear only when every selected run allows them. For example, **Reprocess** is hidden if one of the selected runs belongs to an instrument type with no processor. The checkbox in the header row selects every run on the page, and **Clear** drops the selection.
+**Upload**, **Download**, **Reprocess**, **Delete**, and the notebook link actions appear only when every selected run allows them. For example, **Reprocess** is hidden if one of the selected runs belongs to an instrument type with no processor, and the notebook link actions are hidden if a selected run is deleted. **Remove notebook link** also needs at least one selected run to have a link. The notebook link actions work on up to 100 runs at a time. The checkbox in the header row selects every run on the page, and **Clear** drops the selection.
 
 The selection stays when you move to another page of the same results. It clears when you change the search, a filter, or the sort, so the bar never acts on runs from a list you are no longer looking at.
 
@@ -148,6 +175,8 @@ Reprocessing sends only the original instrument files. Files Data Hub generated,
 **Delete** marks the run deleted without removing stored files. To find a deleted run again, turn on **Show deleted runs** under **Add filter**, then open it and choose **Restore**. Anyone signed in can delete or restore a run. Files that were queued for reprocessing when the run was deleted stay queued and don’t start while the run is deleted. If you restore the run, they start as processing slots free up.
 
 Deleting a run also cancels the uploads that were requested for its files, so the watcher stops trying to send them. Those files go back to **Pending**. Restoring the run doesn’t bring the requests back. Choose **Upload** again if you still want the files. See [Request an upload](/docs/browse-runs#request-upload).
+
+While a run is deleted, Data Hub refuses a watcher’s reports of it, so the watcher’s new files aren’t added. After you restore the run, restart the watcher to send them, or choose **Upload** on a file to have the watcher send that file without a restart. Watchers before 1.4.3 also send them when another file of the run finishes. See [A run was deleted on Data Hub](/docs/troubleshoot-a-watcher#a-run-was-deleted-on-data-hub).
 
 ![Deleted run page with a red banner naming who deleted it and when, and a Restore button](/images/deleted-run.webp)
 

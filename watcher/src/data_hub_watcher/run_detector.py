@@ -327,7 +327,7 @@ class RunDetector:
             # like a connection error.
             status_code, error, retryable = 0, f"{type(exc).__name__}: {exc}", True
             logger.warning("Failed to %s run %s: %s", verb, run.run_id, error, exc_info=exc)
-        self._counters.errors += 1
+        self._counters.add_errors()
         # Report the first retryable failure in a row and every 4xx, so a long
         # outage doesn't push other events out of the bounded queue. A failed
         # write never hides a failed report here: no request goes out while a
@@ -371,7 +371,7 @@ class RunDetector:
             run.run_id,
             exc.message,
         )
-        self._counters.errors += 1
+        self._counters.add_errors()
         self._reporter.report_error(
             "run_report_failed",
             f"Failed to {verb} run {run.run_id}: {exc.message}",
@@ -399,7 +399,7 @@ class RunDetector:
         logger.warning(
             "Failed to record run %s in the state DB: %s", run.run_id, error, exc_info=exc
         )
-        self._counters.errors += 1
+        self._counters.add_errors()
         if not run.write_failing:
             run.write_failing = True
             self._reporter.report_error(
@@ -551,7 +551,7 @@ class RunDetector:
         run.patched_file_count = len(run.files)
         run.acquired_at_sent = acquired
         run.unrecorded = "create"
-        self._counters.runs_reported += 1
+        self._counters.add_runs_reported()
 
         self._reporter.queue_event(
             WatcherEvent(

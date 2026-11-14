@@ -36,6 +36,9 @@ logger = logging.getLogger(__name__)
 # by ``StateDB.has_stat_match`` -- keep the two in sync.
 _STAT_MTIME_TOLERANCE = 1.0
 
+# How often the wait for the observer's stop checks whether it was told to give up.
+_CANCEL_POLL_SECONDS = 0.1
+
 
 def _compile_pattern_matcher(file_patterns: list[str]) -> Callable[[str], bool]:
     """Return a fast ``filename -> bool`` matcher for *file_patterns*.
@@ -68,14 +71,26 @@ class _PendingFile:
     last_changed: float = field(default_factory=time.monotonic)
 
 
+class _ScanStopped(Exception):
+    """The initial scan was asked to stop (see `FileMonitor`'s ``should_stop``)."""
+
+
 class _EventHandler(FileSystemEventHandler):
-    """Watchdog handler that forwards matching create/modify events."""
+    """Watchdog handler that forwards matching create/modify events.
+
+    It also reports when the watched folder itself is deleted or moved, through
+    *on_root_gone*. That is all it does with a delete or move: a file or folder
+    removed from inside the watch folder is ignored, as it always was.
+    """
 
     def __init__(
         self,
         matches: Callable[[str], bool],
         on_event: Callable[[Path], None],
         recursive: bool,
+        *,
+        root: str | None = None,
+        on_root_gone: Callable[[], None] | None = None,
     ) -> None:
         super().__init__()
         # Pre-compiled matcher shared with the FileMonitor so we
@@ -83,6 +98,34 @@ class _EventHandler(FileSystemEventHandler):
         self._matches = matches
         self._on_event = on_event
         self._recursive = recursive
+        # The path the observer was scheduled with. Where watchdog reports the loss
+        # of the watched folder, it gives that path as the event's `src_path`, so a
+        # comparison with it is the test. It is not exact everywhere: FSEvents
+        # normalizes the path to NFC on macOS, so a folder whose name is written
+        # another way is not matched, and the heartbeat tick is what notices.
+        self._root = root
+        self._on_root_gone = on_root_gone
+
+    def on_deleted(self, event: FileSystemEvent) -> None:
+        self._note_root_event(event)
+
+    def on_moved(self, event: FileSystemEvent) -> None:
+        # In watchdog 6.0.0 no emitter reports the watched folder itself as moved, so
+        # this does nothing there. It is harmless, and covers a release or a platform
+        # that does. A folder that is renamed is noticed by the supervisor's check of
+        # the folder's identity, not by this.
+        self._note_root_event(event)
+
+    def _note_root_event(self, event: FileSystemEvent) -> None:
+        if self._on_root_gone is None or self._root is None:
+            return
+        if str(event.src_path) != self._root:
+            return
+        logger.info("Watchdog reports that the watch folder %s was deleted or moved", self._root)
+        try:
+            self._on_root_gone()
+        except Exception:
+            logger.exception("Callback for a deleted watch folder failed")
 
     def on_created(self, event: FileSystemEvent) -> None:
         if isinstance(event, FileCreatedEvent) and not event.is_directory:
@@ -142,6 +185,21 @@ class FileMonitor:
     on_report_only_file:
         Called instead of `on_stable_file` for files picked out by
         `report_only`. Falls back to `on_stable_file` when unset.
+    on_watch_root_gone:
+        Called when watchdog reports the watch folder itself deleted or moved
+        (not a file or folder inside it), on the observer's thread, so it must
+        only note the event and return. It is a prompt to check sooner, not a
+        guarantee: whether watchdog reports the loss of the folder depends on the
+        platform and on how the path was written, so the owner's own check is the
+        test: `watch_directory_problem` for a folder that is missing, and
+        `is_watching` for one that was deleted and created again.
+    should_stop:
+        Called between the entries of the initial scan. When it returns `True`, the
+        scan ends early and `start` returns without starting the observer or the
+        stability checker (the owner is about to stop the monitor). The files the
+        scan hadn't reached are found by the scan at the next start: the scan writes
+        nothing to the state database for a file, and a baseline scan
+        (`seed_baseline`) writes nothing at all, so the next start seeds it again.
     """
 
     def __init__(
@@ -158,12 +216,16 @@ class FileMonitor:
         on_tick: Callable[[], None] | None = None,
         report_only: Callable[[str, float], bool] | None = None,
         on_report_only_file: Callable[[Path], None] | None = None,
+        on_watch_root_gone: Callable[[], None] | None = None,
+        should_stop: Callable[[], bool] | None = None,
     ) -> None:
         self._watch_dir = watch_directory
         self._patterns = file_patterns
         self._seed_baseline = seed_baseline
         self._report_only = report_only
         self._on_report_only = on_report_only_file or on_stable_file
+        self._on_watch_root_gone = on_watch_root_gone
+        self._should_stop = should_stop
         # Paths the initial scan picked out with `report_only`. Removed once
         # the file is dispatched, times out or disappears.
         self._report_only_paths: set[Path] = set()
@@ -195,10 +257,29 @@ class FileMonitor:
     # ------------------------------------------------------------------
 
     def start(self) -> None:
-        """Run the initial scan, start the watchdog observer, and begin the stability checker."""
-        self._initial_scan()
+        """Run the initial scan, start the watchdog observer, and begin the stability checker.
 
-        handler = _EventHandler(self._matches_name, self._enqueue, self._recursive)
+        A stop during the scan (see ``should_stop``) ends it early, and then this returns
+        without starting either.
+        """
+        try:
+            # Before the scan loads its index of what was uploaded, which can be large.
+            self._raise_if_stopping()
+            self._initial_scan()
+        except _ScanStopped:
+            logger.info(
+                "Initial scan stopped early because the watcher is stopping. The files it "
+                "had not reached are scanned at the next start"
+            )
+            return
+
+        handler = _EventHandler(
+            self._matches_name,
+            self._enqueue,
+            self._recursive,
+            root=str(self._watch_dir),
+            on_root_gone=self._on_watch_root_gone,
+        )
         self._observer.schedule(handler, str(self._watch_dir), recursive=self._recursive)
         self._observer.start()
 
@@ -214,25 +295,91 @@ class FileMonitor:
             self._recursive,
         )
 
-    def stop(self, timeout: float = 5.0, *, observer_timeout: float = 5.0) -> bool:
+    def stop(
+        self,
+        timeout: float = 5.0,
+        *,
+        observer_timeout: float = 5.0,
+        should_cancel: Callable[[], bool] | None = None,
+    ) -> bool:
         """Stop the observer and stability-checker thread.
 
         *timeout* bounds the wait for the stability checker, which may be in
         the middle of an auto-mode upload, and *observer_timeout* the wait for
-        the observer. Returns whether the stability checker exited in time.
+        the observer's stop and its thread together (see `_stop_observer`).
+        *should_cancel* ends the wait for the observer early, when it returns `True`.
+        Returns whether the stability checker exited in time.
         """
         self._checker_stop.set()
-        self._observer.stop()
-        # Not started when `start()` failed partway, e.g. in a rebuild that is
-        # being rolled back, and joining an unstarted thread raises.
-        if self._observer.is_alive():
-            self._observer.join(timeout=observer_timeout)
+        self._stop_observer(observer_timeout, should_cancel)
         stopped = self._wait_for_checker(timeout)
         if stopped:
             logger.info("FileMonitor stopped")
         else:
             logger.info("FileMonitor stopping: its stability checker is still running")
         return stopped
+
+    def _stop_observer(
+        self, timeout: float, should_cancel: Callable[[], bool] | None = None
+    ) -> None:
+        """Stop the observer and wait for its thread, together for at most *timeout*.
+
+        watchdog's `Observer.stop` joins its emitter threads with no timeout, and an
+        emitter that is blocked on a hung network share doesn't end, so the stop runs on
+        its own thread. A stop that is still running when *timeout* is up, or when
+        *should_cancel* returns `True` first, is left to finish: the observer's threads
+        are daemon threads, and the watcher goes on without them.
+        """
+        deadline = time.monotonic() + timeout
+
+        def stop() -> None:
+            try:
+                self._observer.stop()
+            except Exception:
+                logger.exception("Stopping the file observer failed")
+
+        stopper = threading.Thread(target=stop, daemon=True, name="observer-stop")
+        stopper.start()
+        cancelled = False
+        while stopper.is_alive():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            if should_cancel is None:
+                stopper.join(timeout=remaining)
+            else:
+                stopper.join(timeout=min(remaining, _CANCEL_POLL_SECONDS))
+                if stopper.is_alive() and should_cancel():
+                    cancelled = True
+                    break
+        if stopper.is_alive():
+            if cancelled:
+                logger.warning(
+                    "Not waiting any longer for the file observer to stop, because the "
+                    "watcher is stopping; going on without it"
+                )
+            else:
+                logger.warning(
+                    "The file observer did not stop within %ss (is the watch folder's share "
+                    "hung?); going on without waiting for it",
+                    timeout,
+                )
+            return
+        # Not started when `start()` failed partway, e.g. in a rebuild that is
+        # being rolled back, and joining an unstarted thread raises.
+        if self._observer.is_alive():
+            self._observer.join(timeout=max(0.0, deadline - time.monotonic()))
+
+    def is_watching(self) -> bool:
+        """Whether watchdog is still watching the folder.
+
+        watchdog 6.0.0's emitter stops itself when its folder is deleted, and a folder
+        created at the same path afterwards isn't watched again. Nothing else says so:
+        the stability checker and the observer thread keep running.
+        """
+        return self._observer.is_alive() and all(
+            emitter.is_alive() for emitter in self._observer.emitters
+        )
 
     def join(self, timeout: float) -> bool:
         """Wait up to *timeout* for the stability checker to exit, after `stop`.
@@ -243,6 +390,13 @@ class FileMonitor:
         if stopped:
             logger.info("FileMonitor stopped")
         return stopped
+
+    def has_exited(self) -> bool:
+        """Whether the stability checker has exited, or never ran. Unlike `join`, logs nothing.
+
+        For an owner that asks again and again while it waits for the checker.
+        """
+        return self._checker_thread is None or not self._checker_thread.is_alive()
 
     def _wait_for_checker(self, timeout: float) -> bool:
         if self._checker_thread and self._checker_thread.is_alive():
@@ -274,6 +428,7 @@ class FileMonitor:
         """
         stack: list[Path] = [root]
         while stack:
+            self._raise_if_stopping()
             current = stack.pop()
             try:
                 it = os.scandir(current)
@@ -282,6 +437,10 @@ class FileMonitor:
                 continue
             with it:
                 for entry in it:
+                    # Between entries, so a stop doesn't wait for the rest of a large
+                    # folder. An entry that is a folder is no work, but it counts: a
+                    # tree of folders is as long to walk.
+                    self._raise_if_stopping()
                     if self._recursive:
                         try:
                             is_dir = entry.is_dir(follow_symlinks=False)
@@ -301,6 +460,10 @@ class FileMonitor:
                             stack.append(Path(entry.path))
                             continue
                     yield entry
+
+    def _raise_if_stopping(self) -> None:
+        if self._should_stop is not None and self._should_stop():
+            raise _ScanStopped
 
     def _load_dedup_index(self) -> dict[str, list[tuple[int, float]]]:
         """Bulk-load the union of upload + detected stat keys keyed by relative path.
