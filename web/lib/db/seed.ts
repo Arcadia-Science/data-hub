@@ -14,8 +14,15 @@ import { copyFile, mkdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { hashPassword } from "better-auth/crypto";
-import { getTableName, isTable, sql } from "drizzle-orm";
+import { eq, getTableName, isTable, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
+import { SCOPE_PRESETS } from "@/lib/api/scope-catalog";
+import { readSettingsFromYaml } from "@/lib/api/watcher-config/from-yaml";
+import {
+  canonicalSettings,
+  type WatcherConfigSettings,
+} from "@/lib/api/watcher-config/settings";
+import { AUTO_UPDATE_STATUS_REASON } from "@/lib/api/watcher-status";
 import {
   startOfLastWeekEndDayISO,
   startOfLastWeekISO,
@@ -230,19 +237,50 @@ export async function seedMcpResource(db: Db, origin: string): Promise<void> {
 // fixture processing still runs even though prod currently marks it generic.
 // ---------------------------------------------------------------------------
 
+// The state of an instrument's current watcher when the seed runs. The
+// watcher's heartbeats and events are built to match (see seedWatchers).
+export type SeededWatcherStatus =
+  // Connected, no heartbeat yet (the pending instrument).
+  | "registered"
+  // Checking in every few minutes.
+  | "watching"
+  // Running, but its watch folder is missing.
+  | "waiting"
+  // Stopped by someone, so no heartbeat since then.
+  | "stopped"
+  // Stopped for an automatic update a few minutes before the seed runs.
+  | "restarting"
+  // Watching when last seen, and silent since.
+  | "unresponsive"
+  // No current watcher: the instrument never had one, or only deregistered ones.
+  | "none";
+
+// A watcher that was deregistered from an instrument. The day counts are
+// counted back from the moment the seed runs.
+export interface SeededPastWatcher {
+  deregisteredDaysAgo: number;
+  hostname: string;
+  osInfo: string;
+  registeredDaysAgo: number;
+}
+
 export interface SeededInstrument {
   // Watcher config YAML snapped from production, with `{{WATCHER_ID}}`
   // substituted at seed time so the Configuration tab shows a real
   // instrument block (watch dir, patterns, run detection) instead of a
-  // placeholder comment.
-  configYamlTemplate: string;
+  // placeholder comment. Only for instruments that have had a watcher.
+  configYamlTemplate?: string;
   displayName: string;
-  hostname: string;
+  hostname?: string;
   id: string;
   instrumentType: schema.InstrumentType;
-  osInfo: string;
+  osInfo?: string;
+  // Watchers deregistered from this instrument, oldest first.
+  pastWatchers?: SeededPastWatcher[];
   status: "pending" | "active" | "inactive";
-  watcherStatus: "registered" | "watching" | "stopped";
+  // Upload mode in the watcher config and in its heartbeats. Defaults to auto.
+  uploadMode?: "auto" | "manual";
+  watcherStatus: SeededWatcherStatus;
 }
 
 // Shared local preamble so seeded configs point at the dev API rather than
@@ -305,6 +343,14 @@ export const SEED_INSTRUMENTS: readonly SeededInstrument[] = [
     hostname: "Aunty-1075",
     osInfo: "Windows 11",
     watcherStatus: "watching",
+    pastWatchers: [
+      {
+        deregisteredDaysAgo: 12,
+        hostname: "LAB-PC-02",
+        osInfo: "Windows 11",
+        registeredDaysAgo: 40,
+      },
+    ],
     configYamlTemplate: buildSeedConfigYaml(`instrument:
   id: unchained-labs-aunty
   watch_directory: C:\\Aunty\\Export
@@ -523,6 +569,163 @@ export const SEED_INSTRUMENTS: readonly SeededInstrument[] = [
     recursive: true
 `),
   },
+  // The made-up instruments below cover the watcher states that the instruments
+  // above do not. Their names and hostnames are invented.
+  {
+    id: "microplate-washer-d",
+    displayName: "Microplate Washer D",
+    instrumentType: "generic",
+    status: "active",
+    hostname: "LAB-PC-01",
+    osInfo: "Windows 11",
+    // Shares a computer with Shaker Incubator E. Its hostname is upper case,
+    // and the other one is lower case.
+    watcherStatus: "watching",
+    configYamlTemplate: buildSeedConfigYaml(`instrument:
+  id: microplate-washer-d
+  watch_directory: C:\\Data\\MicroplateWasherD
+  file_patterns:
+  - '*.csv'
+  enabled: true
+  upload_mode: auto
+  stability_period_seconds: 5
+  upload_parallelism: 4
+  run_detection:
+    pattern: ^(?:.+/)?([^/]+?)\\.[^/.]+$
+    recursive: false
+`),
+  },
+  {
+    id: "shaker-incubator-e",
+    displayName: "Shaker Incubator E",
+    instrumentType: "generic",
+    status: "active",
+    hostname: "lab-pc-01",
+    osInfo: "Windows 11",
+    // Upload mode is manual: each file waits for someone to approve it.
+    uploadMode: "manual",
+    watcherStatus: "watching",
+    configYamlTemplate: buildSeedConfigYaml(`instrument:
+  id: shaker-incubator-e
+  watch_directory: C:\\Data\\ShakerIncubatorE
+  file_patterns:
+  - '*.csv'
+  enabled: true
+  upload_mode: manual
+  stability_period_seconds: 10
+  upload_parallelism: 4
+  run_detection:
+    pattern: ([^/]+)/[^/]+$
+    recursive: true
+`),
+  },
+  {
+    id: "balance-f",
+    displayName: "Balance F",
+    instrumentType: "generic",
+    status: "active",
+    hostname: "LAB-PC-04",
+    osInfo: "Windows 10",
+    // Last seen two hours before the seed runs, so it reads as Unresponsive.
+    watcherStatus: "unresponsive",
+    configYamlTemplate: buildSeedConfigYaml(`instrument:
+  id: balance-f
+  watch_directory: C:\\Data\\BalanceF
+  file_patterns:
+  - '*.csv'
+  enabled: true
+  upload_mode: auto
+  stability_period_seconds: 5
+  upload_parallelism: 4
+  run_detection:
+    pattern: ^(?:.+/)?([^/]+?)\\.[^/.]+$
+    recursive: false
+`),
+  },
+  {
+    id: "colony-counter-g",
+    displayName: "Colony Counter G",
+    instrumentType: "generic",
+    status: "active",
+    hostname: "LAB-PC-05",
+    osInfo: "Windows 11",
+    // Running, but its watch folder is missing.
+    watcherStatus: "waiting",
+    configYamlTemplate: buildSeedConfigYaml(`instrument:
+  id: colony-counter-g
+  watch_directory: D:\\Colony Counter Images
+  file_patterns:
+  - '*.tif'
+  - '*.png'
+  enabled: true
+  upload_mode: auto
+  stability_period_seconds: 5
+  upload_parallelism: 4
+  run_detection:
+    pattern: ^(?:.+/)?([^/]+?)\\.[^/.]+$
+    recursive: false
+`),
+  },
+  {
+    id: "thermal-mixer-h",
+    displayName: "Thermal Mixer H",
+    instrumentType: "generic",
+    status: "active",
+    hostname: "LAB-PC-06",
+    osInfo: "Windows 11",
+    // Stopped for an automatic update a few minutes before the seed runs.
+    watcherStatus: "restarting",
+    configYamlTemplate: buildSeedConfigYaml(`instrument:
+  id: thermal-mixer-h
+  watch_directory: C:\\Data\\ThermalMixerH
+  file_patterns:
+  - '*.csv'
+  enabled: true
+  upload_mode: auto
+  stability_period_seconds: 5
+  upload_parallelism: 4
+  run_detection:
+    pattern: ^(?:.+/)?([^/]+?)\\.[^/.]+$
+    recursive: false
+`),
+  },
+  {
+    id: "spectrophotometer-b",
+    displayName: "Spectrophotometer B",
+    instrumentType: "generic",
+    status: "active",
+    // Its only watcher was deregistered, so there is no current one.
+    watcherStatus: "none",
+    pastWatchers: [
+      {
+        deregisteredDaysAgo: 9,
+        hostname: "LAB-PC-03",
+        osInfo: "Windows 10",
+        registeredDaysAgo: 30,
+      },
+    ],
+    configYamlTemplate: buildSeedConfigYaml(`instrument:
+  id: spectrophotometer-b
+  watch_directory: C:\\Data\\SpectrophotometerB
+  file_patterns:
+  - '*.csv'
+  enabled: true
+  upload_mode: auto
+  stability_period_seconds: 5
+  upload_parallelism: 4
+  run_detection:
+    pattern: ^(?:.+/)?([^/]+?)\\.[^/.]+$
+    recursive: false
+`),
+  },
+  {
+    id: "centrifuge-c",
+    displayName: "Centrifuge C",
+    instrumentType: "generic",
+    status: "active",
+    // Never had a watcher.
+    watcherStatus: "none",
+  },
 ];
 
 export async function seedInstruments(db: Db): Promise<SeededInstrument[]> {
@@ -548,6 +751,550 @@ export interface SeededWatcher {
   status: "registered" | "watching" | "stopped" | "waiting";
 }
 
+const MINUTE_MS = 60_000;
+const MINUTES_PER_DAY = 24 * 60;
+const HISTORY_DAYS = 7;
+// Rows per insert, so a week of heartbeats stays well under the bind-parameter
+// limit and the seed stays quick.
+const WATCHER_ROW_CHUNK = 1000;
+
+// The reason a watcher gives while its watch folder is missing. The watcher
+// sends the same text (`WATCH_DIRECTORY_NOT_FOUND` in watcher/src/data_hub_watcher/models.py).
+const WATCH_DIRECTORY_NOT_FOUND = "watch_directory not found";
+// Stopped by someone, two days before the seed runs.
+const STOPPED_BY_USER_MINUTES_AGO = 2 * MINUTES_PER_DAY;
+// Stopped for an automatic update four minutes before the seed runs. It reads
+// as Restarting until 15 minutes after that stop, then as Unresponsive.
+const RESTARTING_STOP_MINUTES_AGO = 4;
+const RESTARTING_FROM_VERSION = "0.9.4";
+// Unresponsive: last heard from two hours before the seed runs.
+const UNRESPONSIVE_LAST_SEEN_MINUTES_AGO = 2 * 60;
+// Minutes into a day when the seeded uploads and run reports happen.
+const UPLOAD_MINUTES_OF_DAY = [180, 540, 960] as const;
+const RUN_REPORT_MINUTE_OF_DAY = 420;
+
+// Watchers with a week of history. `seedWatcherHistory` writes their heartbeats
+// (one every `stepMinutes`), uploads, run reports, restarts and gaps.
+interface WatcherHistoryPlan {
+  failedUploadMinutesAgo?: number;
+  // Gaps with no heartbeat, each ended by a heartbeat_recovered error at
+  // `recoveredMinutesAgo`, after `missedHeartbeats` heartbeats that never came.
+  recoveries: { missedHeartbeats: number; recoveredMinutesAgo: number }[];
+  // Automatic-update restarts, oldest first. The watcher stops
+  // `stoppedMinutesAgo` before the seed runs and is back `gapMinutes` later.
+  restarts: {
+    from: string;
+    gapMinutes: number;
+    stoppedMinutesAgo: number;
+    to: string;
+  }[];
+  // Heartbeat cadence, in minutes.
+  stepMinutes: number;
+  // Files uploaded each day, one to three.
+  uploadsPerDay: number;
+}
+
+const WATCHER_HISTORY: Partial<Record<string, WatcherHistoryPlan>> = {
+  // One heartbeat every minute, with three restarts that climb to the current
+  // version and one missed-heartbeat gap.
+  "jolene-fplc": {
+    stepMinutes: 1,
+    uploadsPerDay: 3,
+    restarts: [
+      { stoppedMinutesAgo: 8880, gapMinutes: 3, from: "0.9.2", to: "0.9.3" },
+      { stoppedMinutesAgo: 5100, gapMinutes: 3, from: "0.9.3", to: "0.9.4" },
+      {
+        stoppedMinutesAgo: 1500,
+        gapMinutes: 4,
+        from: "0.9.4",
+        to: SEED_WATCHER_VERSION,
+      },
+    ],
+    recoveries: [{ recoveredMinutesAgo: 6480, missedHeartbeats: 3 }],
+  },
+  // One heartbeat every five minutes, one missed heartbeat, and one failed upload.
+  "spectramax-id3-plate-reader": {
+    stepMinutes: 5,
+    uploadsPerDay: 2,
+    restarts: [],
+    recoveries: [{ recoveredMinutesAgo: 3120, missedHeartbeats: 1 }],
+    failedUploadMinutesAgo: 1800,
+  },
+  // One heartbeat every five minutes, with a longer gap.
+  "agilent-4150-tapestation": {
+    stepMinutes: 5,
+    uploadsPerDay: 2,
+    restarts: [],
+    recoveries: [{ recoveredMinutesAgo: 7200, missedHeartbeats: 2 }],
+  },
+};
+
+type WatcherHeartbeatRow = typeof schema.watcherHeartbeats.$inferInsert;
+type WatcherEventRow = typeof schema.watcherEvents.$inferInsert;
+type WatcherConfigRevisionRow =
+  typeof schema.watcherConfigRevisions.$inferInsert;
+
+function minutesBefore(now: Date, minutes: number): Date {
+  return new Date(now.getTime() - minutes * MINUTE_MS);
+}
+
+function heartbeatRow(
+  watcherId: string,
+  timestamp: Date,
+  status: string,
+  uploadMode: "auto" | "manual",
+  uptimeSeconds: number,
+  filesUploadedSinceLast = 0,
+  runsReportedSinceLast = 0
+): WatcherHeartbeatRow {
+  return {
+    watcherId,
+    timestamp,
+    status,
+    uploadMode,
+    filesUploadedSinceLast,
+    runsReportedSinceLast,
+    errorsSinceLast: 0,
+    uptimeSeconds,
+  };
+}
+
+function eventRow(
+  watcherId: string,
+  eventType: WatcherEventRow["eventType"],
+  message: string,
+  timestamp: Date,
+  details: Record<string, unknown> = {}
+): WatcherEventRow {
+  return { watcherId, eventType, message, details, timestamp };
+}
+
+// Ten heartbeats five minutes apart. The first is `fromMinutesAgo` before the
+// seed runs and the rest are older. `startedMinutesAgo` is when the watcher's
+// current run began, which sets the uptime.
+function tenHeartbeats(
+  watcherId: string,
+  now: Date,
+  uploadMode: "auto" | "manual",
+  fromMinutesAgo: number,
+  startedMinutesAgo: number,
+  statusAt: (index: number) => string
+): WatcherHeartbeatRow[] {
+  return Array.from({ length: 10 }, (_, index) => {
+    const minutesAgo = fromMinutesAgo + index * 5;
+    const status = statusAt(index);
+    // Only a watching watcher reports uploads, and the first heartbeat reports
+    // none.
+    const uploads = status === "watching" && index > 0 ? 1 : 0;
+    return heartbeatRow(
+      watcherId,
+      minutesBefore(now, minutesAgo),
+      status,
+      uploadMode,
+      (startedMinutesAgo - minutesAgo) * 60,
+      uploads
+    );
+  });
+}
+
+function fileUploadedEvent(
+  watcherId: string,
+  timestamp: Date,
+  instrumentId: string,
+  runId: string,
+  filename: string,
+  sizeBytes: number
+): WatcherEventRow {
+  const s3Key = `${instrumentId}/${runId}/${filename}`;
+  return eventRow(
+    watcherId,
+    "file_uploaded",
+    `Uploaded ${filename}`,
+    timestamp,
+    {
+      s3_key: s3Key,
+      sha256: createHash("sha256").update(s3Key).digest("hex"),
+      size_bytes: sizeBytes,
+    }
+  );
+}
+
+function appliedEvent(
+  watcherId: string,
+  revision: number,
+  timestamp: Date
+): WatcherEventRow {
+  return eventRow(
+    watcherId,
+    "config_synced",
+    `Applied config revision ${revision}`,
+    timestamp,
+    { kind: "config_revision_applied", revision }
+  );
+}
+
+function rejectedEvent(
+  watcherId: string,
+  revision: number,
+  reason: string,
+  timestamp: Date
+): WatcherEventRow {
+  return eventRow(
+    watcherId,
+    "error",
+    `Rejected config revision ${revision}: ${reason}`,
+    timestamp,
+    { kind: "config_revision_rejected", revision, reason }
+  );
+}
+
+function revisionRow(
+  watcherId: string,
+  revision: number,
+  source: "web" | "pc",
+  status: "pending" | "applied" | "rejected",
+  settings: WatcherConfigSettings,
+  when: {
+    createdAt: Date;
+    createdBy?: string;
+    resolvedAt?: Date;
+    statusReason?: string;
+  }
+): WatcherConfigRevisionRow {
+  return {
+    watcherId,
+    revision,
+    source,
+    status,
+    settings: canonicalSettings(settings),
+    statusReason: when.statusReason ?? null,
+    createdBy: when.createdBy ?? null,
+    createdAt: when.createdAt,
+    resolvedAt: when.resolvedAt ?? null,
+  };
+}
+
+function templateOf(instrument: SeededInstrument): string {
+  const { configYamlTemplate } = instrument;
+  if (!configYamlTemplate) {
+    throw new Error(`${instrument.id} has no watcher config to seed`);
+  }
+  return configYamlTemplate;
+}
+
+// The hostname and OS a current watcher reports, and its config template.
+function watcherIdentity(instrument: SeededInstrument): {
+  configYamlTemplate: string;
+  hostname: string;
+  osInfo: string;
+} {
+  const { hostname, osInfo } = instrument;
+  if (!(hostname && osInfo)) {
+    throw new Error(`${instrument.id} has a watcher but no hostname or OS`);
+  }
+  return { configYamlTemplate: templateOf(instrument), hostname, osInfo };
+}
+
+function watchDirectoryOf(template: string): string {
+  const match = /^ {2}watch_directory: (.+)$/m.exec(template);
+  if (!match?.[1]) {
+    throw new Error("A seeded watcher config has no watch_directory");
+  }
+  return match[1];
+}
+
+// The editable settings a seeded config holds, read the way the server reads
+// a pushed config.yaml, so the revisions match what the watcher reports.
+function settingsFromTemplate(template: string): WatcherConfigSettings {
+  const result = readSettingsFromYaml(
+    template.replaceAll("{{WATCHER_ID}}", "seed-watcher")
+  );
+  if (!result.ok) {
+    throw new Error(`A seeded watcher config is not valid: ${result.reason}`);
+  }
+  return result.settings;
+}
+
+// What seedWatchers writes for one active watcher. Watchers in WATCHER_HISTORY
+// get their heartbeats and events later, from seedWatcherScenarios.
+interface WatcherRows {
+  createdAt: Date;
+  events: WatcherEventRow[];
+  heartbeats: WatcherHeartbeatRow[];
+  lastHeartbeatAt: Date | null;
+  status: "registered" | "watching" | "waiting" | "stopped";
+  statusReason: string | null;
+}
+
+function watcherCreatedAt(instrument: SeededInstrument, now: Date): Date {
+  if (WATCHER_HISTORY[instrument.id]) {
+    return minutesBefore(now, HISTORY_DAYS * MINUTES_PER_DAY);
+  }
+  const pastWatchers = instrument.pastWatchers ?? [];
+  const lastPast = pastWatchers.at(-1);
+  return lastPast
+    ? minutesBefore(now, lastPast.deregisteredDaysAgo * MINUTES_PER_DAY)
+    : now;
+}
+
+function currentWatcherRows(
+  instrument: SeededInstrument,
+  watcherId: string,
+  now: Date
+): WatcherRows {
+  const uploadMode = instrument.uploadMode ?? "auto";
+  const createdAt = watcherCreatedAt(instrument, now);
+  switch (instrument.watcherStatus) {
+    case "registered":
+      return {
+        createdAt,
+        status: "registered",
+        statusReason: null,
+        lastHeartbeatAt: null,
+        heartbeats: [],
+        events: [],
+      };
+    case "watching": {
+      if (WATCHER_HISTORY[instrument.id]) {
+        return {
+          createdAt,
+          status: "watching",
+          statusReason: null,
+          lastHeartbeatAt: now,
+          heartbeats: [],
+          events: [],
+        };
+      }
+      return {
+        createdAt,
+        status: "watching",
+        statusReason: null,
+        lastHeartbeatAt: now,
+        heartbeats: tenHeartbeats(
+          watcherId,
+          now,
+          uploadMode,
+          0,
+          60,
+          () => "watching"
+        ),
+        events: [
+          eventRow(
+            watcherId,
+            "watcher_started",
+            "Watcher started",
+            minutesBefore(now, 60)
+          ),
+          eventRow(
+            watcherId,
+            "config_synced",
+            "Config synced from server",
+            minutesBefore(now, 50)
+          ),
+          eventRow(
+            watcherId,
+            "file_uploaded",
+            "Uploaded latest run files to S3",
+            minutesBefore(now, 10)
+          ),
+        ],
+      };
+    }
+    case "waiting":
+      return {
+        createdAt,
+        status: "waiting",
+        statusReason: WATCH_DIRECTORY_NOT_FOUND,
+        lastHeartbeatAt: now,
+        heartbeats: tenHeartbeats(
+          watcherId,
+          now,
+          uploadMode,
+          0,
+          60,
+          () => "waiting"
+        ),
+        events: [
+          eventRow(
+            watcherId,
+            "watcher_started",
+            "Watcher started",
+            minutesBefore(now, 60)
+          ),
+          eventRow(
+            watcherId,
+            "config_synced",
+            "Config synced from server",
+            minutesBefore(now, 59)
+          ),
+          eventRow(
+            watcherId,
+            "error",
+            `Waiting: ${WATCH_DIRECTORY_NOT_FOUND}`,
+            minutesBefore(now, 55),
+            {
+              kind: "watch_directory_unavailable",
+              watch_directory: watchDirectoryOf(templateOf(instrument)),
+              reason: WATCH_DIRECTORY_NOT_FOUND,
+            }
+          ),
+        ],
+      };
+    case "stopped":
+      return {
+        createdAt,
+        status: "stopped",
+        statusReason: null,
+        lastHeartbeatAt: minutesBefore(now, STOPPED_BY_USER_MINUTES_AGO),
+        heartbeats: tenHeartbeats(
+          watcherId,
+          now,
+          uploadMode,
+          STOPPED_BY_USER_MINUTES_AGO,
+          STOPPED_BY_USER_MINUTES_AGO + 60,
+          (index) => (index === 0 ? "stopped" : "watching")
+        ),
+        events: [
+          eventRow(
+            watcherId,
+            "watcher_started",
+            "Watcher started",
+            minutesBefore(now, STOPPED_BY_USER_MINUTES_AGO + 60)
+          ),
+          eventRow(
+            watcherId,
+            "config_synced",
+            "Config synced from server",
+            minutesBefore(now, STOPPED_BY_USER_MINUTES_AGO + 50)
+          ),
+          eventRow(
+            watcherId,
+            "file_uploaded",
+            "Uploaded latest run files to S3",
+            minutesBefore(now, STOPPED_BY_USER_MINUTES_AGO + 10)
+          ),
+          eventRow(
+            watcherId,
+            "watcher_stopped",
+            "Service stopped",
+            minutesBefore(now, STOPPED_BY_USER_MINUTES_AGO)
+          ),
+        ],
+      };
+    case "restarting":
+      return {
+        createdAt,
+        status: "stopped",
+        statusReason: AUTO_UPDATE_STATUS_REASON,
+        lastHeartbeatAt: minutesBefore(now, RESTARTING_STOP_MINUTES_AGO),
+        heartbeats: tenHeartbeats(
+          watcherId,
+          now,
+          uploadMode,
+          RESTARTING_STOP_MINUTES_AGO,
+          190,
+          (index) => (index === 0 ? "stopped" : "watching")
+        ),
+        events: [
+          eventRow(
+            watcherId,
+            "watcher_started",
+            "Watcher started",
+            minutesBefore(now, 190)
+          ),
+          eventRow(
+            watcherId,
+            "config_synced",
+            "Config synced from server",
+            minutesBefore(now, 189)
+          ),
+          eventRow(
+            watcherId,
+            "file_uploaded",
+            "Uploaded latest run files to S3",
+            minutesBefore(now, 40)
+          ),
+          eventRow(
+            watcherId,
+            "update_started",
+            `Upgrading watcher ${RESTARTING_FROM_VERSION} -> ${SEED_WATCHER_VERSION}`,
+            minutesBefore(now, RESTARTING_STOP_MINUTES_AGO + 2),
+            {
+              current_version: RESTARTING_FROM_VERSION,
+              target_version: SEED_WATCHER_VERSION,
+              mandatory: false,
+              install_method: "uv-tool",
+            }
+          ),
+          eventRow(
+            watcherId,
+            "watcher_stopped",
+            "Service restarting for auto-update",
+            minutesBefore(now, RESTARTING_STOP_MINUTES_AGO)
+          ),
+        ],
+      };
+    case "unresponsive":
+      return {
+        createdAt,
+        status: "watching",
+        statusReason: null,
+        lastHeartbeatAt: minutesBefore(now, UNRESPONSIVE_LAST_SEEN_MINUTES_AGO),
+        heartbeats: tenHeartbeats(
+          watcherId,
+          now,
+          uploadMode,
+          UNRESPONSIVE_LAST_SEEN_MINUTES_AGO,
+          UNRESPONSIVE_LAST_SEEN_MINUTES_AGO + 60,
+          () => "watching"
+        ),
+        events: [
+          eventRow(
+            watcherId,
+            "watcher_started",
+            "Watcher started",
+            minutesBefore(now, UNRESPONSIVE_LAST_SEEN_MINUTES_AGO + 60)
+          ),
+          eventRow(
+            watcherId,
+            "config_synced",
+            "Config synced from server",
+            minutesBefore(now, UNRESPONSIVE_LAST_SEEN_MINUTES_AGO + 59)
+          ),
+          eventRow(
+            watcherId,
+            "file_uploaded",
+            "Uploaded latest run files to S3",
+            minutesBefore(now, UNRESPONSIVE_LAST_SEEN_MINUTES_AGO + 5)
+          ),
+        ],
+      };
+    case "none":
+      throw new Error(`${instrument.id} has no current watcher to seed`);
+    default:
+      return instrument.watcherStatus satisfies never;
+  }
+}
+
+async function insertHeartbeatRows(
+  db: Db,
+  rows: WatcherHeartbeatRow[]
+): Promise<void> {
+  for (let i = 0; i < rows.length; i += WATCHER_ROW_CHUNK) {
+    await db
+      .insert(schema.watcherHeartbeats)
+      .values(rows.slice(i, i + WATCHER_ROW_CHUNK));
+  }
+}
+
+async function insertEventRows(db: Db, rows: WatcherEventRow[]): Promise<void> {
+  for (let i = 0; i < rows.length; i += WATCHER_ROW_CHUNK) {
+    await db
+      .insert(schema.watcherEvents)
+      .values(rows.slice(i, i + WATCHER_ROW_CHUNK));
+  }
+}
+
 export async function seedWatchers(
   db: Db,
   instruments: SeededInstrument[]
@@ -557,92 +1304,62 @@ export async function seedWatchers(
   // heartbeats) to model the realistic "watcher registered, awaiting admin
   // activation" state — instruments only ever exist because a watcher
   // registered against them, so a pending instrument with no watcher is a
-  // state the real system can't produce.
+  // state the real system can't produce. An instrument with no current watcher
+  // (`none`) gets none here.
   const eligible = instruments.filter(
-    (i) => i.status === "active" || i.status === "pending"
+    (i) =>
+      (i.status === "active" || i.status === "pending") &&
+      i.watcherStatus !== "none"
   );
   if (eligible.length === 0) {
     return [];
   }
 
   const now = new Date();
-  const watcherValues = eligible.map((instrument) => {
-    const status =
-      instrument.status === "pending"
-        ? ("registered" as const)
-        : instrument.watcherStatus;
+  const plans = eligible.map((instrument) => {
     const id = crypto.randomUUID();
+    const identity = watcherIdentity(instrument);
     const { configYaml, configChecksum } = renderWatcherConfig(
-      instrument.configYamlTemplate,
+      identity.configYamlTemplate,
       id
     );
+    const rows = currentWatcherRows(instrument, id, now);
     return {
-      id,
-      instrumentId: instrument.id,
-      hostname: instrument.hostname,
-      osInfo: instrument.osInfo,
-      watcherVersion: SEED_WATCHER_VERSION,
-      configChecksum,
-      configYaml,
-      lastHeartbeatAt: status === "watching" ? now : null,
-      status,
+      watcher: {
+        id,
+        instrumentId: instrument.id,
+        hostname: identity.hostname,
+        osInfo: identity.osInfo,
+        watcherVersion: SEED_WATCHER_VERSION,
+        configChecksum,
+        configYaml,
+        createdAt: rows.createdAt,
+        lastHeartbeatAt: rows.lastHeartbeatAt,
+        status: rows.status,
+        statusReason: rows.statusReason,
+      },
+      heartbeats: rows.heartbeats,
+      events: rows.events,
     };
   });
 
   const inserted = await db
     .insert(schema.watchers)
-    .values(watcherValues)
+    .values(plans.map((plan) => plan.watcher))
     .returning({
       id: schema.watchers.id,
       instrumentId: schema.watchers.instrumentId,
       status: schema.watchers.status,
     });
 
-  const watchingIds = inserted
-    .filter((w) => w.status === "watching")
-    .map((w) => w.id);
-
-  if (watchingIds.length > 0) {
-    // 10 heartbeats spread over the last hour for each watching watcher.
-    const heartbeatRows = watchingIds.flatMap((watcherId) =>
-      Array.from({ length: 10 }, (_, i) => ({
-        watcherId,
-        timestamp: new Date(now.getTime() - i * 5 * 60_000),
-        status: "watching",
-        uploadMode: "auto" as const,
-        filesUploadedSinceLast: i === 0 ? 0 : 1,
-        runsReportedSinceLast: 0,
-        errorsSinceLast: 0,
-        uptimeSeconds: 3600 - i * 300,
-      }))
-    );
-    await db.insert(schema.watcherHeartbeats).values(heartbeatRows);
-
-    const eventRows = watchingIds.flatMap((watcherId) => [
-      {
-        watcherId,
-        eventType: "watcher_started" as const,
-        message: "Watcher started",
-        details: {},
-        timestamp: new Date(now.getTime() - 60 * 60_000),
-      },
-      {
-        watcherId,
-        eventType: "config_synced" as const,
-        message: "Config synced from server",
-        details: {},
-        timestamp: new Date(now.getTime() - 50 * 60_000),
-      },
-      {
-        watcherId,
-        eventType: "file_uploaded" as const,
-        message: "Uploaded latest run files to S3",
-        details: {},
-        timestamp: new Date(now.getTime() - 10 * 60_000),
-      },
-    ]);
-    await db.insert(schema.watcherEvents).values(eventRows);
-  }
+  await insertHeartbeatRows(
+    db,
+    plans.flatMap((plan) => plan.heartbeats)
+  );
+  await insertEventRows(
+    db,
+    plans.flatMap((plan) => plan.events)
+  );
 
   return inserted;
 }
@@ -1317,6 +2034,651 @@ export async function seedRuns(
   }
 
   return runs;
+}
+
+// ---------------------------------------------------------------------------
+// Watcher scenarios: a week of history, past watchers, config changes, runs
+// with files waiting for upload, and the token a pending instrument's watcher
+// registered with. They run after the runs and teammates exist, because they
+// point at them.
+// ---------------------------------------------------------------------------
+
+export interface WatcherScenarioOptions {
+  adminId: string;
+  instruments: SeededInstrument[];
+  runs: SeededRun[];
+  teammates: SeededTeammate[];
+  watchers: SeededWatcher[];
+}
+
+// An item from a list, wrapping around the end. Throws when the list is empty.
+function pick<T>(items: readonly T[], index: number): T {
+  const item = items[index % items.length];
+  if (item === undefined) {
+    throw new Error("Nothing to pick from");
+  }
+  return item;
+}
+
+// How many of the given events fall in the `step` minutes that a heartbeat
+// `minutesAgo` before the seed runs reports on.
+function countSinceHeartbeat(
+  eventsAgo: readonly number[],
+  minutesAgo: number,
+  step: number
+): number {
+  return eventsAgo.filter((ago) => ago > minutesAgo && ago <= minutesAgo + step)
+    .length;
+}
+
+// A watcher that was deregistered. It ran from `registeredDaysAgo` until
+// `deregisteredDaysAgo`, and its last heartbeat came five minutes before that.
+async function seedPastWatcher(
+  db: Db,
+  instrument: SeededInstrument,
+  past: SeededPastWatcher,
+  scenario: { adminId: string; now: Date; runs: SeededRun[] }
+): Promise<void> {
+  const { now } = scenario;
+  const template = templateOf(instrument);
+  const id = crypto.randomUUID();
+  const { configYaml, configChecksum } = renderWatcherConfig(template, id);
+  const registeredAgo = past.registeredDaysAgo * MINUTES_PER_DAY;
+  const deregisteredAgo = past.deregisteredDaysAgo * MINUTES_PER_DAY;
+  const lastSeenAgo = deregisteredAgo + 5;
+
+  await db.insert(schema.watchers).values({
+    id,
+    instrumentId: instrument.id,
+    hostname: past.hostname,
+    osInfo: past.osInfo,
+    watcherVersion: SEED_WATCHER_VERSION,
+    configChecksum,
+    configYaml,
+    createdAt: minutesBefore(now, registeredAgo),
+    lastHeartbeatAt: minutesBefore(now, lastSeenAgo),
+    status: "stopped",
+    statusReason: null,
+    configRevision: 1,
+    appliedConfigRevision: 1,
+    deletedAt: minutesBefore(now, deregisteredAgo),
+    deregisteredBy: scenario.adminId,
+  });
+
+  await db.insert(schema.watcherConfigRevisions).values(
+    revisionRow(id, 1, "web", "applied", settingsFromTemplate(template), {
+      createdBy: scenario.adminId,
+      createdAt: minutesBefore(now, registeredAgo + 1),
+      resolvedAt: minutesBefore(now, registeredAgo),
+    })
+  );
+
+  // Heartbeats for its last three days, five minutes apart.
+  const oldestAgo = Math.min(registeredAgo, lastSeenAgo + 3 * MINUTES_PER_DAY);
+  const heartbeats: WatcherHeartbeatRow[] = [];
+  for (let minutesAgo = lastSeenAgo; minutesAgo <= oldestAgo; minutesAgo += 5) {
+    heartbeats.push(
+      heartbeatRow(
+        id,
+        minutesBefore(now, minutesAgo),
+        minutesAgo === lastSeenAgo ? "stopped" : "watching",
+        "auto",
+        (registeredAgo - minutesAgo) * 60
+      )
+    );
+  }
+  await insertHeartbeatRows(db, heartbeats);
+
+  const [run] = scenario.runs;
+  const events: WatcherEventRow[] = [
+    eventRow(
+      id,
+      "watcher_started",
+      `Service started on ${past.hostname}`,
+      minutesBefore(now, registeredAgo)
+    ),
+    eventRow(
+      id,
+      "config_synced",
+      "Config synced from server",
+      minutesBefore(now, registeredAgo - 1)
+    ),
+  ];
+  if (run) {
+    events.push(
+      fileUploadedEvent(
+        id,
+        minutesBefore(now, Math.round((registeredAgo + deregisteredAgo) / 2)),
+        instrument.id,
+        run.runId,
+        "scan-archive.csv",
+        40_960
+      )
+    );
+  }
+  events.push(
+    eventRow(
+      id,
+      "watcher_stopped",
+      "Service stopped: its registration was deleted on Data Hub",
+      minutesBefore(now, deregisteredAgo)
+    )
+  );
+  await insertEventRows(db, events);
+}
+
+// A week of heartbeats, uploads, run reports, restarts and gaps for a watcher
+// with a WATCHER_HISTORY plan. The watcher row itself is seeded by seedWatchers.
+async function seedWatcherHistory(
+  db: Db,
+  instrument: SeededInstrument,
+  watcherId: string,
+  plan: WatcherHistoryPlan,
+  runs: SeededRun[],
+  now: Date
+): Promise<void> {
+  if (runs.length === 0) {
+    throw new Error(`${instrument.id} needs seeded runs for its history`);
+  }
+  const { hostname } = watcherIdentity(instrument);
+  const step = plan.stepMinutes;
+  const historyMinutes = HISTORY_DAYS * MINUTES_PER_DAY;
+
+  const events: WatcherEventRow[] = [
+    eventRow(
+      watcherId,
+      "watcher_started",
+      `Service started on ${hostname}`,
+      minutesBefore(now, historyMinutes)
+    ),
+    eventRow(
+      watcherId,
+      "config_synced",
+      "Config synced from server",
+      minutesBefore(now, historyMinutes - 1)
+    ),
+  ];
+
+  // Uploads and run reports, every day of the week.
+  const uploadAgos: number[] = [];
+  const reportAgos: number[] = [];
+  for (let day = 0; day < HISTORY_DAYS; day++) {
+    const dayStart = day * MINUTES_PER_DAY;
+    for (const [n, offset] of UPLOAD_MINUTES_OF_DAY.slice(
+      0,
+      plan.uploadsPerDay
+    ).entries()) {
+      const agoMinutes = dayStart + offset;
+      const run = pick(runs, day + n);
+      events.push(
+        fileUploadedEvent(
+          watcherId,
+          minutesBefore(now, agoMinutes),
+          instrument.id,
+          run.runId,
+          `scan-${day + 1}-${n + 1}.csv`,
+          20_480 + n * 4096 + day * 512
+        )
+      );
+      uploadAgos.push(agoMinutes);
+    }
+    const reported = pick(runs, day);
+    const reportAgo = dayStart + RUN_REPORT_MINUTE_OF_DAY;
+    events.push(
+      eventRow(
+        watcherId,
+        "run_reported",
+        `Run ${reported.runId} reported`,
+        minutesBefore(now, reportAgo),
+        { run_id: reported.runId }
+      )
+    );
+    reportAgos.push(reportAgo);
+  }
+
+  for (const restart of plan.restarts) {
+    const resumedAgo = restart.stoppedMinutesAgo - restart.gapMinutes;
+    events.push(
+      eventRow(
+        watcherId,
+        "update_started",
+        `Upgrading watcher ${restart.from} -> ${restart.to}`,
+        minutesBefore(now, restart.stoppedMinutesAgo + 1),
+        {
+          current_version: restart.from,
+          target_version: restart.to,
+          mandatory: false,
+          install_method: "uv-tool",
+        }
+      ),
+      eventRow(
+        watcherId,
+        "watcher_stopped",
+        "Service restarting for auto-update",
+        minutesBefore(now, restart.stoppedMinutesAgo)
+      ),
+      eventRow(
+        watcherId,
+        "watcher_started",
+        `Service started on ${hostname}`,
+        minutesBefore(now, resumedAgo)
+      ),
+      eventRow(
+        watcherId,
+        "update_succeeded",
+        `Restarted into upgraded watcher ${restart.from} -> ${restart.to}`,
+        new Date(minutesBefore(now, resumedAgo).getTime() + 30_000),
+        { previous_version: restart.from, target_version: restart.to }
+      )
+    );
+  }
+
+  for (const recovery of plan.recoveries) {
+    events.push(
+      eventRow(
+        watcherId,
+        "error",
+        `Heartbeat recovered after ${recovery.missedHeartbeats} consecutive failure(s)`,
+        minutesBefore(now, recovery.recoveredMinutesAgo),
+        {
+          kind: "heartbeat_recovered",
+          consecutive_failures: recovery.missedHeartbeats,
+          gap_seconds: (recovery.missedHeartbeats + 1) * step * 60,
+        }
+      )
+    );
+  }
+
+  if (plan.failedUploadMinutesAgo !== undefined) {
+    const failedRun = pick(runs, 0);
+    events.push(
+      eventRow(
+        watcherId,
+        "upload_failed",
+        "Upload failed: scan-failed.csv",
+        minutesBefore(now, plan.failedUploadMinutesAgo),
+        {
+          error: "The upload timed out before storage confirmed it",
+          s3_key: `${instrument.id}/${failedRun.runId}/scan-failed.csv`,
+        }
+      )
+    );
+  }
+
+  // Heartbeats, oldest first. A restart's stop heartbeat reads "stopped", and
+  // the watcher comes back `gapMinutes` later. A recovery gap has no heartbeats
+  // until the one that ends it.
+  const stops = new Set(plan.restarts.map((r) => r.stoppedMinutesAgo));
+  const resumes = new Set(
+    plan.restarts.map((r) => r.stoppedMinutesAgo - r.gapMinutes)
+  );
+  const inGap = (minutesAgo: number): boolean =>
+    plan.restarts.some(
+      (r) =>
+        minutesAgo > r.stoppedMinutesAgo - r.gapMinutes &&
+        minutesAgo < r.stoppedMinutesAgo
+    ) ||
+    plan.recoveries.some(
+      (r) =>
+        minutesAgo > r.recoveredMinutesAgo &&
+        minutesAgo < r.recoveredMinutesAgo + (r.missedHeartbeats + 1) * step
+    );
+
+  const heartbeats: WatcherHeartbeatRow[] = [];
+  let runStartedAgo = historyMinutes;
+  for (let minutesAgo = historyMinutes; minutesAgo >= 0; minutesAgo -= step) {
+    if (inGap(minutesAgo)) {
+      continue;
+    }
+    if (resumes.has(minutesAgo)) {
+      runStartedAgo = minutesAgo;
+    }
+    heartbeats.push(
+      heartbeatRow(
+        watcherId,
+        minutesBefore(now, minutesAgo),
+        stops.has(minutesAgo) ? "stopped" : "watching",
+        "auto",
+        (runStartedAgo - minutesAgo) * 60,
+        countSinceHeartbeat(uploadAgos, minutesAgo, step),
+        countSinceHeartbeat(reportAgos, minutesAgo, step)
+      )
+    );
+  }
+
+  await insertHeartbeatRows(db, heartbeats);
+  await insertEventRows(db, events);
+}
+
+async function setRevisionNumbers(
+  db: Db,
+  watcherId: string,
+  configRevision: number,
+  appliedConfigRevision: number
+): Promise<void> {
+  await db
+    .update(schema.watchers)
+    .set({ configRevision, appliedConfigRevision })
+    .where(eq(schema.watchers.id, watcherId));
+}
+
+// Three watchers, one in each config state. A save always makes a new
+// revision; the watcher's next report moves it to applied or rejected.
+async function seedConfigChanges(
+  db: Db,
+  options: {
+    adminId: string;
+    now: Date;
+    pendingBy: string;
+    rejectedBy: string;
+    settingsOf: (instrumentId: string) => WatcherConfigSettings;
+    watcherOf: (instrumentId: string) => string;
+  }
+): Promise<void> {
+  const { adminId, now } = options;
+
+  // Pending: a teammate saved a change while the watcher was stopped, so the
+  // change waits until the watcher starts again.
+  const stopped = options.watcherOf("instantraman");
+  const stoppedBase = options.settingsOf("instantraman");
+  await db.insert(schema.watcherConfigRevisions).values([
+    revisionRow(stopped, 1, "web", "applied", stoppedBase, {
+      createdBy: adminId,
+      createdAt: minutesBefore(now, 10 * MINUTES_PER_DAY + 1),
+      resolvedAt: minutesBefore(now, 10 * MINUTES_PER_DAY),
+    }),
+    revisionRow(
+      stopped,
+      2,
+      "web",
+      "pending",
+      { ...stoppedBase, stability_period_seconds: 10, upload_parallelism: 2 },
+      { createdBy: options.pendingBy, createdAt: minutesBefore(now, 180) }
+    ),
+  ]);
+  await setRevisionNumbers(db, stopped, 2, 1);
+  await insertEventRows(db, [
+    appliedEvent(stopped, 1, minutesBefore(now, 10 * MINUTES_PER_DAY)),
+  ]);
+
+  // Rejected: the watcher could not use the new watch folder, and said why.
+  const rejected = options.watcherOf("spectramax-id3-plate-reader");
+  const rejectedBase = options.settingsOf("spectramax-id3-plate-reader");
+  const rejectionReason =
+    "The watcher could not read the new watch folder on this PC.";
+  await db.insert(schema.watcherConfigRevisions).values([
+    revisionRow(rejected, 1, "web", "applied", rejectedBase, {
+      createdBy: adminId,
+      createdAt: minutesBefore(now, 6 * MINUTES_PER_DAY + 1),
+      resolvedAt: minutesBefore(now, 6 * MINUTES_PER_DAY),
+    }),
+    revisionRow(
+      rejected,
+      2,
+      "web",
+      "rejected",
+      { ...rejectedBase, watch_directory: "C:\\Data\\SpectraMaxID3Archive" },
+      {
+        createdBy: options.rejectedBy,
+        createdAt: minutesBefore(now, 120),
+        resolvedAt: minutesBefore(now, 105),
+        statusReason: rejectionReason,
+      }
+    ),
+  ]);
+  await setRevisionNumbers(db, rejected, 2, 1);
+  await insertEventRows(db, [
+    appliedEvent(rejected, 1, minutesBefore(now, 6 * MINUTES_PER_DAY)),
+    rejectedEvent(rejected, 2, rejectionReason, minutesBefore(now, 105)),
+  ]);
+
+  // Edited on the PC: the PC's revision is applied, but the watcher reads its
+  // config only at startup, so it still runs revision 1.
+  const edited = options.watcherOf("agilent-4150-tapestation");
+  const editedBase = options.settingsOf("agilent-4150-tapestation");
+  await db.insert(schema.watcherConfigRevisions).values([
+    revisionRow(edited, 1, "web", "applied", editedBase, {
+      createdBy: adminId,
+      createdAt: minutesBefore(now, 5 * MINUTES_PER_DAY + 1),
+      resolvedAt: minutesBefore(now, 5 * MINUTES_PER_DAY),
+    }),
+    revisionRow(
+      edited,
+      2,
+      "pc",
+      "applied",
+      {
+        ...editedBase,
+        file_patterns: [...editedBase.file_patterns, "*.txt"],
+      },
+      {
+        createdAt: minutesBefore(now, 40),
+        resolvedAt: minutesBefore(now, 40),
+      }
+    ),
+  ]);
+  await setRevisionNumbers(db, edited, 2, 1);
+  await insertEventRows(db, [
+    appliedEvent(edited, 1, minutesBefore(now, 5 * MINUTES_PER_DAY)),
+  ]);
+}
+
+// A run with files waiting for upload: detected, or upload requested and not
+// yet uploaded. Times are minutes before the seed runs.
+async function seedWaitingRun(
+  db: Db,
+  run: {
+    acquiredAgo: number;
+    createdAgo: number;
+    files: {
+      detectedAgo: number;
+      name: string;
+      requestedAgo?: number;
+      status: "detected" | "upload_requested";
+    }[];
+    instrumentId: string;
+    now: Date;
+    runId: string;
+    watcherId: string;
+  }
+): Promise<void> {
+  const [row] = await db
+    .insert(schema.instrumentRuns)
+    .values({
+      instrumentId: run.instrumentId,
+      runId: run.runId,
+      source: "watcher",
+      watcherId: run.watcherId,
+      metadata: { seeded: true },
+      acquiredAt: minutesBefore(run.now, run.acquiredAgo),
+      createdAt: minutesBefore(run.now, run.createdAgo),
+    })
+    .returning({ id: schema.instrumentRuns.id });
+  if (!row) {
+    throw new Error(`Could not seed run ${run.runId}`);
+  }
+  await db.insert(schema.files).values(
+    run.files.map((file) => ({
+      instrumentRunId: row.id,
+      relativePath: file.name,
+      filename: file.name,
+      contentType: "text/csv",
+      sizeBytes: 4096,
+      category: "raw" as const,
+      status: file.status,
+      metadata: { seeded: true },
+      detectedAt: minutesBefore(run.now, file.detectedAgo),
+      uploadRequestedAt:
+        file.requestedAgo === undefined
+          ? null
+          : minutesBefore(run.now, file.requestedAgo),
+    }))
+  );
+}
+
+// The token a pending instrument's watcher registered with, so that its
+// registration names a token instead of being claimed on first use.
+async function seedPendingWatcherToken(
+  db: Db,
+  adminId: string,
+  watcherId: string,
+  now: Date
+): Promise<void> {
+  const watcherPreset = SCOPE_PRESETS.find((preset) => preset.id === "watcher");
+  if (!watcherPreset) {
+    throw new Error("The watcher scope preset is missing");
+  }
+  const plaintext = generateToken();
+  const [token] = await db
+    .insert(schema.personalAccessTokens)
+    .values({
+      createdBy: adminId,
+      name: "Lab PC token",
+      tokenHash: hashToken(plaintext),
+      tokenPrefix: getTokenPrefix(plaintext),
+      scopes: [...watcherPreset.scopes],
+      lastUsedAt: minutesBefore(now, 20),
+    })
+    .returning({ id: schema.personalAccessTokens.id });
+  if (!token) {
+    throw new Error("Could not seed the pending watcher's token");
+  }
+  await db
+    .update(schema.watchers)
+    .set({ registeredByToken: token.id })
+    .where(eq(schema.watchers.id, watcherId));
+}
+
+// Writes the watcher states that need more than seedWatchers does. Call it
+// after seedWatchers, seedRuns and seedTeammates, because it points at them.
+export async function seedWatcherScenarios(
+  db: Db,
+  options: WatcherScenarioOptions
+): Promise<void> {
+  const now = new Date();
+  const instrumentById = new Map(
+    options.instruments.map(
+      (instrument) => [instrument.id, instrument] as const
+    )
+  );
+  const watcherIdByInstrument = new Map(
+    options.watchers.map(
+      (watcher) => [watcher.instrumentId, watcher.id] as const
+    )
+  );
+  const runsOf = (instrumentId: string): SeededRun[] =>
+    options.runs.filter((run) => run.instrumentId === instrumentId);
+  const instrumentOf = (instrumentId: string): SeededInstrument => {
+    const instrument = instrumentById.get(instrumentId);
+    if (!instrument) {
+      throw new Error(`No seeded instrument ${instrumentId}`);
+    }
+    return instrument;
+  };
+  const watcherOf = (instrumentId: string): string => {
+    const watcherId = watcherIdByInstrument.get(instrumentId);
+    if (!watcherId) {
+      throw new Error(`No seeded watcher for ${instrumentId}`);
+    }
+    return watcherId;
+  };
+  const [pendingBy, rejectedBy] = options.teammates;
+  if (!(pendingBy && rejectedBy)) {
+    throw new Error("The seed needs two teammates");
+  }
+
+  for (const instrument of options.instruments) {
+    for (const past of instrument.pastWatchers ?? []) {
+      await seedPastWatcher(db, instrument, past, {
+        adminId: options.adminId,
+        now,
+        runs: runsOf(instrument.id),
+      });
+    }
+  }
+
+  for (const [instrumentId, plan] of Object.entries(WATCHER_HISTORY)) {
+    if (plan) {
+      await seedWatcherHistory(
+        db,
+        instrumentOf(instrumentId),
+        watcherOf(instrumentId),
+        plan,
+        runsOf(instrumentId),
+        now
+      );
+    }
+  }
+
+  await seedConfigChanges(db, {
+    adminId: options.adminId,
+    now,
+    pendingBy: pendingBy.id,
+    rejectedBy: rejectedBy.id,
+    settingsOf: (instrumentId) =>
+      settingsFromTemplate(templateOf(instrumentOf(instrumentId))),
+    watcherOf,
+  });
+
+  // Balance F is unresponsive: these files were detected before it went silent,
+  // and their upload requests are queued.
+  await seedWaitingRun(db, {
+    instrumentId: "balance-f",
+    now,
+    runId: "weighing-batch-a",
+    watcherId: watcherOf("balance-f"),
+    acquiredAgo: 150,
+    createdAgo: 140,
+    files: [
+      { name: "weigh-0001.csv", status: "detected", detectedAgo: 140 },
+      { name: "weigh-0002.csv", status: "detected", detectedAgo: 135 },
+      {
+        name: "weigh-0003.csv",
+        status: "upload_requested",
+        detectedAgo: 130,
+        requestedAgo: 125,
+      },
+      {
+        name: "weigh-0004.csv",
+        status: "upload_requested",
+        detectedAgo: 128,
+        requestedAgo: 124,
+      },
+    ],
+  });
+
+  // Thermal Mixer H is restarting, so the requests made since it stopped queue
+  // until it is back.
+  await seedWaitingRun(db, {
+    instrumentId: "thermal-mixer-h",
+    now,
+    runId: "mixer-run-b",
+    watcherId: watcherOf("thermal-mixer-h"),
+    acquiredAgo: 35,
+    createdAgo: 30,
+    files: [
+      { name: "mix-0001.csv", status: "detected", detectedAgo: 30 },
+      {
+        name: "mix-0002.csv",
+        status: "upload_requested",
+        detectedAgo: 28,
+        requestedAgo: 2,
+      },
+      {
+        name: "mix-0003.csv",
+        status: "upload_requested",
+        detectedAgo: 27,
+        requestedAgo: 2,
+      },
+    ],
+  });
+
+  await seedPendingWatcherToken(
+    db,
+    options.adminId,
+    watcherOf("seed-pending-instrument"),
+    now
+  );
 }
 
 // ---------------------------------------------------------------------------

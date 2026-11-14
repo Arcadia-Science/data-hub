@@ -28,6 +28,7 @@ import {
   seedSlackChannelConfig,
   seedTeammates,
   seedWatcherReleaseConfig,
+  seedWatcherScenarios,
   seedWatchers,
 } from "@/lib/db/seed";
 
@@ -66,7 +67,7 @@ export async function seedWorkspace(db: Db): Promise<SeededWorkspace> {
   const instruments = await seedInstruments(db);
 
   console.log("Seeding watchers + heartbeats + events…");
-  await seedWatchers(db, instruments);
+  const watchers = await seedWatchers(db, instruments);
 
   console.log("Seeding runs + files…");
   const activeInstruments = instruments.filter((i) => i.status === "active");
@@ -77,6 +78,15 @@ export async function seedWorkspace(db: Db): Promise<SeededWorkspace> {
 
   console.log("Seeding teammate users…");
   const teammates = await seedTeammates(db);
+
+  console.log("Seeding watcher history, past watchers, config changes…");
+  await seedWatcherScenarios(db, {
+    adminId: userId,
+    instruments,
+    runs,
+    teammates,
+    watchers,
+  });
 
   console.log("Seeding run comments, attributions, and notebook links…");
   const commentAuthors = [
