@@ -6678,7 +6678,9 @@
                     "offline",
                     "no_watcher",
                     "deregistered"
-                  ]
+                  ],
+                  "deprecated": true,
+                  "description": "Deprecated. Use `connection.state`, or `connection.reason`."
                 },
                 "lastWatcherHeartbeatAt": {
                   "anyOf": [
@@ -6690,7 +6692,9 @@
                     {
                       "type": "null"
                     }
-                  ]
+                  ],
+                  "deprecated": true,
+                  "description": "Deprecated. Get the instrument for its `watcher.lastHeartbeatAt`."
                 },
                 "runCount": {
                   "type": "integer",

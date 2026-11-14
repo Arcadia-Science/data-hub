@@ -61,12 +61,18 @@ export function InstrumentBadgePill({
  */
 export function InstrumentBadge({
   instrumentId,
+  instrumentName,
   status,
   connection,
   uploadMode = "auto",
   className,
 }: {
   instrumentId: string;
+  /**
+   * The instrument's name. It goes into the link's accessible name, so a list
+   * of links read by a screen reader says which instrument each one is for.
+   */
+  instrumentName?: string;
   status: InstrumentLifecycleStatus;
   connection: Connection;
   /** The watcher's upload mode. It changes what Online says. */
@@ -80,7 +86,11 @@ export function InstrumentBadge({
     <Tooltip>
       <TooltipTrigger asChild>
         <Link
-          aria-label={`${label}, watcher details`}
+          aria-label={
+            instrumentName
+              ? `${label}, watcher details for ${instrumentName}`
+              : `${label}, watcher details`
+          }
           className="inline-flex rounded-4xl outline-none focus-visible:ring-2 focus-visible:ring-ring"
           href={watcherPageHref(instrumentId)}
         >

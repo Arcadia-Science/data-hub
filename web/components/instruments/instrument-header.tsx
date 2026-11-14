@@ -63,13 +63,7 @@ function ManualUploadPill() {
   );
 }
 
-function WatchDirectory({
-  path,
-  hostname,
-}: {
-  path: string;
-  hostname: string | null;
-}) {
+function WatchDirectory({ path }: { path: string }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -83,9 +77,7 @@ function WatchDirectory({
         </button>
       </TooltipTrigger>
       <TooltipContent className="flex-col items-start" side="bottom">
-        <p className="font-medium">
-          Watched folder{hostname ? ` on ${hostname}` : ""}
-        </p>
+        <p className="font-medium">Watch folder on the instrument PC</p>
         <p>
           The watcher only looks for files in this folder. Files saved anywhere
           else, such as a shared network drive, won't appear in Data Hub.
@@ -155,6 +147,7 @@ export function InstrumentHeader({
             <InstrumentBadge
               connection={instrument.connection}
               instrumentId={instrument.id}
+              instrumentName={instrument.displayName}
               status={instrument.status}
               uploadMode={instrument.watcher?.uploadMode}
             />
@@ -164,10 +157,7 @@ export function InstrumentHeader({
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground text-sm">
               {watchDirectory ? (
                 <>
-                  <WatchDirectory
-                    hostname={instrument.watcher?.hostname ?? null}
-                    path={watchDirectory}
-                  />
+                  <WatchDirectory path={watchDirectory} />
                   {filePatterns.length > 0 ? (
                     <FilePatterns patterns={filePatterns} />
                   ) : null}

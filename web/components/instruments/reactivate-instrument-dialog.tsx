@@ -63,8 +63,7 @@ export function ReactivateInstrumentDialog({
           <AlertDialogTitle>Reactivate {displayName}?</AlertDialogTitle>
           <AlertDialogDescription>
             The instrument returns to Active and reappears in the sidebar and
-            dashboard. Its watcher was deregistered when it was retired, so a
-            new watcher must be set up before new files arrive.
+            dashboard. A new watcher must be set up before new files arrive.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

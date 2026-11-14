@@ -71,7 +71,7 @@ export function RetireInstrumentDialog({
           <AlertDialogTitle>Retire {displayName}?</AlertDialogTitle>
           <AlertDialogDescription>
             The instrument moves to Retired and disappears from the sidebar and
-            dashboard. It stops accepting new runs.
+            dashboard. It stops accepting new runs and watchers.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <ul className="rounded-lg border text-sm">

@@ -201,6 +201,7 @@ export function InstrumentsTable({
                   <InstrumentBadge
                     connection={row.connection}
                     instrumentId={row.id}
+                    instrumentName={row.displayName}
                     status={row.status}
                     uploadMode={row.watcher?.uploadMode}
                   />
