@@ -104,6 +104,7 @@ These older fields still come back with the values they had, but are deprecated,
 - `hasDeregisteredWatcher`, from `list_instruments` only
 - the top-level `filePatterns`, from both tools, which `watcher.filePatterns` replaces
 - `watcherStatus` and `lastWatcherHeartbeatAt` on an instrument result of `global_search`, which `connection` replaces
+- `watcherStatus` on each instrument of `get_system_status`, which now returns `connection` as well and which `connection` replaces
 
 ## Questions about Data Hub [#questions-about-data-hub]
 

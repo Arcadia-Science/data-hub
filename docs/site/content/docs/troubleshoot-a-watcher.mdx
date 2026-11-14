@@ -33,7 +33,7 @@ The instrument was registered but an admin has not confirmed it. Its badge reads
 
 Each instrument can have at most one active watcher. An earlier install (often on another PC, or before a reimage) is still registered. The CLI prints the existing watcher id; deregister it before re-running `init`:
 
-- **Web app**: open the instrument, select its status badge to open its watcher page, and choose **Deregister** from the ⋮ menu. You can also use the row menu in **Settings → Watchers**. Only admins see those menus. Watcher 1.4.3’s message names a menu that no longer exists; the next watcher release will print the address of the watcher’s page instead
+- **Web app**: open the instrument, select its status badge to open its watcher page, and choose **Deregister** from the ⋮ menu. You can also use the row menu in **Settings → Watchers**. Only admins see those menus. Watcher 1.4.3’s message names a menu that no longer exists; watcher 1.4.4 prints the address of the watcher’s page instead
 - **API**: `DELETE /api/v1/watchers/<existing_watcher_id>` with a bearer token that has `watchers:admin`
 
 Deregistration is a soft-delete: the history stays with the instrument as a past watcher, and on the **Deregistered** tab of **Settings → Watchers**.

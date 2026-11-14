@@ -232,9 +232,9 @@ If a file that the queue started never finishes, for example because Data Hub re
 
 ### Request an upload [#request-upload]
 
-A file that the watcher found but hasn’t uploaded reads **Waiting to upload**. Choose **Upload** on that file to ask the watcher to send it, or **Upload all** at the top of the **Files** section to ask for every waiting file in the run. You can also select runs in a list and choose **Upload**. The watcher picks up the request within a minute. On instruments that upload automatically, this needs watcher 1.2.1 or later; see [Roll out watcher releases](/docs/watcher-releases#what-each-version-adds). The footer under the files table counts how many are waiting on the instrument PC and how many are uploaded.
+A file that the watcher found but hasn’t uploaded reads **Waiting to upload**. Choose **Upload** on that file to ask the watcher to send it, or **Upload all** at the top of the **Files** section to ask for every waiting file in the run. The watcher picks up the request within a minute. On instruments that upload automatically, this needs watcher 1.2.1 or later; see [Roll out watcher releases](/docs/watcher-releases#what-each-version-adds). The footer under the files table counts how many are waiting on the instrument PC and how many are uploaded.
 
-The **Upload** buttons follow the instrument’s badge. When one is turned off, the reason shows beside it:
+The **Upload** and **Upload all** buttons on a run page follow the instrument’s badge. When one is turned off, the reason shows beside it:
 
 | Badge | Upload buttons | Beside them |
 | --- | --- | --- |
@@ -250,6 +250,8 @@ If the badge reads **Offline** and the run has files that are still on the instr
 ![Run page for an offline instrument, with a notice that four files are still on the instrument PC and a turned-off Upload all button with the reason beside it](/images/run-offline-notice.webp)
 
 Data Hub keeps a request made while the instrument is **Restarting** and the watcher uploads the files once it’s back. If no heartbeat arrives for about 15 minutes, Data Hub cancels the request and the files read **Waiting to upload** again.
+
+The **Upload** button on a runs list doesn’t follow the badge. Select runs and choose it to ask for every waiting file in them. For an instrument that is **Offline**, **Connecting**, **Pending**, or **Retired**, Data Hub refuses that run’s request, and a message reports how many runs failed. Choose **Upload** from the run page instead to see why.
 
 For instruments in [manual upload mode](/docs/concepts#upload-mode), every file waits for this approval. **Dismiss** tells the watcher not to upload a file. See [Manage the watcher fleet](/docs/manage-watchers#approving-manual-uploads).
 
