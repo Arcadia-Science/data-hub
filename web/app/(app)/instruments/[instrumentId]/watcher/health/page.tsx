@@ -4,14 +4,19 @@ import {
   WatcherHealth,
   WatcherHealthSkeleton,
 } from "@/components/watchers/watcher-health";
-import { getAllWatcherHeartbeats } from "@/lib/api/watchers";
 import { watcherDetailParamsCache } from "@/lib/search-params";
 import { getViewerTimeZone } from "@/lib/viewer-timezone";
 import {
   loadWatcherPage,
   requireWatcherPageSession,
 } from "@/lib/watchers/load-page";
-import { defaultWatcherSince, tzSafeSince } from "@/lib/watchers/since";
+import {
+  MAX_HEALTH_DAYS,
+  pickerFallback,
+  resolveWatcherRange,
+  startOfDay,
+} from "@/lib/watchers/range";
+import { watcherPageHref } from "@/lib/watchers/routes";
 
 interface Props {
   params: Promise<{ instrumentId: string }>;
@@ -31,6 +36,32 @@ export default async function WatcherHealthPage({
   const filters = watcherDetailParamsCache.parse(query);
   const timeZone = await getViewerTimeZone();
 
+  // A past watcher sent nothing lately, so its default range ends on the day it
+  // was deregistered.
+  const deregisteredAt = data.watcher?.deletedAt ?? null;
+  const range = resolveWatcherRange(
+    {
+      dateFrom: filters.date_from,
+      dateTo: filters.date_to,
+      legacySince: filters.since,
+    },
+    { timeZone, deregisteredAt, maxDays: MAX_HEALTH_DAYS }
+  );
+
+  // The Activity tab, listing this range's failed uploads. It keeps `?watcher=`
+  // when this page's URL had it, like the sub-tab links do.
+  const failuresHref = watcherPageHref(data.instrument.id, {
+    tab: "activity",
+    watcherId: data.selection.requested
+      ? (data.selection.selected?.id ?? null)
+      : null,
+    params: {
+      event_type: "upload_failed",
+      date_from: range.start.toISOString(),
+      date_to: startOfDay(range.toDay, timeZone).toISOString(),
+    },
+  });
+
   return (
     <WatcherFrame
       data={data}
@@ -39,28 +70,20 @@ export default async function WatcherHealthPage({
     >
       {data.watcher ? (
         <Suspense fallback={<WatcherHealthSkeleton />}>
-          <WatcherHealthSection
-            defaultSince={defaultWatcherSince(data.watcher.deletedAt, timeZone)}
-            since={filters.since}
+          <WatcherHealth
+            deregisteredAt={deregisteredAt}
+            failuresHref={failuresHref}
+            range={range}
+            rangeFallback={pickerFallback(
+              range,
+              timeZone,
+              deregisteredAt !== null
+            )}
+            timeZone={timeZone}
             watcherId={data.watcher.id}
           />
         </Suspense>
       ) : null}
     </WatcherFrame>
   );
-}
-
-async function WatcherHealthSection({
-  watcherId,
-  since,
-  defaultSince,
-}: {
-  watcherId: string;
-  since: string | null;
-  defaultSince: string;
-}) {
-  const heartbeats = await getAllWatcherHeartbeats(watcherId, {
-    since: tzSafeSince(since ?? defaultSince),
-  });
-  return <WatcherHealth defaultSince={defaultSince} heartbeats={heartbeats} />;
 }

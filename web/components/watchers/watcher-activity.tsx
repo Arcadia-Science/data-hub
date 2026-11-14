@@ -1,9 +1,16 @@
+import type { DateRange } from "@/components/runs/runs-date-filter";
 import { TablePendingProvider } from "@/components/table-pending";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EventLog } from "@/components/watchers/event-log";
 import { EventLogToolbar } from "@/components/watchers/event-log-toolbar";
-import { getWatcherEvents, WATCHER_PAGE_SIZE } from "@/lib/api/watchers";
-import { tzSafeSince } from "@/lib/watchers/since";
+import { getWatcherEvents } from "@/lib/api/watchers";
+import {
+  WATCHER_EVENTS_MAX_SHOWN,
+  WATCHER_EVENTS_PAGE_SIZE,
+} from "@/lib/search-params";
+import { describeEvent } from "@/lib/watchers/event-messages";
+import { pluralize } from "@/lib/watchers/phrases";
+import { describeRange, type WatcherRange } from "@/lib/watchers/range";
 
 export function WatcherActivitySkeleton() {
   return (
@@ -14,58 +21,89 @@ export function WatcherActivitySkeleton() {
       role="status"
     >
       <div className="flex items-center justify-between">
-        <h2 className="font-medium text-sm">Event Log</h2>
+        <div className="flex flex-col gap-1.5">
+          <Skeleton className="h-5 w-24" />
+          <Skeleton className="h-4 w-44" />
+        </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Skeleton className="h-8 w-28" />
-          <Skeleton className="h-8 w-36" />
+          <Skeleton className="h-9 w-28" />
+          <Skeleton className="h-9 w-36" />
         </div>
       </div>
-      <div className="rounded-md border border-dashed bg-background py-8 dark:bg-muted" />
+      <div className="rounded-xl border border-dashed bg-card py-8" />
     </div>
   );
 }
 
 /**
- * The Activity tab: the selected watcher's event log, filtered by the URL.
- * Server component, so it reads its own events.
+ * The Activity tab: the selected watcher's event log for the days and event
+ * types in the URL. Server component, so it reads its own events.
  */
 export async function WatcherActivity({
+  instrumentId,
   watcherId,
-  since,
-  defaultSince,
+  range,
+  rangeFallback,
   eventTypes,
-  page,
+  shown,
+  timeZone,
+  isAdmin,
 }: {
+  instrumentId: string;
   watcherId: string;
-  /** The `?events_since=` day (`yyyy-MM-dd`), or null for the default. */
-  since: string | null;
-  /** The day the log opens on when the URL names none. */
-  defaultSince: string;
+  range: WatcherRange;
+  /** What the range picker shows when the URL names no range. */
+  rangeFallback: DateRange;
   eventTypes: string[];
-  page: number;
+  /** How many events the URL asks to show. */
+  shown: number;
+  timeZone: string;
+  isAdmin: boolean;
 }) {
+  const pageSize = Math.min(
+    Math.max(shown, WATCHER_EVENTS_PAGE_SIZE),
+    WATCHER_EVENTS_MAX_SHOWN
+  );
   const events = await getWatcherEvents(watcherId, {
-    since: tzSafeSince(since ?? defaultSince),
+    since: range.start,
+    until: range.endExclusive,
     eventTypes: eventTypes.length > 0 ? eventTypes : undefined,
-    page,
+    page: 1,
+    pageSize,
   });
-  const totalPages = Math.ceil(events.total / WATCHER_PAGE_SIZE);
+
+  const rows = events.rows.map((event) => ({
+    id: event.id,
+    timestamp: event.timestamp.toISOString(),
+    description: describeEvent(event),
+    // Only an admin is shown the raw event, so only an admin is sent it.
+    raw: isAdmin
+      ? {
+          eventType: event.eventType,
+          message: event.message,
+          details: event.details,
+        }
+      : null,
+  }));
 
   return (
     <TablePendingProvider>
       <div className="flex flex-col gap-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <h2 className="font-medium text-sm">Event Log</h2>
-            {events.total > 0 && (
-              <p className="text-muted-foreground text-xs">
-                {events.total} event{events.total !== 1 && "s"}
-              </p>
-            )}
+            <h2 className="font-semibold">Event log</h2>
+            <p className="text-muted-foreground text-sm">
+              {pluralize(events.total, "event")}{" "}
+              {describeRange(range, timeZone)}
+            </p>
           </div>
-          <EventLogToolbar defaultSince={defaultSince} />
+          <EventLogToolbar rangeFallback={rangeFallback} />
         </div>
-        <EventLog events={events.rows} page={page} totalPages={totalPages} />
+        <EventLog
+          instrumentId={instrumentId}
+          rows={rows}
+          total={events.total}
+        />
       </div>
     </TablePendingProvider>
   );

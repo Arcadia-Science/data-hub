@@ -10,7 +10,7 @@ import {
   loadWatcherPage,
   requireWatcherPageSession,
 } from "@/lib/watchers/load-page";
-import { defaultWatcherSince } from "@/lib/watchers/since";
+import { pickerFallback, resolveWatcherRange } from "@/lib/watchers/range";
 
 interface Props {
   params: Promise<{ instrumentId: string }>;
@@ -29,20 +29,36 @@ export default async function WatcherActivityPage({
   const data = await loadWatcherPage(instrumentId, query.watcher);
   const filters = watcherDetailParamsCache.parse(query);
   const timeZone = await getViewerTimeZone();
+  const isAdmin = session.user.isAdmin === true;
+
+  // A past watcher sent nothing lately, so its default range ends on the day it
+  // was deregistered.
+  const deregisteredAt = data.watcher?.deletedAt ?? null;
+  const range = resolveWatcherRange(
+    {
+      dateFrom: filters.date_from,
+      dateTo: filters.date_to,
+      legacySince: filters.events_since,
+    },
+    { timeZone, deregisteredAt }
+  );
 
   return (
-    <WatcherFrame
-      data={data}
-      isAdmin={session.user.isAdmin === true}
-      tab="activity"
-    >
+    <WatcherFrame data={data} isAdmin={isAdmin} tab="activity">
       {data.watcher ? (
         <Suspense fallback={<WatcherActivitySkeleton />}>
           <WatcherActivity
-            defaultSince={defaultWatcherSince(data.watcher.deletedAt, timeZone)}
             eventTypes={filters.event_type}
-            page={filters.logs_page}
-            since={filters.events_since}
+            instrumentId={data.instrument.id}
+            isAdmin={isAdmin}
+            range={range}
+            rangeFallback={pickerFallback(
+              range,
+              timeZone,
+              deregisteredAt !== null
+            )}
+            shown={filters.shown}
+            timeZone={timeZone}
             watcherId={data.watcher.id}
           />
         </Suspense>

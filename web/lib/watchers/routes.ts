@@ -15,12 +15,18 @@ export const WATCHER_PARAM = "watcher";
 
 /**
  * The page's path, with the instrument ID encoded once. Pass `watcherId` for a
- * registration other than the one the page opens on, and `focus` to have the
- * Settings form put the cursor in that field.
+ * registration other than the one the page opens on, `focus` to have the
+ * Settings form put the cursor in that field, and `params` for the tab's own
+ * filters, such as the Activity tab's `event_type`.
  */
 export function watcherPageHref(
   instrumentId: string,
-  options: { tab?: WatcherTab; watcherId?: string | null; focus?: string } = {}
+  options: {
+    tab?: WatcherTab;
+    watcherId?: string | null;
+    focus?: string;
+    params?: Record<string, string>;
+  } = {}
 ): string {
   const tab = options.tab ?? "activity";
   const segment = WATCHER_TABS.find((t) => t.key === tab)?.segment ?? "";
@@ -30,6 +36,9 @@ export function watcherPageHref(
   }
   if (options.focus) {
     query.set("focus", options.focus);
+  }
+  for (const [name, value] of Object.entries(options.params ?? {})) {
+    query.set(name, value);
   }
   const queryString = query.toString();
   const search = queryString ? `?${queryString}` : "";

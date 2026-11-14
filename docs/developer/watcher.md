@@ -555,6 +555,15 @@ The watcher's primary observability surface is the per-watcher event log served 
 | `update_check_failed` | `GET /watchers/:id/update-check` failed for 3 consecutive attempts (~3 hours of going dark on the update channel). |
 | `watch_directory_unavailable` | The watch folder was missing, unreadable, not answering (`watch_directory not responding`) or can't be watched (`watch_directory can't be watched`), so the watcher entered the [waiting state](#the-waiting-state), at startup or, from 1.4.3, while it was running. `details` includes `watch_directory`, `reason`. |
 
+### How the web app shows events
+
+The watcher page's Activity tab gives every event a plain label and message with `describeEvent` in `web/lib/watchers/event-messages.ts`, which covers each event type and `details.kind` in the tables above. A type or kind it doesn't know still shows, with a label written from its name and the watcher's own message. When you add a kind or change what `details` carries, add it there too and cover it in `web/tests/unit/watcher-event-messages.test.ts`.
+
+The Health tab reads two things from events, so don't reword them without changing the web app:
+
+- A restart is a `watcher_stopped` event whose message says `restarting for auto-update` or `Windows is shutting down`. The event has no reason field, so `RESTART_STOP_FRAGMENTS` in `web/lib/watchers/stop-reasons.ts` matches the message. Any other stop isn't a restart.
+- A missed heartbeat is an `error` event with `details.kind="heartbeat_recovered"`. Its `gap_seconds` colours the connectivity grid.
+
 ### File timestamps
 
 Each file's on-disk creation time (`st_birthtime` where the OS provides it, otherwise `st_mtime`) is captured at stabilization, persisted in `detected_files`, and sent to the API on every run report and presigned-URL request. This lets the dashboard order events by when the instrument actually wrote the file rather than when the watcher uploaded it — useful when an initial scan or backfill uploads files long after their original write time.

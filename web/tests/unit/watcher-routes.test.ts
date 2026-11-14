@@ -39,6 +39,20 @@ describe("watcherPageHref", () => {
     );
     expect(watcherPageHref("a b/c")).toBe("/instruments/a%20b%2Fc/watcher");
   });
+
+  it("adds a tab's own filters, after ?watcher=", () => {
+    expect(
+      watcherPageHref("plate-reader-a", {
+        watcherId: WATCHER_ID,
+        params: {
+          event_type: "upload_failed",
+          date_from: "2026-11-08T08:00:00.000Z",
+        },
+      })
+    ).toBe(
+      `/instruments/plate-reader-a/watcher?watcher=${WATCHER_ID}&event_type=upload_failed&date_from=2026-11-08T08%3A00%3A00.000Z`
+    );
+  });
 });
 
 // One test per row of the spec's redirect table that starts at /watchers/<id>.

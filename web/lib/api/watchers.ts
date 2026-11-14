@@ -1,6 +1,5 @@
 import {
   and,
-  asc,
   count,
   desc,
   eq,
@@ -8,6 +7,7 @@ import {
   inArray,
   isNotNull,
   isNull,
+  lt,
   or,
   type SQL,
   sql,
@@ -730,34 +730,6 @@ export async function getWatcherHeartbeats(
   return { rows, total };
 }
 
-export async function getAllWatcherHeartbeats(
-  watcherId: string,
-  opts: { since?: Date } = {}
-): Promise<WatcherHeartbeatRow[]> {
-  const since = opts.since ?? new Date(Date.now() - DEFAULT_LOOKBACK_MS);
-
-  return await db
-    .select({
-      id: watcherHeartbeats.id,
-      timestamp: watcherHeartbeats.timestamp,
-      status: watcherHeartbeats.status,
-      uploadMode: watcherHeartbeats.uploadMode,
-      filesUploadedSinceLast: watcherHeartbeats.filesUploadedSinceLast,
-      runsReportedSinceLast: watcherHeartbeats.runsReportedSinceLast,
-      errorsSinceLast: watcherHeartbeats.errorsSinceLast,
-      uptimeSeconds: watcherHeartbeats.uptimeSeconds,
-    })
-    .from(watcherHeartbeats)
-    .where(
-      and(
-        eq(watcherHeartbeats.watcherId, watcherId),
-        gte(watcherHeartbeats.timestamp, since)
-      )
-    )
-    .orderBy(asc(watcherHeartbeats.timestamp))
-    .limit(5000);
-}
-
 // ---------------------------------------------------------------------------
 // Events
 // ---------------------------------------------------------------------------
@@ -774,6 +746,8 @@ export async function getWatcherEvents(
   watcherId: string,
   opts: {
     since?: Date;
+    /** Exclusive: events at this moment or later are left out. */
+    until?: Date;
     eventTypes?: string[];
     page?: number;
     pageSize?: number;
@@ -787,6 +761,9 @@ export async function getWatcherEvents(
     eq(watcherEvents.watcherId, watcherId),
     gte(watcherEvents.timestamp, since),
   ];
+  if (opts.until) {
+    conditions.push(lt(watcherEvents.timestamp, opts.until));
+  }
   // URL params arrive as plain strings — validate against the Drizzle enum
   // values so the inArray query is type-safe and ignores bogus filter values.
   if (opts.eventTypes && opts.eventTypes.length > 0) {
