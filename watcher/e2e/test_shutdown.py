@@ -309,6 +309,16 @@ def test_a_watcher_started_again_after_a_kill_resumes_without_reporting_twice(
         what="the watcher to record the upload",
     )
     server.wait_for_event(pc.watcher_id, event_type="file_uploaded")
+    # The watcher deletes its saved copy of an event once the server has answered the batch,
+    # which comes after the server has stored it. A kill in between makes the next start send the
+    # batch again, and the server stores it twice (see "Saved events" in docs/developer/watcher.md),
+    # so wait for the watcher to have deleted what the server has.
+    wait_until(
+        lambda: pc.state_query("SELECT count(*) FROM pending_events") == [(0,)],
+        30,
+        lambda: server.dump(pc.watcher_id, instrument_id),
+        what="the watcher to delete the events the server has",
+    )
 
     pc.kill()
     proxy.clear_log()

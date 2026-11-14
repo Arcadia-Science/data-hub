@@ -1,9 +1,12 @@
 """Structured event reporting from the watcher to the Data Hub API.
 
 The watcher's primary observability surface is the per-watcher event log
-served by ``POST /watchers/:id/events``. Events are queued in memory by
-the various long-running components (uploader, run-detector, monitor,
-updater, heartbeat) and flushed in batches on every heartbeat tick.
+served by ``POST /watchers/:id/events``. Events are queued by the various
+long-running components (uploader, run-detector, monitor, updater,
+heartbeat) and flushed in batches on every heartbeat tick. The supervisor's
+reporter also saves each queued event in the state database (see
+:meth:`EventReporter.attach_store`), so events that were queued but not yet
+sent when the watcher was killed are sent after the restart.
 
 Event taxonomy
 --------------
@@ -39,7 +42,11 @@ a database migration. Known ``kind`` values, with their per-kind
   emission per parent directory per process so a misconfigured pattern
   doesn't flood the queue. ``details = {"kind", "relative_path"}``.
 * ``events_dropped`` -- synthetic event prepended to the next
-  successful batch after one or more prior batches were dropped.
+  successful batch after events were dropped: the oldest ones when the
+  queue was full, a batch that the server refused (a 4xx), a saved batch
+  that failed ``MAX_FAILED_FLUSHES`` flushes in a way that may have
+  reached the server (a 500 or a read timeout), or a batch that wasn't
+  saved and failed to send.
   ``details = {"kind", "dropped_count", "since"}``.
 * ``heartbeat_recovered`` -- emitted on the first successful heartbeat
   after one or more consecutive failures.
@@ -73,10 +80,14 @@ server writes those events itself when the watcher posts the result.
 """
 
 from __future__ import annotations
+import itertools
+import json
 import logging
+import sqlite3
 import threading
 import time
 from collections import deque
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -88,14 +99,20 @@ from data_hub_watcher.api_client import (
     DataHubClient,
     timeout_until,
 )
+from data_hub_watcher.state import StateDB
 
 logger = logging.getLogger(__name__)
 
 
-# Cap the in-memory event queue so a prolonged API outage can't grow it
-# without bound. Older events are dropped first (FIFO) and surfaced via
-# the synthetic ``kind=events_dropped`` event on the next successful flush.
+# Cap the event queue so a prolonged API outage can't grow it without bound. Older
+# events are dropped first (FIFO) and surfaced via the synthetic
+# ``kind=events_dropped`` event on the next successful flush.
 MAX_QUEUE_SIZE = 500
+
+# The most events the server takes in one request, the synthetic ``events_dropped``
+# event included (`web/lib/api/openapi/schemas/watchers.ts`). A longer queue is sent
+# in several requests.
+MAX_EVENTS_PER_REQUEST = 100
 
 # Per-attempt retry profile for the events POST. Total wall-clock is
 # 1 + 2 + 4 = 7 s in the worst case, well under the 60 s heartbeat
@@ -105,6 +122,42 @@ FLUSH_RETRY_BASE_DELAY = 1.0
 # A flush with a deadline retries only if the retry would still have this long to run
 # once it has waited its delay.
 FLUSH_RETRY_MIN_SECONDS = 1.0
+
+# A saved batch that fails a flush in a way that may have reached the server (a 500 or
+# another 5xx, or a read timeout) is dropped, and counted in `events_dropped`, when its
+# events have been in this many failed flushes. A batch that the server rejects on every
+# try (a 500 on a value the database refuses) would otherwise stay at the front of the queue
+# and keep every later event from being sent, and a read timeout from a server that stores
+# the batch would send it again at every tick.
+MAX_FAILED_FLUSHES = 3
+
+# The answers that say the server, or a gateway in front of it, can't take requests now:
+# bad gateway, service unavailable, gateway timeout.
+_UNAVAILABLE_STATUSES = frozenset({502, 503, 504})
+
+
+def _nothing_reached_the_server(exc: Exception | None) -> bool:
+    """Whether a failed events request never got to the events route, so it stored nothing.
+
+    A connection failure (status 0 without a read timeout) and an answer that says the
+    server is unavailable (`_UNAVAILABLE_STATUSES`) are that. A batch that fails this way
+    is kept for as long as it takes: nothing was stored, and a later flush can't store it
+    twice.
+    """
+    return (
+        isinstance(exc, ApiError)
+        and not exc.read_timed_out
+        and (exc.status_code == 0 or exc.status_code in _UNAVAILABLE_STATUSES)
+    )
+
+
+def _worth_retrying(exc: Exception | None) -> bool:
+    """Whether another request could succeed where this one failed.
+
+    Only a connection error, a read timeout or a 5xx could. A 4xx fails the same way again,
+    and an error raised after a 2xx answer means the server stored the batch.
+    """
+    return isinstance(exc, ApiError) and exc.is_transient
 
 
 def _safe_to_replay(exc: Exception | None) -> bool:
@@ -116,7 +169,7 @@ def _safe_to_replay(exc: Exception | None) -> bool:
     slow to answer. Neither is a 4xx, which would fail again, or an error raised after a
     2xx answer, which means the server did store it.
     """
-    return isinstance(exc, ApiError) and not exc.read_timed_out and exc.is_transient
+    return _worth_retrying(exc) and not (isinstance(exc, ApiError) and exc.read_timed_out)
 
 
 class EventType(str, Enum):
@@ -152,19 +205,77 @@ class WatcherEvent:
         }
 
 
+@dataclass(eq=False)
+class _Queued:
+    """An event waiting to be sent, and where it is saved.
+
+    `eq=False` makes two entries equal only when they are the same object, which is how the
+    queue tells entries apart.
+    """
+
+    event: WatcherEvent
+    # The `pending_events` row that holds the event, or `None` when it isn't saved: no store
+    # was attached when it was queued, or writing it failed.
+    row_id: int | None = None
+    # Set when the entry is dropped from the queue (past the cap, or in a batch given up on).
+    # A send that already has the entry in flight uses it to take the drop back if the server
+    # then takes the entry (see `EventReporter._acknowledge`).
+    dropped: bool = False
+    # How many flushes this entry has been in that failed in a way that may have reached the
+    # server (see `MAX_FAILED_FLUSHES`). Not saved: an entry loaded after a restart starts
+    # again at 0.
+    failed_flushes: int = 0
+
+
+def _event_from_json(raw: str) -> WatcherEvent | None:
+    """The event that `json.dumps(event.to_dict())` made *raw* from, or `None` if unreadable."""
+    try:
+        data = json.loads(raw)
+        return WatcherEvent(
+            event_type=EventType(data["event_type"]),
+            message=str(data["message"]),
+            details=dict(data["details"]),
+            timestamp=str(data["timestamp"]),
+        )
+    except (ValueError, KeyError, TypeError):
+        # Not JSON, a missing field, or an event type this version doesn't know.
+        return None
+
+
 class EventReporter:
-    """Accumulates events in memory and flushes them to the API in batches.
+    """Queues events and flushes them to the API in batches.
 
     Resilience properties:
 
     * Bounded queue (``MAX_QUEUE_SIZE``): on overflow the oldest queued
       event is discarded and ``_dropped_count`` is bumped.
+    * Batches of at most ``MAX_EVENTS_PER_REQUEST`` events, which is what the
+      server takes in one request.
     * Retry-with-backoff in :meth:`flush` (up to ``FLUSH_RETRY_MAX``
       attempts) so a single transient network blip doesn't lose the
       whole batch.
     * After any drops, the next successful flush prepends a synthetic
       ``kind=events_dropped`` event so operators can see how much
       observability data was lost and during which window.
+    * With a store attached (:meth:`attach_store`), every queued event is also saved in
+      the state database until the server has it. A kill, or a batch that can't be sent
+      for now, loses nothing: what is saved is sent after the restart or on the next flush.
+      "For now" is bounded where the failure may have reached the server (see
+      `_give_up_on`), so a batch that the server fails on every time can't block the
+      events behind it for good.
+
+    How the queue and the store stay one list
+    -----------------------------------------
+    ``_queue`` is the one list of what waits to be sent, whether or not a store is attached.
+    Each entry knows the store row that holds it (``row_id``). Every change to the list
+    (an event queued, the oldest dropped to stay within the cap, a batch the server took, a
+    batch that was given up on) updates the rows in the same hold of ``_lock``, through
+    `_save` and `_delete_rows`, so the rows are the entries that have a ``row_id``. The store
+    is read once, by :meth:`attach_store`. Two things break that, both in the safe direction.
+    An event whose write failed has no row: this process still sends it, it just isn't saved.
+    A row whose deletion failed outlives its entry, and is sent again after a restart.
+    :meth:`detach_store` takes the saved entries out of the queue and leaves their rows for
+    the next start.
     """
 
     def __init__(
@@ -176,8 +287,15 @@ class EventReporter:
     ) -> None:
         self._client = client
         self._watcher_id = watcher_id
-        self._queue: deque[WatcherEvent] = deque(maxlen=max_queue_size)
+        self._queue: deque[_Queued] = deque()
+        # Guards `_queue`, `_store` and the drop counters. A store call is made with it
+        # held, so `detach_store` returning means no thread is using the store any more.
         self._lock = threading.Lock()
+        # Held for a whole flush, so two flushes never send the same events. One flush
+        # takes the events it sends from the queue without removing them, which would let
+        # a second one send them again.
+        self._flush_lock = threading.Lock()
+        self._store: StateDB | None = None
         self._max_queue_size = max_queue_size
         # Number of events dropped since the last successful flush.
         # Carried across flushes so a long outage that drops several
@@ -188,13 +306,8 @@ class EventReporter:
 
     def queue_event(self, event: WatcherEvent) -> None:
         with self._lock:
-            if len(self._queue) >= self._max_queue_size:
-                # FIFO: drop the oldest event so the freshest signal
-                # survives. ``deque(maxlen=...)`` would do this for us
-                # but we want to track the drop explicitly.
-                self._queue.popleft()
-                self._note_drop(1)
-            self._queue.append(event)
+            self._queue.append(_Queued(event, self._save(event)))
+            self._trim()
 
     def report_error(self, kind: str, message: str, **details: Any) -> None:
         """Queue a structured ``EventType.ERROR`` with a ``kind`` discriminator.
@@ -213,11 +326,159 @@ class EventReporter:
             )
         )
 
+    # ------------------------------------------------------------------
+    # the store
+    # ------------------------------------------------------------------
+
+    def attach_store(self, store: StateDB) -> None:
+        """Save every queued event in *store* from now on, and take over what it holds.
+
+        Events that an earlier process saved and never sent join the front of the queue, in
+        the order they were queued, and go out with the next flush. Events saved for another
+        watcher ID are deleted: one state database can serve a watcher that registered again,
+        and the server would refuse them. Events queued before the attach are saved now, and
+        queue behind those. Rows this version can't read are deleted.
+
+        If the store can't be read, it stays unattached and the reporter keeps working in
+        memory.
+
+        Events are queued from many threads, and each thread has its own connection to the
+        store, which takes its own write lock for every write.
+        """
+        with self._lock:
+            if self._store is not None:
+                raise RuntimeError("A store is already attached to this event reporter")
+            try:
+                discarded = store.delete_pending_events_of_other_watchers(self._watcher_id)
+                rows = store.pending_events(self._watcher_id)
+            except sqlite3.Error as exc:
+                logger.warning(
+                    "Could not read the saved events from the state database: %s; "
+                    "queueing events in memory only",
+                    exc,
+                )
+                return
+            if discarded:
+                logger.info(
+                    "Dropped %d saved event(s) that belong to a different watcher", discarded
+                )
+            saved: list[_Queued] = []
+            unreadable: list[int] = []
+            for row_id, raw in rows:
+                event = _event_from_json(raw)
+                if event is None:
+                    unreadable.append(row_id)
+                else:
+                    saved.append(_Queued(event, row_id))
+            self._store = store
+            if unreadable:
+                logger.warning("Dropped %d saved event(s) that could not be read", len(unreadable))
+                self._delete_rows(unreadable)
+            if saved:
+                logger.info(
+                    "Found %d event(s) saved before the last stop; sending them", len(saved)
+                )
+            for entry in self._queue:
+                entry.row_id = self._save(entry.event)
+            self._queue = deque([*saved, *self._queue])
+            self._trim()
+
+    def detach_store(self, *, wait_for_flush: float = 0.0) -> None:
+        """Stop saving events, before the store is closed. Call it once nothing queues events.
+
+        Events queued from now on stay in memory. What is saved but not yet sent stays in the
+        store for the next start, and leaves the queue, so this process doesn't send it as
+        well (it couldn't delete the rows afterwards, and the next start would send them
+        again). Returns once no thread is inside a store call.
+
+        A flush that is running when this is called, such as the tick that a stop gave up on
+        (`HeartbeatLoop.stop_loop`), has its batch in flight. If the server takes it, the flush
+        deletes the batch's rows, which it can't do once the store is detached. So this waits
+        up to *wait_for_flush* seconds for the flush lock, and holds it through the detach: a
+        flush that ends in time has deleted its rows before the store goes. A flush that is
+        still running after the wait loses its rows to the detach, and if its request then
+        succeeds, the next start sends that batch again.
+        """
+        holds_flush_lock = self._flush_lock.acquire(timeout=max(0.0, wait_for_flush))
+        try:
+            with self._lock:
+                if self._store is None:
+                    return
+                self._store = None
+                self._queue = deque(entry for entry in self._queue if entry.row_id is None)
+        finally:
+            if holds_flush_lock:
+                self._flush_lock.release()
+
+    def _save(self, event: WatcherEvent) -> int | None:
+        """Save *event* in the store and return its row id, or `None` if it isn't saved.
+
+        The caller holds `_lock`.
+        """
+        if self._store is None:
+            return None
+        try:
+            return self._store.add_pending_event(self._watcher_id, json.dumps(event.to_dict()))
+        except (sqlite3.Error, TypeError, ValueError) as exc:
+            # The event is still sent by this process. A value that JSON can't hold fails
+            # again when the batch is sent, as it did before events were saved.
+            logger.warning("Could not save an event in the state database: %s", exc)
+            return None
+
+    def _delete_rows(self, row_ids: Iterable[int | None]) -> None:
+        """Delete the saved events with these ids, if a store is attached.
+
+        The caller holds `_lock`.
+        """
+        ids = [row_id for row_id in row_ids if row_id is not None]
+        if not ids or self._store is None:
+            return
+        try:
+            self._store.delete_pending_events(ids)
+        except sqlite3.Error as exc:
+            logger.warning(
+                "Could not delete %d saved event(s) from the state database: %s", len(ids), exc
+            )
+
+    # ------------------------------------------------------------------
+    # the queue
+    # ------------------------------------------------------------------
+
     def _note_drop(self, n: int) -> None:
         """Record that *n* events were dropped (caller holds ``_lock``)."""
         if self._dropped_count == 0:
             self._dropped_since = datetime.now(timezone.utc).isoformat()
         self._dropped_count += n
+
+    def _trim(self) -> None:
+        """Drop the oldest events until the queue is within its cap (caller holds ``_lock``).
+
+        FIFO: the freshest signal survives. The drop is counted so the next successful flush
+        reports it, and the rows go with the entries.
+        """
+        over = len(self._queue) - self._max_queue_size
+        if over <= 0:
+            return
+        dropped = [self._queue.popleft() for _ in range(over)]
+        for entry in dropped:
+            entry.dropped = True
+        self._note_drop(over)
+        self._delete_rows(entry.row_id for entry in dropped)
+
+    def _remove(self, entries: Iterable[_Queued]) -> list[_Queued]:
+        """Take *entries* out of the queue and return the ones that were still in it.
+
+        The caller holds `_lock`.
+        """
+        gone = set(entries)
+        removed = [entry for entry in self._queue if entry in gone]
+        if removed:
+            self._queue = deque(entry for entry in self._queue if entry not in gone)
+        return removed
+
+    # ------------------------------------------------------------------
+    # flushing
+    # ------------------------------------------------------------------
 
     def flush(
         self,
@@ -225,7 +486,12 @@ class EventReporter:
         deadline: float | None = None,
         timeout_cap: tuple[float, float] = DEFAULT_TIMEOUT,
     ) -> None:
-        """Send the queued events.
+        """Send the queued events, the oldest first, at most `MAX_EVENTS_PER_REQUEST` at a time.
+
+        Each batch is deleted from the store once the server has taken it (a 2xx answer),
+        and the next one is sent, until what was queued when the flush began has been sent
+        or a batch fails. An event queued while the flush runs waits for the next one, so a
+        thread that queues events as fast as they are sent can't keep a flush from ending.
 
         *deadline* (a `time.monotonic()` value) is for a flush that has a limited time, as
         when the watcher is stopping. Each attempt has an HTTP timeout of *timeout_cap*, the
@@ -233,18 +499,47 @@ class EventReporter:
         server that answers slowly is still waited for. It retries as the usual flush does,
         but only after a failure that can't have left the batch stored (see
         `_safe_to_replay`: not after a read timeout), and only while the deadline still
-        leaves a retry time to run. It makes no attempt once the deadline has passed. The
-        events that couldn't be sent are dropped as after any failed flush.
+        leaves a retry time to run. It makes no attempt once the deadline has passed, and
+        waits for a flush that is running only until then.
+
+        A saved batch that fails stays queued, and the next flush sends it again, as long as
+        nothing reached the server: a connection failure (not a read timeout) or a 502, 503
+        or 504 keeps it for good. A 500 or any other 5xx, and a read timeout, keep it too, but
+        its events are dropped and counted once they have been in `MAX_FAILED_FLUSHES` failed
+        flushes, so a batch that the server can't store, or stores and is slow to answer, is
+        not sent over and over. Anything else is dropped and counted at once: a batch that
+        isn't saved, one that the server refused with a 4xx, which would fail again and keep
+        every later event from being sent, and one whose answer couldn't be read after a 2xx,
+        which the server stored. Only a connection error, a read timeout or a 5xx is retried
+        within the flush.
         """
         if deadline is not None and time.monotonic() >= deadline:
             return
+        wait = -1.0 if deadline is None else max(0.0, deadline - time.monotonic())
+        if not self._flush_lock.acquire(timeout=wait):
+            return
+        try:
+            with self._lock:
+                left = len(self._queue)
+            while True:
+                taken = self._flush_batch(left, deadline, timeout_cap)
+                if taken is None:
+                    return
+                left -= taken
+                if left <= 0 or (deadline is not None and time.monotonic() >= deadline):
+                    return
+        finally:
+            self._flush_lock.release()
+
+    def _flush_batch(
+        self, left: int, deadline: float | None, timeout_cap: tuple[float, float]
+    ) -> int | None:
+        """Send the oldest of the *left* events to send, as many as fit in one request.
+
+        Returns how many queued events the server took (0 if only the `events_dropped` event
+        was sent), or `None` when there was nothing to send or the request failed.
+        """
         with self._lock:
-            if not self._queue and self._dropped_count == 0:
-                return
-            # Snapshot and clear atomically so events queued from other
-            # threads during the network call aren't lost.
-            queue_snapshot = list(self._queue)
-            self._queue.clear()
             # Capture pending drop state so the synthetic event reflects
             # exactly the window covered by this batch. Don't reset
             # ``_dropped_count`` yet — it only clears on a successful
@@ -252,8 +547,14 @@ class EventReporter:
             # next attempt.
             dropped_count = self._dropped_count
             dropped_since = self._dropped_since
+            room = min(left, MAX_EVENTS_PER_REQUEST - (1 if dropped_count > 0 else 0))
+            # Not taken out of the queue: they leave it, and the store, once the server has
+            # them, so a kill or a failed request doesn't lose them.
+            batch = list(itertools.islice(self._queue, room))
+            if not batch and dropped_count == 0:
+                return None
 
-        events_to_send = list(queue_snapshot)
+        events_to_send = [entry.event for entry in batch]
         if dropped_count > 0:
             # Prepend a synthetic event so the dashboard sees the gap
             # before any of the events in this batch.
@@ -270,6 +571,22 @@ class EventReporter:
                 ),
             )
 
+        last_exc, attempts = self._send(events_to_send, deadline, timeout_cap)
+        if last_exc is None:
+            with self._lock:
+                self._acknowledge(batch, dropped_count)
+            return len(batch)
+        self._give_up_on(batch, last_exc, attempts, len(events_to_send))
+        return None
+
+    def _send(
+        self,
+        events: list[WatcherEvent],
+        deadline: float | None,
+        timeout_cap: tuple[float, float],
+    ) -> tuple[Exception | None, int]:
+        """Send one request with the usual retries. Returns the last error (`None` on success)
+        and the number of attempts."""
         # Inline retry-with-backoff. Total worst-case wall clock is
         # ~7 s for FLUSH_RETRY_MAX=3 — well under the heartbeat
         # interval, so we keep this on the heartbeat thread for
@@ -282,22 +599,13 @@ class EventReporter:
             try:
                 self._client.send_events(
                     self._watcher_id,
-                    [e.to_dict() for e in events_to_send],
+                    [event.to_dict() for event in events],
                     timeout=None if deadline is None else timeout_until(deadline, timeout_cap),
                 )
-                # Success — clear the pending-drop counter we just
-                # surfaced. New drops may have accumulated concurrently
-                # while we were blocked on the network; subtract rather
-                # than zero so those remain reportable.
-                with self._lock:
-                    self._dropped_count -= dropped_count
-                    if self._dropped_count <= 0:
-                        self._dropped_count = 0
-                        self._dropped_since = None
-                return
+                return None, attempts
             except (ApiError, Exception) as exc:
                 last_exc = exc
-            if attempts >= FLUSH_RETRY_MAX:
+            if attempts >= FLUSH_RETRY_MAX or not _worth_retrying(last_exc):
                 break
             if deadline is not None and not _safe_to_replay(last_exc):
                 break
@@ -313,16 +621,72 @@ class EventReporter:
                 delay,
             )
             time.sleep(delay)
+        return last_exc, attempts
 
-        # All retries exhausted. Drop the real events (the synthetic
-        # prefix isn't counted — the prior drops it represents are
-        # still tracked in ``_dropped_count``) and let the next
-        # successful flush surface the loss.
+    def _acknowledge(self, batch: list[_Queued], dropped_count: int) -> None:
+        """The server took *batch*, and the `events_dropped` event for *dropped_count* drops.
+
+        The caller holds `_lock`.
+        """
+        removed = self._remove(batch)
+        self._delete_rows(entry.row_id for entry in removed)
+        # Drops that happened while the request was in flight stay reportable, so subtract
+        # rather than zero. An entry of this batch that the cap dropped meanwhile was
+        # counted as dropped but has now arrived, so it is taken back.
+        arrived_after_drop = sum(1 for entry in batch if entry.dropped)
+        self._dropped_count -= dropped_count + arrived_after_drop
+        if self._dropped_count <= 0:
+            self._dropped_count = 0
+            self._dropped_since = None
+
+    def _give_up_on(self, batch: list[_Queued], exc: Exception, attempts: int, sent: int) -> None:
+        """A batch failed all its attempts: keep or drop its entries, as the failure says.
+
+        What happens to the entries of the batch depends on how it failed:
+
+        * Nothing reached the server (a connection failure, or a 502, 503 or 504): the saved
+          entries stay in the queue and in the store, for as long as it takes.
+        * It may have reached the server (a 500 or another 5xx, or a read timeout): the saved
+          entries stay, but each is counted as having been in a failed flush, and one that has
+          been in `MAX_FAILED_FLUSHES` is dropped.
+        * Anything else (a 4xx, or an error after a 2xx answer, which means the server stored
+          the batch): the entries are dropped, because a retry would fail again or store them
+          twice, and every later event would wait behind them.
+
+        An entry that isn't saved is always dropped. The synthetic prefix isn't counted: the
+        prior drops it represents are still tracked in ``_dropped_count`` and the next
+        successful flush surfaces them.
+        """
+        reached_nothing = _nothing_reached_the_server(exc)
+        may_have_reached = not reached_nothing and _worth_retrying(exc)
         with self._lock:
-            self._note_drop(len(queue_snapshot))
+            doomed: list[_Queued] = []
+            for entry in batch:
+                if entry.row_id is None:
+                    drop = True
+                elif reached_nothing:
+                    drop = False
+                elif may_have_reached:
+                    entry.failed_flushes += 1
+                    drop = entry.failed_flushes >= MAX_FAILED_FLUSHES
+                else:
+                    drop = True
+                if drop:
+                    doomed.append(entry)
+            removed = self._remove(doomed)
+            for entry in removed:
+                entry.dropped = True
+            if removed:
+                self._note_drop(len(removed))
+                self._delete_rows(entry.row_id for entry in removed)
+            # Counted from the queue, so an entry that the cap dropped while the request was
+            # in flight, or that `detach_store` took out, isn't one of the kept.
+            queued = set(self._queue)
+            kept = sum(1 for entry in batch if entry in queued)
         logger.warning(
-            "Failed to flush %d event(s) after %d attempt(s): %s",
-            len(events_to_send),
+            "Failed to flush %d event(s) after %d attempt(s): %s%s",
+            sent,
             attempts,
-            last_exc,
+            exc,
+            f"; {kept} saved event(s) stay queued" if kept else "",
         )

@@ -10,6 +10,7 @@ exercise the actual rebuild, not a stand-in.
 from __future__ import annotations
 import collections
 import itertools
+import json
 import logging
 import os
 import shutil
@@ -21,7 +22,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
@@ -37,6 +38,7 @@ from data_hub_watcher.constants import (
     HEARTBEAT_INTERVAL_SECONDS,
     MONITOR_RESTART_WINDOW_SECONDS,
     STOP_BUDGET_SECONDS,
+    STOP_FLUSH_WAIT_SECONDS,
     SYSTEM_SHUTDOWN_HTTP_TIMEOUT,
     UPGRADE_HANDOFF_TIMEOUT_SECONDS,
 )
@@ -3672,3 +3674,260 @@ class TestHeartbeatRevisionFields:
         loop._send_heartbeat("watching")
 
         assert seen == []
+
+
+def _heartbeat_counts(env: _Env) -> list[tuple[str, int, int, int]]:
+    """`(status, files uploaded, runs reported, errors)` of every heartbeat sent so far."""
+    return [
+        (
+            call.args[1]["status"],
+            call.args[1]["files_uploaded_since_last_heartbeat"],
+            call.args[1]["runs_reported_since_last_heartbeat"],
+            call.args[1]["errors_since_last_heartbeat"],
+        )
+        for call in env.client.send_heartbeat.call_args_list
+    ]
+
+
+class TestCountsAcrossRebuilds:
+    """The supervisor owns the heartbeat counts, as it owns the event reporter.
+
+    A rebuild stops the old heartbeat loop without a final heartbeat, and the waiting state
+    runs a loop of its own. Counts the old loop hadn't sent yet are sent by the next one.
+    """
+
+    def test_every_part_of_the_runtime_counts_into_the_supervisors_counters(
+        self, env: _Env
+    ) -> None:
+        sup = env.supervisor()
+        sup.start()
+        rt = sup.rt
+        assert rt is not None
+
+        assert rt.counters is sup.counters
+        assert rt.heartbeat.counters is sup.counters
+        assert rt.uploader._counters is sup.counters
+        assert rt.detector._counters is sup.counters
+        assert rt.updater._counters is sup.counters
+
+    def test_counts_not_yet_sent_survive_a_rebuild(self, env: _Env) -> None:
+        sup = env.supervisor()
+        sup.start()
+        old_rt = sup.rt
+        assert old_rt is not None
+        # Counted since the start-up heartbeat, so the old loop never sent them.
+        sup.counters.add_files_uploaded(2)
+        sup.counters.add_runs_reported()
+        sup.counters.add_errors(3)
+        env.client.get_latest_config_revision.return_value = _revision(
+            2, _settings(env.watch_dir, file_patterns=["*.csv", "*.txt"])
+        )
+
+        sup._on_heartbeat_revision(2)
+        assert sup.poll(timeout=0) is False
+
+        new_rt = sup.rt
+        assert new_rt is not None and new_rt is not old_rt
+        assert new_rt.counters is sup.counters
+        # The new loop's start-up heartbeat is the first one after the rebuild.
+        assert _heartbeat_counts(env)[-1] == ("watching", 2, 1, 3)
+
+    def test_counts_not_yet_sent_survive_the_switch_from_waiting_to_watching(
+        self, env: _Env
+    ) -> None:
+        sup = env.supervisor(env.write_config(_cfg(env.tmp_path / "later")))
+        sup.start()
+        waiting = sup._waiting
+        assert waiting is not None
+        assert waiting.heartbeat.counters is sup.counters
+        assert waiting.updater._counters is sup.counters
+        sup.counters.add_errors(2)
+
+        (env.tmp_path / "later").mkdir()
+        waiting.heartbeat._on_tick()  # type: ignore[misc]
+        sup.poll(timeout=0)
+
+        assert sup.rt is not None
+        assert sup.rt.counters is sup.counters
+        assert _heartbeat_counts(env)[-1] == ("watching", 0, 0, 2)
+
+    def test_counts_not_yet_sent_survive_the_fall_back_to_waiting(self, env: _Env) -> None:
+        sup = env.supervisor()
+        sup.start()
+        assert sup.rt is not None
+        sup.counters.add_files_uploaded(4)
+
+        sup._teardown_for_rebuild()
+        sup._enter_waiting("could not start watching: test", started_message="Watcher restarted")
+
+        assert sup._waiting is not None
+        assert sup._waiting.heartbeat.counters is sup.counters
+        assert _heartbeat_counts(env)[-1] == ("waiting", 4, 0, 0)
+
+    def test_the_counts_of_a_heartbeat_that_failed_reach_the_server_after_a_rebuild(
+        self, env: _Env
+    ) -> None:
+        sup = env.supervisor()
+        sup.start()
+        sup.counters.add_files_uploaded(2)
+        env.client.send_heartbeat.side_effect = ApiError("down", status_code=503)
+        assert sup.rt is not None
+        sup.rt.heartbeat._send_heartbeat()  # Refused: the 2 are given back.
+        env.client.send_heartbeat.side_effect = None
+        env.client.get_latest_config_revision.return_value = _revision(
+            2, _settings(env.watch_dir, file_patterns=["*.csv", "*.txt"])
+        )
+
+        sup._on_heartbeat_revision(2)
+        sup.poll(timeout=0)
+
+        assert _heartbeat_counts(env)[-1] == ("watching", 2, 0, 0)
+
+
+class TestSavedEventsAcrossRestarts:
+    """The supervisor's reporter saves its events in the state database it opens in `start`.
+
+    `start` attaches the database and `stop` detaches it before the close, so events that
+    couldn't be sent when the watcher stopped (or when it was killed) go out after the next
+    start, and an event queued after the close doesn't open the database again.
+    """
+
+    @staticmethod
+    def _sent_messages(env: _Env) -> list[str]:
+        return [e["message"] for c in env.client.send_events.call_args_list for e in c.args[1]]
+
+    def test_events_that_could_not_be_sent_at_a_stop_are_sent_after_the_next_start(
+        self, env: _Env
+    ) -> None:
+        first = env.supervisor()
+        first.start()
+        env.client.send_events.reset_mock()
+        # The server can't be reached when the watcher stops, so `watcher_stopped` isn't sent.
+        env.client.send_events.side_effect = ApiError("offline", status_code=0)
+        first.reporter.report_error("upload_queue_poll_failed", "queued before the stop")
+
+        first.stop(stopped_message="Watcher stopped")
+
+        state = env.state()
+        try:
+            saved = [json.loads(raw)["message"] for _id, raw in state.pending_events(WATCHER_ID)]
+        finally:
+            state.close()
+        assert saved == ["queued before the stop", "Watcher stopped"]
+
+        env.client.send_events.reset_mock(side_effect=True)
+        second = env.supervisor()
+        second.start()
+
+        sent = self._sent_messages(env)
+        # What the first process saved goes out first, in order, then what the second queued.
+        assert sent[:2] == ["queued before the stop", "Watcher stopped"]
+        assert any(m.startswith("Watcher started on test-host") for m in sent[2:])
+        state = env.state()
+        try:
+            assert state.pending_events(WATCHER_ID) == []
+        finally:
+            state.close()
+
+    def test_start_sends_what_an_earlier_process_saved_and_discards_another_watchers(
+        self, env: _Env
+    ) -> None:
+        def event(message: str) -> str:
+            return json.dumps(
+                {
+                    "event_type": "error",
+                    "timestamp": "2026-01-01T00:00:00+00:00",
+                    "message": message,
+                    "details": {"kind": "from_an_earlier_process"},
+                }
+            )
+
+        state = env.state()
+        try:
+            state.add_pending_event("w-an-earlier-registration", event("not this watcher's"))
+            state.add_pending_event(WATCHER_ID, event("saved before the kill"))
+        finally:
+            state.close()
+
+        sup = env.supervisor()
+        sup.start()
+
+        sent = self._sent_messages(env)
+        assert "not this watcher's" not in sent
+        assert sent.index("saved before the kill") == 0
+        state = env.state()
+        try:
+            assert state.pending_events("w-an-earlier-registration") == []
+            assert state.pending_events(WATCHER_ID) == []
+        finally:
+            state.close()
+
+    def test_the_events_of_a_runtime_that_is_rebuilt_are_saved_and_sent_once(
+        self, env: _Env
+    ) -> None:
+        sup = env.supervisor()
+        sup.start()
+        env.client.get_latest_config_revision.return_value = _revision(
+            2, _settings(env.watch_dir, file_patterns=["*.csv", "*.txt"])
+        )
+
+        sup._on_heartbeat_revision(2)
+        sup.poll(timeout=0)
+        # What the rebuild queued after its start-up flush (the config push) goes out with
+        # the next tick's flush.
+        sup.reporter.flush()
+
+        sent = self._sent_messages(env)
+        assert len([m for m in sent if m.startswith("Watcher restarted")]) == 1
+        state = env.state()
+        try:
+            assert state.pending_events(WATCHER_ID) == []
+        finally:
+            state.close()
+
+    def test_the_stop_gives_a_flush_a_tick_left_running_a_moment_before_it_detaches_the_store(
+        self, env: _Env
+    ) -> None:
+        # A tick's flush that is still sending can only delete the events it sends while the
+        # store is attached, so the stop waits for it, but never past its own limit.
+        sup = env.supervisor()
+        sup.start()
+
+        with patch.object(sup.reporter, "detach_store", wraps=sup.reporter.detach_store) as detach:
+            sup.stop(stopped_message="Watcher stopped")
+
+        assert 0 < detach.call_args.kwargs["wait_for_flush"] <= STOP_FLUSH_WAIT_SECONDS
+
+    def test_a_stop_that_has_used_up_its_time_does_not_wait_for_a_flush_to_detach_the_store(
+        self, env: _Env
+    ) -> None:
+        sup = env.supervisor()
+        sup.start()
+
+        with (
+            patch.object(runtime, "_stop_deadline", return_value=time.monotonic() - 1),
+            patch.object(sup.reporter, "detach_store", wraps=sup.reporter.detach_store) as detach,
+        ):
+            sup.stop(stopped_message="Watcher stopped")
+
+        assert detach.call_args.kwargs["wait_for_flush"] == 0
+
+    def test_an_event_queued_after_the_stop_does_not_open_the_closed_database_again(
+        self, env: _Env
+    ) -> None:
+        sup = env.supervisor()
+        sup.start()
+        sup.stop(stopped_message="Watcher stopped")
+        assert sup._state is not None
+        assert not sup._state._connections
+
+        # As from a heartbeat tick that the stop left running.
+        sup.reporter.report_error("heartbeat_recovered", "late")
+
+        assert sup.reporter._store is None
+        assert not sup._state._connections
+        state = env.state()
+        try:
+            assert state.pending_events(WATCHER_ID) == []
+        finally:
+            state.close()

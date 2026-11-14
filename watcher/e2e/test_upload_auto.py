@@ -170,8 +170,8 @@ def test_small_file_is_uploaded_with_one_put(
 
     # The watcher remembers the upload and has nothing left to retry. (That a heartbeat counts the
     # upload is shown by the counters scenario in test_heartbeat_status.py, which keeps the
-    # heartbeat away from the upload. Waiting for "exactly one" here would be a race with
-    # ENG-2125.)
+    # heartbeat away from the upload. Which heartbeat carries it here depends on timing, so this
+    # test doesn't wait for one.)
     assert recorded_uploads(pc) == [SMALL_PATH]
     assert pending(pc) == []
 
@@ -370,8 +370,7 @@ def test_single_put_that_fails_three_times_leaves_the_file_pending(
     instrument_id: str,
     watch_dir: Path,
 ) -> None:
-    # A 6-second tick, so the error is counted well inside one interval and not while a
-    # heartbeat is in flight (see ENG-2125). The file needs a few
+    # A 6-second tick, so the error is counted well inside one interval. The file needs a few
     # seconds to give up on, which is time enough for the first tick to go by.
     pc = watcher(overrides={testing_overrides.HEARTBEAT_INTERVAL_ENV_VAR: "6"})
     proxy.add_fault("status", path=LOCAL_S3, method="PUT", status=503)

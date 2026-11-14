@@ -30,7 +30,7 @@ from e2e_support.server import (
     HeartbeatRow,
     ServerView,
 )
-from e2e_support.waiting import KnownBugStillPresent, known_bug, stays_true, wait_until
+from e2e_support.waiting import stays_true, wait_until
 
 pytestmark = pytest.mark.e2e
 
@@ -410,14 +410,6 @@ def test_heartbeats_report_what_happened_since_the_last_one_and_start_again_from
 
 
 @pytest.mark.covers("heartbeat.failed->counts_carried")
-@pytest.mark.xfail(
-    strict=True,
-    raises=KnownBugStillPresent,
-    reason=(
-        "ENG-2112: the counters are reset after a heartbeat that "
-        "failed to send, so the next successful one reports zero for that interval"
-    ),
-)
 def test_counts_from_a_heartbeat_that_failed_are_carried_into_the_next_one(
     watcher: WatcherFactory,
     server: ServerView,
@@ -440,22 +432,13 @@ def test_counts_from_a_heartbeat_that_failed_are_carried_into_the_next_one(
     server.wait_for_heartbeats(pc.watcher_id, count=2, after_id=after)
 
     beats = server.heartbeats(pc.watcher_id)
-    # Intended: the upload and the run report were not lost with the failed heartbeats, so
-    # they reach the server with the first heartbeat that gets through.
-    with known_bug():
-        assert_total(beats, "files_uploaded_since_last", 1)
-        assert_total(beats, "runs_reported_since_last", 1)
+    # The upload and the run report were not lost with the failed heartbeats: they reach the
+    # server with the first heartbeat that gets through.
+    assert_total(beats, "files_uploaded_since_last", 1)
+    assert_total(beats, "runs_reported_since_last", 1)
 
 
 @pytest.mark.covers("heartbeat.in_flight->counts_kept")
-@pytest.mark.xfail(
-    strict=True,
-    raises=KnownBugStillPresent,
-    reason=(
-        "ENG-2125: the counters are reset after the heartbeat "
-        "request returns, so a count added while it is in flight is never reported"
-    ),
-)
 def test_counts_added_while_a_heartbeat_is_being_sent_are_reported_in_the_next_one(
     watcher: WatcherFactory,
     server: ServerView,
@@ -473,7 +456,7 @@ def test_counts_added_while_a_heartbeat_is_being_sent_are_reported_in_the_next_o
         return next(r for r in heartbeat_requests(proxy) if r.fault_mode == "delay")
 
     # Hold one heartbeat for a while. Its payload was built before the hold, so it says
-    # nothing happened, and the counters are reset when it returns.
+    # nothing happened. What is counted while it is held goes out with a later heartbeat.
     with proxy.fault("delay", path=r"/heartbeat$", delay_seconds=6, count=1):
         proxy.wait_for_request(
             lambda r: r.fault_mode == "delay" and r.path.endswith("/heartbeat"), 15
@@ -489,10 +472,9 @@ def test_counts_added_while_a_heartbeat_is_being_sent_are_reported_in_the_next_o
         server.wait_for_heartbeats(pc.watcher_id, count=3, after_id=stored_before)
 
     beats = server.heartbeats(pc.watcher_id)
-    # Intended: every count reaches the server in exactly one heartbeat.
-    with known_bug():
-        assert_total(beats, "files_uploaded_since_last", 1)
-        assert_total(beats, "runs_reported_since_last", 1)
+    # Every count reaches the server in exactly one heartbeat.
+    assert_total(beats, "files_uploaded_since_last", 1)
+    assert_total(beats, "runs_reported_since_last", 1)
 
 
 # ---------------------------------------------------------------------------

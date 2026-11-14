@@ -38,6 +38,7 @@ from data_hub_watcher.constants import (
     PRUNE_DAYS,
     STOP_BUDGET_SECONDS,
     STOP_FINAL_HEARTBEAT_SECONDS,
+    STOP_FLUSH_WAIT_SECONDS,
     STOP_MIN_WAIT_SECONDS,
     STOP_RESERVE_SECONDS,
     SYSTEM_SHUTDOWN_HTTP_TIMEOUT,
@@ -319,6 +320,7 @@ def build_runtime(
     deregistered_event: threading.Event | None = None,
     deregistered_replies: DeregisteredReplies | None = None,
     upgrade_handoff: UpgradeHandoff | None = None,
+    counters: WatcherCounters | None = None,
     report_only: Callable[[str, float], bool] | None = None,
     config_revision: Callable[[], int | None] | None = None,
     on_config_revision: Callable[[int | None], None] | None = None,
@@ -341,11 +343,11 @@ def build_runtime(
     :class:`WatcherRuntime` for why.
 
     The remaining keyword arguments let :class:`WatcherSupervisor` rebuild the
-    runtime in place: *reporter*, the three events, *deregistered_replies* (the run of
-    "deregistered" heartbeat replies) and *upgrade_handoff* (what the updater
-    remembers of an upgrade it handed to the Windows worker) are shared
-    across rebuilds, *report_only* marks files for the first scan to report without
-    uploading (see :class:`FileMonitor`), and *config_revision* /
+    runtime in place: *reporter*, *counters* (the heartbeat counts not yet sent), the three
+    events, *deregistered_replies* (the run of "deregistered" heartbeat replies) and
+    *upgrade_handoff* (what the updater remembers of an upgrade it handed to the Windows
+    worker) are shared across rebuilds, *report_only* marks files for the first scan to
+    report without uploading (see :class:`FileMonitor`), and *config_revision* /
     *on_config_revision* connect the heartbeat to the config-revision check.
     *request_folder_check* asks the supervisor to check the watch folder. It is
     called on every heartbeat tick, after the updater's, when watchdog reports
@@ -376,7 +378,8 @@ def build_runtime(
     # never re-baselined; the gate is read once here, before the scan runs.
     seed_baseline = cfg.resolve_initial_scan() == "new-only" and not state_db.baseline_established()
 
-    counters = WatcherCounters()
+    if counters is None:
+        counters = WatcherCounters()
     if reporter is None:
         reporter = EventReporter(client, watcher_id)
 
@@ -996,8 +999,10 @@ def stop_runtime(
     nobody to report to: the server answers the event and the final heartbeat with the
     same 404 as the heartbeats before them. Its stop runs steps 1 to 4 as a Windows
     shutdown does (uploads are cut off first, every join takes at most 1 s) and skips 5
-    and 6. The stop itself sends nothing to Data Hub, queued events included, and the
-    state database is closed as in any stop.
+    and 6. The stop itself sends nothing to Data Hub, queued events included. Events
+    saved in the state database stay there (see `EventReporter`): the next start sends
+    them if the watcher is registered again under the same ID, and deletes them when
+    `init` has given it another. The state database is closed as in any stop.
 
     Steps 4 to 6 are `_stop_heartbeat_and_report`. In auto mode a file whose upload was
     cut off is uploaded after the next start, from its `pending_uploads` row. A file that
@@ -1200,8 +1205,12 @@ class WatcherSupervisor:
         self.host = host
         self.watcher_id: str = cfg.watcher_id
         # Shared by every runtime this supervisor builds, so events queued just
-        # before a rebuild are flushed by the next heartbeat.
+        # before a rebuild are flushed by the next heartbeat. `start` attaches the
+        # state database to it, which saves the events it queues.
         self.reporter = EventReporter(client, self.watcher_id)
+        # Shared the same way: the counts that the heartbeat hasn't sent yet, which a
+        # rebuild or the waiting state would otherwise drop with the old loop.
+        self.counters = WatcherCounters()
         self.shutdown_event = threading.Event()
         self.upgrade_restart_event = threading.Event()
         # Set, with `shutdown_event`, when the heartbeats show that the registration was
@@ -1329,6 +1338,10 @@ class WatcherSupervisor:
         # the package index is otherwise only read when an upgrade runs.
         testing_overrides.announce_active_overrides()
         self._state = StateDB(self.db_path)
+        # From here on the reporter saves each event it queues in this database, and
+        # sends the ones that an earlier process saved and never got to send (the flush
+        # of the first heartbeat does). Detached again in `stop`, before the close.
+        self.reporter.attach_store(self._state)
         if self._state.claim_config_revisions(self.watcher_id):
             logger.info("Dropped config revision bookkeeping from a different watcher registration")
         self._seen = self._state.config_revision_seen()
@@ -1444,7 +1457,14 @@ class WatcherSupervisor:
         stop begins to wind anything down: the heartbeat loop keeps ticking while uploads
         finish, and a tick that runs during the rest of the stop can't dispatch an update
         or end the hand-off.
+
+        Last, the saved events are detached from the reporter and the state database is
+        closed. A flush that a heartbeat tick left running gets up to
+        `STOP_FLUSH_WAIT_SECONDS` before that, within what is left of the budget, to delete
+        the events it sends if the server takes them (see `EventReporter.detach_store`).
         """
+        # The same limit that `stop_runtime` sets for itself, a moment later.
+        deadline = _stop_deadline(system_shutdown)
         handed_off = self._handoff.begin_stop()
         stop_reason = self._final_stop_reason(
             system_shutdown=system_shutdown, operator_stop=operator_stop, handed_off=handed_off
@@ -1471,12 +1491,19 @@ class WatcherSupervisor:
                     stopped_message=stopped_message,
                     system_shutdown=system_shutdown,
                     stop_reason=stop_reason,
-                    deadline=_stop_deadline(system_shutdown),
+                    deadline=deadline,
                 )
             self._waiting = None
         # The state DB of a runtime that was cut off, once its threads have exited.
         self._reap_cut_off()
         if self._state is not None:
+            # Events queued from here on, such as one from a heartbeat tick that was left
+            # running (see `HeartbeatLoop.stop_loop`), stay in memory: a write after the
+            # close would open the database again. What is saved and unsent waits for the
+            # next start. A flush that such a tick left running gets a moment, within what
+            # is left of the stop budget, to delete the events it sends if the server takes
+            # them, because it can't once the store is detached.
+            self.reporter.detach_store(wait_for_flush=min(_left(deadline), STOP_FLUSH_WAIT_SECONDS))
             self._state.close()
 
     def _final_stop_reason(
@@ -2011,6 +2038,7 @@ class WatcherSupervisor:
             deregistered_event=self.deregistered_event,
             deregistered_replies=self._deregistered_replies,
             upgrade_handoff=self._handoff,
+            counters=self.counters,
             report_only=_any_rule(rules),
             config_revision=lambda: self._applied,
             on_config_revision=self._on_heartbeat_revision,
@@ -2076,11 +2104,10 @@ class WatcherSupervisor:
                 reason,
             )
         assert self._state is not None
-        counters = WatcherCounters()
         updater = Updater(
             client=self.client,
             reporter=self.reporter,
-            counters=counters,
+            counters=self.counters,
             state_db=self._state,
             cfg=self.cfg,
             config_dir=self.config_dir,
@@ -2107,7 +2134,7 @@ class WatcherSupervisor:
             instrument_id=inst.id,
             watch_directory=str(inst.watch_directory),
             upload_mode=inst.upload_mode,
-            counters=counters,
+            counters=self.counters,
             on_tick=on_tick,
             status="waiting",
             status_reason=reason,

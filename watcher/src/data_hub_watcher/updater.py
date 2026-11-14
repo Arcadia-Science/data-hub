@@ -540,6 +540,10 @@ class Updater:
             # it is reported below, and this tick goes on as if there had been none.
             expired_target = self._handoff.take_expired()
 
+            # `last_files_uploaded` is what was uploaded since the previous heartbeat
+            # began to send. Counts that a failed heartbeat gave back to be reported
+            # later are not in it, so an outage doesn't hold off an update after the
+            # uploads that caused it have been seen once.
             if self._counters.last_files_uploaded == 0:
                 self._idle_ticks += 1
             else:

@@ -62,7 +62,7 @@ The same goes for the stop of an automatic update (watcher 1.4.2 and later). The
 
 Windows waits 10 seconds for a service to stop at a restart on Windows 10 version 1703 and later, and longer on older builds. The watcher limits its own stop to about 8 seconds either way. That is enough for the final heartbeat when Data Hub answers. A file that is still uploading is cut off, not waited for, and the watcher uploads it again after the restart. See [An upload was cut off by a restart or an update](/docs/troubleshoot-a-watcher#an-upload-was-cut-off-by-a-restart-or-an-update).
 
-If Data Hub can’t be reached, or the stop is cut off for another reason, the final heartbeat doesn’t arrive and the service ends with no `stopped` status. If the PC then stays down for more than five minutes, the watcher shows as **Unresponsive** until the service starts again.
+If Data Hub can’t be reached, or the stop is cut off for another reason, the final heartbeat doesn’t arrive and the service ends with no `stopped` status. If the PC then stays down for more than five minutes, the watcher shows as **Unresponsive** until the service starts again. With watcher 1.4.3 and later, a `watcher_stopped` event that was queued but not sent is recorded once the service starts again, with the time of the stop.
 
 Windows 10 and 11 turn on Fast Startup by default. With it, **Shut down** in the Start menu doesn’t stop the service: Windows saves its state and the service carries on from it at the next start, so no final heartbeat is sent and no `watcher_stopped` event is recorded. **Restart** always stops the service, and so does a shutdown with Fast Startup turned off.
 

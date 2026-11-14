@@ -579,13 +579,13 @@ class TestS3SessionPoolSizing:
 
 
 class TestPollUploadQueueCounterLocking:
-    """Manual-mode poll failures must increment the shared counter under the lock.
+    """Manual-mode poll failures must count through the shared counters' own lock.
 
-    The optimisation introduced a parallel-upload worker pool that
-    races the heartbeat thread to read/write ``_counters``. Routing
-    ``poll_upload_queue``'s error bumps through ``_bump_errors``
-    keeps every mutation point under ``_counters_lock`` and avoids a
-    silent torn-write on the integer field.
+    The upload worker threads race the heartbeat thread, which takes the
+    counts out of ``_counters`` for its payload. Routing
+    ``poll_upload_queue``'s error bumps through ``_bump_errors``, which
+    calls ``WatcherCounters.add_errors``, keeps every mutation point
+    under the counters' lock.
     """
 
     def test_api_error_bumps_via_helper(

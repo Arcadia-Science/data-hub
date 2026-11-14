@@ -754,7 +754,7 @@ class TestTheCountSurvivesStateChanges:
         _assert_nothing_runs_after_the_third_reply(env, sup, events_at_reply, monitor_start)
         if announce_late:
             # The late `watcher_started` event is not queued for a watcher that can't send it.
-            queued = [event.event_type for event in built.reporter._queue]
+            queued = [entry.event.event_type for entry in built.reporter._queue]
             assert EventType.WATCHER_STARTED not in queued
         closes.clear()
         heartbeats = env.client.send_heartbeat.call_count

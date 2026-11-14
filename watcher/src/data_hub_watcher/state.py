@@ -139,6 +139,10 @@ class StateDB:
     - `pending_uploads` — auto-mode uploads that have not succeeded yet,
       so the next start can retry them. `detected_files` can't answer
       this because `uploaded_files` is pruned and it is not.
+    - `pending_events` — watcher events that the supervisor's `EventReporter` has
+      queued and the server hasn't acknowledged, so a kill doesn't lose them.
+      Tagged with the watcher ID, because one file can serve a watcher that
+      registered again.
     - `meta` — small key/value store (e.g. the preview deployment URL this
       DB was seeded against) used to decide when to reset on a redeploy.
     """
@@ -294,6 +298,13 @@ class StateDB:
                     relative_path TEXT PRIMARY KEY,
                     run_id        TEXT NOT NULL,
                     attempts      INTEGER NOT NULL DEFAULT 0
+                );
+
+                CREATE TABLE IF NOT EXISTS pending_events (
+                    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                    watcher_id TEXT NOT NULL,
+                    event_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL
                 );
 
                 CREATE TABLE IF NOT EXISTS meta (
@@ -717,6 +728,72 @@ class StateDB:
         with self._write_lock:
             cur = self._conn.execute("DELETE FROM pending_uploads")
             self._conn.commit()
+        return cur.rowcount
+
+    # ------------------------------------------------------------------
+    # pending events
+    # ------------------------------------------------------------------
+
+    def add_pending_event(self, watcher_id: str, event_json: str) -> int:
+        """Save an event for *watcher_id* until the server has it. Returns the row's id.
+
+        Ids only grow, so the oldest event has the lowest id. Writers on any thread are
+        serialised by `_write_lock`, and each has its own connection.
+        """
+        with self._write_lock:
+            try:
+                cur = self._conn.execute(
+                    "INSERT INTO pending_events (watcher_id, event_json, created_at) "
+                    "VALUES (?, ?, ?)",
+                    (watcher_id, event_json, datetime.now(timezone.utc).isoformat()),
+                )
+                self._conn.commit()
+            except BaseException:
+                with contextlib.suppress(sqlite3.Error):
+                    self._conn.rollback()
+                raise
+        assert cur.lastrowid is not None
+        return cur.lastrowid
+
+    def pending_events(self, watcher_id: str) -> list[tuple[int, str]]:
+        """The saved events of *watcher_id* as `(id, event_json)`, oldest first."""
+        cur = self._conn.execute(
+            "SELECT id, event_json FROM pending_events WHERE watcher_id = ? ORDER BY id",
+            (watcher_id,),
+        )
+        return [(row[0], row[1]) for row in cur.fetchall()]
+
+    def delete_pending_events(self, row_ids: Iterable[int]) -> None:
+        """Delete saved events by id, in one transaction. An id that is gone is ignored."""
+        ids = [(row_id,) for row_id in row_ids]
+        if not ids:
+            return
+        with self._write_lock:
+            try:
+                self._conn.executemany("DELETE FROM pending_events WHERE id = ?", ids)
+                self._conn.commit()
+            except BaseException:
+                with contextlib.suppress(sqlite3.Error):
+                    self._conn.rollback()
+                raise
+
+    def delete_pending_events_of_other_watchers(self, watcher_id: str) -> int:
+        """Delete the saved events that belong to a watcher other than *watcher_id*.
+
+        A watcher registered again on the same PC keeps this file, and its predecessor's
+        events would be refused by the server or filed under the wrong watcher. Returns
+        the number of rows removed.
+        """
+        with self._write_lock:
+            try:
+                cur = self._conn.execute(
+                    "DELETE FROM pending_events WHERE watcher_id != ?", (watcher_id,)
+                )
+                self._conn.commit()
+            except BaseException:
+                with contextlib.suppress(sqlite3.Error):
+                    self._conn.rollback()
+                raise
         return cur.rowcount
 
     # ------------------------------------------------------------------
