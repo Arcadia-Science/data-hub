@@ -4,8 +4,8 @@ import { ArrowRight, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import { useId } from "react";
 import { useViewerTimeZone } from "@/components/viewer-time-zone-provider";
+import { formatLastCheckIn } from "@/lib/instruments/problem-notice";
 import {
-  formatLastCheckIn,
   offlineNoticeCopy,
   shouldShowOfflineNotice,
 } from "@/lib/runs/offline-notice";

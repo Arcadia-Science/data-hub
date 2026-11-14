@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { InstrumentBadgeState } from "@/lib/instruments/connection";
+import { formatLastCheckIn } from "@/lib/instruments/problem-notice";
 import {
-  formatLastCheckIn,
   offlineNoticeCopy,
   shouldShowOfflineNotice,
 } from "@/lib/runs/offline-notice";

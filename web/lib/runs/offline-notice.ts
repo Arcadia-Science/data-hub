@@ -2,12 +2,6 @@
 // offline and files from the run are still waiting on the instrument PC. No
 // database imports: the run page's client components import this file.
 
-import {
-  calendarDayKey,
-  formatDateCompact,
-  formatTime,
-  startOfYesterdayISO,
-} from "@/lib/date";
 import type { InstrumentBadgeState } from "@/lib/instruments/connection";
 
 /**
@@ -24,39 +18,14 @@ export function shouldShowOfflineNotice(
   return badge === "offline" && waitingFileCount > 0;
 }
 
-/**
- * When the watcher last checked in, as a phrase that follows "checked in":
- * "today at 2:14 PM", "yesterday at 2:14 PM", or "Nov 9 at 2:14 PM" (with the
- * year when it isn't this one). The day is the viewer's, so pass their time
- * zone.
- */
-export function formatLastCheckIn(
-  date: Date,
-  timeZone: string,
-  now: Date = new Date()
-): string {
-  const time = formatTime(date, timeZone);
-  const day = calendarDayKey(date, timeZone);
-  if (day === calendarDayKey(now, timeZone)) {
-    return `today at ${time}`;
-  }
-  const yesterday = calendarDayKey(
-    new Date(startOfYesterdayISO(timeZone, now)),
-    timeZone
-  );
-  if (day === yesterday) {
-    return `yesterday at ${time}`;
-  }
-  return `${formatDateCompact(date, timeZone, now)} at ${time}`;
-}
-
 export interface OfflineNoticeCopy {
   body: string;
   title: string;
 }
 
 /**
- * The notice's words. `lastCheckIn` is the phrase from `formatLastCheckIn`,
+ * The notice's words. `lastCheckIn` is the phrase from `formatLastCheckIn`
+ * (`@/lib/instruments/problem-notice`),
  * or null when the watcher never sent a heartbeat, which drops the last
  * sentence.
  */
