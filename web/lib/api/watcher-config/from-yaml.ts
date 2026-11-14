@@ -92,8 +92,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export interface InstrumentConfigFields {
   /** In the order the config lists them, with no clean-up. */
   filePatterns: string[];
-  /** The run detection pattern, and whether it searches subfolders. Null when there is no pattern. */
-  runDetection: { pattern: string; recursive: boolean } | null;
+  /** The run detection pattern. Null when the config has no string pattern. */
+  runDetection: { pattern: string } | null;
   uploadMode: "auto" | "manual";
   watchDirectory: string | null;
 }
@@ -137,13 +137,7 @@ export function readInstrumentConfigFields(
   }
   const detection = instrument?.run_detection;
   if (isRecord(detection) && typeof detection.pattern === "string") {
-    fields.runDetection = {
-      pattern: detection.pattern,
-      recursive:
-        typeof detection.recursive === "boolean"
-          ? detection.recursive
-          : WATCHER_DEFAULTS.recursive,
-    };
+    fields.runDetection = { pattern: detection.pattern };
   }
   if (instrument?.upload_mode === "manual") {
     fields.uploadMode = "manual";

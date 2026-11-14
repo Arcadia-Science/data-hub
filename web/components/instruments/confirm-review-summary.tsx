@@ -2,8 +2,7 @@ import type { ReactNode } from "react";
 import { FilePatterns } from "@/components/instruments/file-patterns";
 import {
   type InstrumentConfirmReview,
-  runDetectionName,
-  workedRunExample,
+  presetRunDetectionName,
 } from "@/lib/instruments/confirm-review";
 
 const EMPTY = <span className="text-muted-foreground">&mdash;</span>;
@@ -17,7 +16,7 @@ function SummaryRow({
 }) {
   return (
     <div className="grid gap-x-3 gap-y-1 border-border border-t py-2.5 first:border-t-0 sm:grid-cols-[170px_minmax(0,1fr)]">
-      <dt className="text-muted-foreground">{label}</dt>
+      <dt className="text-muted-foreground text-sm">{label}</dt>
       <dd className="flex min-w-0 flex-wrap items-center gap-1 text-sm [overflow-wrap:anywhere]">
         {children}
       </dd>
@@ -36,8 +35,9 @@ export function ConfirmReviewSummary({
 }) {
   const { watcher } = review;
   const detection = watcher?.runDetection ?? null;
-  const example = detection
-    ? workedRunExample(detection.pattern, review.recentFilePath)
+  const example = review.runExample;
+  const presetName = detection
+    ? presetRunDetectionName(detection.pattern)
     : null;
 
   return (
@@ -51,6 +51,7 @@ export function ConfirmReviewSummary({
         {watcher?.tokenName ? (
           <span className="text-muted-foreground">
             · token “{watcher.tokenName}”
+            {watcher.tokenRevoked ? " (revoked)" : ""}
           </span>
         ) : null}
       </SummaryRow>
@@ -69,7 +70,16 @@ export function ConfirmReviewSummary({
       <SummaryRow label="How files become runs">
         {detection ? (
           <>
-            <span>{runDetectionName(detection.pattern)}.</span>
+            {presetName ? (
+              <span>{presetName}.</span>
+            ) : (
+              <>
+                <span>Custom pattern:</span>
+                <code className="font-mono text-[13px]">
+                  {detection.pattern}
+                </code>
+              </>
+            )}
             {example ? (
               <>
                 <span className="font-mono text-muted-foreground text-xs">

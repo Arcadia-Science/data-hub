@@ -1,18 +1,18 @@
 // The Confirm review's data for one instrument: the registration and settings of
-// its active watcher, and a recent file for the worked example. The route that
+// its active watcher, and a worked example from a recent file. The route that
 // serves it and the instrument page both check that the viewer is an admin.
 
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
+import { resolveActor } from "@/lib/api/actor";
 import { readInstrumentConfigFields } from "@/lib/api/watcher-config/from-yaml";
+import { runIdForPathGuarded } from "@/lib/api/watcher-config/guarded-run-id";
+import { latestRawFilePaths } from "@/lib/api/watcher-config/revisions";
 import { type DbExecutor, db } from "@/lib/db";
+import { instruments, personalAccessTokens, watchers } from "@/lib/db/schema";
 import {
-  files,
-  instrumentRuns,
-  instruments,
-  personalAccessTokens,
-  watchers,
-} from "@/lib/db/schema";
-import type { InstrumentConfirmReview } from "@/lib/instruments/confirm-review";
+  type InstrumentConfirmReview,
+  workedRunExample,
+} from "@/lib/instruments/confirm-review";
 
 /** The review for one instrument, or null when no instrument has that ID. */
 export async function getInstrumentConfirmReview(
@@ -32,6 +32,7 @@ export async function getInstrumentConfirmReview(
     .select({
       hostname: watchers.hostname,
       configYaml: watchers.configYaml,
+      tokenId: personalAccessTokens.id,
       tokenName: personalAccessTokens.name,
       tokenRevokedAt: personalAccessTokens.revokedAt,
     })
@@ -44,40 +45,58 @@ export async function getInstrumentConfirmReview(
       and(eq(watchers.instrumentId, instrumentId), isNull(watchers.deletedAt))
     )
     .limit(1);
-
-  // The newest file of any run. Its path is relative to the watch folder, which
-  // is what run detection matches; the bare file name is the fallback.
-  const [recent] = await executor
-    .select({ filename: files.filename, relativePath: files.relativePath })
-    .from(files)
-    .innerJoin(instrumentRuns, eq(instrumentRuns.id, files.instrumentRunId))
-    .where(
-      and(
-        eq(instrumentRuns.instrumentId, instrumentId),
-        isNull(instrumentRuns.deletedAt)
-      )
-    )
-    .orderBy(desc(files.detectedAt))
-    .limit(1);
-
-  let watcher: InstrumentConfirmReview["watcher"] = null;
-  if (active) {
-    const config = readInstrumentConfigFields(active.configYaml);
-    watcher = {
-      hostname: active.hostname,
-      // A revoked token no longer names the registration.
-      tokenName: active.tokenRevokedAt ? null : active.tokenName,
-      filePatterns: config.filePatterns,
-      runDetection: config.runDetection,
-      uploadMode: config.uploadMode,
-      watchDirectory: config.watchDirectory,
+  if (!active) {
+    return {
+      displayName: instrument.displayName,
+      instrumentId,
+      runExample: null,
+      watcher: null,
     };
+  }
+
+  const config = readInstrumentConfigFields(active.configYaml);
+  // The registering token keeps its name once revoked, as elsewhere in the app.
+  const registeredBy = resolveActor({
+    userId: null,
+    userName: null,
+    userEmail: null,
+    userImage: null,
+    tokenId: active.tokenId,
+    tokenName: active.tokenName,
+    tokenRevokedAt: active.tokenRevokedAt,
+  });
+
+  // The newest raw file's path, relative to the watch folder like the watcher
+  // matches it. The pattern comes from the watcher's config and this runs while
+  // the page renders, so it goes through the guarded matcher.
+  let runExample: InstrumentConfirmReview["runExample"] = null;
+  if (config.runDetection) {
+    const [recentPath = null] = await latestRawFilePaths(
+      instrumentId,
+      1,
+      executor
+    );
+    runExample = workedRunExample(
+      config.runDetection.pattern,
+      recentPath?.replaceAll("\\", "/") ?? null,
+      runIdForPathGuarded
+    );
   }
 
   return {
     displayName: instrument.displayName,
     instrumentId,
-    recentFilePath: recent ? recent.relativePath || recent.filename : null,
-    watcher,
+    runExample,
+    watcher: {
+      hostname: active.hostname,
+      tokenName:
+        registeredBy?.kind === "token" ? registeredBy.token.name : null,
+      tokenRevoked:
+        registeredBy?.kind === "token" && registeredBy.token.revoked,
+      filePatterns: config.filePatterns,
+      runDetection: config.runDetection,
+      uploadMode: config.uploadMode,
+      watchDirectory: config.watchDirectory,
+    },
   };
 }

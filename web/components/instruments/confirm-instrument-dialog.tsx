@@ -32,6 +32,7 @@ import {
 } from "@/components/ui/select";
 import { type InstrumentType, VALID_INSTRUMENT_TYPES } from "@/lib/db/schema";
 import {
+  apiErrorMessage,
   buildConfirmInstrumentBody,
   type InstrumentConfirmReview,
 } from "@/lib/instruments/confirm-review";
@@ -42,8 +43,9 @@ const INSTRUMENT_TYPE_OPTIONS = VALID_INSTRUMENT_TYPES.map((value) => ({
   label: INSTRUMENT_TYPE_LABELS[value],
 }));
 
-const TYPE_REASON_ID = "confirm-instrument-type-reason";
+const REASON_ID = "confirm-instrument-reason";
 const LOAD_ERROR = "Couldn't load the watcher's settings.";
+const CONFIRM_ERROR = "Failed to confirm instrument";
 
 /**
  * Confirms a pending instrument. `children` is the button that opens the
@@ -97,12 +99,21 @@ export function ConfirmInstrumentDialog({
     return () => controller.abort();
   }, [open, instrumentId]);
 
-  const canConfirm = instrumentType !== "" && !isPending;
-  const reason =
-    instrumentType === "" ? "Choose an instrument type to confirm." : null;
+  // Confirming needs the watcher's settings on screen, so the admin has seen
+  // what they are confirming, and a type.
+  let reason: string | null = null;
+  if (loadError) {
+    reason =
+      "Can't confirm until the watcher's settings load. Close this and try again.";
+  } else if (!review) {
+    reason = "Confirm is available once the watcher's settings have loaded.";
+  } else if (instrumentType === "") {
+    reason = "Choose an instrument type to confirm.";
+  }
+  const canConfirm = reason === null && !isPending;
 
   function handleConfirm() {
-    if (instrumentType === "" || isPending) {
+    if (!canConfirm || instrumentType === "") {
       return;
     }
     const body = buildConfirmInstrumentBody(instrumentType);
@@ -119,11 +130,11 @@ export function ConfirmInstrumentDialog({
         );
         if (!res.ok) {
           const data = await res.json().catch(() => null);
-          setSubmitError(data?.error ?? "Failed to confirm instrument");
+          setSubmitError(apiErrorMessage(data, CONFIRM_ERROR));
           return;
         }
       } catch {
-        setSubmitError("Failed to confirm instrument");
+        setSubmitError(CONFIRM_ERROR);
         return;
       }
 
@@ -196,12 +207,13 @@ export function ConfirmInstrumentDialog({
             Decides how files are processed and which details appear on run
             pages.
           </p>
-          {reason ? (
-            <p className="text-muted-foreground text-xs" id={TYPE_REASON_ID}>
-              {reason}
-            </p>
-          ) : null}
         </div>
+
+        {reason ? (
+          <p className="text-muted-foreground text-xs" id={REASON_ID}>
+            {reason}
+          </p>
+        ) : null}
 
         {submitError ? (
           <p className="text-destructive text-sm" role="alert">
@@ -225,7 +237,7 @@ export function ConfirmInstrumentDialog({
               Cancel
             </Button>
             <Button
-              aria-describedby={reason ? TYPE_REASON_ID : undefined}
+              aria-describedby={reason ? REASON_ID : undefined}
               aria-disabled={canConfirm ? undefined : true}
               onClick={handleConfirm}
               type="button"

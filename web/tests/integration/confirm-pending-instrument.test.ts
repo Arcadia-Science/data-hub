@@ -1,7 +1,13 @@
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { instrumentRecord } from "@/lib/api/openapi";
-import { instruments, watchers } from "@/lib/db/schema";
+import {
+  files,
+  instrumentRuns,
+  instruments,
+  personalAccessTokens,
+  watchers,
+} from "@/lib/db/schema";
 import {
   api,
   closeTestDb,
@@ -85,26 +91,33 @@ describe("Confirming a pending instrument", () => {
   });
 
   describe("the review the dialog loads", () => {
+    const PC_CONFIG = [
+      "instrument:",
+      "  watch_directory: 'D:\\Exports'",
+      "  file_patterns:",
+      "    - '*.csv'",
+      "  run_detection:",
+      "    pattern: '^([^_]+)'",
+      "    recursive: false",
+      "  upload_mode: manual",
+    ].join("\n");
+
+    async function seedWatcher(
+      instrumentId: string,
+      registeredByToken: string | null
+    ) {
+      await getTestDb().insert(watchers).values({
+        instrumentId,
+        hostname: "LAB-PC-01",
+        registeredByToken,
+        configYaml: PC_CONFIG,
+      });
+    }
+
     it("gives an admin the watcher's registration and settings", async () => {
       const pc = await seedTestUser({ tokenName: "Lab PC token" });
       await seedPending("plate-reader-c");
-      await getTestDb()
-        .insert(watchers)
-        .values({
-          instrumentId: "plate-reader-c",
-          hostname: "LAB-PC-01",
-          registeredByToken: pc.tokenId,
-          configYaml: [
-            "instrument:",
-            "  watch_directory: 'D:\\Exports'",
-            "  file_patterns:",
-            "    - '*.csv'",
-            "  run_detection:",
-            "    pattern: '^([^_]+)'",
-            "    recursive: false",
-            "  upload_mode: manual",
-          ].join("\n"),
-        });
+      await seedWatcher("plate-reader-c", pc.tokenId);
 
       const res = await api(
         "/api/v1/instruments/plate-reader-c/confirm-review",
@@ -114,15 +127,108 @@ describe("Confirming a pending instrument", () => {
       expect(await res.json()).toEqual({
         displayName: "Plate Reader A",
         instrumentId: "plate-reader-c",
-        recentFilePath: null,
+        // No files yet, so the example uses the sample path.
+        runExample: { path: "RUN001_quant.csv", runId: "RUN001" },
         watcher: {
           hostname: "LAB-PC-01",
           tokenName: "Lab PC token",
+          tokenRevoked: false,
           filePatterns: ["*.csv"],
-          runDetection: { pattern: "^([^_]+)", recursive: false },
+          runDetection: { pattern: "^([^_]+)" },
           uploadMode: "manual",
           watchDirectory: "D:\\Exports",
         },
+      });
+    });
+
+    it("uses the newest raw file for the example, skipping deleted and non-raw files", async () => {
+      await seedPending("plate-reader-d");
+      await seedWatcher("plate-reader-d", null);
+      const db = getTestDb();
+      const [run] = await db
+        .insert(instrumentRuns)
+        .values({
+          instrumentId: "plate-reader-d",
+          runId: "run-0001",
+          source: "watcher",
+        })
+        .returning({ id: instrumentRuns.id });
+      await db.insert(files).values([
+        {
+          instrumentRunId: run.id,
+          filename: "older_quant.csv",
+          relativePath: "older_quant.csv",
+          category: "raw",
+          createdAt: new Date("2026-01-01T00:00:00Z"),
+        },
+        {
+          instrumentRunId: run.id,
+          filename: "newest_quant.csv",
+          relativePath: "newest_quant.csv",
+          category: "raw",
+          createdAt: new Date("2026-01-02T00:00:00Z"),
+        },
+        {
+          instrumentRunId: run.id,
+          filename: "deleted_quant.csv",
+          relativePath: "deleted_quant.csv",
+          category: "raw",
+          createdAt: new Date("2026-01-03T00:00:00Z"),
+          deletedAt: new Date("2026-01-03T01:00:00Z"),
+        },
+        {
+          instrumentRunId: run.id,
+          filename: "report.json",
+          relativePath: "report.json",
+          category: "processed",
+          createdAt: new Date("2026-01-04T00:00:00Z"),
+        },
+      ]);
+
+      const res = await api(
+        "/api/v1/instruments/plate-reader-d/confirm-review",
+        { headers: { Cookie: adminCookie } }
+      );
+      expect(res.status).toBe(200);
+      expect((await res.json()).runExample).toEqual({
+        path: "newest_quant.csv",
+        runId: "newest",
+      });
+    });
+
+    it("keeps the name of a revoked token and marks it revoked", async () => {
+      const pc = await seedTestUser({ tokenName: "Old lab PC token" });
+      await getTestDb()
+        .update(personalAccessTokens)
+        .set({ revokedAt: new Date() })
+        .where(eq(personalAccessTokens.id, pc.tokenId));
+      await seedPending("plate-reader-e");
+      await seedWatcher("plate-reader-e", pc.tokenId);
+
+      const res = await api(
+        "/api/v1/instruments/plate-reader-e/confirm-review",
+        { headers: { Cookie: adminCookie } }
+      );
+      expect(res.status).toBe(200);
+      expect((await res.json()).watcher).toMatchObject({
+        tokenName: "Old lab PC token",
+        tokenRevoked: true,
+      });
+    });
+
+    it("gives a null watcher and no example for an instrument with no watcher", async () => {
+      await seedPending("plate-reader-f");
+
+      const res = await api(
+        "/api/v1/instruments/plate-reader-f/confirm-review",
+        { headers: { Cookie: adminCookie } }
+      );
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        displayName: "Plate Reader A",
+        instrumentId: "plate-reader-f",
+        runExample: null,
+        watcher: null,
       });
     });
 
@@ -132,6 +238,34 @@ describe("Confirming a pending instrument", () => {
         { headers: { Cookie: memberCookie } }
       );
       expect(res.status).toBe(403);
+    });
+
+    it("refuses a token that can read watchers but is not an admin token", async () => {
+      const { token } = await seedTestUser({ scopes: ["watchers:read"] });
+      const res = await api(
+        "/api/v1/instruments/plate-reader-c/confirm-review",
+        { token }
+      );
+      expect(res.status).toBe(403);
+    });
+
+    it("refuses a legacy token with the * scope, which must list watchers:admin itself", async () => {
+      const { token } = await seedTestUser({ scopes: ["*"] });
+      const res = await api(
+        "/api/v1/instruments/plate-reader-c/confirm-review",
+        { token }
+      );
+      expect(res.status).toBe(403);
+    });
+
+    it("gives a token that lists watchers:admin the review", async () => {
+      const { token } = await seedTestUser({ scopes: ["watchers:admin"] });
+      const res = await api(
+        "/api/v1/instruments/plate-reader-c/confirm-review",
+        { token }
+      );
+      expect(res.status).toBe(200);
+      expect((await res.json()).instrumentId).toBe("plate-reader-c");
     });
 
     it("returns 404 for an instrument that does not exist", async () => {

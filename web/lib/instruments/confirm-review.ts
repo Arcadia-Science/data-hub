@@ -7,14 +7,22 @@ import { RUN_DETECTION_PRESETS } from "@/lib/api/watcher-config/settings";
 import type { InstrumentType } from "@/lib/db/schema";
 import type { UploadMode } from "@/lib/instruments/connection";
 
+export interface WorkedRunExample {
+  /** The file path the example uses. */
+  path: string;
+  runId: string;
+}
+
 /** The active watcher's settings, as the review shows them. */
 export interface ConfirmReviewWatcher {
   filePatterns: string[];
   hostname: string | null;
   /** The run detection in the watcher's config. Null when the config has none. */
-  runDetection: { pattern: string; recursive: boolean } | null;
-  /** The token that registered the watcher. Null when none did, or it was revoked. */
+  runDetection: { pattern: string } | null;
+  /** The token that registered the watcher. Null when none did. */
   tokenName: string | null;
+  /** True when that token has since been revoked. */
+  tokenRevoked: boolean;
   uploadMode: UploadMode;
   watchDirectory: string | null;
 }
@@ -24,10 +32,10 @@ export interface InstrumentConfirmReview {
   displayName: string;
   instrumentId: string;
   /**
-   * A recent file's path relative to the watch folder, for the worked example.
-   * Null when the instrument has no files yet.
+   * One file and the run the watcher's run detection gives it. Null when the
+   * watcher has no run detection, or nothing matches.
    */
-  recentFilePath: string | null;
+  runExample: WorkedRunExample | null;
   /** The active watcher. Null when the instrument has none. */
   watcher: ConfirmReviewWatcher | null;
 }
@@ -62,43 +70,25 @@ function findPreset(pattern: string) {
 }
 
 /**
- * The plain name of a run detection pattern: the preset's name, or "Custom
- * pattern" when the pattern isn't one of the presets.
+ * The plain name of a run detection pattern: the preset's name, or null when
+ * the pattern isn't one of the presets.
  */
-export function runDetectionName(pattern: string): string {
+export function presetRunDetectionName(pattern: string): string | null {
   const preset = findPreset(pattern);
-  return preset ? PLAIN_PRESET_NAMES[preset.key] : "Custom pattern";
-}
-
-/**
- * The run ID a watcher gives a file: the pattern's first capture group, searched
- * in the file's path relative to the watch folder, as the watcher matches it.
- * Null when nothing matches or the pattern doesn't compile.
- */
-export function runIdForPath(pattern: string, path: string): string | null {
-  let match: RegExpExecArray | null;
-  try {
-    match = new RegExp(pattern).exec(path);
-  } catch {
-    return null;
-  }
-  return match?.[1] || null;
-}
-
-export interface WorkedRunExample {
-  /** The file path the example uses. */
-  path: string;
-  runId: string;
+  return preset ? PLAIN_PRESET_NAMES[preset.key] : null;
 }
 
 /**
  * One file and the run it lands in, to show what the detection does. Uses the
  * instrument's most recent file when the pattern matches it, and otherwise a
- * sample path. Null when neither matches.
+ * sample path. Null when neither matches. `runIdFor` runs the pattern on a
+ * path (the server passes `runIdForPathGuarded`); it is a parameter so this
+ * file stays free of server-only code.
  */
 export function workedRunExample(
   pattern: string,
-  recentFilePath: string | null
+  recentFilePath: string | null,
+  runIdFor: (pattern: string, path: string) => string | null
 ): WorkedRunExample | null {
   const preset = findPreset(pattern);
   const sample = preset ? SAMPLE_PATHS[preset.key] : CUSTOM_SAMPLE_PATH;
@@ -106,12 +96,26 @@ export function workedRunExample(
     if (!path) {
       continue;
     }
-    const runId = runIdForPath(pattern, path);
+    const runId = runIdFor(pattern, path);
     if (runId !== null) {
       return { path, runId };
     }
   }
   return null;
+}
+
+/**
+ * The text to show for a failed request. The API's errors look like
+ * { error: { code, message } }; a bare string is accepted too. Anything else,
+ * such as a body that isn't JSON, gets the fallback.
+ */
+export function apiErrorMessage(body: unknown, fallback: string): string {
+  const error = (body as { error?: unknown } | null | undefined)?.error;
+  if (typeof error === "string" && error) {
+    return error;
+  }
+  const message = (error as { message?: unknown } | null | undefined)?.message;
+  return typeof message === "string" && message ? message : fallback;
 }
 
 /**

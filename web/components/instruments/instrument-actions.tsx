@@ -50,7 +50,9 @@ export function InstrumentActions({
           : "flex items-center justify-end gap-1"
       }
     >
-      {instrument.status === "pending" ? (
+      {/* The instrument page confirms from its pending card, so the header leaves
+          the button out. */}
+      {instrument.status === "pending" && !expanded ? (
         <ConfirmInstrumentDialog
           displayName={instrument.displayName}
           instrumentId={instrument.id}
