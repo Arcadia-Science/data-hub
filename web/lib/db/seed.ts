@@ -449,7 +449,7 @@ export const SEED_INSTRUMENTS: readonly SeededInstrument[] = [
     watcherStatus: "watching",
     configYamlTemplate: buildSeedConfigYaml(`instrument:
   id: epson-v700-scanner
-  watch_directory: C:\\Users\\raymo\\ScanData
+  watch_directory: C:\\Users\\LabUser\\ScanData
   file_patterns:
   - '*.tif'
   - '*.tiff'
