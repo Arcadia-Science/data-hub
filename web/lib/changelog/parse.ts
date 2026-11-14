@@ -1,5 +1,6 @@
 import YAML from "yaml";
 import { z } from "zod";
+import { isHttpUrl } from "@/lib/http-url";
 
 // The date lives in the filename, not the frontmatter, so renaming a file
 // is the only way to change when an entry appears to have shipped.
@@ -93,13 +94,4 @@ export function isRealCalendarDate(isoDate: string): boolean {
     date.getUTCMonth() === month - 1 &&
     date.getUTCDate() === day
   );
-}
-
-function isHttpUrl(value: string): boolean {
-  try {
-    const url = new URL(value);
-    return url.protocol === "https:" || url.protocol === "http:";
-  } catch {
-    return false;
-  }
 }

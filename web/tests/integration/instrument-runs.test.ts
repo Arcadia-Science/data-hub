@@ -1,3 +1,4 @@
+import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   runCreated,
@@ -6,7 +7,7 @@ import {
   runListResponse,
   runUpdated,
 } from "@/lib/api/openapi";
-import { instruments } from "@/lib/db/schema";
+import { files, instrumentRuns, instruments } from "@/lib/db/schema";
 import {
   api,
   clearCapturedSlackMessages,
@@ -17,6 +18,13 @@ import {
   seedTestUser,
   waitForCapturedSlackMessages,
 } from "@/tests/integration/helpers";
+
+// What an operator reads in the Event Log when a deleted run refuses a request.
+const DELETED_RUN_MESSAGE = {
+  post: "This run was deleted on Data Hub. Restore it to add files.",
+  patch: "This run was deleted on Data Hub. Restore it to make changes.",
+  uploadUrl: "This run was deleted on Data Hub. Restore it to upload files.",
+};
 
 describe("Instrument Runs API", () => {
   let token: string;
@@ -461,6 +469,218 @@ describe("Instrument Runs API", () => {
       body: { metadata: { should: "fail" } },
     });
     expect(res.status).toBe(409);
+  });
+
+  // A watcher that forgot a deleted run reports it again as a new run. The
+  // server refuses that report, so the new file is not attached to the run.
+  // Each test makes its own run, so it passes when it runs alone.
+  describe("reports of a deleted run", () => {
+    const runsPath = `/api/v1/instruments/${instrumentId}/runs`;
+    const firstFile = {
+      relative_path: "first.csv",
+      filename: "first.csv",
+      size_bytes: 1,
+    };
+    const secondFile = {
+      relative_path: "second.csv",
+      filename: "second.csv",
+      size_bytes: 2,
+    };
+
+    // Reports a run with one file, as a watcher does, then deletes it.
+    async function deletedRun(
+      runId: string,
+      acquiredAt?: string
+    ): Promise<string> {
+      const created = await api(runsPath, {
+        method: "POST",
+        token,
+        body: {
+          run_id: runId,
+          source: "watcher",
+          ...(acquiredAt && { acquired_at: acquiredAt }),
+          detected_files: [firstFile],
+        },
+      });
+      expect(created.status).toBe(201);
+      const { id } = await created.json();
+      const deleted = await api(`${runsPath}/${runId}`, {
+        method: "DELETE",
+        token,
+      });
+      expect(deleted.status).toBe(200);
+      return id;
+    }
+
+    async function storedRun(runId: string) {
+      const [row] = await getTestDb()
+        .select()
+        .from(instrumentRuns)
+        .where(
+          and(
+            eq(instrumentRuns.instrumentId, instrumentId),
+            eq(instrumentRuns.runId, runId)
+          )
+        );
+      return row;
+    }
+
+    async function fileNames(runRowId: string) {
+      const rows = await getTestDb()
+        .select({ filename: files.filename })
+        .from(files)
+        .where(eq(files.instrumentRunId, runRowId));
+      return rows.map((r) => r.filename).sort();
+    }
+
+    it("is refused for a watcher, and attaches no files", async () => {
+      const runId = "run-deleted-watcher-report";
+      const runRowId = await deletedRun(runId);
+
+      const refused = await api(runsPath, {
+        method: "POST",
+        token,
+        body: {
+          run_id: runId,
+          source: "watcher",
+          detected_files: [firstFile, secondFile],
+        },
+      });
+      expect(refused.status).toBe(409);
+      expect((await refused.json()).error.code).toBe("CONFLICT");
+      expect(await fileNames(runRowId)).toEqual(["first.csv"]);
+    });
+
+    it("is refused for a watcher's source even when the body carries nothing else", async () => {
+      const runId = "run-deleted-watcher-no-files";
+      await deletedRun(runId);
+
+      const refused = await api(runsPath, {
+        method: "POST",
+        token,
+        body: { run_id: runId, source: "watcher" },
+      });
+      expect(refused.status).toBe(409);
+    });
+
+    it("is refused for the Lambda's source when the body carries files", async () => {
+      const runId = "run-deleted-lambda-with-files";
+      const runRowId = await deletedRun(runId);
+
+      const refused = await api(runsPath, {
+        method: "POST",
+        token,
+        body: { run_id: runId, source: "lambda", detected_files: [secondFile] },
+      });
+      expect(refused.status).toBe(409);
+      expect((await refused.json()).error.details).toEqual({
+        reason: "run_deleted",
+      });
+      expect(await fileNames(runRowId)).toEqual(["first.csv"]);
+    });
+
+    it("is refused for the Lambda's source when the body carries an acquired_at", async () => {
+      const runId = "run-deleted-lambda-with-acquired-at";
+      await deletedRun(runId, "2026-03-02T08:00:00.000Z");
+
+      const refused = await api(runsPath, {
+        method: "POST",
+        token,
+        body: {
+          run_id: runId,
+          source: "lambda",
+          acquired_at: "2026-03-01T08:00:00.000Z",
+        },
+      });
+      expect(refused.status).toBe(409);
+      expect((await storedRun(runId)).acquiredAt?.toISOString()).toBe(
+        "2026-03-02T08:00:00.000Z"
+      );
+    });
+
+    it("still returns the run to the Lambda's own call", async () => {
+      const runId = "run-deleted-lambda-ensure-run";
+      const runRowId = await deletedRun(runId);
+
+      // What `ensure_run` in the Lambda sends: the run ID and the source.
+      const res = await api(runsPath, {
+        method: "POST",
+        token,
+        body: { run_id: runId, source: "lambda" },
+      });
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.id).toBe(runRowId);
+      expect(data.run_id).toBe(runId);
+      expect(await fileNames(runRowId)).toEqual(["first.csv"]);
+      expect((await storedRun(runId)).deletedAt).not.toBeNull();
+    });
+
+    it("does not move the run's acquired_at earlier", async () => {
+      const runId = "run-deleted-acquired-at";
+      await deletedRun(runId, "2026-03-02T08:00:00.000Z");
+
+      const refused = await api(runsPath, {
+        method: "POST",
+        token,
+        body: {
+          run_id: runId,
+          source: "watcher",
+          acquired_at: "2026-03-01T08:00:00.000Z",
+          detected_files: [
+            {
+              ...secondFile,
+              file_created_at: "2026-03-01T07:00:00.000Z",
+            },
+          ],
+        },
+      });
+      expect(refused.status).toBe(409);
+      expect((await storedRun(runId)).acquiredAt?.toISOString()).toBe(
+        "2026-03-02T08:00:00.000Z"
+      );
+    });
+
+    it("carries the run_deleted reason on every refusal of a deleted run", async () => {
+      const runId = "run-deleted-every-refusal";
+      await deletedRun(runId);
+
+      const post = await api(runsPath, {
+        method: "POST",
+        token,
+        body: {
+          run_id: runId,
+          source: "watcher",
+          detected_files: [secondFile],
+        },
+      });
+      const patch = await api(`${runsPath}/${runId}`, {
+        method: "PATCH",
+        token,
+        body: { detected_files: [secondFile] },
+      });
+      const uploadUrl = await api(`${runsPath}/${runId}/request-upload-url`, {
+        method: "POST",
+        token,
+        body: { filename: "second.csv", relative_path: "second.csv" },
+      });
+
+      const expected = [
+        [post, DELETED_RUN_MESSAGE.post],
+        [patch, DELETED_RUN_MESSAGE.patch],
+        [uploadUrl, DELETED_RUN_MESSAGE.uploadUrl],
+      ] as const;
+      for (const [res, message] of expected) {
+        expect(res.status).toBe(409);
+        expect(await res.json()).toEqual({
+          error: {
+            code: "CONFLICT",
+            message,
+            details: { reason: "run_deleted" },
+          },
+        });
+      }
+    });
   });
 });
 

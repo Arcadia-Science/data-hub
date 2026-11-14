@@ -271,6 +271,12 @@
           },
           "comment_count": {
             "type": "integer"
+          },
+          "notebook_links": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RunNotebookLink"
+            }
           }
         },
         "required": [
@@ -296,7 +302,8 @@
           "total_size_bytes",
           "error_messages",
           "attributions",
-          "comment_count"
+          "comment_count",
+          "notebook_links"
         ]
       },
       "RunAttribution": {
@@ -323,6 +330,137 @@
           "displayName",
           "initials",
           "avatarUrl"
+        ]
+      },
+      "RunNotebookLink": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "url": {
+            "type": "string",
+            "description": "The link as saved, ready to open."
+          },
+          "url_key": {
+            "type": "string",
+            "description": "Two links with the same key point to the same page. The key ignores http vs. https, `www.`, a trailing slash, the fragment, and tracking parameters. Notion links are keyed by page ID, so a renamed page still matches."
+          },
+          "label": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "display_name": {
+            "type": "string",
+            "description": "The label, or a name worked out from the URL when there is none."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_by": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              },
+              "initials": {
+                "type": "string"
+              },
+              "avatarUrl": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "displayName",
+              "initials",
+              "avatarUrl"
+            ]
+          },
+          "created_by_token": {
+            "$ref": "#/components/schemas/TokenActor"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_by": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              },
+              "initials": {
+                "type": "string"
+              },
+              "avatarUrl": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "displayName",
+              "initials",
+              "avatarUrl"
+            ]
+          },
+          "updated_by_token": {
+            "$ref": "#/components/schemas/TokenActor"
+          }
+        },
+        "required": [
+          "id",
+          "url",
+          "url_key",
+          "label",
+          "display_name",
+          "created_at",
+          "created_by",
+          "created_by_token",
+          "updated_at",
+          "updated_by",
+          "updated_by_token"
+        ]
+      },
+      "TokenActor": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
         ]
       },
       "RunCreated": {
@@ -436,6 +574,12 @@
               "$ref": "#/components/schemas/RunAttribution"
             }
           },
+          "notebook_links": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RunNotebookLink"
+            }
+          },
           "files": {
             "type": "array",
             "items": {
@@ -458,26 +602,8 @@
           "deleted_by_token",
           "metadata",
           "attributions",
+          "notebook_links",
           "files"
-        ]
-      },
-      "TokenActor": {
-        "type": [
-          "object",
-          "null"
-        ],
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "name": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "name"
         ]
       },
       "RunDetailFile": {
@@ -1977,6 +2103,20 @@
           {
             "schema": {
               "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ],
+              "description": "`true` lists only runs with at least one lab notebook link; `false` lists only runs with none."
+            },
+            "required": false,
+            "description": "`true` lists only runs with at least one lab notebook link; `false` lists only runs with none.",
+            "name": "has_notebook_link",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
               "description": "Metadata key filter."
             },
             "required": false,
@@ -2264,6 +2404,20 @@
           {
             "schema": {
               "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ],
+              "description": "`true` lists only runs with at least one lab notebook link; `false` lists only runs with none."
+            },
+            "required": false,
+            "description": "`true` lists only runs with at least one lab notebook link; `false` lists only runs with none.",
+            "name": "has_notebook_link",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
               "description": "Metadata key filter."
             },
             "required": false,
@@ -2383,7 +2537,7 @@
       "post": {
         "operationId": "createInstrumentRun",
         "summary": "Create an instrument run",
-        "description": "Requires scope `runs:create`. PAT only; browser sessions are rejected.",
+        "description": "Requires scope `runs:create`. PAT only; browser sessions are rejected. Returns 200 with the existing run when it already exists. Returns 409 (`details.reason: run_deleted`) when the run exists and was deleted and the body has `source: \"watcher\"`, an `acquired_at`, or a non-empty `detected_files`. The request then attaches no files and changes nothing. A body with only `run_id` and `source: \"lambda\"` still gets 200.",
         "tags": [
           "Runs"
         ],
@@ -2640,7 +2794,7 @@
       "patch": {
         "operationId": "updateInstrumentRun",
         "summary": "Update a run",
-        "description": "Requires scope `runs:update`. PAT only; browser sessions are rejected.",
+        "description": "Requires scope `runs:update`. PAT only; browser sessions are rejected. Returns 409 (`details.reason: run_deleted`) when the run was deleted. Restore it first.",
         "tags": [
           "Runs"
         ],
@@ -3907,7 +4061,7 @@
       "post": {
         "operationId": "requestRunUploadUrl",
         "summary": "Request a presigned upload URL",
-        "description": "Requires scope `runs:upload`. PAT only; browser sessions are rejected. Watchers at 1.1.0 or newer send `relative_path` and `X-Data-Hub-Watcher-Version`. A file whose name is already used by a different folder is stored as `<stem>~<folder hash>.<ext>`, and the returned `s3_key` uses that stored name. Older watchers are looked up by filename only. Watchers at 1.2.0 or newer receive a multipart upload for files of 100 MB or more. Older watchers are refused when the file is over 5 GB.",
+        "description": "Requires scope `runs:upload`. PAT only; browser sessions are rejected. Watchers at 1.1.0 or newer send `relative_path` and `X-Data-Hub-Watcher-Version`. A file whose name is already used by a different folder is stored as `<stem>~<folder hash>.<ext>`, and the returned `s3_key` uses that stored name. Older watchers are looked up by filename only. Watchers at 1.2.0 or newer receive a multipart upload for files of 100 MB or more. Older watchers are refused when the file is over 5 GB. Returns 409 (`details.reason: run_deleted`) when the run was deleted.",
         "tags": [
           "Runs"
         ],
@@ -4452,6 +4606,904 @@
                   "required": [
                     "id",
                     "deleted"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token does not have the required scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested resource was not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with resource state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/instruments/{instrumentId}/runs/{runId}/notebook-links": {
+      "get": {
+        "operationId": "listRunNotebookLinks",
+        "summary": "List a run's lab notebook links",
+        "description": "Requires scope `runs:read`. Oldest first.",
+        "tags": [
+          "Runs"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "example": "plate-reader"
+            },
+            "required": true,
+            "name": "instrumentId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "The run ID. Spaces at the start or end are ignored.",
+              "example": "run-2026-001"
+            },
+            "required": true,
+            "description": "The run ID. Spaces at the start or end are ignored.",
+            "name": "runId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Notebook links.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "notebook_links": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/RunNotebookLink"
+                      }
+                    }
+                  },
+                  "required": [
+                    "notebook_links"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token does not have the required scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested resource was not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with resource state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createRunNotebookLink",
+        "summary": "Add a lab notebook link to a run",
+        "description": "Requires scope `runs:link`. Returns 409 when the run is deleted, already links to the same page (`details.link_id` names that link), or has the most links allowed.",
+        "tags": [
+          "Runs"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "example": "plate-reader"
+            },
+            "required": true,
+            "name": "instrumentId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "The run ID. Spaces at the start or end are ignored.",
+              "example": "run-2026-001"
+            },
+            "required": true,
+            "description": "The run ID. Spaces at the start or end are ignored.",
+            "name": "runId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2048
+                  },
+                  "label": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 200,
+                    "description": "Optional name for the link. Blank or null means none."
+                  }
+                },
+                "required": [
+                  "url"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created notebook link.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunNotebookLink"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token does not have the required scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested resource was not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with resource state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/instruments/{instrumentId}/runs/{runId}/notebook-links/{linkId}": {
+      "patch": {
+        "operationId": "updateRunNotebookLink",
+        "summary": "Edit a lab notebook link",
+        "description": "Requires scope `runs:link`. Anyone with the scope can edit any link.",
+        "tags": [
+          "Runs"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "example": "plate-reader"
+            },
+            "required": true,
+            "name": "instrumentId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "The run ID. Spaces at the start or end are ignored.",
+              "example": "run-2026-001"
+            },
+            "required": true,
+            "description": "The run ID. Spaces at the start or end are ignored.",
+            "name": "runId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "example": "9b2c4e1a-7d3f-4a5b-8c6d-0e1f2a3b4c5d"
+            },
+            "required": true,
+            "name": "linkId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2048
+                  },
+                  "label": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 200,
+                    "description": "Null or blank clears the label. Leave it out to keep it."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated notebook link.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunNotebookLink"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token does not have the required scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested resource was not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with resource state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteRunNotebookLink",
+        "summary": "Remove a lab notebook link",
+        "description": "Requires scope `runs:link`. The link is deleted for good. Removing it again returns 404.",
+        "tags": [
+          "Runs"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "example": "plate-reader"
+            },
+            "required": true,
+            "name": "instrumentId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "The run ID. Spaces at the start or end are ignored.",
+              "example": "run-2026-001"
+            },
+            "required": true,
+            "description": "The run ID. Spaces at the start or end are ignored.",
+            "name": "runId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "example": "9b2c4e1a-7d3f-4a5b-8c6d-0e1f2a3b4c5d"
+            },
+            "required": true,
+            "name": "linkId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Removed notebook link.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "deleted": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "deleted"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token does not have the required scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested resource was not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with resource state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/instrument-runs/notebook-links": {
+      "post": {
+        "operationId": "bulkAddRunNotebookLink",
+        "summary": "Add a lab notebook link to many runs",
+        "description": "Requires scope `runs:link`. Reports an outcome for each run instead of failing the whole request.",
+        "tags": [
+          "Runs"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "runs": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "instrument_id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "run_id": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "instrument_id",
+                        "run_id"
+                      ]
+                    },
+                    "minItems": 1,
+                    "maxItems": 100,
+                    "description": "The runs to change, at most 100. They can belong to different instruments."
+                  },
+                  "url": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2048
+                  },
+                  "label": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 200,
+                    "description": "Optional name for the new links. Runs that already link to the page keep their own label."
+                  }
+                },
+                "required": [
+                  "runs",
+                  "url"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Outcome for each run.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "type": "string"
+                    },
+                    "url_key": {
+                      "type": "string"
+                    },
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "instrument_id": {
+                            "type": "string"
+                          },
+                          "run_id": {
+                            "type": "string"
+                          },
+                          "outcome": {
+                            "type": "string",
+                            "enum": [
+                              "added",
+                              "already_linked",
+                              "run_deleted",
+                              "limit_reached",
+                              "not_found"
+                            ],
+                            "description": "`already_linked`: the run already links to the same page and was left as it was. `limit_reached`: the run already has the most links allowed."
+                          },
+                          "link": {
+                            "allOf": [
+                              {
+                                "$ref": "#/components/schemas/RunNotebookLink"
+                              },
+                              {
+                                "type": [
+                                  "object",
+                                  "null"
+                                ],
+                                "description": "The run's link to the page, for `added` and `already_linked`."
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "instrument_id",
+                          "run_id",
+                          "outcome",
+                          "link"
+                        ]
+                      }
+                    },
+                    "counts": {
+                      "type": "object",
+                      "properties": {
+                        "added": {
+                          "type": "integer"
+                        },
+                        "already_linked": {
+                          "type": "integer"
+                        },
+                        "run_deleted": {
+                          "type": "integer"
+                        },
+                        "limit_reached": {
+                          "type": "integer"
+                        },
+                        "not_found": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "added",
+                        "already_linked",
+                        "run_deleted",
+                        "limit_reached",
+                        "not_found"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "url",
+                    "url_key",
+                    "results",
+                    "counts"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token does not have the required scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested resource was not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with resource state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/instrument-runs/notebook-links/remove": {
+      "post": {
+        "operationId": "bulkRemoveRunNotebookLinks",
+        "summary": "Remove lab notebook links from many runs",
+        "description": "Requires scope `runs:link`. Reports an outcome for each run instead of failing the whole request.",
+        "tags": [
+          "Runs"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "runs": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "instrument_id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "run_id": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "instrument_id",
+                        "run_id"
+                      ]
+                    },
+                    "minItems": 1,
+                    "maxItems": 100,
+                    "description": "The runs to change, at most 100. They can belong to different instruments."
+                  },
+                  "urls": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2048
+                    },
+                    "minItems": 1,
+                    "maxItems": 20,
+                    "description": "Links to remove. Each removes any link to the same page, so a copy of the URL with a different query string or `www.` still matches."
+                  }
+                },
+                "required": [
+                  "runs",
+                  "urls"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Outcome for each run.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "url_keys": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "instrument_id": {
+                            "type": "string"
+                          },
+                          "run_id": {
+                            "type": "string"
+                          },
+                          "outcome": {
+                            "type": "string",
+                            "enum": [
+                              "removed",
+                              "not_linked",
+                              "run_deleted",
+                              "not_found"
+                            ]
+                          },
+                          "removed": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "instrument_id",
+                          "run_id",
+                          "outcome",
+                          "removed"
+                        ]
+                      }
+                    },
+                    "counts": {
+                      "type": "object",
+                      "properties": {
+                        "removed": {
+                          "type": "integer"
+                        },
+                        "not_linked": {
+                          "type": "integer"
+                        },
+                        "run_deleted": {
+                          "type": "integer"
+                        },
+                        "not_found": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "removed",
+                        "not_linked",
+                        "run_deleted",
+                        "not_found"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "url_keys",
+                    "results",
+                    "counts"
                   ]
                 }
               }

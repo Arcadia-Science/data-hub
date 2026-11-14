@@ -65,9 +65,11 @@ TRANSITIONS: tuple[Transition, ...] = (
         MACHINE,
         "service.stop->clean_stop_during_start",
         "A `service stop` that arrives while the service is still starting (its first "
-        "heartbeat is held up) is not lost: when the start has finished the service stops "
-        "cleanly, with a `stopped` heartbeat and a `watcher_stopped` event. (The CLI has "
-        "this window and loses the stop, which is `process.stop->clean_stop_during_scan`.)",
+        "heartbeat is held up) is not lost: a thread hands it to the supervisor's "
+        "`request_stop` at once, which ends the start-up scan, and when the first heartbeat "
+        "has returned the service stops cleanly, with a `stopped` heartbeat and a "
+        "`watcher_stopped` event. (The CLI has the same window, which is "
+        "`process.stop->clean_stop_during_scan`.)",
         platforms=SERVICE,
     ),
     covered(

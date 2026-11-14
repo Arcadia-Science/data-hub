@@ -166,6 +166,44 @@ UPLOAD_POLL_INTERVAL_SECONDS = 60
 # still running, and the rebuild waits for their threads to exit before it
 # starts the new runtime.
 CONFIG_APPLY_DRAIN_TIMEOUT_SECONDS = 120
+# The same wait when the watch folder has disappeared under a running watcher.
+# Every part of a large file opens the file again, so once the folder is gone the
+# parts that haven't started can't open it and the upload can't finish either way:
+# waiting longer only keeps the watcher reporting `watching` while its folder is
+# missing. The files that were cut off are uploaded again once the folder is back
+# (`pending_uploads` rows, or the server's queue).
+WATCH_FOLDER_GONE_DRAIN_TIMEOUT_SECONDS = 10
+# What the move to the waiting state, and the rebuild of a runtime that can't see its
+# folder, give each of the other waits that a folder on a dead share can hold up, after
+# the drain: the threads of uploads that were cut off (`Uploader.abort`, which can't
+# reach a thread that is blocked reading the share), the file monitor's observer, and the
+# heartbeat tick in progress. A thread that is still running then is left behind and the
+# watcher goes on without it, instead of keeping the `poll` thread, which is the one that
+# sees a stop, in the wait. A runtime that starts on the same folder does not start until
+# the cut-off threads have exited. A stop ends each of these waits at once.
+WATCH_FOLDER_GONE_JOIN_SECONDS = 5
+# A look at the watch folder (`FolderProbe`) runs on its own thread and is given this
+# long. A stat or a listing on a share that has hung can block for the SMB timeout
+# (about a minute on Windows) or, on a hard NFS mount, forever, and the `poll` thread
+# has to stay free to see a stop. A look that takes longer counts as a problem:
+# "not responding". A stop ends the wait for a look sooner in the supervisor's folder
+# checks and in the uploader's looks. The look that starts a runtime keeps the full limit.
+FOLDER_PROBE_TIMEOUT_SECONDS = 10
+# A running watcher moves to the waiting state only when a second look, this long
+# after the first one that found a problem, finds one too. A share that drops and
+# comes back within seconds, or a folder that is still being deleted, costs it nothing:
+# the move cuts off every upload in progress and rescans the folder at the next start.
+# The reason reported is the one of the second look.
+FOLDER_CONFIRM_DELAY_SECONDS = 3
+# A runtime that went blind (watchdog stopped watching its folder, or the folder is
+# not the one it started on) is rebuilt once. If the rebuilt runtime has not been
+# watching this long when it goes blind again, rebuilding again would not help, and
+# would send a heartbeat and a full scan at every check. When watchdog has stopped
+# watching, the folder can't be watched: the watcher waits with that reason and retries
+# on the waiting state's backoff. When watchdog is still watching and only the folder's
+# identity changed, the filesystem doesn't give it a lasting one: the watcher keeps
+# the runtime and stops comparing the identity, until a config change or a restart.
+MONITOR_RESTART_WINDOW_SECONDS = 120
 # While waiting with the watch folder present, a start that keeps failing is
 # retried after 1, 2, 4 and 8 heartbeat intervals, then every 15 minutes, so a
 # persistent failure doesn't rebuild the runtime and log a traceback every

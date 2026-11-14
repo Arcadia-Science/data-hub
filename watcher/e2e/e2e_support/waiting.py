@@ -47,12 +47,12 @@ def known_bug() -> Iterator[None]:
     the server holds what it should, the file was written. If any of that fails the test
     fails, and not as an expected failure. Only the intended-behavior assertion goes inside::
 
-        @pytest.mark.xfail(strict=True, raises=KnownBugStillPresent, reason="ENG-2118: ...")
-        @pytest.mark.covers("process.stop->clean_stop_during_scan")
-        def test_a_stop_during_start_up_still_ends_with_a_clean_stop(...):
+        @pytest.mark.xfail(strict=True, raises=KnownBugStillPresent, reason="bug-example: ...")
+        @pytest.mark.covers("machine.thing->intended_outcome")
+        def test_the_intended_behavior(...):
             ...  # precondition
             with known_bug():
-                assert pc.wait_exit(30) == 0
+                assert the_intended_behavior()
 
     An ``AssertionError`` raised inside the block, a :class:`WaitTimeout` included, is
     re-raised as :class:`KnownBugStillPresent` with the original as its cause. When the bug

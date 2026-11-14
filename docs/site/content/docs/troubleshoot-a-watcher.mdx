@@ -57,6 +57,8 @@ The watcher checks for the folder again once a minute and starts watching as soo
 - Create or reconnect the folder on the PC, or
 - Point the watcher at the right folder from the web app; see [Change a watcher’s config](/docs/manage-watchers#change-a-watchers-config)
 
+Watcher 1.4.3 and later also go back to this state when the folder disappears while they run, for example when a network drive drops or the folder is deleted. The watcher notices within a minute, looks again a few seconds later so that a drop of a moment doesn’t count, stops watching, and shows **Waiting: folder not found**. It gives a file that was uploading at that moment up to 10 seconds to finish, cuts it off if it isn’t done, and uploads it again once the folder is back. When the folder returns, the watcher starts watching it again without a restart, and queues a `watcher_started` event that says it resumed.
+
 Older watchers exit at startup instead, with an error that the watch directory doesn’t exist.
 
 ## A config change shows “Change rejected” [#change-rejected]
@@ -101,6 +103,16 @@ The watcher records one `run_report_failed` event when a run’s report first fa
 A failure that isn’t a connection problem or a server error, such as `401 Unauthorized`, is not retried, because it would fail the same way. Each one is recorded. Fix the cause, then restart the watcher.
 
 Older watchers try again only when another file in the run finishes or the watcher restarts. Restart the watcher to report the run.
+
+## A run was deleted on Data Hub [#a-run-was-deleted-on-data-hub]
+
+A run report that fails with `409 Conflict` and a message that starts “This run was deleted on Data Hub” means someone deleted the run. Data Hub refuses a watcher’s report of a deleted run, and the files in that report aren’t added to it.
+
+Watcher 1.4.3 and later record one `run_report_failed` event for the run and stop reporting it until the watcher restarts. A restart tries once more, and records one more event if the run is still deleted. After you restore the run, restart the watcher to send its files.
+
+Earlier watchers record one event for each file, and do it again each time they start. After you restore the run, they send its files when another file of the run finishes or the watcher restarts.
+
+To stop the errors without restoring the run, move the run’s files out of the watch folder.
 
 ## Files are not being detected
 
@@ -175,7 +187,7 @@ Run `data-hub-watcher state forget --prefix your_folder_name/` on the instrument
 </Step>
 
 <Step>
-Start the watcher again. It reports the files in that folder again and uploads the ones Data Hub doesn’t have.
+Start the watcher again. It reports the files in that folder again and uploads the ones Data Hub doesn’t have. A run that was deleted on Data Hub refuses its files instead. See [A run was deleted on Data Hub](#a-run-was-deleted-on-data-hub).
 </Step>
 
 </Steps>

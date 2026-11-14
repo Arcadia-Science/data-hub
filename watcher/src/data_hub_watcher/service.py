@@ -820,6 +820,23 @@ def _run_service_loop(
         host=platform.node(),
     )
 
+    # ``SvcStop`` and the preshutdown control set ``stop_event`` from the SCM's thread. This
+    # thread hands it to the supervisor's one stop signal, ``request_stop``, the moment it
+    # is set, which is the call the CLI's signal handler makes too. It starts before
+    # ``start``, so a stop that arrives while the watcher starts is seen: it ends the
+    # start-up scan early (the long step) and wakes ``poll``. Without the wake, the loop
+    # would see a stop up to a second late (``poll`` blocks for up to a second), and the
+    # uploader would go on starting parts and files until then. It is a daemon thread and
+    # ends with the process. The event is set after ``_system_shutdown`` for a
+    # preshutdown, so the loop reads the right mark once it has woken.
+    def _request_stop_when_stopped() -> None:
+        stop_event.wait()
+        supervisor.request_stop()
+
+    threading.Thread(
+        target=_request_stop_when_stopped, name="service-stop-wake", daemon=True
+    ).start()
+
     # Syncs the config (failures surface as kind=config_sync_failed in the
     # dashboard), applies a config revision saved in Data Hub while the
     # service was down, then starts watching. If the watch folder is missing
@@ -827,22 +844,16 @@ def _run_service_loop(
     # restart-loop and a fix from the web app can still reach this PC.
     supervisor.start()
 
-    if supervisor.waiting_reason is not None:
+    if stop_event.is_set():
+        # Said in place of "is running" and "is waiting", which a stop during the start makes
+        # untrue, as the CLI leaves out its status lines. The end-to-end drivers wait for
+        # either of those as the ready signal, or for the service to have stopped, which a
+        # service that was asked to stop does.
+        logger.info("%s was asked to stop while it was starting", SERVICE_DISPLAY_NAME)
+    elif supervisor.waiting_reason is not None:
         logger.warning("%s is waiting: %s", SERVICE_DISPLAY_NAME, supervisor.waiting_reason)
     else:
         logger.info("%s is running", SERVICE_DISPLAY_NAME)
-
-    # ``poll`` blocks for up to a second, so without this the loop would see the SCM's
-    # stop up to a second late, and the uploader would go on starting parts and files
-    # until then. The thread wakes ``poll`` the moment the stop event is set, as the
-    # CLI's signal handler does with ``supervisor.wake()``. It is a daemon thread that
-    # ends with the process. The event is set after ``_system_shutdown`` for a
-    # preshutdown, so the loop reads the right mark once it has woken.
-    def _wake_when_stopped() -> None:
-        stop_event.wait()
-        supervisor.wake()
-
-    threading.Thread(target=_wake_when_stopped, name="service-stop-wake", daemon=True).start()
 
     # Poll until the SCM's stop_event is set (operator-initiated stop, or OS
     # shutdown) or the runtime asks to shut down (the in-process updater

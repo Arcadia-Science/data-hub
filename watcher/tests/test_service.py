@@ -35,9 +35,11 @@ from unittest.mock import MagicMock
 import click
 import pytest
 
+from data_hub_watcher import runtime as _runtime_module
 from data_hub_watcher.api_client import ApiError
 from data_hub_watcher.config_io import load_config as real_load_config
 from data_hub_watcher.constants import DEREGISTERED_MESSAGE, STOP_BUDGET_SECONDS
+from data_hub_watcher.events import EventType
 from data_hub_watcher.models import (
     ApiErrorDetail,
     ConfigChecksumResponse,
@@ -46,6 +48,12 @@ from data_hub_watcher.models import (
     RunDetectionConfig,
     WatcherConfig,
 )
+
+# The runtime functions as they are, for the tests that run the service over a real runtime. The
+# `harness` fixture replaces them with stand-ins.
+_REAL_BUILD_RUNTIME = _runtime_module.build_runtime
+_REAL_START_RUNTIME = _runtime_module.start_runtime
+_REAL_STOP_RUNTIME = _runtime_module.stop_runtime
 
 # Real winreg.REG_SZ and win32service.SERVICE_RUNNING values. Using the
 # real numeric values lets ``query_service_status`` look them up in its
@@ -1191,6 +1199,20 @@ class _LoopHarness:
         # developer's shell.
         monkeypatch.delenv("DATA_HUB_WATCHER_LOG_LEVEL", raising=False)
 
+    def stop_after_it_is_running(self, stop_event: threading.Event) -> None:
+        """Set *stop_event* from the first `poll`, which the loop makes once the service runs.
+
+        A stop that is already set when the loop starts is a stop that arrived during the
+        start, which the service says in place of "is running".
+        """
+        from data_hub_watcher import runtime
+
+        def poll(_supervisor: Any, timeout: float = 1.0) -> bool:
+            stop_event.set()
+            return False
+
+        self.monkeypatch.setattr(runtime.WatcherSupervisor, "poll", poll)
+
 
 @pytest.fixture
 def harness(
@@ -2056,7 +2078,7 @@ class TestRunServiceLoopLogging:
 
             harness.monkeypatch.setattr(dotenv, "load_dotenv", load_env_file)
         stop_event = threading.Event()
-        stop_event.set()
+        harness.stop_after_it_is_running(stop_event)
 
         harness.svc._run_service_loop(stop_event, harness.sm)
         # Another module logs after the service has started, as the watcher does for each file.
@@ -2088,7 +2110,7 @@ class TestRunServiceLoopLogging:
         # limit on INFO lines. Its name is ``__main__`` when the SCM runs
         # the file, so the exemption follows ``logger.name``.
         stop_event = threading.Event()
-        stop_event.set()
+        harness.stop_after_it_is_running(stop_event)
         harness.svc._run_service_loop(stop_event, harness.sm)
 
         info_messages = [c.args[0] for c in harness.sm.LogInfoMsg.call_args_list]
@@ -2297,6 +2319,175 @@ class TestServiceClass:
         info_messages = [c.args[0] for c in sm.LogInfoMsg.call_args_list]
         assert not any("Windows is shutting down" in m for m in info_messages)
         sm.LogErrorMsg.assert_not_called()
+
+
+class TestStopDuringStartUp:
+    """A stop that reaches the service while it starts ends the start-up scan.
+
+    `SvcStop` and the preshutdown control set the service's stop event from the SCM's thread.
+    The service loop used to read that event only after the supervisor had started, which on a
+    large folder is minutes after the scan began. A thread now hands the stop to the
+    supervisor's `request_stop` from before `start`, and the scan reads that between entries.
+    """
+
+    FILE_COUNT = 40
+
+    def test_the_stop_event_reaches_the_supervisor_while_its_start_is_still_running(
+        self, harness: _LoopHarness
+    ) -> None:
+        from data_hub_watcher import runtime
+
+        stop_event = threading.Event()
+        scanning = threading.Event()
+        scan_ended = threading.Event()
+        should_stop_when_asked: list[bool] = []
+
+        def long_scan(rt: Any, started_message: str = "", **kwargs: Any) -> None:
+            # What the file monitor's scan does between entries.
+            harness.start_calls.append((rt, started_message))
+            should_stop = kwargs["should_stop"]
+            scanning.set()
+            deadline = time.monotonic() + 20
+            while not should_stop() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            should_stop_when_asked.append(should_stop())
+            scan_ended.set()
+
+        harness.monkeypatch.setattr(runtime, "start_runtime", long_scan)
+        errors: list[BaseException] = []
+
+        def run() -> None:
+            try:
+                harness.svc._run_service_loop(stop_event, harness.sm)
+            except BaseException as exc:
+                errors.append(exc)
+
+        thread = threading.Thread(target=run, daemon=True, name="test-service-loop")
+        thread.start()
+        try:
+            assert scanning.wait(10), "the service never reached its start-up scan"
+
+            # What `SvcStop` does, from the SCM's thread, while the scan is running.
+            stop_event.set()
+
+            assert scan_ended.wait(5), "the stop never reached the scan"
+            thread.join(5)
+            assert not thread.is_alive()
+        finally:
+            stop_event.set()
+            thread.join(5)
+
+        assert errors == []
+        assert should_stop_when_asked == [True]
+        # The service then stops as it does for any other stop.
+        assert len(harness.stop_calls) == 1
+        assert harness.stop_calls[0][1] == "Service stopped"
+        assert harness.stop_system_shutdown == [False]
+
+    def test_a_stop_during_the_start_is_logged_as_that_and_not_as_running(
+        self, harness: _LoopHarness, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # The stop was already there when `start` returned: it arrived during the start.
+        stop_event = threading.Event()
+        stop_event.set()
+
+        with caplog.at_level(logging.INFO, logger="data_hub_watcher.service"):
+            harness.svc._run_service_loop(stop_event, harness.sm)
+
+        messages = [r.getMessage() for r in caplog.records]
+        assert "Data Hub Watcher was asked to stop while it was starting" in messages
+        # Neither line that says the watcher works, which the stop made untrue.
+        assert not [m for m in messages if "is running" in m or "is waiting" in m]
+        info_messages = [c.args[0] for c in harness.sm.LogInfoMsg.call_args_list]
+        assert not any("is running" in m for m in info_messages)
+
+    def test_a_stop_during_the_start_of_a_waiting_service_is_not_logged_as_waiting_either(
+        self, harness: _LoopHarness, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        missing = harness.tmp_path / "not-there"
+        harness.cfg = harness.cfg.model_copy(
+            update={
+                "instrument": harness.cfg.instrument.model_copy(update={"watch_directory": missing})
+            }
+        )
+        stop_event = threading.Event()
+        stop_event.set()
+
+        with caplog.at_level(logging.INFO, logger="data_hub_watcher.service"):
+            harness.svc._run_service_loop(stop_event, harness.sm)
+
+        messages = [r.getMessage() for r in caplog.records]
+        assert "Data Hub Watcher was asked to stop while it was starting" in messages
+        assert not [m for m in messages if "is running" in m or "is waiting" in m]
+
+    def test_a_service_that_was_not_asked_to_stop_says_it_is_running(
+        self, harness: _LoopHarness, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        stop_event = threading.Event()
+        harness.stop_after_it_is_running(stop_event)
+
+        with caplog.at_level(logging.INFO, logger="data_hub_watcher.service"):
+            harness.svc._run_service_loop(stop_event, harness.sm)
+
+        messages = [r.getMessage() for r in caplog.records]
+        assert "Data Hub Watcher is running" in messages
+        assert not [m for m in messages if "asked to stop while" in m]
+
+    def test_a_stop_control_ends_the_scan_of_a_real_runtime_and_the_service_stops_cleanly(
+        self,
+        service_class: type,
+        harness: _LoopHarness,
+        count_scan_entries: Callable[..., Any],
+    ) -> None:
+        from data_hub_watcher import runtime
+
+        harness.monkeypatch.setattr(runtime, "build_runtime", _REAL_BUILD_RUNTIME)
+        harness.monkeypatch.setattr(runtime, "start_runtime", _REAL_START_RUNTIME)
+        harness.monkeypatch.setattr(runtime, "stop_runtime", _REAL_STOP_RUNTIME)
+        watch_dir = harness.cfg.instrument.watch_directory
+        for i in range(self.FILE_COUNT):
+            (watch_dir / f"RUN{i:03}_a.csv").write_text("a,b\n1,2\n")
+
+        ws = sys.modules["win32service"]
+        svc = service_class(["DataHubWatcher"])
+        reached = threading.Event()
+        real_request_stop = runtime.WatcherSupervisor.request_stop
+
+        def request_stop(self_: Any) -> None:
+            real_request_stop(self_)
+            reached.set()
+
+        harness.monkeypatch.setattr(runtime.WatcherSupervisor, "request_stop", request_stop)
+
+        def stop_from_the_scm() -> None:
+            # The SCM calls `SvcStop` on its own thread. The scan goes on until the stop has
+            # reached the supervisor, which is a thread hop away.
+            threading.Thread(
+                target=lambda: svc.ServiceCtrlHandlerEx(ws.SERVICE_CONTROL_STOP, 0, None)
+            ).start()
+            assert reached.wait(5), "the stop never reached the supervisor"
+
+        scan = count_scan_entries(after=stop_from_the_scm, n=3)
+        runner = threading.Thread(target=svc.SvcDoRun, daemon=True)
+        runner.start()
+        try:
+            runner.join(15)
+            assert not runner.is_alive(), "the service kept scanning after its stop"
+        finally:
+            svc._stop_event.set()
+            runner.join(10)
+
+        # The scan read the entry that came with the stop and no more of the 41.
+        assert scan.entries_read == 3
+        final = harness.client.send_heartbeat.call_args.args[1]
+        assert final["status"] == "stopped"
+        stopped = [
+            call.args[0]
+            for call in harness.reporter.queue_event.call_args_list
+            if call.args[0].event_type == EventType.WATCHER_STOPPED
+        ]
+        assert [e.message for e in stopped] == ["Service stopped"]
+        sys.modules["servicemanager"].LogErrorMsg.assert_not_called()
 
 
 class TestBootstrapFailureLog:

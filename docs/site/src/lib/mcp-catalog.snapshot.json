@@ -12,6 +12,7 @@
     "runs": "Runs",
     "attribution": "Run attribution",
     "comments": "Comments",
+    "notebook_links": "Lab notebook links",
     "files": "Files",
     "watchers": "Watchers",
     "discovery": "Discovery",
@@ -442,7 +443,7 @@
     {
       "name": "search_runs",
       "title": "Search Runs",
-      "description": "Search instrument runs with filtering, pagination, and sorting. Supports run status filters and instrument-metadata filters (plate reader, gel-doc, qPCR, Hina microscope, Epson scanner, Aunty). Prefer global_search when the query may match filenames, instrument names, or attributor names rather than run IDs. Discover valid metadata filter values via get_instrument_filter_options or datahub://instruments/{id}/filter-options.",
+      "description": "Search instrument runs with filtering, pagination, and sorting. Each run lists its lab notebook links. Supports run status, has-notebook-link, and instrument-metadata filters (plate reader, gel-doc, qPCR, Hina microscope, Epson scanner, Aunty). Prefer global_search when the query may match filenames, instrument names, or attributor names rather than run IDs. Discover valid metadata filter values via get_instrument_filter_options or datahub://instruments/{id}/filter-options.",
       "group": "runs",
       "scope": "runs:read",
       "annotations": {
@@ -590,6 +591,10 @@
           "ranBy": {
             "description": "Filter by attributor. Pass a user id, the literal \"me\" for the authenticated token owner, or \"unattributed\" for runs with no attributions. Use get_me for your user id, or list_run_attributors to discover colleagues.",
             "type": "string"
+          },
+          "hasNotebookLink": {
+            "description": "true: only runs with at least one lab notebook link. false: only runs with none.",
+            "type": "boolean"
           },
           "status": {
             "description": "Filter by derived run status (OR'd together). Status is derived from a run's raw file states, priority-exclusive: failed (any file failed), stalled (a file has been in processing past the stall window and can be reprocessed), pending (files awaiting upload), uploaded, queued (reprocessing files waiting for a free processing slot), processing (in flight), completed (all done), empty (no files).",
@@ -794,6 +799,172 @@
                   "type": "integer",
                   "minimum": -9007199254740991,
                   "maximum": 9007199254740991
+                },
+                "notebook_links": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      },
+                      "url": {
+                        "type": "string"
+                      },
+                      "url_key": {
+                        "type": "string"
+                      },
+                      "label": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "display_name": {
+                        "type": "string"
+                      },
+                      "created_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                      },
+                      "created_by": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "displayName": {
+                                "type": "string"
+                              },
+                              "initials": {
+                                "type": "string"
+                              },
+                              "avatarUrl": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "displayName",
+                              "initials",
+                              "avatarUrl"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "created_by_token": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "name"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "updated_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                      },
+                      "updated_by": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "displayName": {
+                                "type": "string"
+                              },
+                              "initials": {
+                                "type": "string"
+                              },
+                              "avatarUrl": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "displayName",
+                              "initials",
+                              "avatarUrl"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "updated_by_token": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "name"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "url",
+                      "url_key",
+                      "label",
+                      "display_name",
+                      "created_at",
+                      "created_by",
+                      "created_by_token",
+                      "updated_at",
+                      "updated_by",
+                      "updated_by_token"
+                    ],
+                    "additionalProperties": false
+                  }
                 }
               },
               "required": [
@@ -819,7 +990,8 @@
                 "total_size_bytes",
                 "error_messages",
                 "attributions",
-                "comment_count"
+                "comment_count",
+                "notebook_links"
               ],
               "additionalProperties": false
             }
@@ -867,7 +1039,7 @@
     {
       "name": "get_run",
       "title": "Get Run",
-      "description": "Get details for a specific instrument run by its natural key (instrument ID + run ID). Returns metadata, timestamps, instrument info, and attributions by default. Pass include to attach the first page of files, comments, and/or a failure_summary without extra tool calls. To show the interactive report (plate maps, spectra, images) or a bounded processed-CSV sample, call get_run_report for the same run.",
+      "description": "Get details for a specific instrument run by its natural key (instrument ID + run ID). Returns metadata, timestamps, instrument info, attributions, and lab notebook links (notebookLinks) by default. Pass include to attach the first page of files, comments, and/or a failure_summary without extra tool calls. To show the interactive report (plate maps, spectra, images) or a bounded processed-CSV sample, call get_run_report for the same run.",
       "group": "runs",
       "scope": "runs:read",
       "annotations": {
@@ -1088,6 +1260,172 @@
                 "displayName",
                 "initials",
                 "avatarUrl"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "notebookLinks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "url": {
+                  "type": "string"
+                },
+                "url_key": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "display_name": {
+                  "type": "string"
+                },
+                "created_at": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                },
+                "created_by": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "displayName": {
+                          "type": "string"
+                        },
+                        "initials": {
+                          "type": "string"
+                        },
+                        "avatarUrl": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "displayName",
+                        "initials",
+                        "avatarUrl"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "created_by_token": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "updated_at": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                },
+                "updated_by": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "displayName": {
+                          "type": "string"
+                        },
+                        "initials": {
+                          "type": "string"
+                        },
+                        "avatarUrl": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "displayName",
+                        "initials",
+                        "avatarUrl"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "updated_by_token": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "url",
+                "url_key",
+                "label",
+                "display_name",
+                "created_at",
+                "created_by",
+                "created_by_token",
+                "updated_at",
+                "updated_by",
+                "updated_by_token"
               ],
               "additionalProperties": false
             }
@@ -1399,7 +1737,8 @@
           "instrumentType",
           "deletedByUser",
           "deletedByToken",
-          "attributions"
+          "attributions",
+          "notebookLinks"
         ],
         "additionalProperties": false
       }
@@ -3067,6 +3406,664 @@
           "instrumentId",
           "runId",
           "filesQueued"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "add_notebook_link",
+      "title": "Add Notebook Link",
+      "description": "Link runs on one instrument to a lab notebook page: any http or https page, such as Notion or Google Docs. Adds the same link to up to 100 runs and reports an outcome for each. Runs that already link to the same page keep their link and label, and deleted or missing runs are skipped. Acts as the signed-in user. Adding a link doesn't record who ran the runs; call claim_runs for that.",
+      "group": "notebook_links",
+      "scope": "runs:link",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true
+      },
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "instrumentId": {
+            "type": "string",
+            "description": "Instrument identifier"
+          },
+          "runIds": {
+            "minItems": 1,
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Run identifiers within the instrument (1–100)"
+          },
+          "url": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048,
+            "description": "The notebook page's http or https URL"
+          },
+          "label": {
+            "description": "Optional short name for the link. Without one, Data Hub names it after the page in the URL.",
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "instrumentId",
+          "runIds",
+          "url"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "instrumentId": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "urlKey": {
+            "type": "string"
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "runId": {
+                  "type": "string"
+                },
+                "outcome": {
+                  "type": "string",
+                  "enum": [
+                    "added",
+                    "already_linked",
+                    "run_deleted",
+                    "limit_reached",
+                    "not_found"
+                  ]
+                },
+                "link": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        "url": {
+                          "type": "string"
+                        },
+                        "url_key": {
+                          "type": "string"
+                        },
+                        "label": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "display_name": {
+                          "type": "string"
+                        },
+                        "created_at": {
+                          "type": "string",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                        },
+                        "created_by": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "displayName": {
+                                  "type": "string"
+                                },
+                                "initials": {
+                                  "type": "string"
+                                },
+                                "avatarUrl": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "displayName",
+                                "initials",
+                                "avatarUrl"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "created_by_token": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "name": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "name"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "updated_at": {
+                          "type": "string",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                        },
+                        "updated_by": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "displayName": {
+                                  "type": "string"
+                                },
+                                "initials": {
+                                  "type": "string"
+                                },
+                                "avatarUrl": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "displayName",
+                                "initials",
+                                "avatarUrl"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "updated_by_token": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "name": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "name"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "url",
+                        "url_key",
+                        "label",
+                        "display_name",
+                        "created_at",
+                        "created_by",
+                        "created_by_token",
+                        "updated_at",
+                        "updated_by",
+                        "updated_by_token"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "runId",
+                "outcome",
+                "link"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "counts": {
+            "type": "object",
+            "properties": {
+              "added": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "already_linked": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "run_deleted": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "limit_reached": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "not_found": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "added",
+              "already_linked",
+              "run_deleted",
+              "limit_reached",
+              "not_found"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "instrumentId",
+          "url",
+          "urlKey",
+          "results",
+          "counts"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "update_notebook_link",
+      "title": "Update Notebook Link",
+      "description": "Change a lab notebook link's URL, label, or both. Get the link ID from get_run's notebookLinks. Pass label: null to clear the label; leave a field out to keep it.",
+      "group": "notebook_links",
+      "scope": "runs:link",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true
+      },
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "instrumentId": {
+            "type": "string",
+            "description": "Instrument identifier"
+          },
+          "runId": {
+            "type": "string",
+            "description": "Run identifier within the instrument"
+          },
+          "linkId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "The link's id"
+          },
+          "url": {
+            "description": "New http or https URL",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "label": {
+            "description": "New label. Null or blank clears it.",
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "instrumentId",
+          "runId",
+          "linkId"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "url": {
+            "type": "string"
+          },
+          "url_key": {
+            "type": "string"
+          },
+          "label": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "displayName": {
+                    "type": "string"
+                  },
+                  "initials": {
+                    "type": "string"
+                  },
+                  "avatarUrl": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "id",
+                  "displayName",
+                  "initials",
+                  "avatarUrl"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_by_token": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "name"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "updated_by": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "displayName": {
+                    "type": "string"
+                  },
+                  "initials": {
+                    "type": "string"
+                  },
+                  "avatarUrl": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "id",
+                  "displayName",
+                  "initials",
+                  "avatarUrl"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "updated_by_token": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "name"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "url",
+          "url_key",
+          "label",
+          "display_name",
+          "created_at",
+          "created_by",
+          "created_by_token",
+          "updated_at",
+          "updated_by",
+          "updated_by_token"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "remove_notebook_link",
+      "title": "Remove Notebook Link",
+      "description": "Remove the link to a lab notebook page from up to 100 runs on one instrument. Matches any saved link to the same page, even when its URL differs in www., query string, or fragment. Links are deleted for good, so confirm with the user first.",
+      "group": "notebook_links",
+      "scope": "runs:link",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true
+      },
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "instrumentId": {
+            "type": "string",
+            "description": "Instrument identifier"
+          },
+          "runIds": {
+            "minItems": 1,
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Run identifiers within the instrument (1–100)"
+          },
+          "url": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048,
+            "description": "The notebook page's URL"
+          }
+        },
+        "required": [
+          "instrumentId",
+          "runIds",
+          "url"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "instrumentId": {
+            "type": "string"
+          },
+          "urlKey": {
+            "type": "string"
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "runId": {
+                  "type": "string"
+                },
+                "outcome": {
+                  "type": "string",
+                  "enum": [
+                    "removed",
+                    "not_linked",
+                    "run_deleted",
+                    "not_found"
+                  ]
+                },
+                "removed": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "runId",
+                "outcome",
+                "removed"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "counts": {
+            "type": "object",
+            "properties": {
+              "removed": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "not_linked": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "run_deleted": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "not_found": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "removed",
+              "not_linked",
+              "run_deleted",
+              "not_found"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "instrumentId",
+          "urlKey",
+          "results",
+          "counts"
         ],
         "additionalProperties": false
       }
@@ -5036,7 +6033,7 @@
     {
       "name": "global_search",
       "title": "Global Search",
-      "description": "Fuzzy search across runs, files, instruments, users, and comments (same backend as the UI ⌘K palette). Prefer this over search_runs when the query may match a filename, instrument display name, attributor name, user, or comment body. The users scope returns workspace member names/emails to any authenticated caller (no row-level member privacy). Use search_runs for date/status/metadata filters. Queries shorter than 2 characters are rejected.",
+      "description": "Fuzzy search across runs, files, instruments, users, and comments (same backend as the UI ⌘K palette). Prefer this over search_runs when the query may match a filename, instrument display name, attributor name, user, comment body, or a lab notebook link. A pasted notebook URL finds the runs linked to that page, ignoring http vs. https, www., the query string, and the fragment. The users scope returns workspace member names/emails to any authenticated caller (no row-level member privacy). Use search_runs for date/status/metadata filters. Queries shorter than 2 characters are rejected.",
       "group": "discovery",
       "scope": "runs:read",
       "annotations": {
@@ -5122,6 +6119,7 @@
                   "type": "string",
                   "enum": [
                     "run_id",
+                    "notebook_link",
                     "file",
                     "instrument",
                     "ran_by"
@@ -5131,6 +6129,36 @@
                   "type": [
                     "string",
                     "null"
+                  ]
+                },
+                "matchedNotebookLink": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "url": {
+                          "type": "string"
+                        },
+                        "label": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "displayName": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "url",
+                        "label",
+                        "displayName"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "null"
+                    }
                   ]
                 }
               },
@@ -5145,7 +6173,8 @@
                 "fileCount",
                 "totalSizeBytes",
                 "matchReason",
-                "matchedFilename"
+                "matchedFilename",
+                "matchedNotebookLink"
               ],
               "additionalProperties": false
             }

@@ -565,6 +565,63 @@ class TestARebuildThatOverlapsIt:
         assert builds == []
 
 
+class TestTheFolderChecksOfADeregisteredWatcher:
+    """The checks of the watch folder leave a watcher alone once its registration is gone.
+
+    `deregistered_event` is set a moment before `shutdown_event` (see `_deregistered_requester`),
+    and these tests set only the first, as a check that runs in that moment would see it. A move
+    to the waiting state, a rebuild or a start then builds and tears down what the stop that
+    follows has to unwind.
+    """
+
+    def test_a_running_watcher_is_not_moved_to_the_waiting_state(
+        self, env: _Env, builds: list[WatcherConfig]
+    ) -> None:
+        sup = env.supervisor()
+        sup.start()
+        rt = sup.rt
+        assert rt is not None
+        built = len(builds)
+        sup.deregistered_event.set()
+        env.watch_dir.rename(env.tmp_path / "moved-away")
+
+        sup._check_running_folder()
+
+        # The runtime is left running for the stop, and no waiting loop is built.
+        assert sup.rt is rt
+        assert sup._waiting is None
+        assert len(builds) == built
+
+    def test_a_blind_runtime_is_not_rebuilt(self, env: _Env, builds: list[WatcherConfig]) -> None:
+        sup = env.supervisor()
+        sup.start()
+        rt = sup.rt
+        assert rt is not None
+        built = len(builds)
+        sup.deregistered_event.set()
+        # What `_check_running_folder` reads: the folder is there, but the monitor is not
+        # watching it.
+        with patch.object(FileMonitor, "is_watching", return_value=False):
+            sup._check_running_folder()
+
+        assert sup.rt is rt
+        assert len(builds) == built
+
+    def test_a_waiting_watcher_whose_folder_is_back_does_not_start_watching(
+        self, env: _Env, builds: list[WatcherConfig]
+    ) -> None:
+        sup = _waiting_supervisor(env)
+        _bring_the_folder_back(env)
+        sup.deregistered_event.set()
+
+        sup._check_waiting_folder()
+
+        # Its loop is left for the stop, and no runtime is built.
+        assert sup._waiting is not None
+        assert builds == []
+        assert sup.rt is None
+
+
 def _count_events_at_each_reply(env: _Env) -> list[int]:
     """Make every heartbeat from now on get the "deregistered" reply.
 

@@ -23,7 +23,7 @@ export const SCOPE_METADATA: Record<Scope, ScopeMeta> = {
   "runs:read": {
     label: "View runs",
     description:
-      "Read and search runs, their files, comments, and attributions.",
+      "Read and search runs, their files, comments, attributions, and lab notebook links.",
     destructive: false,
   },
   "runs:create": {
@@ -55,6 +55,11 @@ export const SCOPE_METADATA: Record<Scope, ScopeMeta> = {
     label: "Comment on runs",
     description:
       "Post run comments as this token, and edit or delete the ones it posted.",
+    destructive: false,
+  },
+  "runs:link": {
+    label: "Link lab notebooks",
+    description: "Add, edit, and remove lab notebook links on runs.",
     destructive: false,
   },
   "files:read": {

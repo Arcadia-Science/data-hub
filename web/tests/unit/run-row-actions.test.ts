@@ -38,6 +38,7 @@ const BASE: RunRow = {
   error_messages: [],
   comment_count: 0,
   attributions: [],
+  notebook_links: [],
 };
 
 function row(overrides: Partial<RunRow>): RunRow {

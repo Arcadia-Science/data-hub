@@ -46,6 +46,7 @@ const {
     total_size_bytes: 1234,
     error_messages: [] as string[],
     comment_count: 0,
+    notebook_links: [],
     attributions: [] as Array<{
       userId: string;
       displayName: string;
@@ -641,6 +642,13 @@ vi.mock("@/lib/api/run-comments", () => ({
   }),
 }));
 
+vi.mock("@/lib/api/run-notebook-links", () => ({
+  listNotebookLinksForRun: vi.fn().mockResolvedValue([]),
+  bulkAddNotebookLink: vi.fn(),
+  bulkRemoveNotebookLinks: vi.fn(),
+  updateNotebookLink: vi.fn(),
+}));
+
 vi.mock("@/lib/api/notifications", () => ({
   notifyComment: vi.fn().mockResolvedValue(undefined),
 }));
@@ -732,6 +740,9 @@ describe("MCP Protocol (in-memory)", () => {
     "dismiss_file",
     "send_feedback",
     "update_watcher_config",
+    "add_notebook_link",
+    "update_notebook_link",
+    "remove_notebook_link",
   ]);
 
   it("registers all expected tools", async () => {
@@ -877,7 +888,7 @@ describe("MCP Protocol (in-memory)", () => {
 
   it("every registered tool advertises outputSchema", async () => {
     const { tools } = await client.listTools();
-    expect(tools).toHaveLength(42);
+    expect(tools).toHaveLength(45);
     for (const tool of tools) {
       const schema = tool.outputSchema as
         | { type?: string; oneOf?: unknown; anyOf?: unknown }

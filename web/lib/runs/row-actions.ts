@@ -17,6 +17,7 @@ import { isProcessableInstrumentType } from "@/lib/instruments/processable-types
 //              file is in `uploaded`, `completed`, `failed`, or stalled.
 //              Queued files are already waiting, so they do not count.
 // - Delete:    the run isn't already soft-deleted.
+// - Link:      the run isn't soft-deleted, so its notebook links can change.
 // ---------------------------------------------------------------------------
 
 export function canUploadRun(row: RunRow): boolean {
@@ -56,12 +57,17 @@ export function canDeleteRun(row: RunRow): boolean {
   return row.deleted_at === null;
 }
 
+export function canLinkRun(row: RunRow): boolean {
+  return row.deleted_at === null;
+}
+
 export function computeRunCaps(row: RunRow): RunCaps {
   return {
     upload: canUploadRun(row),
     download: canDownloadRun(row),
     reprocess: canReprocessRun(row),
     delete: canDeleteRun(row),
+    link: canLinkRun(row),
   };
 }
 
@@ -90,5 +96,10 @@ export function runRowToRef(row: RunRow): RunRef {
     caps: computeRunCaps(row),
     stats: computeRunStats(row),
     unclaimed: isUnclaimedRun(row),
+    notebookLinks: row.notebook_links.map((link) => ({
+      url: link.url,
+      urlKey: link.url_key,
+      displayName: link.display_name,
+    })),
   };
 }

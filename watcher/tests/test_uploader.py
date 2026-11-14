@@ -1242,6 +1242,19 @@ class TestUploadQueueWorker:
         # immediately rather than after the 60s interval.
         assert worker.stop(timeout=5) is True
 
+    def test_has_exited_says_whether_the_thread_is_gone_and_signals_nothing(self) -> None:
+        stop = threading.Event()
+        worker = UploadQueueWorker(MagicMock(), stop_event=stop, interval_seconds=60)
+        assert worker.has_exited() is True  # never started
+
+        worker.start()
+        assert worker.has_exited() is False
+        # Asking doesn't stop it: a caller that asks again and again must not end the loop.
+        assert not stop.is_set()
+
+        assert worker.stop(timeout=5) is True
+        assert worker.has_exited() is True
+
     def test_stop_reports_false_when_upload_in_flight(self) -> None:
         # A poll stuck mid-upload past the join timeout must report unfinished
         # so teardown skips closing the state DB out from under it.
