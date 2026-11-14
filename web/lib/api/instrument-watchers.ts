@@ -18,6 +18,7 @@ import { type DbExecutor, db } from "@/lib/db";
 import { instruments, watchers } from "@/lib/db/schema";
 import {
   type Connection,
+  type ConnectionWatcher,
   computeConnection,
   deriveConfigState,
   type InstrumentWatcher,
@@ -198,15 +199,11 @@ export async function getInstrumentWatcherInfo(
   return result;
 }
 
-/**
- * The connection of one instrument, without the rest of its watcher. For the
- * checks that decide whether work can reach the watcher, such as queueing
- * uploads, which read the state on every request.
- */
-export async function getInstrumentConnection(
+/** The active watcher of one instrument, as much of it as the connection needs. */
+async function readConnectionWatcher(
   instrumentId: string,
-  executor: DbExecutor = db
-): Promise<Connection> {
+  executor: DbExecutor
+): Promise<ConnectionWatcher | null> {
   const [row] = await executor
     .select({
       status: watchers.status,
@@ -218,15 +215,42 @@ export async function getInstrumentConnection(
       and(eq(watchers.instrumentId, instrumentId), isNull(watchers.deletedAt))
     )
     .limit(1);
+  if (!row) {
+    return null;
+  }
+  return {
+    status: computeEffectiveStatus({ ...row, deletedAt: null }),
+    statusReason: row.statusReason,
+  };
+}
 
-  if (row) {
-    return computeConnection(
-      {
-        status: computeEffectiveStatus({ ...row, deletedAt: null }),
-        statusReason: row.statusReason,
-      },
-      0
-    );
+/**
+ * Only the connection state of one instrument, in one query. For the checks
+ * that decide whether work can reach the watcher, such as queueing uploads,
+ * which read it on every request and don't need the reason. It reads `offline`
+ * for an instrument with no active watcher, as `getInstrumentConnection` does.
+ */
+export async function getInstrumentConnectionState(
+  instrumentId: string,
+  executor: DbExecutor = db
+): Promise<Connection["state"]> {
+  const watcher = await readConnectionWatcher(instrumentId, executor);
+  return computeConnection(watcher, 0).state;
+}
+
+/**
+ * The connection of one instrument, without the rest of its watcher. It costs a
+ * second query when the instrument has no active watcher, to tell a deregistered
+ * watcher from none ever; use `getInstrumentConnectionState` when only the
+ * state matters.
+ */
+export async function getInstrumentConnection(
+  instrumentId: string,
+  executor: DbExecutor = db
+): Promise<Connection> {
+  const watcher = await readConnectionWatcher(instrumentId, executor);
+  if (watcher) {
+    return computeConnection(watcher, 0);
   }
 
   const [past] = await executor

@@ -26,7 +26,7 @@ import {
   NOT_FOUND,
   WATCHER_DEREGISTERED,
 } from "@/lib/api/errors";
-import { getInstrumentConnection } from "@/lib/api/instrument-watchers";
+import { getInstrumentConnectionState } from "@/lib/api/instrument-watchers";
 import { touchRuns } from "@/lib/api/touch-runs";
 import {
   decideWatcherBinding,
@@ -328,8 +328,11 @@ export async function revertUploadQueueIfWatcherOffline(
   // is expected back and keeps its queue, but whether this revert should wait
   // for it is a separate decision from accepting new upload requests while it
   // restarts. TODO(run-page uploads): decide it with `prepareUploadTarget`.
-  const connection = await getInstrumentConnection(opts.instrumentId, executor);
-  if (connection.state === "online") {
+  const connectionState = await getInstrumentConnectionState(
+    opts.instrumentId,
+    executor
+  );
+  if (connectionState === "online") {
     return 0;
   }
 

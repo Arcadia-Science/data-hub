@@ -153,9 +153,9 @@ describe("instrument badge table", () => {
     },
     {
       row: 4,
-      name: "registered watcher is Connecting however long ago it registered",
+      name: "registered watcher is Connecting however old its last heartbeat",
       instrumentStatus: "active",
-      watcher: { status: "registered", ageMs: null },
+      watcher: { status: "registered", ageMs: 3 * DAY },
       past: 2,
       badge: "connecting",
       reason: null,

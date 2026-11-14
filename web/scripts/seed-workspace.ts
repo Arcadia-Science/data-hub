@@ -73,7 +73,7 @@ export async function seedWorkspace(db: Db): Promise<SeededWorkspace> {
   const activeInstruments = instruments.filter((i) => i.status === "active");
   const runs: SeededRun[] = [];
   for (const instrument of activeInstruments) {
-    runs.push(...(await seedRuns(db, instrument.id, 8)));
+    runs.push(...(await seedRuns(db, instrument.id, 8, instrument.runPlan)));
   }
 
   console.log("Seeding teammate users…");

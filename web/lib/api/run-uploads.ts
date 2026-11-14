@@ -1,6 +1,6 @@
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
-import { getInstrumentConnection } from "@/lib/api/instrument-watchers";
+import { getInstrumentConnectionState } from "@/lib/api/instrument-watchers";
 import { touchRuns } from "@/lib/api/touch-runs";
 import { db } from "@/lib/db";
 import { files, instrumentRuns } from "@/lib/db/schema";
@@ -131,8 +131,8 @@ async function prepareUploadTarget(
   // a perpetual "Uploading" spinner with no error. Only an online watcher
   // counts. TODO(run-page uploads): also accept requests while the connection
   // is `restarting`, because queued requests survive a restart.
-  const connection = await getInstrumentConnection(run.instrumentId);
-  if (connection.state !== "online") {
+  const connectionState = await getInstrumentConnectionState(run.instrumentId);
+  if (connectionState !== "online") {
     return {
       ok: false,
       status: 409,

@@ -264,6 +264,16 @@ export interface SeededPastWatcher {
   registeredDaysAgo: number;
 }
 
+// The made-up instruments' runs are this much older than the catalog's runs.
+const MADE_UP_RUNS_OLDER_BY_DAYS = 2;
+
+export interface SeededRunPlan {
+  // Every run comes from the processing Lambda, none from a watcher.
+  lambdaOnly?: boolean;
+  // Moves every run's acquisition time back by this many days.
+  olderByDays?: number;
+}
+
 export interface SeededInstrument {
   // Watcher config YAML snapped from production, with `{{WATCHER_ID}}`
   // substituted at seed time so the Configuration tab shows a real
@@ -277,6 +287,10 @@ export interface SeededInstrument {
   osInfo?: string;
   // Watchers deregistered from this instrument, oldest first.
   pastWatchers?: SeededPastWatcher[];
+  // How seedRuns places this instrument's runs. The made-up instruments set it
+  // so their runs are older than the catalog's newest runs and don't take over
+  // the dashboard's most recently active instruments.
+  runPlan?: SeededRunPlan;
   status: "pending" | "active" | "inactive";
   // Upload mode in the watcher config and in its heartbeats. Defaults to auto.
   uploadMode?: "auto" | "manual";
@@ -573,6 +587,7 @@ export const SEED_INSTRUMENTS: readonly SeededInstrument[] = [
   // above do not. Their names and hostnames are invented.
   {
     id: "microplate-washer-d",
+    runPlan: { olderByDays: MADE_UP_RUNS_OLDER_BY_DAYS },
     displayName: "Microplate Washer D",
     instrumentType: "generic",
     status: "active",
@@ -597,6 +612,7 @@ export const SEED_INSTRUMENTS: readonly SeededInstrument[] = [
   },
   {
     id: "shaker-incubator-e",
+    runPlan: { olderByDays: MADE_UP_RUNS_OLDER_BY_DAYS },
     displayName: "Shaker Incubator E",
     instrumentType: "generic",
     status: "active",
@@ -621,6 +637,7 @@ export const SEED_INSTRUMENTS: readonly SeededInstrument[] = [
   },
   {
     id: "balance-f",
+    runPlan: { olderByDays: MADE_UP_RUNS_OLDER_BY_DAYS },
     displayName: "Balance F",
     instrumentType: "generic",
     status: "active",
@@ -644,6 +661,7 @@ export const SEED_INSTRUMENTS: readonly SeededInstrument[] = [
   },
   {
     id: "colony-counter-g",
+    runPlan: { olderByDays: MADE_UP_RUNS_OLDER_BY_DAYS },
     displayName: "Colony Counter G",
     instrumentType: "generic",
     status: "active",
@@ -668,6 +686,7 @@ export const SEED_INSTRUMENTS: readonly SeededInstrument[] = [
   },
   {
     id: "thermal-mixer-h",
+    runPlan: { olderByDays: MADE_UP_RUNS_OLDER_BY_DAYS },
     displayName: "Thermal Mixer H",
     instrumentType: "generic",
     status: "active",
@@ -691,6 +710,7 @@ export const SEED_INSTRUMENTS: readonly SeededInstrument[] = [
   },
   {
     id: "spectrophotometer-b",
+    runPlan: { olderByDays: MADE_UP_RUNS_OLDER_BY_DAYS },
     displayName: "Spectrophotometer B",
     instrumentType: "generic",
     status: "active",
@@ -720,6 +740,7 @@ export const SEED_INSTRUMENTS: readonly SeededInstrument[] = [
   },
   {
     id: "centrifuge-c",
+    runPlan: { lambdaOnly: true, olderByDays: MADE_UP_RUNS_OLDER_BY_DAYS },
     displayName: "Centrifuge C",
     instrumentType: "generic",
     status: "active",
@@ -758,8 +779,9 @@ const HISTORY_DAYS = 7;
 // limit and the seed stays quick.
 const WATCHER_ROW_CHUNK = 1000;
 
-// The reason a watcher gives while its watch folder is missing. The watcher
-// sends the same text (`WATCH_DIRECTORY_NOT_FOUND` in watcher/src/data_hub_watcher/models.py).
+// The start of the reason a watcher gives while its watch folder is missing.
+// The watcher follows it with a colon and the folder's path
+// (`WATCH_DIRECTORY_NOT_FOUND` in watcher/src/data_hub_watcher/models.py).
 const WATCH_DIRECTORY_NOT_FOUND = "watch_directory not found";
 // Stopped by someone, two days before the seed runs.
 const STOPPED_BY_USER_MINUTES_AGO = 2 * MINUTES_PER_DAY;
@@ -1100,11 +1122,13 @@ function currentWatcherRows(
         ],
       };
     }
-    case "waiting":
+    case "waiting": {
+      const watchDirectory = watchDirectoryOf(templateOf(instrument));
+      const reason = `${WATCH_DIRECTORY_NOT_FOUND}: ${watchDirectory}`;
       return {
         createdAt,
         status: "waiting",
-        statusReason: WATCH_DIRECTORY_NOT_FOUND,
+        statusReason: reason,
         lastHeartbeatAt: now,
         heartbeats: tenHeartbeats(
           watcherId,
@@ -1130,16 +1154,17 @@ function currentWatcherRows(
           eventRow(
             watcherId,
             "error",
-            `Waiting: ${WATCH_DIRECTORY_NOT_FOUND}`,
+            `Waiting: ${reason}`,
             minutesBefore(now, 55),
             {
               kind: "watch_directory_unavailable",
-              watch_directory: watchDirectoryOf(templateOf(instrument)),
-              reason: WATCH_DIRECTORY_NOT_FOUND,
+              watch_directory: watchDirectory,
+              reason,
             }
           ),
         ],
       };
+    }
     case "stopped":
       return {
         createdAt,
@@ -1884,7 +1909,8 @@ function seedAcquiredAtSchedule(now: Date = new Date()): Date[] {
 export async function seedRuns(
   db: Db,
   instrumentId: string,
-  count = 8
+  count = 8,
+  plan: SeededRunPlan = {}
 ): Promise<SeededRun[]> {
   if (count <= 0) {
     return [];
@@ -1899,14 +1925,18 @@ export async function seedRuns(
   // a non-empty, differing set after a local reseed.
   const schedule = seedAcquiredAtSchedule();
   const runValues = Array.from({ length: count }, (_, i) => {
-    const acquiredAt =
-      schedule[i] ?? new Date(Date.now() - (i + 1) * 3 * DAY_MS);
+    const acquiredAt = new Date(
+      (schedule[i] ?? new Date(Date.now() - (i + 1) * 3 * DAY_MS)).getTime() -
+        (plan.olderByDays ?? 0) * DAY_MS
+    );
     const runId = runIds?.[i] ?? `run-${i + 1}`;
     const extraMeta = synthetic?.metadataForRun?.(runId, i) ?? {};
     return {
       instrumentId,
       runId,
-      source: (i % 2 === 0 ? "lambda" : "watcher") as "lambda" | "watcher",
+      source: (plan.lambdaOnly || i % 2 === 0 ? "lambda" : "watcher") as
+        | "lambda"
+        | "watcher",
       metadata: { seeded: true, ...extraMeta },
       acquiredAt,
     };
@@ -2372,6 +2402,7 @@ async function seedConfigChanges(
     pendingBy: string;
     rejectedBy: string;
     settingsOf: (instrumentId: string) => WatcherConfigSettings;
+    templateOf: (instrumentId: string) => string;
     watcherOf: (instrumentId: string) => string;
   }
 ): Promise<void> {
@@ -2433,30 +2464,36 @@ async function seedConfigChanges(
   ]);
 
   // Edited on the PC: the PC's revision is applied, but the watcher reads its
-  // config only at startup, so it still runs revision 1.
+  // config only at startup, so it still runs revision 1. The PC pushed the
+  // edited file, so the server's copy of the config is the edited one.
   const edited = options.watcherOf("agilent-4150-tapestation");
   const editedBase = options.settingsOf("agilent-4150-tapestation");
+  const editedTemplate = options
+    .templateOf("agilent-4150-tapestation")
+    .replace(/^( {2}file_patterns:\n(?: {2}- .*\n)+)/m, "$1  - '*.txt'\n");
+  const editedSettings = settingsFromTemplate(editedTemplate);
+  if (editedSettings.file_patterns.length <= editedBase.file_patterns.length) {
+    throw new Error("The edited-on-PC config did not gain a file pattern");
+  }
   await db.insert(schema.watcherConfigRevisions).values([
     revisionRow(edited, 1, "web", "applied", editedBase, {
       createdBy: adminId,
       createdAt: minutesBefore(now, 5 * MINUTES_PER_DAY + 1),
       resolvedAt: minutesBefore(now, 5 * MINUTES_PER_DAY),
     }),
-    revisionRow(
-      edited,
-      2,
-      "pc",
-      "applied",
-      {
-        ...editedBase,
-        file_patterns: [...editedBase.file_patterns, "*.txt"],
-      },
-      {
-        createdAt: minutesBefore(now, 40),
-        resolvedAt: minutesBefore(now, 40),
-      }
-    ),
+    revisionRow(edited, 2, "pc", "applied", editedSettings, {
+      createdAt: minutesBefore(now, 40),
+      resolvedAt: minutesBefore(now, 40),
+    }),
   ]);
+  const { configYaml, configChecksum } = renderWatcherConfig(
+    editedTemplate,
+    edited
+  );
+  await db
+    .update(schema.watchers)
+    .set({ configYaml, configChecksum })
+    .where(eq(schema.watchers.id, edited));
   await setRevisionNumbers(db, edited, 2, 1);
   await insertEventRows(db, [
     appliedEvent(edited, 1, minutesBefore(now, 5 * MINUTES_PER_DAY)),
@@ -2617,11 +2654,13 @@ export async function seedWatcherScenarios(
     rejectedBy: rejectedBy.id,
     settingsOf: (instrumentId) =>
       settingsFromTemplate(templateOf(instrumentOf(instrumentId))),
+    templateOf: (instrumentId) => templateOf(instrumentOf(instrumentId)),
     watcherOf,
   });
 
-  // Balance F is unresponsive: these files were detected before it went silent,
-  // and their upload requests are queued.
+  // Balance F is unresponsive: these files were detected before it went silent.
+  // They have no upload requests, because the server reverts upload requests
+  // to a watcher that stays silent for 15 minutes.
   await seedWaitingRun(db, {
     instrumentId: "balance-f",
     now,
@@ -2632,18 +2671,8 @@ export async function seedWatcherScenarios(
     files: [
       { name: "weigh-0001.csv", status: "detected", detectedAgo: 140 },
       { name: "weigh-0002.csv", status: "detected", detectedAgo: 135 },
-      {
-        name: "weigh-0003.csv",
-        status: "upload_requested",
-        detectedAgo: 130,
-        requestedAgo: 125,
-      },
-      {
-        name: "weigh-0004.csv",
-        status: "upload_requested",
-        detectedAgo: 128,
-        requestedAgo: 124,
-      },
+      { name: "weigh-0003.csv", status: "detected", detectedAgo: 130 },
+      { name: "weigh-0004.csv", status: "detected", detectedAgo: 128 },
     ],
   });
 
@@ -2654,7 +2683,9 @@ export async function seedWatcherScenarios(
     now,
     runId: "mixer-run-b",
     watcherId: watcherOf("thermal-mixer-h"),
-    acquiredAgo: 35,
+    // Older than the catalog's newest run, so this instrument stays out of the
+    // dashboard's most recent three. Its files were detected a few minutes ago.
+    acquiredAgo: 180,
     createdAgo: 30,
     files: [
       { name: "mix-0001.csv", status: "detected", detectedAgo: 30 },
