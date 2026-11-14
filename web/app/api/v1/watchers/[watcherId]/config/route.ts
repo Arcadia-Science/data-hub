@@ -3,9 +3,9 @@ import type { NextRequest } from "next/server";
 import { actorRefFromAuth } from "@/lib/api/actor";
 import { authorizeToken } from "@/lib/api/auth";
 import { apiError, NOT_FOUND, VALIDATION_ERROR } from "@/lib/api/errors";
-import { extractWatchDirectory } from "@/lib/api/instruments";
 import { readJsonBody, watcherConfigBody } from "@/lib/api/openapi";
 import { isValidUUID } from "@/lib/api/validators";
+import { extractWatchDirectory } from "@/lib/api/watcher-config/from-yaml";
 import { recordWatcherConfigPush } from "@/lib/api/watcher-config/revisions";
 import { sameWatchPath } from "@/lib/api/watcher-config/settings";
 import {

@@ -3,10 +3,15 @@ import type { NextRequest } from "next/server";
 import { actorColumns, actorRefFromAuth } from "@/lib/api/actor";
 import { authorize, requireAdminForSession } from "@/lib/api/auth";
 import { apiError, NOT_FOUND, VALIDATION_ERROR } from "@/lib/api/errors";
+import {
+  getInstrumentWatcherInfo,
+  instrumentWatcherToRest,
+  NO_WATCHER_INFO,
+} from "@/lib/api/instrument-watchers";
 import { patchInstrumentBody, readJsonBody } from "@/lib/api/openapi";
 import { deregisterInstrumentWatchers } from "@/lib/api/watchers";
 import { db } from "@/lib/db";
-import { instrumentRuns, instruments, watchers } from "@/lib/db/schema";
+import { instrumentRuns, instruments } from "@/lib/db/schema";
 
 export async function GET(
   request: NextRequest,
@@ -29,8 +34,9 @@ export async function GET(
     return apiError(404, NOT_FOUND, `Instrument '${instrumentId}' not found`);
   }
 
-  // Counts exclude soft-deleted records to reflect the "active" totals.
-  const [runCountResult, watcherCountResult] = await Promise.all([
+  // The run count excludes soft-deleted runs. The watcher is the one active
+  // registration, if any.
+  const [runCountResult, infoById] = await Promise.all([
     db
       .select({ value: count() })
       .from(instrumentRuns)
@@ -40,13 +46,9 @@ export async function GET(
           isNull(instrumentRuns.deletedAt)
         )
       ),
-    db
-      .select({ value: count() })
-      .from(watchers)
-      .where(
-        and(eq(watchers.instrumentId, instrumentId), isNull(watchers.deletedAt))
-      ),
+    getInstrumentWatcherInfo([instrumentId]),
   ]);
+  const info = infoById.get(instrumentId) ?? NO_WATCHER_INFO;
 
   return Response.json({
     id: instrument.id,
@@ -56,7 +58,11 @@ export async function GET(
     created_at: instrument.createdAt,
     updated_at: instrument.updatedAt,
     run_count: runCountResult[0].value,
-    watcher_count: watcherCountResult[0].value,
+    watcher: instrumentWatcherToRest(info.watcher),
+    connection: info.connection,
+    past_watcher_count: info.pastWatcherCount,
+    // Deprecated: an instrument has at most one watcher.
+    watcher_count: info.watcher ? 1 : 0,
   });
 }
 

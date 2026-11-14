@@ -9,8 +9,8 @@ import {
   VALIDATION_ERROR,
 } from "@/lib/api/errors";
 import { isValidUUID } from "@/lib/api/validators";
+import { computeEffectiveStatus } from "@/lib/api/watcher-status";
 import {
-  computeEffectiveStatus,
   deregisterWatcherRow,
   findWatcherIncludingDeleted,
   watcherDeregisteredResponse,

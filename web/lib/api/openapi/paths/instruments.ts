@@ -10,6 +10,7 @@ import {
   createInstrumentBody,
   instrumentDetail,
   instrumentListItem,
+  instrumentRecord,
   patchInstrumentBody,
 } from "../schemas/instruments";
 
@@ -41,7 +42,7 @@ registry.registerPath({
     body: { content: { "application/json": { schema: createInstrumentBody } } },
   },
   responses: {
-    201: jsonResponse("Created instrument.", instrumentDetail),
+    201: jsonResponse("Created instrument.", instrumentRecord),
     ...errorResponses(),
   },
 });
@@ -72,7 +73,7 @@ registry.registerPath({
     body: { content: { "application/json": { schema: patchInstrumentBody } } },
   },
   responses: {
-    200: jsonResponse("Updated instrument.", instrumentDetail),
+    200: jsonResponse("Updated instrument.", instrumentRecord),
     ...errorResponses(),
   },
 });

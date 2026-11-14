@@ -24,6 +24,7 @@ export {
   createInstrumentBody,
   instrumentDetail,
   instrumentListItem,
+  instrumentRecord,
   patchInstrumentBody,
 } from "./schemas/instruments";
 export {

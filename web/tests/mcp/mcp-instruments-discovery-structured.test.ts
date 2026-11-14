@@ -13,14 +13,33 @@ import {
 } from "@/lib/mcp/tools/instruments.output";
 
 const { MOCK_LIST_INSTRUMENT, MOCK_INSTRUMENT_DETAIL } = vi.hoisted(() => {
+  const MOCK_WATCHER = {
+    id: "watcher-1",
+    hostname: "lab-pc",
+    osInfo: "Windows 11",
+    version: "1.4.2",
+    status: "watching" as const,
+    statusReason: null,
+    lastHeartbeatAt: new Date("2025-01-01T00:00:00.000Z"),
+    watchDirectory: "C:\\Data",
+    filePatterns: ["*.txt"],
+    uploadMode: "auto" as const,
+    configState: "none" as const,
+    sharedComputerWith: [
+      { instrumentId: "test-gel-doc", displayName: "Test Gel Doc" },
+    ],
+  };
   const MOCK_LIST_INSTRUMENT = {
     id: "test-plate-reader",
     displayName: "Test Plate Reader",
     status: "active" as const,
     instrumentType: "plate_reader" as const,
     filePatterns: ["*.txt"],
+    watcher: MOCK_WATCHER,
+    connection: { state: "online" as const, reason: null },
+    pastWatcherCount: 1,
     activeWatcherId: "watcher-1",
-    hasDeregisteredWatcher: false,
+    hasDeregisteredWatcher: true,
     runCount: 3,
     runsThisWeek: 1,
     lastRunAt: new Date("2025-01-01T00:00:00.000Z"),
@@ -37,6 +56,9 @@ const { MOCK_LIST_INSTRUMENT, MOCK_INSTRUMENT_DETAIL } = vi.hoisted(() => {
       status: MOCK_LIST_INSTRUMENT.status,
       instrumentType: MOCK_LIST_INSTRUMENT.instrumentType,
       filePatterns: MOCK_LIST_INSTRUMENT.filePatterns,
+      watcher: MOCK_WATCHER,
+      connection: MOCK_LIST_INSTRUMENT.connection,
+      pastWatcherCount: MOCK_LIST_INSTRUMENT.pastWatcherCount,
       runCount: MOCK_LIST_INSTRUMENT.runCount,
       watcherCount: MOCK_LIST_INSTRUMENT.watcherCount,
       watchersOnline: MOCK_LIST_INSTRUMENT.watchersOnline,
@@ -191,6 +213,101 @@ describe("instruments + discovery structuredContent", () => {
     const parsed = parseText(result.content);
     expect(result.structuredContent).toEqual(parsed);
     expect(getInstrumentOutputSchema.parse(parsed)).toEqual(parsed);
+  });
+
+  it("returns the watcher, connection and past watcher count on both tools", async () => {
+    const list = parseText(
+      (await client.callTool({ name: "list_instruments", arguments: {} }))
+        .content
+    ) as { instruments: Record<string, unknown>[] };
+    const detail = parseText(
+      (
+        await client.callTool({
+          name: "get_instrument",
+          arguments: { instrumentId: "test-plate-reader" },
+        })
+      ).content
+    ) as Record<string, unknown>;
+
+    for (const instrument of [list.instruments[0], detail]) {
+      expect(instrument).toMatchObject({
+        connection: { state: "online", reason: null },
+        pastWatcherCount: 1,
+        watcher: {
+          id: "watcher-1",
+          hostname: "lab-pc",
+          status: "watching",
+          lastHeartbeatAt: "2025-01-01T00:00:00.000Z",
+          watchDirectory: "C:\\Data",
+          filePatterns: ["*.txt"],
+          uploadMode: "auto",
+          configState: "none",
+          sharedComputerWith: [
+            { instrumentId: "test-gel-doc", displayName: "Test Gel Doc" },
+          ],
+        },
+        // The deprecated fields keep their values.
+        watcherCount: 1,
+        watchersOnline: 1,
+        activeWatcherId: "watcher-1",
+      });
+    }
+  });
+
+  it("marks the deprecated instrument fields in the advertised output schema", async () => {
+    interface FieldSchema {
+      deprecated?: boolean;
+      description?: string;
+    }
+    const { tools } = await client.listTools();
+    const fieldsOf = (name: string, path: "detail" | "list") => {
+      const schema = tools.find((t) => t.name === name)?.outputSchema as {
+        properties: Record<string, FieldSchema & { items?: unknown }>;
+      };
+      return path === "list"
+        ? (
+            schema.properties.instruments.items as {
+              properties: Record<string, FieldSchema>;
+            }
+          ).properties
+        : (schema.properties as Record<string, FieldSchema>);
+    };
+
+    const deprecatedOnList = [
+      "watcherCount",
+      "watchersOnline",
+      "hasDeregisteredWatcher",
+      "lastWatcherHeartbeatAt",
+      "activeWatcherId",
+      "filePatterns",
+    ];
+    const deprecatedOnDetail = [
+      "watcherCount",
+      "watchersOnline",
+      "watchersOffline",
+      "lastWatcherHeartbeatAt",
+      "activeWatcherId",
+      "activeWatcherHostname",
+      "activeWatcherWatchDirectory",
+      "activeWatcherDeregistered",
+      "filePatterns",
+    ];
+    for (const [name, path, deprecated] of [
+      ["list_instruments", "list", deprecatedOnList],
+      ["get_instrument", "detail", deprecatedOnDetail],
+    ] as const) {
+      const fields = fieldsOf(name, path);
+      for (const field of deprecated) {
+        expect(fields[field]?.deprecated, `${name}.${field}`).toBe(true);
+        expect(fields[field]?.description, `${name}.${field}`).toMatch(
+          /^Deprecated\./
+        );
+      }
+      for (const field of ["watcher", "connection", "pastWatcherCount"]) {
+        expect(fields[field], `${name}.${field}`).toBeDefined();
+        expect(fields[field]?.deprecated, `${name}.${field}`).toBeUndefined();
+      }
+    }
   });
 
   it("get_instrument_filter_options structuredContent matches text and schema", async () => {

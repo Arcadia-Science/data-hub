@@ -1,6 +1,6 @@
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
-import { instrumentHasOnlineWatcher } from "@/lib/api/instruments";
+import { getInstrumentConnection } from "@/lib/api/instrument-watchers";
 import { touchRuns } from "@/lib/api/touch-runs";
 import { db } from "@/lib/db";
 import { files, instrumentRuns } from "@/lib/db/schema";
@@ -126,7 +126,13 @@ async function prepareUploadTarget(
   }
 
   // Reject offline early so rows aren't left stuck in `upload_requested`.
-  if (!(await instrumentHasOnlineWatcher(run.instrumentId))) {
+  // Uploads transfer through the watcher, so with none online to pick the
+  // files up they would sit in `upload_requested` forever and the UI would show
+  // a perpetual "Uploading" spinner with no error. Only an online watcher
+  // counts. TODO(run-page uploads): also accept requests while the connection
+  // is `restarting`, because queued requests survive a restart.
+  const connection = await getInstrumentConnection(run.instrumentId);
+  if (connection.state !== "online") {
     return {
       ok: false,
       status: 409,

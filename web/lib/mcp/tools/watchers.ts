@@ -11,8 +11,8 @@ import {
   type WatcherConfigSettings,
   watcherConfigSettingsSchema,
 } from "@/lib/api/watcher-config/settings";
+import type { EffectiveStatus } from "@/lib/api/watcher-status";
 import {
-  type EffectiveStatus,
   getWatcherById,
   getWatcherEvents,
   getWatcherHeartbeats,

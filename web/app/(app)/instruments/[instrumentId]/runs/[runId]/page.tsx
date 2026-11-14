@@ -230,7 +230,7 @@ async function RunDetailContentBody({
 
   // Gate client-side upload actions on watcher availability — a queued
   // upload request is a no-op if no agent is around to action it.
-  const isWatcherOnline = (instrument?.watchersOnline ?? 0) > 0;
+  const isWatcherOnline = instrument?.connection.state === "online";
 
   const toRunHref = (rid: string) =>
     `/instruments/${instrumentId}/runs/${encodeURIComponent(rid)}`;

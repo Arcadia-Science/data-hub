@@ -8,22 +8,23 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useViewerTimeZone } from "@/components/viewer-time-zone-provider";
-import type { WatcherOnlineStatus } from "@/components/watchers/watcher-online-status";
 import {
   AUTO_UPDATE_STATUS_REASON,
+  type EffectiveStatus,
   isRestartStopReason,
   type RestartStopReason,
   SYSTEM_SHUTDOWN_STATUS_REASON,
   UPLOAD_REQUEST_REVERT_GRACE_MS,
 } from "@/lib/api/watcher-status";
-import type { EffectiveStatus } from "@/lib/api/watchers";
 import { formatTime } from "@/lib/date";
+import type { LegacyWatcherStatus } from "@/lib/instruments/connection";
 import { cn, formatRelativeTime } from "@/lib/utils";
 
 /**
  * Union of every status this badge can render:
- *   - `WatcherOnlineStatus` is the instrument-level aggregate (any watcher
- *     online vs none) used in the instruments table and instrument header.
+ *   - `LegacyWatcherStatus` is the instrument-level status (online or not, or
+ *     no watcher) used in the instruments table and instrument header. See
+ *     `toLegacyWatcherStatus` in `lib/instruments/connection.ts`.
  *   - `EffectiveStatus` is the per-watcher state used in the watchers table
  *     and watcher detail header.
  *
@@ -34,11 +35,9 @@ import { cn, formatRelativeTime } from "@/lib/utils";
  * badge can.
  */
 export type WatcherBadgeStatus =
-  | WatcherOnlineStatus
-  | EffectiveStatus
-  // Active instrument whose only watcher was deregistered. Distinct from
-  // `no_watcher` (never had one), so the header can still link to the watcher.
-  | "deregistered";
+  // Includes `deregistered` (an active instrument whose only watcher was
+  // deregistered), which is distinct from `no_watcher` (never had one).
+  LegacyWatcherStatus | EffectiveStatus;
 
 const ONLINE_CLASSNAME =
   "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300";
