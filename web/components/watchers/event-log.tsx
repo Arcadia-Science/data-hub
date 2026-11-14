@@ -44,7 +44,7 @@ const TONE_CLASSNAMES: Record<EventTone, string> = {
   update:
     "bg-violet-100 text-violet-800 dark:bg-violet-950 dark:text-violet-300",
   neutral: "bg-slate-100 text-slate-700 dark:bg-slate-950 dark:text-slate-300",
-  muted: "bg-muted text-muted-foreground",
+  muted: "bg-muted text-muted-foreground dark:bg-slate-950 dark:text-slate-300",
   warning: "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300",
   error: "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300",
 };

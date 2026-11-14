@@ -46,7 +46,8 @@ const STATUS_BADGES: Record<
   superseded: {
     label: "Superseded",
     Icon: Undo2,
-    className: "bg-muted text-muted-foreground",
+    className:
+      "bg-muted text-muted-foreground dark:bg-slate-950 dark:text-slate-300",
   },
 };
 
