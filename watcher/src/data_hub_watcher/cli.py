@@ -1227,31 +1227,40 @@ def watch(ctx: click.Context, dry_run: bool) -> None:
         role="Watcher",
         host=platform.node(),
     )
-    click.echo("Syncing config to Data Hub and scanning for existing files…")
-    supervisor.start()
-
-    if supervisor.waiting_reason is not None:
-        click.echo(
-            click.style(
-                f"Waiting: {supervisor.waiting_reason}. Heartbeats continue, and watching "
-                "starts once the folder exists or a config change from Data Hub fixes it.",
-                fg="yellow",
-            )
-        )
-    else:
-        running = supervisor.cfg.instrument
-        click.echo(f"Watcher is running (instrument={running.id}, dir={running.watch_directory})…")
-    click.echo("Press Ctrl+C to stop.")
-
-    stop_requested = threading.Event()
+    # Installed before `start`, so a stop during start-up is recorded and acted on as soon
+    # as `start` returns, as any other stop is. With the default handlers, SIGTERM would end
+    # the process at once and Ctrl+C would raise KeyboardInterrupt, and neither would send
+    # the final `stopped` heartbeat or the `watcher_stopped` event. `request_stop` is the
+    # supervisor's one stop signal: it also ends the start-up scan early, so `start` returns
+    # within moments instead of when a large folder has been scanned.
+    stop_requested = supervisor.stop_requested
 
     def _shutdown(signum: int, frame: Any) -> None:
         click.echo("\nShutting down…")
-        stop_requested.set()
-        supervisor.wake()
+        supervisor.request_stop()
 
     signal.signal(signal.SIGINT, _shutdown)
     signal.signal(signal.SIGTERM, _shutdown)
+
+    click.echo("Syncing config to Data Hub and scanning for existing files…")
+    supervisor.start()
+
+    # A stop during start-up makes these status lines untrue, so they are skipped.
+    if not stop_requested.is_set():
+        if supervisor.waiting_reason is not None:
+            click.echo(
+                click.style(
+                    f"Waiting: {supervisor.waiting_reason}. Heartbeats continue, and watching "
+                    "starts once the folder exists or a config change from Data Hub fixes it.",
+                    fg="yellow",
+                )
+            )
+        else:
+            running = supervisor.cfg.instrument
+            click.echo(
+                f"Watcher is running (instrument={running.id}, dir={running.watch_directory})…"
+            )
+        click.echo("Press Ctrl+C to stop.")
 
     # Poll until Ctrl+C or until the runtime asks to shut down (the in-process
     # auto-updater requests a restart from the heartbeat thread). Each poll
