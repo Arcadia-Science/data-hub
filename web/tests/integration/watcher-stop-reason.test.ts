@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { getWatcherHealth } from "@/lib/api/watcher-health";
 import { instruments, watcherEvents, watchers } from "@/lib/db/schema";
@@ -37,8 +37,19 @@ describe("The reason a watcher stopped, copied onto its stop event", () => {
     await closeTestDb();
   });
 
+  // One active watcher per instrument is enforced by a unique index, so each
+  // test's watcher replaces the previous one.
   async function newWatcher(): Promise<string> {
     counter += 1;
+    await getTestDb()
+      .update(watchers)
+      .set({ deletedAt: new Date() })
+      .where(
+        and(
+          eq(watchers.instrumentId, "stop-reason-inst"),
+          isNull(watchers.deletedAt)
+        )
+      );
     const [watcher] = await getTestDb()
       .insert(watchers)
       .values({

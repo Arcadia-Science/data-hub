@@ -452,10 +452,16 @@ describe("getWatcherHealth", () => {
     }
 
     beforeAll(async () => {
+      // Its own instrument: one active watcher per instrument is enforced.
+      await getTestDb().insert(instruments).values({
+        id: "dst-test-instrument",
+        displayName: "DST Test Instrument",
+        status: "active",
+      });
       const [watcher] = await getTestDb()
         .insert(watchers)
         .values({
-          instrumentId: "health-test-instrument",
+          instrumentId: "dst-test-instrument",
           hostname: "DST-PC",
           status: "watching",
           createdAt: at("2026-03-01T00:00"),
