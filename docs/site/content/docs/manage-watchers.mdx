@@ -88,12 +88,12 @@ A watcher that shows amber blocks every few hours, or red blocks in the middle o
 
 ## See every watcher at once [#all-watchers]
 
-**Settings → Watchers**, which only admins see, has the release form from [Roll out watcher releases](/docs/watcher-releases) at the top and the list of **All watchers** below it. There is one watcher per instrument. The heading carries a rollout pill, “14 of 16 on 1.4.3” for example. It is green when every watcher runs the latest version or a newer one, and amber otherwise, so you can watch a release catch up.
+**Settings → Watchers**, which only admins see, has the release form from [Roll out watcher releases](/docs/watcher-releases) at the top and the list of **All watchers** below it. There is one watcher per instrument. The heading carries a rollout pill, “14 out of 16 on the latest version” for example. It is green when every watcher runs the latest version or a newer one, and amber otherwise, so you can watch a release catch up.
 
 The **Active** tab has one row for each watcher:
 
 - **Instrument**: opens the watcher’s page
-- **Computer**: sortable, with an “N on this computer” marker when other active watchers share it. Hover over the marker to see which instruments
+- **Computer**: sortable, with a stacked-layers icon when other active watchers share it. Hover over the icon, or focus it with the keyboard, to see how many watchers run on that computer and which instruments
 - **Version**
 - **Status**: the watcher’s [status badge](#watcher-status-badge)
 - **Settings**: **Change pending**, **Change rejected**, **Edited on PC, restart pending**, or a dash when there is nothing to report; see [Change a watcher’s settings](#change-a-watchers-config)
@@ -108,10 +108,9 @@ The **Deregistered** tab lists past watchers, with the **Instrument**, **Compute
 
 Admins can change a watcher’s settings from the web app, without visiting the instrument PC. This needs watcher 1.4.0 or later. For older watchers the form is turned off with a note to update the watcher.
 
-Open the watcher’s page and choose the **Settings** tab. It has four cards:
+Open the watcher’s page and choose the **Settings** tab. It shows:
 
-- **Current settings**: what the watcher is running now, as it last reported
-- **Edit settings**: the form, with **Save change** and **Preview with recent files**
+- **Current settings**: what the watcher is running now, as it last reported. Admins get an **Edit** button here, which opens the form in a dialog with **Save change** and **Preview with recent files**. Saving closes the dialog.
 - **History**: every change, with who made it and when
 - **Raw config file (YAML)**, folded away at the bottom
 
@@ -124,7 +123,7 @@ You can change:
 
 The form checks each value as you type. **Preview with recent files** shows which of the instrument’s recent files the new patterns match and the run ID each would get. It only covers files Data Hub already knows about, so files on the PC that never matched a pattern don’t appear.
 
-![Watcher page on the Settings tab, with the current settings, the edit form, and the history of changes](/images/watcher-settings.webp)
+![Watcher page on the Settings tab, with the current settings, the Edit button, and the history of changes](/images/watcher-settings.webp)
 
 After you save:
 
@@ -137,7 +136,7 @@ If the new settings match more files, the watcher reports files that are already
 
 If the watcher is offline, the change waits and is applied when the watcher next starts. If someone also edited `config.yaml` on the PC while it was offline, the newer of the two edits wins and the other stays in the history.
 
-The same form also opens from the notice on an instrument page that says Data Hub can’t find the watch folder: **Change folder** opens **Settings** with the **Watch folder** field selected. See [Check that new files will arrive](/docs/browse-runs#check-files-will-arrive).
+The same form also opens from the notice on an instrument page that says Data Hub can’t find the watch folder: **Change folder** opens **Settings** with the form already open and the **Watch folder** field selected. See [Check that new files will arrive](/docs/browse-runs#check-files-will-arrive).
 
 ### Edits made on the PC [#edits-on-the-pc]
 

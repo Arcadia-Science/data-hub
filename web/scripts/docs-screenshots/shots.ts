@@ -275,8 +275,7 @@ export const SHOTS: Shot[] = [
     // The badge is a link, and its tooltip opens on hover or focus.
     steps: async ({ page }) => {
       await page.getByRole("link", { name: /watcher details for/ }).hover();
-      // The tooltip's text is also in a hidden copy for screen readers.
-      await page.getByText("Click for watcher details.").first().waitFor();
+      await page.getByRole("tooltip").waitFor();
     },
   },
   {
