@@ -346,7 +346,11 @@ export const SHOTS: Shot[] = [
     ready: (page) => waitFor(page, "Latest version"),
     steps: async ({ page }) => {
       await waitFor(page, "Azure 600 Gel Doc");
-      await waitFor(page, /on this computer/);
+      // The shared-computer marker is an icon; its count is its name.
+      await page
+        .getByRole("img", { name: /on this computer/ })
+        .first()
+        .waitFor();
     },
   },
   {
