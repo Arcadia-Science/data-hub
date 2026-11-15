@@ -13,7 +13,7 @@ import {
 
 /** The rollout pill above the list: how many active watchers run the latest. */
 export interface RolloutPill {
-  /** "{N} of {M} on {version}". */
+  /** "{N} out of {M} on the latest version". */
   text: string;
   /** Green when every active watcher is on the latest, amber otherwise. */
   tone: "current" | "behind";
@@ -40,7 +40,7 @@ export function rolloutPill(input: {
     isOnLatest(version, latest)
   ).length;
   return {
-    text: `${onLatest} of ${total} on ${latest}`,
+    text: `${onLatest} out of ${total} on the latest version`,
     tone: onLatest === total ? "current" : "behind",
   };
 }

@@ -183,7 +183,7 @@ describe("Settings › Watchers and the old /watchers list", () => {
       expect(html).toContain("Active (3)");
       expect(html).toContain("Deregistered (2)");
       // Two of the three active watchers run the latest version.
-      expect(html).toContain("2 of 3 on 9.9.9");
+      expect(html).toContain("2 out of 3 on the latest version");
       // The two watchers on one computer each carry the shared marker. The
       // third active watcher's computer matches a deregistered watcher's
       // hostname, which counts for nothing, so it has no marker.

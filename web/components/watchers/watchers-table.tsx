@@ -11,7 +11,6 @@ import { useMemo, useState } from "react";
 import { RelativeTime } from "@/components/dashboard/relative-time";
 import { EmptyState } from "@/components/empty-state";
 import { RowControl, RowLink } from "@/components/row-link";
-import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -163,11 +162,11 @@ export function ActiveWatchersTable({ rows }: { rows: ActiveWatcherRow[] }) {
                   </RowLink>
                 </TableCell>
                 <TableCell>
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex items-center gap-1.5">
                     <ComputerName hostname={row.hostname} />
                     {marker ? (
-                      <RowControl>
-                        <SharedComputerBadge marker={marker} />
+                      <RowControl className="flex">
+                        <SharedComputerIcon marker={marker} />
                       </RowControl>
                     ) : null}
                   </div>
@@ -267,17 +266,25 @@ export function DeregisteredWatchersTable({
   );
 }
 
-// The marker is focusable, so a keyboard user can open its tooltip too.
-function SharedComputerBadge({ marker }: { marker: SharedComputerMarker }) {
+// The icon is focusable, so a keyboard user can open its tooltip too. Its
+// accessible name is the count the tooltip leads with.
+function SharedComputerIcon({ marker }: { marker: SharedComputerMarker }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Badge className="cursor-default" tabIndex={0} variant="secondary">
-          <Layers />
-          {marker.label}
-        </Badge>
+        <span
+          aria-label={marker.label}
+          className="inline-flex cursor-default rounded-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+          role="img"
+          tabIndex={0}
+        >
+          <Layers aria-hidden="true" className="size-3.5" />
+        </span>
       </TooltipTrigger>
-      <TooltipContent>{marker.tooltip}</TooltipContent>
+      <TooltipContent className="flex flex-col items-start gap-0.5">
+        <p className="font-semibold">{marker.label}</p>
+        <p>{marker.tooltip}</p>
+      </TooltipContent>
     </Tooltip>
   );
 }

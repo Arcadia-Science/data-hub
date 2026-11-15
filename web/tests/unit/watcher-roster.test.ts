@@ -17,7 +17,7 @@ describe("rolloutPill", () => {
         activeVersions: ["1.4.2", "1.4.2", "1.4.2"],
         latestVersion: "1.4.2",
       })
-    ).toEqual({ text: "3 of 3 on 1.4.2", tone: "current" });
+    ).toEqual({ text: "3 out of 3 on the latest version", tone: "current" });
   });
 
   it("is amber when some active watchers are behind", () => {
@@ -26,13 +26,13 @@ describe("rolloutPill", () => {
         activeVersions: ["1.4.2", "1.4.1", "1.4.2"],
         latestVersion: "1.4.2",
       })
-    ).toEqual({ text: "2 of 3 on 1.4.2", tone: "behind" });
+    ).toEqual({ text: "2 out of 3 on the latest version", tone: "behind" });
   });
 
   it("counts a watcher with no version as behind", () => {
     expect(
       rolloutPill({ activeVersions: [null, "1.4.2"], latestVersion: "1.4.2" })
-    ).toEqual({ text: "1 of 2 on 1.4.2", tone: "behind" });
+    ).toEqual({ text: "1 out of 2 on the latest version", tone: "behind" });
   });
 
   it("counts a watcher ahead of the latest version as current", () => {
@@ -43,13 +43,13 @@ describe("rolloutPill", () => {
         activeVersions: ["1.4.2", "1.4.1", "1.4.1"],
         latestVersion: "1.4.1",
       })
-    ).toEqual({ text: "3 of 3 on 1.4.1", tone: "current" });
+    ).toEqual({ text: "3 out of 3 on the latest version", tone: "current" });
     expect(
       rolloutPill({
         activeVersions: ["1.5.0", "1.4.0"],
         latestVersion: "1.4.2",
       })
-    ).toEqual({ text: "1 of 2 on 1.4.2", tone: "behind" });
+    ).toEqual({ text: "1 out of 2 on the latest version", tone: "behind" });
   });
 
   it("counts a version that can't be compared as behind unless it matches", () => {
@@ -58,10 +58,10 @@ describe("rolloutPill", () => {
         activeVersions: ["dev-build", "", "1.4.2"],
         latestVersion: "1.4.2",
       })
-    ).toEqual({ text: "1 of 3 on 1.4.2", tone: "behind" });
+    ).toEqual({ text: "1 out of 3 on the latest version", tone: "behind" });
     expect(
       rolloutPill({ activeVersions: [" 1.4.2 "], latestVersion: "1.4.2" })
-    ).toEqual({ text: "1 of 1 on 1.4.2", tone: "current" });
+    ).toEqual({ text: "1 out of 1 on the latest version", tone: "current" });
   });
 
   it("is hidden when no latest version is set", () => {
@@ -82,10 +82,10 @@ describe("rolloutPill", () => {
   it("reads the same for one watcher", () => {
     expect(
       rolloutPill({ activeVersions: ["1.4.2"], latestVersion: "1.4.2" })
-    ).toEqual({ text: "1 of 1 on 1.4.2", tone: "current" });
+    ).toEqual({ text: "1 out of 1 on the latest version", tone: "current" });
     expect(
       rolloutPill({ activeVersions: ["1.4.1"], latestVersion: "1.4.2" })
-    ).toEqual({ text: "0 of 1 on 1.4.2", tone: "behind" });
+    ).toEqual({ text: "0 out of 1 on the latest version", tone: "behind" });
   });
 });
 
