@@ -1,6 +1,6 @@
 "use client";
 
-import { EllipsisVertical, Trash2 } from "lucide-react";
+import { EllipsisVertical } from "lucide-react";
 import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -48,7 +48,6 @@ export function WatcherActions({ watcher }: { watcher: WatcherActionTarget }) {
             }}
             variant="destructive"
           >
-            <Trash2 className="size-3.5" />
             Deregister
           </DropdownMenuItem>
         </DropdownMenuContent>

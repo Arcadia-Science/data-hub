@@ -136,7 +136,7 @@ export function WatcherStatusBadge({
     return (
       <Tooltip>
         <TooltipTrigger asChild>{badge}</TooltipTrigger>
-        <TooltipContent className="flex max-w-80 flex-col items-start gap-1">
+        <TooltipContent className="flex max-w-80 flex-col items-start gap-0.5">
           {reason ? <p className="break-all font-medium">{reason}</p> : null}
           <p>
             The watcher is running but can&apos;t find its watch folder. Fix the
@@ -169,7 +169,7 @@ export function WatcherStatusBadge({
   return (
     <Tooltip>
       <TooltipTrigger asChild>{badge}</TooltipTrigger>
-      <TooltipContent className="flex flex-col items-start gap-1">
+      <TooltipContent className="flex flex-col items-start gap-0.5">
         {lastOnlineAt ? (
           <p className="font-medium">
             Last online {formatRelativeTime(lastOnlineAt)}
