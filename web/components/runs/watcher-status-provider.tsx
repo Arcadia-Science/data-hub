@@ -1,30 +1,55 @@
 "use client";
 
-import { createContext, type ReactNode, use } from "react";
+import { createContext, type ReactNode, use, useMemo } from "react";
+import type { InstrumentBadgeState } from "@/lib/instruments/connection";
+import {
+  getRunUploadAvailability,
+  type RunUploadAvailability,
+} from "@/lib/runs/upload-availability";
 
 /**
- * Describes whether the instrument's watcher is actively heartbeating.
- *
- * Downstream upload-style controls read this to decide between the
- * enabled button and the disabled-with-tooltip variant (see
- * `watcher-gated-upload-button.tsx`). Centralizing the flag here keeps
- * the run-detail variants free of `isWatcherOnline` prop drilling.
+ * What the run page knows about the instrument's watcher: the badge the
+ * instrument shows (which lets Pending and Retired win over the connection),
+ * and what the offline notice says about the instrument.
  */
 export interface WatcherStatus {
-  isWatcherOnline: boolean;
+  badgeState: InstrumentBadgeState;
+  instrumentId: string;
+  instrumentName: string;
+  /** When the watcher last checked in, or null if it never has. */
+  lastHeartbeatAt: Date | null;
+  /** Whether Upload works now, and the line that says why not. */
+  upload: RunUploadAvailability;
 }
+
+type WatcherStatusInput = Omit<WatcherStatus, "upload">;
 
 const WatcherStatusContext = createContext<WatcherStatus | null>(null);
 
+/**
+ * Downstream upload controls and the offline notice read this. They follow the
+ * run-page table in `getRunUploadAvailability`, so none of them takes the
+ * instrument's state as a prop.
+ */
 export function WatcherStatusProvider({
-  isWatcherOnline,
+  badgeState,
   children,
-}: {
-  isWatcherOnline: boolean;
-  children: ReactNode;
-}) {
+  instrumentId,
+  instrumentName,
+  lastHeartbeatAt,
+}: WatcherStatusInput & { children: ReactNode }) {
+  const value = useMemo<WatcherStatus>(
+    () => ({
+      badgeState,
+      instrumentId,
+      instrumentName,
+      lastHeartbeatAt,
+      upload: getRunUploadAvailability(badgeState),
+    }),
+    [badgeState, instrumentId, instrumentName, lastHeartbeatAt]
+  );
   return (
-    <WatcherStatusContext.Provider value={{ isWatcherOnline }}>
+    <WatcherStatusContext.Provider value={value}>
       {children}
     </WatcherStatusContext.Provider>
   );

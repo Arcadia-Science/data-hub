@@ -63,9 +63,11 @@ export interface ProblemNoticeInput {
 }
 
 /**
- * When a watcher last checked in, for "hasn't checked in since {time}": "today
- * at 2:14 PM", "yesterday at 2:14 PM", or "Nov 12 at 2:14 PM", with the year
- * when it isn't this one.
+ * When a watcher last checked in, as a phrase for "hasn't checked in since
+ * {time}" or "last checked in {time}": "today at 2:14 PM", "yesterday at 2:14
+ * PM", or "Nov 12 at 2:14 PM", with the year when it isn't this one. The day is
+ * the viewer's, so pass their time zone. The instrument page's notice and the
+ * run page's notice both use it.
  */
 export function formatLastCheckIn(
   date: Date,

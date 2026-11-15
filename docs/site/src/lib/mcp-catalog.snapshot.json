@@ -3644,7 +3644,7 @@
     {
       "name": "request_run_upload",
       "title": "Request Run Upload",
-      "description": "Queue specific detected files for watcher upload (max 100). Requires an online watcher. Idempotent for files already in upload_requested.",
+      "description": "Queue specific detected files for watcher upload (max 100). Requires an instrument whose watcher is online or restarting; a request made during a restart waits until the watcher is back. Offline, connecting, pending and retired instruments are refused. Idempotent for files already in upload_requested.",
       "group": "runs",
       "scope": "runs:upload",
       "annotations": {
@@ -3745,7 +3745,7 @@
     {
       "name": "request_run_upload_all",
       "title": "Request Run Upload All",
-      "description": "Queue every detected file on a run for watcher upload. Requires an online watcher.",
+      "description": "Queue every detected file on a run for watcher upload. Requires an instrument whose watcher is online or restarting; a request made during a restart waits until the watcher is back. Offline, connecting, pending and retired instruments are refused.",
       "group": "runs",
       "scope": "runs:upload",
       "annotations": {

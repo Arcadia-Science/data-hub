@@ -1,9 +1,14 @@
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
-import { getInstrumentConnectionState } from "@/lib/api/instrument-watchers";
+import { getInstrumentConnection } from "@/lib/api/instrument-watchers";
 import { touchRuns } from "@/lib/api/touch-runs";
 import { db } from "@/lib/db";
-import { files, instrumentRuns } from "@/lib/db/schema";
+import { files, instrumentRuns, instruments } from "@/lib/db/schema";
+import {
+  type InstrumentBadgeState,
+  instrumentBadgeState,
+} from "@/lib/instruments/connection";
+import { getRunUploadAvailability } from "@/lib/runs/upload-availability";
 
 export const MAX_UPLOAD_FILE_IDS = 100;
 
@@ -102,6 +107,33 @@ export type RequestUploadResult =
       message: string;
     };
 
+// The badge the instrument shows: its own status first, then its connection.
+async function getInstrumentBadge(
+  instrumentId: string
+): Promise<InstrumentBadgeState> {
+  const [[instrument], connection] = await Promise.all([
+    db
+      .select({ status: instruments.status })
+      .from(instruments)
+      .where(eq(instruments.id, instrumentId))
+      .limit(1),
+    getInstrumentConnection(instrumentId),
+  ]);
+  // A run's instrument always exists. Read as retired, the strictest reading,
+  // if it was removed since the run was found.
+  return instrumentBadgeState(instrument?.status ?? "inactive", connection);
+}
+
+function uploadRefusedMessage(badge: InstrumentBadgeState): string {
+  if (badge === "retired") {
+    return "This instrument is retired, so uploads can't be requested.";
+  }
+  if (badge === "pending") {
+    return "This instrument is waiting for an admin to confirm it, so uploads can't be requested.";
+  }
+  return "The watcher for this instrument isn't online or restarting. Bring it online before requesting uploads — otherwise nothing will transfer to S3.";
+}
+
 async function prepareUploadTarget(
   instrumentId: string,
   runId: string
@@ -125,20 +157,25 @@ async function prepareUploadTarget(
     };
   }
 
-  // Reject offline early so rows aren't left stuck in `upload_requested`.
-  // Uploads transfer through the watcher, so with none online to pick the
-  // files up they would sit in `upload_requested` forever and the UI would show
-  // a perpetual "Uploading" spinner with no error. Only an online watcher
-  // counts. TODO(run-page uploads): also accept requests while the connection
-  // is `restarting`, because queued requests survive a restart.
-  const connectionState = await getInstrumentConnectionState(run.instrumentId);
-  if (connectionState !== "online") {
+  // Reject early when no watcher can take the files, so rows aren't left stuck
+  // in `upload_requested`. Uploads transfer through the watcher, so with none
+  // coming to pick the files up they would sit in `upload_requested` forever
+  // and the UI would show a perpetual "Uploading" spinner with no error.
+  //
+  // The run page's upload table decides which instruments qualify: an online
+  // watcher, or one that is restarting, because upload requests survive a
+  // restart (since watcher 1.4.1 for a Windows restart, and 1.4.2 for an
+  // update). A request made while it restarts queues until the watcher is
+  // back, and the upload-queue sweep cancels it once the watcher's last
+  // heartbeat is more than 15 minutes old (`UPLOAD_REQUEST_REVERT_GRACE_MS`).
+  // Offline, connecting, pending and retired instruments are refused.
+  const badge = await getInstrumentBadge(run.instrumentId);
+  if (!getRunUploadAvailability(badge).enabled) {
     return {
       ok: false,
       status: 409,
       code: "WATCHER_OFFLINE",
-      message:
-        "No online watcher for this instrument. Bring the watcher online before requesting uploads — otherwise nothing will transfer to S3.",
+      message: uploadRefusedMessage(badge),
     };
   }
 
