@@ -116,7 +116,7 @@ const GridRows = memo(function GridRows({
         >
           {shortDayLabel(day.date)}
         </span>
-        <div className="flex min-w-0 flex-1 gap-0.5">
+        <div className="flex min-w-0 flex-1 gap-[3px]">
           {day.blocks.map((block, col) => {
             const text = describeBlock(
               block,
@@ -128,7 +128,7 @@ const GridRows = memo(function GridRows({
               <span
                 aria-label={blockSentence(text)}
                 className={cn(
-                  "h-[18px] flex-1 rounded-[3px] outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background",
+                  "h-4 flex-1 rounded-[4px] outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background",
                   BLOCK_CLASSNAMES[block.state]
                 )}
                 data-cell={`${row}-${col}`}
@@ -260,7 +260,7 @@ export function ConnectivityGrid({ days }: { days: HealthDay[] }) {
               <span
                 aria-hidden="true"
                 className={cn(
-                  "size-2.5 rounded-xs ring-1 ring-border/60 ring-inset",
+                  "size-2.5 rounded-[3px] ring-1 ring-border/60 ring-inset",
                   BLOCK_CLASSNAMES[item.state]
                 )}
               />
