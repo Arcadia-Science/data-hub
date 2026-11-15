@@ -1,12 +1,6 @@
 "use client";
 
-import {
-  Copy,
-  ExternalLink,
-  MoreHorizontal,
-  Pencil,
-  Trash2,
-} from "lucide-react";
+import { ExternalLink, MoreHorizontal } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -108,15 +102,9 @@ export function NotebookLinkRow({
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="min-w-36">
           {readOnly ? null : (
-            <DropdownMenuItem onSelect={onEdit}>
-              <Pencil className="size-3.5" />
-              Edit
-            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={onEdit}>Edit</DropdownMenuItem>
           )}
-          <DropdownMenuItem onSelect={copyLink}>
-            <Copy className="size-3.5" />
-            Copy link
-          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={copyLink}>Copy link</DropdownMenuItem>
           {readOnly ? null : (
             <>
               <DropdownMenuSeparator />
@@ -127,7 +115,6 @@ export function NotebookLinkRow({
                 }}
                 variant="destructive"
               >
-                <Trash2 className="size-3.5" />
                 Remove
               </DropdownMenuItem>
             </>
