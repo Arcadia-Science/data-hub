@@ -153,20 +153,22 @@
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "The PC the watcher runs on. Needs scope `watchers:read`; left out without it."
           },
           "os_info": {
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "The PC's operating system. Needs scope `watchers:read`; left out without it."
           },
           "version": {
             "type": [
               "string",
               "null"
             ],
-            "description": "Installed watcher version. Null until its first heartbeat."
+            "description": "Installed watcher version. Null until its first heartbeat. Needs scope `watchers:read`; left out without it."
           },
           "status": {
             "type": "string",
@@ -197,7 +199,8 @@
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "The folder the watcher watches. Needs scope `watchers:read`; left out without it."
           },
           "file_patterns": {
             "type": "array",
@@ -241,24 +244,19 @@
                 "display_name"
               ]
             },
-            "description": "Other instruments whose active watchers run on the same computer (hostnames compared without case)."
+            "description": "Other instruments whose active watchers run on the same computer (hostnames compared without case). Needs scope `watchers:read`; left out without it."
           }
         },
         "required": [
           "id",
-          "hostname",
-          "os_info",
-          "version",
           "status",
           "status_reason",
           "last_heartbeat_at",
-          "watch_directory",
           "file_patterns",
           "upload_mode",
-          "config_state",
-          "shared_computer_with"
+          "config_state"
         ],
-        "description": "An instrument's one active watcher: the program on the instrument PC that finds new files and uploads them."
+        "description": "An instrument's one active watcher: the program on the instrument PC that finds new files and uploads them. `hostname`, `os_info`, `version`, `watch_directory` and `shared_computer_with` say where it runs, so they need scope `watchers:read` as well as `instruments:read`. A token without it gets a watcher with those five fields absent. Browser sessions hold every scope."
       },
       "InstrumentConnection": {
         "type": "object",
@@ -1765,7 +1763,7 @@
       "get": {
         "operationId": "listInstruments",
         "summary": "List instruments",
-        "description": "Requires scope `instruments:read`.",
+        "description": "Requires scope `instruments:read`. Each instrument's `watcher` leaves out `hostname`, `os_info`, `version`, `watch_directory` and `shared_computer_with` unless the token also has `watchers:read`.",
         "tags": [
           "Instruments"
         ],
@@ -1957,7 +1955,7 @@
       "get": {
         "operationId": "getInstrument",
         "summary": "Get an instrument",
-        "description": "Requires scope `instruments:read`.",
+        "description": "Requires scope `instruments:read`. The `watcher` leaves out `hostname`, `os_info`, `version`, `watch_directory` and `shared_computer_with` unless the token also has `watchers:read`.",
         "tags": [
           "Instruments"
         ],

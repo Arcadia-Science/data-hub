@@ -58,7 +58,7 @@ export async function GET(
     created_at: instrument.createdAt,
     updated_at: instrument.updatedAt,
     run_count: runCountResult[0].value,
-    watcher: instrumentWatcherToRest(info.watcher),
+    watcher: instrumentWatcherToRest(info.watcher, authResult),
     connection: info.connection,
     past_watcher_count: info.pastWatcherCount,
     // Deprecated: an instrument has at most one watcher.

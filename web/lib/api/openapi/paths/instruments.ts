@@ -21,7 +21,8 @@ registry.registerPath({
   path: "/instruments",
   operationId: "listInstruments",
   summary: "List instruments",
-  description: "Requires scope `instruments:read`.",
+  description:
+    "Requires scope `instruments:read`. Each instrument's `watcher` leaves out `hostname`, `os_info`, `version`, `watch_directory` and `shared_computer_with` unless the token also has `watchers:read`.",
   tags: ["Instruments"],
   security: bearerSecurity,
   responses: {
@@ -51,7 +52,8 @@ registry.registerPath({
   path: "/instruments/{instrumentId}",
   operationId: "getInstrument",
   summary: "Get an instrument",
-  description: "Requires scope `instruments:read`.",
+  description:
+    "Requires scope `instruments:read`. The `watcher` leaves out `hostname`, `os_info`, `version`, `watch_directory` and `shared_computer_with` unless the token also has `watchers:read`.",
   tags: ["Instruments"],
   security: bearerSecurity,
   request: { params: instrumentParams },

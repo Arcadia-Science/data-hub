@@ -42,12 +42,27 @@ export const instrumentRecord = z
 export const instrumentWatcher = z
   .object({
     id: z.string(),
-    hostname: z.string().nullable(),
-    os_info: z.string().nullable(),
+    hostname: z
+      .string()
+      .nullable()
+      .optional()
+      .describe(
+        "The PC the watcher runs on. Needs scope `watchers:read`; left out without it."
+      ),
+    os_info: z
+      .string()
+      .nullable()
+      .optional()
+      .describe(
+        "The PC's operating system. Needs scope `watchers:read`; left out without it."
+      ),
     version: z
       .string()
       .nullable()
-      .describe("Installed watcher version. Null until its first heartbeat."),
+      .optional()
+      .describe(
+        "Installed watcher version. Null until its first heartbeat. Needs scope `watchers:read`; left out without it."
+      ),
     status: watcherStatusSchema.describe(
       "Detailed watcher status. `stale` means no heartbeat for 5 minutes, or no return from a restart within 15."
     ),
@@ -58,7 +73,13 @@ export const instrumentWatcher = z
         "Why the watcher is waiting (the missing folder), or why it stopped for a restart (`system_shutdown` or `auto_update`). The reason stays while the status reads `stale`."
       ),
     last_heartbeat_at: isoDateTime.nullable(),
-    watch_directory: z.string().nullable(),
+    watch_directory: z
+      .string()
+      .nullable()
+      .optional()
+      .describe(
+        "The folder the watcher watches. Needs scope `watchers:read`; left out without it."
+      ),
     file_patterns: z
       .array(z.string())
       .describe("File patterns from the watcher's config, in config order."),
@@ -70,13 +91,14 @@ export const instrumentWatcher = z
       ),
     shared_computer_with: z
       .array(z.object({ instrument_id: z.string(), display_name: z.string() }))
+      .optional()
       .describe(
-        "Other instruments whose active watchers run on the same computer (hostnames compared without case)."
+        "Other instruments whose active watchers run on the same computer (hostnames compared without case). Needs scope `watchers:read`; left out without it."
       ),
   })
   .openapi("InstrumentWatcher", {
     description:
-      "An instrument's one active watcher: the program on the instrument PC that finds new files and uploads them.",
+      "An instrument's one active watcher: the program on the instrument PC that finds new files and uploads them. `hostname`, `os_info`, `version`, `watch_directory` and `shared_computer_with` say where it runs, so they need scope `watchers:read` as well as `instruments:read`. A token without it gets a watcher with those five fields absent. Browser sessions hold every scope.",
   });
 
 export const instrumentConnection = z

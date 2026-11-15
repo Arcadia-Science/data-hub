@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
       const info = infoById.get(row.id) ?? NO_WATCHER_INFO;
       return {
         ...row,
-        watcher: instrumentWatcherToRest(info.watcher),
+        watcher: instrumentWatcherToRest(info.watcher, authResult),
         connection: info.connection,
         past_watcher_count: info.pastWatcherCount,
       };

@@ -8,6 +8,7 @@
 // watchers per instrument.
 
 import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import { hasScope } from "@/lib/api/scopes";
 import { readInstrumentConfigFields } from "@/lib/api/watcher-config/from-yaml";
 import {
   currentRevisionStatusSql,
@@ -265,23 +266,49 @@ export async function getInstrumentConnection(
   return computeConnection(null, past?.count ?? 0);
 }
 
-/** An instrument's `watcher` as REST returns it: snake_case, dates as ISO 8601. */
-export function instrumentWatcherToRest(watcher: InstrumentWatcher | null) {
+/**
+ * Whether the caller may see where a watcher runs. Host details (hostname, OS,
+ * version, watch folder and the other instruments on the same computer) were
+ * `watchers:read` data before instruments carried a `watcher`, so
+ * `instruments:read` alone doesn't unlock them. Browser sessions hold every
+ * scope. Use this for every REST response that embeds a watcher.
+ */
+export function canReadWatcherHostDetails(auth: { scopes: string[] }): boolean {
+  return hasScope(auth, "watchers:read");
+}
+
+/**
+ * An instrument's `watcher` as REST returns it: snake_case, dates as ISO 8601.
+ * For a caller without `watchers:read`, `hostname`, `os_info`, `version`,
+ * `watch_directory` and `shared_computer_with` are left out (the keys are
+ * absent, not null, since null already means "unknown" for most of them).
+ * Status, heartbeat, patterns, upload mode and settings state stay.
+ */
+export function instrumentWatcherToRest(
+  watcher: InstrumentWatcher | null,
+  auth: { scopes: string[] }
+) {
   if (watcher === null) {
     return null;
   }
-  return {
+  const shared = {
     id: watcher.id,
-    hostname: watcher.hostname,
-    os_info: watcher.osInfo,
-    version: watcher.version,
     status: watcher.status,
     status_reason: watcher.statusReason,
     last_heartbeat_at: watcher.lastHeartbeatAt?.toISOString() ?? null,
-    watch_directory: watcher.watchDirectory,
     file_patterns: watcher.filePatterns,
     upload_mode: watcher.uploadMode,
     config_state: watcher.configState,
+  };
+  if (!canReadWatcherHostDetails(auth)) {
+    return shared;
+  }
+  return {
+    ...shared,
+    hostname: watcher.hostname,
+    os_info: watcher.osInfo,
+    version: watcher.version,
+    watch_directory: watcher.watchDirectory,
     shared_computer_with: watcher.sharedComputerWith.map((other) => ({
       instrument_id: other.instrumentId,
       display_name: other.displayName,

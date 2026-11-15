@@ -12,6 +12,7 @@ import {
   closeTestDb,
   getTestDb,
   resetDb,
+  seedSessionCookie,
   seedTestUser,
 } from "@/tests/integration/helpers";
 
@@ -582,5 +583,161 @@ describe("Instruments API: watcher and connection", () => {
         web?.watcher?.filePatterns ?? null
       );
     }
+  });
+});
+
+// Where a watcher runs was `watchers:read` data before instruments carried a
+// `watcher`, so `instruments:read` alone gets the watcher's state but not its
+// host details. Browser sessions hold every scope.
+describe("Instruments API: watcher host details need watchers:read", () => {
+  const HOST_FIELDS = [
+    "hostname",
+    "os_info",
+    "version",
+    "watch_directory",
+    "shared_computer_with",
+  ];
+  const STATE_FIELDS = [
+    "id",
+    "status",
+    "status_reason",
+    "last_heartbeat_at",
+    "file_patterns",
+    "upload_mode",
+    "config_state",
+  ];
+
+  let instrumentsOnlyToken: string;
+  let withWatchersReadToken: string;
+  let sessionCookie: string;
+
+  beforeAll(async () => {
+    await resetDb();
+    ({ token: instrumentsOnlyToken } = await seedTestUser({
+      scopes: ["instruments:read"],
+      email: "instruments-only@example.com",
+    }));
+    ({ token: withWatchersReadToken } = await seedTestUser({
+      scopes: ["instruments:read", "watchers:read"],
+      email: "with-watchers-read@example.com",
+    }));
+    const member = await seedTestUser({
+      isAdmin: false,
+      email: "session-user@example.com",
+    });
+    sessionCookie = await seedSessionCookie(member.userId);
+
+    // Two instruments on one computer, so `shared_computer_with` has a value.
+    const db = getTestDb();
+    for (const id of ["host-gate-a", "host-gate-b"]) {
+      await db
+        .insert(instruments)
+        .values({ id, displayName: `Display ${id}`, status: "active" });
+      await db.insert(watchers).values({
+        instrumentId: id,
+        hostname: "HOST-GATE-PC",
+        osInfo: "Windows 11",
+        watcherVersion: "1.2.3",
+        status: "watching",
+        lastHeartbeatAt: new Date(),
+        configYaml: [
+          "instrument:",
+          "  watch_directory: D:\\Exports\\Gate",
+          "  file_patterns:",
+          '    - "*.csv"',
+          "  upload_mode: manual",
+          "",
+        ].join("\n"),
+      });
+    }
+  });
+
+  afterAll(async () => {
+    await closeTestDb();
+  });
+
+  type WatcherJson = Record<string, unknown> | null;
+  interface Caller {
+    cookie?: string;
+    token?: string;
+  }
+
+  async function detailWatcher(caller: Caller): Promise<WatcherJson> {
+    const res = await api("/api/v1/instruments/host-gate-a", {
+      token: caller.token,
+      headers: caller.cookie ? { Cookie: caller.cookie } : undefined,
+    });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    // The gated shape still matches the documented schema.
+    instrumentDetail.parse(data);
+    return data.watcher;
+  }
+
+  async function listWatcher(caller: Caller): Promise<WatcherJson> {
+    const res = await api("/api/v1/instruments", {
+      token: caller.token,
+      headers: caller.cookie ? { Cookie: caller.cookie } : undefined,
+    });
+    expect(res.status).toBe(200);
+    const data = (await res.json()) as { id: string; watcher: WatcherJson }[];
+    instrumentListItem.array().parse(data);
+    return data.find((row) => row.id === "host-gate-a")?.watcher ?? null;
+  }
+
+  function expectNoHostDetails(watcher: WatcherJson) {
+    expect(watcher).not.toBeNull();
+    for (const key of HOST_FIELDS) {
+      expect(watcher).not.toHaveProperty(key);
+    }
+    for (const key of STATE_FIELDS) {
+      expect(watcher).toHaveProperty(key);
+    }
+    expect(watcher).toMatchObject({
+      status: "watching",
+      file_patterns: ["*.csv"],
+      upload_mode: "manual",
+    });
+    // Nothing about the computer leaks anywhere in the payload.
+    const text = JSON.stringify(watcher);
+    expect(text).not.toContain("HOST-GATE-PC");
+    expect(text).not.toContain("Gate");
+    expect(text).not.toContain("host-gate-b");
+  }
+
+  function expectHostDetails(watcher: WatcherJson) {
+    expect(watcher).toMatchObject({
+      hostname: "HOST-GATE-PC",
+      os_info: "Windows 11",
+      version: "1.2.3",
+      watch_directory: "D:\\Exports\\Gate",
+      shared_computer_with: [{ instrument_id: "host-gate-b" }],
+      status: "watching",
+      file_patterns: ["*.csv"],
+    });
+  }
+
+  it("GET /instruments/:id gives a token with only instruments:read no host details", async () => {
+    expectNoHostDetails(await detailWatcher({ token: instrumentsOnlyToken }));
+  });
+
+  it("GET /instruments gives a token with only instruments:read no host details", async () => {
+    expectNoHostDetails(await listWatcher({ token: instrumentsOnlyToken }));
+  });
+
+  it("GET /instruments/:id gives a token with watchers:read the host details", async () => {
+    expectHostDetails(await detailWatcher({ token: withWatchersReadToken }));
+  });
+
+  it("GET /instruments gives a token with watchers:read the host details", async () => {
+    expectHostDetails(await listWatcher({ token: withWatchersReadToken }));
+  });
+
+  it("GET /instruments/:id gives a browser session the host details", async () => {
+    expectHostDetails(await detailWatcher({ cookie: sessionCookie }));
+  });
+
+  it("GET /instruments gives a browser session the host details", async () => {
+    expectHostDetails(await listWatcher({ cookie: sessionCookie }));
   });
 });
