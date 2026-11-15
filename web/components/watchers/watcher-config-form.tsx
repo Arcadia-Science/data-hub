@@ -139,6 +139,7 @@ export function WatcherConfigForm({
   savedSettings,
   editable,
   watcherVersion,
+  onSaved,
   focusField,
 }: {
   watcherId: string;
@@ -154,6 +155,7 @@ export function WatcherConfigForm({
   /** False below watcher 1.4.0: the form shows but can't be changed. */
   editable: boolean;
   watcherVersion: string | null;
+  onSaved?: () => void;
   /**
    * Puts the cursor in this field once, when the form first shows. A link
    * such as "Change folder" sets it through `?focus=` in the page's address.
@@ -274,6 +276,7 @@ export function WatcherConfigForm({
       toast.success("Change saved", {
         description: "The watcher applies it within about a minute.",
       });
+      onSaved?.();
       router.refresh();
     });
   }
