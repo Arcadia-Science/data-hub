@@ -2,6 +2,11 @@ import { eq } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 import { authorize, authorizeToken } from "@/lib/api/auth";
 import { apiError, CONFLICT } from "@/lib/api/errors";
+import {
+  getInstrumentWatcherInfo,
+  instrumentWatcherToRest,
+  NO_WATCHER_INFO,
+} from "@/lib/api/instrument-watchers";
 import { createInstrumentBody, readJsonBody } from "@/lib/api/openapi";
 import { db } from "@/lib/db";
 import { instruments } from "@/lib/db/schema";
@@ -21,7 +26,19 @@ export async function GET(request: NextRequest) {
     })
     .from(instruments);
 
-  return Response.json(rows);
+  const infoById = await getInstrumentWatcherInfo(rows.map((row) => row.id));
+
+  return Response.json(
+    rows.map((row) => {
+      const info = infoById.get(row.id) ?? NO_WATCHER_INFO;
+      return {
+        ...row,
+        watcher: instrumentWatcherToRest(info.watcher, authResult),
+        connection: info.connection,
+        past_watcher_count: info.pastWatcherCount,
+      };
+    })
+  );
 }
 
 // PAT-only: the watcher CLI creates instruments. Session `*` would let

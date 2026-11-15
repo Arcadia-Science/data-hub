@@ -16,9 +16,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { getWatcherOnlineStatus } from "@/components/watchers/watcher-online-status";
 import { WatcherStatusBadge } from "@/components/watchers/watcher-status-badge";
 import type { InstrumentListItem } from "@/lib/api/instruments";
+import { toLegacyWatcherStatus } from "@/lib/instruments/connection";
 
 /**
  * Placeholder that mirrors `InstrumentsTable` column layout and row height
@@ -185,10 +185,7 @@ export function InstrumentsTable({
           {data.map((row) => {
             // Active + no live watcher but a deregistered one reads as
             // "Deregistered" rather than "No Watcher".
-            const watcherStatus =
-              row.watcherCount === 0 && row.hasDeregisteredWatcher
-                ? "deregistered"
-                : getWatcherOnlineStatus(row);
+            const watcherStatus = toLegacyWatcherStatus(row.connection);
             return (
               <TableRow className="relative text-sm" key={row.id}>
                 <TableCell>
@@ -208,7 +205,7 @@ export function InstrumentsTable({
                   <RowControl>
                     {row.status === "active" ? (
                       <WatcherStatusBadge
-                        lastOnlineAt={row.lastWatcherHeartbeatAt}
+                        lastOnlineAt={row.watcher?.lastHeartbeatAt ?? null}
                         status={watcherStatus}
                       />
                     ) : (

@@ -114,13 +114,233 @@
               "dishcam",
               "aunty"
             ]
+          },
+          "watcher": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InstrumentWatcher"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "connection": {
+            "$ref": "#/components/schemas/InstrumentConnection"
+          },
+          "past_watcher_count": {
+            "type": "integer",
+            "description": "How many deregistered watchers the instrument has had."
           }
         },
         "required": [
           "id",
           "display_name",
           "status",
-          "instrument_type"
+          "instrument_type",
+          "watcher",
+          "connection",
+          "past_watcher_count"
+        ]
+      },
+      "InstrumentWatcher": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "hostname": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The PC the watcher runs on. Needs scope `watchers:read`; left out without it."
+          },
+          "os_info": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The PC's operating system. Needs scope `watchers:read`; left out without it."
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Installed watcher version. Null until its first heartbeat. Needs scope `watchers:read`; left out without it."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "registered",
+              "watching",
+              "stopped",
+              "waiting",
+              "stale"
+            ],
+            "description": "Detailed watcher status. `stale` means no heartbeat for 5 minutes, or no return from a restart within 15."
+          },
+          "status_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the watcher is waiting (the missing folder), or why it stopped for a restart (`system_shutdown` or `auto_update`). The reason stays while the status reads `stale`."
+          },
+          "last_heartbeat_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "watch_directory": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The folder the watcher watches. Needs scope `watchers:read`; left out without it."
+          },
+          "file_patterns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "File patterns from the watcher's config, in config order."
+          },
+          "upload_mode": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "manual"
+            ]
+          },
+          "config_state": {
+            "type": "string",
+            "enum": [
+              "none",
+              "pending",
+              "applied",
+              "rejected",
+              "edited_on_pc"
+            ],
+            "description": "State of the watcher's settings: `pending` (a change is waiting for the watcher), `rejected` (the watcher refused the latest change), `edited_on_pc` (a PC edit takes effect when the watcher restarts), `applied`, or `none`."
+          },
+          "shared_computer_with": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "instrument_id": {
+                  "type": "string"
+                },
+                "display_name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "instrument_id",
+                "display_name"
+              ]
+            },
+            "description": "Other instruments whose active watchers run on the same computer (hostnames compared without case). Needs scope `watchers:read`; left out without it."
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "status_reason",
+          "last_heartbeat_at",
+          "file_patterns",
+          "upload_mode",
+          "config_state"
+        ],
+        "description": "An instrument's one active watcher: the program on the instrument PC that finds new files and uploads them. `hostname`, `os_info`, `version`, `watch_directory` and `shared_computer_with` say where it runs, so they need scope `watchers:read` as well as `instruments:read`. A token without it gets a watcher with those five fields absent. Browser sessions hold every scope."
+      },
+      "InstrumentConnection": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "online",
+              "restarting",
+              "connecting",
+              "offline"
+            ],
+            "description": "`online`: the watcher checked in within 5 minutes. `restarting`: the watcher stopped for a Windows restart or an automatic update less than 15 minutes ago. `connecting`: the watcher registered and hasn't sent a heartbeat yet. `offline`: anything else. The instrument's own status plays no part: a pending instrument can be `online`."
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "folder_missing",
+              "unresponsive",
+              "stopped",
+              "no_watcher",
+              "deregistered",
+              null
+            ],
+            "description": "Why the instrument is offline. Null in every other state."
+          }
+        },
+        "required": [
+          "state",
+          "reason"
+        ],
+        "description": "Whether new files can reach Data Hub, and why not."
+      },
+      "InstrumentRecord": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "active",
+              "inactive"
+            ]
+          },
+          "instrument_type": {
+            "type": "string",
+            "enum": [
+              "generic",
+              "plate_reader",
+              "gel_doc",
+              "qpcr",
+              "tape_station",
+              "hina_microscope",
+              "epson_v700_scanner",
+              "instant_raman",
+              "fplc",
+              "dishcam",
+              "aunty"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "display_name",
+          "status",
+          "instrument_type",
+          "created_at"
         ]
       },
       "InstrumentDetail": {
@@ -143,7 +363,9 @@
                 "type": "integer"
               },
               "watcher_count": {
-                "type": "integer"
+                "type": "integer",
+                "deprecated": true,
+                "description": "Deprecated. An instrument has at most one watcher: use `watcher`, which is null when it has none."
               }
             },
             "required": [
@@ -1541,7 +1763,7 @@
       "get": {
         "operationId": "listInstruments",
         "summary": "List instruments",
-        "description": "Requires scope `instruments:read`.",
+        "description": "Requires scope `instruments:read`. Each instrument's `watcher` leaves out `hostname`, `os_info`, `version`, `watch_directory` and `shared_computer_with` unless the token also has `watchers:read`.",
         "tags": [
           "Instruments"
         ],
@@ -1671,7 +1893,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InstrumentDetail"
+                  "$ref": "#/components/schemas/InstrumentRecord"
                 }
               }
             }
@@ -1733,7 +1955,7 @@
       "get": {
         "operationId": "getInstrument",
         "summary": "Get an instrument",
-        "description": "Requires scope `instruments:read`.",
+        "description": "Requires scope `instruments:read`. The `watcher` leaves out `hostname`, `os_info`, `version`, `watch_directory` and `shared_computer_with` unless the token also has `watchers:read`.",
         "tags": [
           "Instruments"
         ],
@@ -1884,7 +2106,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InstrumentDetail"
+                  "$ref": "#/components/schemas/InstrumentRecord"
                 }
               }
             }

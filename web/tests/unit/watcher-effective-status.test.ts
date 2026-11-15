@@ -1,16 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   AUTO_UPDATE_STATUS_REASON,
+  computeEffectiveStatus,
+  type EffectiveStatus,
   isRestartStopReason,
   RESTART_STOP_REASONS,
+  STALE_THRESHOLD_MS,
   SYSTEM_SHUTDOWN_STATUS_REASON,
   UPLOAD_REQUEST_REVERT_GRACE_MS,
 } from "@/lib/api/watcher-status";
-import {
-  computeEffectiveStatus,
-  type EffectiveStatus,
-  STALE_THRESHOLD_MS,
-} from "@/lib/api/watchers";
 
 // The display status of a watcher from its stored status, its stored reason
 // and the age of its last heartbeat. The list route's `status` filter builds

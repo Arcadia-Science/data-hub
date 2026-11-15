@@ -77,13 +77,34 @@ const {
       }>,
     };
   }
+  const MOCK_WATCHER = {
+    id: "watcher-1",
+    hostname: "lab-pc",
+    osInfo: "Windows 11",
+    version: "1.4.2",
+    status: "watching" as const,
+    statusReason: null,
+    lastHeartbeatAt: new Date("2025-01-01"),
+    watchDirectory: "C:\\Data",
+    filePatterns: ["*.txt"],
+    uploadMode: "auto" as const,
+    configState: "none" as const,
+    sharedComputerWith: [],
+  };
+  const ONLINE = { state: "online" as const, reason: null };
   const listBase = {
     activeWatcherId: "watcher-1",
     hasDeregisteredWatcher: false,
     runsThisWeek: 0,
     lastWatcherHeartbeatAt: new Date("2025-01-01"),
+    watcher: MOCK_WATCHER,
+    connection: ONLINE,
+    pastWatcherCount: 0,
   };
   const detailBase = {
+    watcher: MOCK_WATCHER,
+    connection: ONLINE,
+    pastWatcherCount: 0,
     watchersOffline: 0,
     activeWatcherId: "watcher-1",
     activeWatcherHostname: "lab-pc",
@@ -134,6 +155,8 @@ const {
     createdAt: new Date("2024-01-01"),
     ...listBase,
     lastWatcherHeartbeatAt: null,
+    watcher: null,
+    connection: { state: "offline" as const, reason: "no_watcher" as const },
   };
   return {
     MOCK_INSTRUMENT,
@@ -176,6 +199,8 @@ const {
       activeWatcherId: null,
       activeWatcherHostname: null,
       lastWatcherHeartbeatAt: null,
+      watcher: null,
+      connection: { state: "offline" as const, reason: "no_watcher" as const },
     },
     MOCK_FILE: {
       id: 42,

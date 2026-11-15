@@ -9,10 +9,6 @@ import {
   type SQL,
   sql,
 } from "drizzle-orm";
-import {
-  getWatcherOnlineStatus,
-  type WatcherOnlineStatus,
-} from "@/components/watchers/watcher-online-status";
 import { type ActorToken, actorUser, resolveActor } from "@/lib/api/actor";
 import { getInstrumentListWithCounts } from "@/lib/api/instruments";
 import { db } from "@/lib/db";
@@ -26,6 +22,10 @@ import {
   runNotebookLinks,
   users,
 } from "@/lib/db/schema";
+import {
+  type LegacyWatcherStatus,
+  toLegacyWatcherStatus,
+} from "@/lib/instruments/connection";
 import {
   notebookLinkDisplayName,
   notebookSearchKey,
@@ -110,7 +110,7 @@ export interface SearchInstrumentResult {
   type: "instrument";
   // `deregistered` (active instrument, only watcher deregistered) is distinct
   // from `no_watcher`. Only meaningful when `status` is `active`.
-  watcherStatus: WatcherOnlineStatus | "deregistered";
+  watcherStatus: LegacyWatcherStatus;
 }
 
 export interface SearchUserResult {
@@ -367,13 +367,9 @@ async function searchInstruments(
           id: row.id,
           displayName: row.displayName,
           status: row.status,
-          watcherStatus:
-            row.watcherCount === 0 && row.hasDeregisteredWatcher
-              ? ("deregistered" as const)
-              : getWatcherOnlineStatus(row),
-          lastWatcherHeartbeatAt: row.lastWatcherHeartbeatAt
-            ? row.lastWatcherHeartbeatAt.toISOString()
-            : null,
+          watcherStatus: toLegacyWatcherStatus(row.connection),
+          lastWatcherHeartbeatAt:
+            row.watcher?.lastHeartbeatAt?.toISOString() ?? null,
           runCount: row.runCount,
           matchReason: nameHit ? ("name" as const) : ("pattern" as const),
           matchedPattern: nameHit ? null : (matchedPattern ?? null),

@@ -84,3 +84,61 @@ export function parseSettingsFromYaml(
   const result = readSettingsFromYaml(configYaml);
   return result.ok ? result.settings : null;
 }
+
+export interface InstrumentConfigFields {
+  /** In the order the config lists them, with no clean-up. */
+  filePatterns: string[];
+  uploadMode: "auto" | "manual";
+  watchDirectory: string | null;
+}
+
+/**
+ * The folder, file patterns and upload mode in a watcher's `config.yaml`, for
+ * showing an instrument's state. Unlike `readSettingsFromYaml` it doesn't
+ * check the values against the rules in `settings.ts`: a config the web app
+ * can't edit still says which folder the watcher uses. Missing, unparseable
+ * or oddly shaped YAML gives no folder, no patterns and the default mode.
+ */
+export function readInstrumentConfigFields(
+  configYaml: string | null
+): InstrumentConfigFields {
+  const fields: InstrumentConfigFields = {
+    watchDirectory: null,
+    filePatterns: [],
+    uploadMode: WATCHER_DEFAULTS.upload_mode,
+  };
+  if (!configYaml) {
+    return fields;
+  }
+  let doc: unknown;
+  try {
+    doc = YAML.parse(configYaml);
+  } catch {
+    return fields;
+  }
+  const instrument = (
+    doc as { instrument?: Record<string, unknown> | null } | null | undefined
+  )?.instrument;
+  const dir = instrument?.watch_directory;
+  if (typeof dir === "string") {
+    fields.watchDirectory = dir;
+  }
+  const patterns = instrument?.file_patterns;
+  if (Array.isArray(patterns)) {
+    fields.filePatterns = patterns.map(String);
+  }
+  if (instrument?.upload_mode === "manual") {
+    fields.uploadMode = "manual";
+  }
+  return fields;
+}
+
+/**
+ * The `instrument.watch_directory` of a watcher's `config.yaml`, or null when
+ * the YAML is missing, unparseable or has none.
+ */
+export function extractWatchDirectory(
+  configYaml: string | null
+): string | null {
+  return readInstrumentConfigFields(configYaml).watchDirectory;
+}

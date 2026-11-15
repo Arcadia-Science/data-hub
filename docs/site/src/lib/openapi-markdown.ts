@@ -5,7 +5,9 @@
 
 interface JsonSchema {
   $ref?: string;
+  allOf?: JsonSchema[];
   anyOf?: JsonSchema[];
+  deprecated?: boolean;
   description?: string;
   enum?: unknown[];
   format?: string;
@@ -45,6 +47,7 @@ interface OpenApiOperation {
 }
 
 interface OpenApiDocument {
+  components?: { schemas?: Record<string, JsonSchema> };
   paths?: Record<string, Partial<Record<string, OpenApiOperation>>>;
   webhooks?: Record<string, Partial<Record<string, OpenApiOperation>>>;
 }
@@ -130,9 +133,68 @@ function formatObjectProps(schema: JsonSchema | undefined): string {
   const required = new Set(schema.required ?? []);
   const lines = Object.entries(schema.properties).map(([name, prop]) => {
     const req = required.has(name) ? "required" : "optional";
+    const deprecated = prop.deprecated ? ", deprecated" : "";
     const description = prop.description ? ` — ${prop.description}` : "";
-    return `  - \`${name}\` (${req}, \`${formatSchemaType(prop)}\`)${description}`;
+    return `  - \`${name}\` (${req}${deprecated}, \`${formatSchemaType(prop)}\`)${description}`;
   });
+  return lines.length > 0 ? `\n${lines.join("\n")}` : "";
+}
+
+/**
+ * Follows a `$ref` into `components.schemas`, so a response that names its
+ * schema can still be read. Returns undefined for a reference it can't
+ * resolve, or one that points back at itself.
+ */
+function resolveSchema(
+  schema: JsonSchema | undefined,
+  doc: OpenApiDocument
+): JsonSchema | undefined {
+  let current = schema;
+  const seen = new Set<string>();
+  while (current?.$ref) {
+    const prefix = "#/components/schemas/";
+    if (!current.$ref.startsWith(prefix) || seen.has(current.$ref)) {
+      return;
+    }
+    seen.add(current.$ref);
+    current = doc.components?.schemas?.[current.$ref.slice(prefix.length)];
+  }
+  return current;
+}
+
+/**
+ * The properties of an object schema, including those of the schemas it
+ * extends with `allOf`, reading through `$ref`s.
+ */
+function schemaProperties(
+  schema: JsonSchema | undefined,
+  doc: OpenApiDocument
+): Record<string, JsonSchema> {
+  const resolved = resolveSchema(schema, doc);
+  const inherited = (resolved?.allOf ?? []).map((part) =>
+    schemaProperties(part, doc)
+  );
+  return Object.assign({}, ...inherited, resolved?.properties);
+}
+
+/**
+ * The deprecated properties of a response's schema, one line each. Responses
+ * list only their type, so this is where a deprecated field shows up. It reads
+ * through `$ref`s, `allOf` and the items of an array, and ignores anything
+ * deeper.
+ */
+function deprecatedResponseProps(
+  schema: JsonSchema | undefined,
+  doc: OpenApiDocument
+): string {
+  const resolved = resolveSchema(schema, doc);
+  const object = resolved?.type === "array" ? resolved.items : resolved;
+  const lines = Object.entries(schemaProperties(object, doc))
+    .filter(([, prop]) => (resolveSchema(prop, doc) ?? prop).deprecated)
+    .map(([name, prop]) => {
+      const description = prop.description ? ` — ${prop.description}` : "";
+      return `  - \`${name}\` (deprecated, \`${formatSchemaType(prop)}\`)${description}`;
+    });
   return lines.length > 0 ? `\n${lines.join("\n")}` : "";
 }
 
@@ -140,7 +202,8 @@ function formatOperationBody(
   method: string,
   pathOrName: string,
   operation: OpenApiOperation,
-  kind: "operation" | "webhook"
+  kind: "operation" | "webhook",
+  doc: OpenApiDocument
 ): string {
   const verb = method.toUpperCase();
   const target =
@@ -177,7 +240,7 @@ function formatOperationBody(
     const description = response.description
       ? ` — ${response.description}`
       : "";
-    return `- \`${status}\`${type}${description}`;
+    return `- \`${status}\`${type}${description}${deprecatedResponseProps(schema, doc)}`;
   });
   if (responseLines.length > 0) {
     lines.push(`\n**Responses**\n\n${responseLines.join("\n")}`);
@@ -204,7 +267,7 @@ export function openApiPageMarkdown(page: OpenApiPageLike): string {
       continue;
     }
     sections.push(
-      formatOperationBody(item.method, item.path, operation, "operation")
+      formatOperationBody(item.method, item.path, operation, "operation", doc)
     );
   }
 
@@ -214,7 +277,7 @@ export function openApiPageMarkdown(page: OpenApiPageLike): string {
       continue;
     }
     sections.push(
-      formatOperationBody(item.method, item.name, operation, "webhook")
+      formatOperationBody(item.method, item.name, operation, "webhook", doc)
     );
   }
 

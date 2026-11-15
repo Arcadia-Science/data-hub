@@ -26,13 +26,10 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useViewerTimeZone } from "@/components/viewer-time-zone-provider";
-import {
-  getWatcherOnlineStatus,
-  type WatcherOnlineStatus,
-} from "@/components/watchers/watcher-online-status";
 import { WatcherStatusBadge } from "@/components/watchers/watcher-status-badge";
 import type { InstrumentDetail } from "@/lib/api/instruments";
 import { formatDate } from "@/lib/date";
+import { toLegacyWatcherStatus } from "@/lib/instruments/connection";
 
 export function InstrumentHeaderSkeleton() {
   return (
@@ -62,20 +59,15 @@ export function InstrumentHeaderSkeleton() {
 // For `pending`/`inactive` instruments the lifecycle badge pre-empts the
 // watcher badge, since "No Watcher"/"Offline" would read as a fault rather than
 // an intentional decommission.
-function renderStatusBadge(
-  instrument: InstrumentDetail,
-  watcherStatus: WatcherOnlineStatus
-) {
+function renderStatusBadge(instrument: InstrumentDetail) {
   if (instrument.status === "pending" || instrument.status === "inactive") {
     return <InstrumentStatusBadge status={instrument.status} />;
   }
 
   return (
     <WatcherStatusBadge
-      lastOnlineAt={instrument.lastWatcherHeartbeatAt}
-      status={
-        instrument.activeWatcherDeregistered ? "deregistered" : watcherStatus
-      }
+      lastOnlineAt={instrument.watcher?.lastHeartbeatAt ?? null}
+      status={toLegacyWatcherStatus(instrument.connection)}
     />
   );
 }
@@ -134,8 +126,7 @@ export function InstrumentHeader({
   };
 }) {
   const timeZone = useViewerTimeZone();
-  const watcherStatus = getWatcherOnlineStatus(instrument);
-  const watchDirectory = instrument.activeWatcherWatchDirectory;
+  const watchDirectory = instrument.watcher?.watchDirectory ?? null;
   const retiredAt =
     instrument.status === "inactive" ? instrument.retiredAt : null;
 
@@ -171,7 +162,7 @@ export function InstrumentHeader({
             <h1 className="font-semibold text-2xl tracking-tight">
               {instrument.displayName}
             </h1>
-            {renderStatusBadge(instrument, watcherStatus)}
+            {renderStatusBadge(instrument)}
           </div>
 
           {watchDirectory || retiredAt ? (
@@ -179,7 +170,7 @@ export function InstrumentHeader({
               {watchDirectory ? (
                 <>
                   <WatchDirectory
-                    hostname={instrument.activeWatcherHostname}
+                    hostname={instrument.watcher?.hostname ?? null}
                     path={watchDirectory}
                   />
                   {instrument.filePatterns.length > 0 ? (

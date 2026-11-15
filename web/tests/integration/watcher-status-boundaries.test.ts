@@ -2,8 +2,8 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   computeEffectiveStatus,
   type EffectiveStatus,
-  effectiveStatusCondition,
-} from "@/lib/api/watchers";
+} from "@/lib/api/watcher-status";
+import { effectiveStatusCondition } from "@/lib/api/watchers";
 import { instruments, watchers } from "@/lib/db/schema";
 import { closeTestDb, getTestDb, resetDb } from "@/tests/integration/helpers";
 

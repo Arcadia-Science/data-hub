@@ -39,3 +39,71 @@ export function isRestartStopReason(
 // watcher that died: the sweep cancels its requests if the watcher doesn't
 // come back. The same window decides when such a watcher reads Unresponsive.
 export const UPLOAD_REQUEST_REVERT_GRACE_MS = 15 * 60 * 1000;
+
+// A `watching` or `waiting` watcher reads `stale` once its last heartbeat is
+// older than this, even though the database still says `watching`. The SQL
+// mirror, `effectiveStatusCondition` in `lib/api/watchers.ts`, uses it too.
+export const STALE_THRESHOLD_MS = 5 * 60 * 1000;
+
+export interface WatcherLike {
+  /** Set when the watcher was deregistered. */
+  deletedAt: Date | null;
+  lastHeartbeatAt: Date | null;
+  status: string;
+  /** Why the watcher is `waiting`, or why it `stopped` for a restart. */
+  statusReason: string | null;
+}
+
+export const EFFECTIVE_STATUSES = [
+  "registered",
+  "watching",
+  "waiting",
+  "stopped",
+  "stale",
+] as const;
+
+export type EffectiveStatus = (typeof EFFECTIVE_STATUSES)[number];
+
+/**
+ * Derives the display status from stored status, stop reason, and heartbeat
+ * recency. "stale" is never stored in the DB: it's a virtual status computed
+ * here, and `effectiveStatusCondition` in `lib/api/watchers.ts` must agree with it.
+ *
+ * - Deregistered: always `stopped`. It can no longer send heartbeats, so
+ *   staleness is moot, whatever it reported last.
+ * - `registered`: no heartbeat yet, so it is exempt from staleness checks.
+ * - `watching` and `waiting`: `stale` once the last heartbeat is more than
+ *   `STALE_THRESHOLD_MS` old, or missing.
+ * - `stopped` for a restart (see `RESTART_STOP_REASONS`): the watcher is
+ *   expected back, so it reads `stale` once the last heartbeat is more than
+ *   `UPLOAD_REQUEST_REVERT_GRACE_MS` old, or missing.
+ * - Any other `stopped`: always `stopped`. The watcher said it was stopping,
+ *   so it can't send another heartbeat and its silence is not a fault.
+ */
+export function computeEffectiveStatus(
+  watcher: WatcherLike,
+  now: Date = new Date()
+): EffectiveStatus {
+  if (watcher.deletedAt) {
+    return "stopped";
+  }
+
+  if (watcher.status === "registered") {
+    return "registered";
+  }
+
+  const age = watcher.lastHeartbeatAt
+    ? now.getTime() - watcher.lastHeartbeatAt.getTime()
+    : Number.POSITIVE_INFINITY;
+
+  if (watcher.status === "stopped") {
+    const expectedBack = isRestartStopReason(watcher.statusReason);
+    return expectedBack && age > UPLOAD_REQUEST_REVERT_GRACE_MS
+      ? "stale"
+      : "stopped";
+  }
+
+  return age > STALE_THRESHOLD_MS
+    ? "stale"
+    : (watcher.status as EffectiveStatus);
+}

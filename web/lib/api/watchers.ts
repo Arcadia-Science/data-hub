@@ -26,16 +26,22 @@ import {
   NOT_FOUND,
   WATCHER_DEREGISTERED,
 } from "@/lib/api/errors";
-import { instrumentHasOnlineWatcher } from "@/lib/api/instruments";
+import { getInstrumentConnectionState } from "@/lib/api/instrument-watchers";
 import { touchRuns } from "@/lib/api/touch-runs";
 import {
   decideWatcherBinding,
   isBoundToOtherToken,
 } from "@/lib/api/watcher-binding";
-import type { ConfigRevisionStatus } from "@/lib/api/watcher-config/revisions";
 import {
-  isRestartStopReason,
+  type ConfigRevisionStatus,
+  currentRevisionStatusSql,
+  pcEditAwaitingRestartSql,
+} from "@/lib/api/watcher-config/revisions";
+import {
+  computeEffectiveStatus,
+  type EffectiveStatus,
   RESTART_STOP_REASONS,
+  STALE_THRESHOLD_MS,
   UPLOAD_REQUEST_REVERT_GRACE_MS,
 } from "@/lib/api/watcher-status";
 import { type DbExecutor, db } from "@/lib/db";
@@ -45,14 +51,11 @@ import {
   instruments,
   personalAccessTokens,
   users,
-  watcherConfigRevisions,
   watcherEvents,
   watcherEventTypeEnum,
   watcherHeartbeats,
   watchers,
 } from "@/lib/db/schema";
-
-export const STALE_THRESHOLD_MS = 5 * 60 * 1000;
 
 export async function findActiveWatcher(watcherId: string) {
   const [watcher] = await db
@@ -321,7 +324,15 @@ export async function revertUploadQueueIfWatcherOffline(
   },
   executor: DbExecutor = db
 ): Promise<number> {
-  if (await instrumentHasOnlineWatcher(opts.instrumentId, executor)) {
+  // Only an online watcher drains the queue, as before. A restarting watcher
+  // is expected back and keeps its queue, but whether this revert should wait
+  // for it is a separate decision from accepting new upload requests while it
+  // restarts. TODO(run-page uploads): decide it with `prepareUploadTarget`.
+  const connectionState = await getInstrumentConnectionState(
+    opts.instrumentId,
+    executor
+  );
+  if (connectionState === "online") {
     return 0;
   }
 
@@ -416,66 +427,6 @@ export async function deregisterInstrumentWatchers(
   return active.length;
 }
 
-interface WatcherLike {
-  /** Set when the watcher was deregistered. */
-  deletedAt: Date | null;
-  lastHeartbeatAt: Date | null;
-  status: string;
-  /** Why the watcher is `waiting`, or why it `stopped` for a restart. */
-  statusReason: string | null;
-}
-
-export type EffectiveStatus =
-  | "registered"
-  | "watching"
-  | "stopped"
-  | "waiting"
-  | "stale";
-
-/**
- * Derives the display status from stored status, stop reason, and heartbeat
- * recency. "stale" is never stored in the DB: it's a virtual status computed
- * here, and `effectiveStatusCondition` below must agree with it.
- *
- * - Deregistered: always `stopped`. It can no longer send heartbeats, so
- *   staleness is moot, whatever it reported last.
- * - `registered`: no heartbeat yet, so it is exempt from staleness checks.
- * - `watching` and `waiting`: `stale` once the last heartbeat is more than
- *   `STALE_THRESHOLD_MS` old, or missing.
- * - `stopped` for a restart (see `RESTART_STOP_REASONS`): the watcher is
- *   expected back, so it reads `stale` once the last heartbeat is more than
- *   `UPLOAD_REQUEST_REVERT_GRACE_MS` old, or missing.
- * - Any other `stopped`: always `stopped`. The watcher said it was stopping,
- *   so it can't send another heartbeat and its silence is not a fault.
- */
-export function computeEffectiveStatus(
-  watcher: WatcherLike,
-  now: Date = new Date()
-): EffectiveStatus {
-  if (watcher.deletedAt) {
-    return "stopped";
-  }
-
-  if (watcher.status === "registered") {
-    return "registered";
-  }
-
-  const age = watcher.lastHeartbeatAt
-    ? now.getTime() - watcher.lastHeartbeatAt.getTime()
-    : Number.POSITIVE_INFINITY;
-
-  if (watcher.status === "stopped") {
-    const expectedBack = isRestartStopReason(watcher.statusReason);
-    return expectedBack && age > UPLOAD_REQUEST_REVERT_GRACE_MS
-      ? "stale"
-      : "stopped";
-  }
-
-  return age > STALE_THRESHOLD_MS
-    ? "stale"
-    : (watcher.status as EffectiveStatus);
-}
-
 /**
  * The SQL condition that selects the watchers whose `computeEffectiveStatus`
  * is `status`, for list filters. It uses the same thresholds as that function,
@@ -549,33 +500,6 @@ export interface WatcherListItem {
   watcherVersion: string | null;
 }
 
-// Status of the watcher's current config revision: the newest one that
-// wasn't superseded. A pending change can sit below a higher superseded PC
-// edit (when Data Hub wins an offline conflict), so this skips superseded
-// rows rather than reading the highest revision.
-const currentRevisionStatus = sql<ConfigRevisionStatus | null>`(
-  select ${watcherConfigRevisions.status}
-  from ${watcherConfigRevisions}
-  where ${watcherConfigRevisions.watcherId} = ${watchers.id}
-    and ${watcherConfigRevisions.status} <> 'superseded'
-  order by ${watcherConfigRevisions.revision} desc
-  limit 1
-)`;
-
-// Same rule as `pickRestartPending`: the newest pending or applied revision
-// is an applied PC edit newer than the revision the watcher reports running.
-// False when the watcher hasn't reported one.
-const pcEditAwaitingRestart = sql<boolean>`coalesce((
-  select ${watcherConfigRevisions.status} = 'applied'
-    and ${watcherConfigRevisions.source} = 'pc'
-    and ${watcherConfigRevisions.revision} > ${watchers.appliedConfigRevision}
-  from ${watcherConfigRevisions}
-  where ${watcherConfigRevisions.watcherId} = ${watchers.id}
-    and ${watcherConfigRevisions.status} in ('pending', 'applied')
-  order by ${watcherConfigRevisions.revision} desc
-  limit 1
-), false)`;
-
 // Fetches all watchers (optionally including soft-deleted ones) with their
 // parent instrument's display name. The total count is small enough that we
 // fetch everything and partition active vs deregistered in JS on the server.
@@ -595,8 +519,8 @@ export async function getWatcherList(opts: {
       statusReason: watchers.statusReason,
       configRevision: watchers.configRevision,
       appliedConfigRevision: watchers.appliedConfigRevision,
-      configRevisionStatus: currentRevisionStatus,
-      pcEditAwaitingRestart,
+      configRevisionStatus: currentRevisionStatusSql,
+      pcEditAwaitingRestart: pcEditAwaitingRestartSql,
       lastHeartbeatAt: watchers.lastHeartbeatAt,
       createdAt: watchers.createdAt,
       deletedAt: watchers.deletedAt,
@@ -654,8 +578,8 @@ export const getWatcherById = cache(async function getWatcherById(
       statusReason: watchers.statusReason,
       configRevision: watchers.configRevision,
       appliedConfigRevision: watchers.appliedConfigRevision,
-      configRevisionStatus: currentRevisionStatus,
-      pcEditAwaitingRestart,
+      configRevisionStatus: currentRevisionStatusSql,
+      pcEditAwaitingRestart: pcEditAwaitingRestartSql,
       lastHeartbeatAt: watchers.lastHeartbeatAt,
       configYaml: watchers.configYaml,
       configChecksum: watchers.configChecksum,

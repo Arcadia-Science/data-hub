@@ -235,9 +235,7 @@ async function InstrumentHeaderSection({
 
   // Admins get an "Edit watcher config" action for the live watcher.
   const watcherConfig = await loadWatcherConfigForAdmin(
-    isAdmin && !instrument.activeWatcherDeregistered
-      ? instrument.activeWatcherId
-      : null
+    isAdmin ? (instrument.watcher?.id ?? null) : null
   );
 
   return (

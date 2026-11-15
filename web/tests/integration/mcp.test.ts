@@ -1,5 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { getInstrumentById } from "@/lib/api/instruments";
 // biome-ignore lint/performance/noNamespaceImport: integration tests need the full schema module for Db typing
 import * as schema from "@/lib/db/schema";
 import {
@@ -46,6 +47,8 @@ async function parseSseResponse(res: Response) {
 
 describe("MCP Server (HTTP)", () => {
   let token: string;
+  // A personal access token, for the REST calls that cross-check the tools.
+  let restToken: string;
   let userId: string;
   let tokenB: string;
   let adminAId: string;
@@ -58,7 +61,7 @@ describe("MCP Server (HTTP)", () => {
 
   beforeAll(async () => {
     await resetDb();
-    ({ userId } = await seedTestUser());
+    ({ userId, token: restToken } = await seedTestUser());
     const { userId: userIdB } = await seedTestUser();
     token = await getMcpAccessToken(userId);
     tokenB = await getMcpAccessToken(userIdB);
@@ -224,6 +227,146 @@ describe("MCP Server (HTTP)", () => {
     expect(payload.instruments).toEqual(
       expect.arrayContaining([expect.objectContaining({ id: instrumentId })])
     );
+  });
+
+  // The watcher, connection and past watcher count come from one reader, so the
+  // web app's server function, the REST API and the MCP tools return the same
+  // answer for the same instrument. The deprecated fields keep their values.
+  it("get_instrument and list_instruments agree with REST and the web app on the watcher", async () => {
+    const db = getTestDb();
+    const agreeId = "mcp-agree-instrument";
+    const sharedId = "mcp-agree-shared";
+    await db.insert(schema.instruments).values([
+      { id: agreeId, displayName: "Agree Instrument", status: "active" },
+      { id: sharedId, displayName: "Agree Shared", status: "active" },
+    ]);
+    const yaml = [
+      "instrument:",
+      "  watch_directory: D:\\Exports",
+      "  file_patterns:",
+      '    - "*.zz"',
+      '    - "*.aa"',
+      "  upload_mode: manual",
+      "",
+    ].join("\n");
+    const [live] = await db
+      .insert(schema.watchers)
+      .values([
+        {
+          instrumentId: agreeId,
+          hostname: "Agree-PC",
+          osInfo: "Windows 11",
+          watcherVersion: "1.4.2",
+          status: "stopped",
+          statusReason: "auto_update",
+          lastHeartbeatAt: new Date(Date.now() - 60_000),
+          configYaml: yaml,
+        },
+        {
+          instrumentId: agreeId,
+          hostname: "old-pc",
+          status: "stopped",
+          deletedAt: new Date(Date.now() - 24 * 60 * 60_000),
+        },
+        {
+          instrumentId: sharedId,
+          hostname: "agree-pc",
+          status: "watching",
+          lastHeartbeatAt: new Date(),
+        },
+      ])
+      .returning({ id: schema.watchers.id });
+
+    const web = await getInstrumentById(agreeId);
+    const webWatcher = JSON.parse(JSON.stringify(web?.watcher));
+    expect(webWatcher).toMatchObject({
+      id: live.id,
+      status: "stopped",
+      statusReason: "auto_update",
+      uploadMode: "manual",
+      filePatterns: ["*.zz", "*.aa"],
+      sharedComputerWith: [
+        { instrumentId: sharedId, displayName: "Agree Shared" },
+      ],
+    });
+    expect(web?.connection).toEqual({ state: "restarting", reason: null });
+    expect(web?.pastWatcherCount).toBe(1);
+
+    // MCP get_instrument.
+    const mcpDetail = JSON.parse(
+      (await callTool("get_instrument", { instrumentId: agreeId })).content[0]
+        .text
+    );
+    expect(mcpDetail.watcher).toEqual(webWatcher);
+    expect(mcpDetail.connection).toEqual(web?.connection);
+    expect(mcpDetail.pastWatcherCount).toBe(web?.pastWatcherCount);
+
+    // MCP list_instruments.
+    const mcpList = JSON.parse(
+      (await callTool("list_instruments", {})).content[0].text
+    ) as { instruments: Array<{ id: string }> };
+    const mcpRow = mcpList.instruments.find((i) => i.id === agreeId) as
+      | Record<string, unknown>
+      | undefined;
+    expect(mcpRow?.watcher).toEqual(webWatcher);
+    expect(mcpRow?.connection).toEqual(web?.connection);
+    expect(mcpRow?.pastWatcherCount).toBe(1);
+
+    // REST, in snake_case.
+    const rest = await (
+      await api(`/api/v1/instruments/${agreeId}`, { token: restToken })
+    ).json();
+    const restList = (await (
+      await api("/api/v1/instruments", { token: restToken })
+    ).json()) as Array<{ id: string }>;
+    for (const row of [rest, restList.find((i) => i.id === agreeId)]) {
+      const r = row as {
+        connection: unknown;
+        past_watcher_count: number;
+        watcher: unknown;
+      };
+      expect(r.connection).toEqual(mcpDetail.connection);
+      expect(r.past_watcher_count).toBe(mcpDetail.pastWatcherCount);
+      expect(r.watcher).toEqual({
+        id: mcpDetail.watcher.id,
+        hostname: mcpDetail.watcher.hostname,
+        os_info: mcpDetail.watcher.osInfo,
+        version: mcpDetail.watcher.version,
+        status: mcpDetail.watcher.status,
+        status_reason: mcpDetail.watcher.statusReason,
+        last_heartbeat_at: mcpDetail.watcher.lastHeartbeatAt,
+        watch_directory: mcpDetail.watcher.watchDirectory,
+        file_patterns: mcpDetail.watcher.filePatterns,
+        upload_mode: mcpDetail.watcher.uploadMode,
+        config_state: mcpDetail.watcher.configState,
+        shared_computer_with: mcpDetail.watcher.sharedComputerWith.map(
+          (other: { displayName: string; instrumentId: string }) => ({
+            instrument_id: other.instrumentId,
+            display_name: other.displayName,
+          })
+        ),
+      });
+    }
+
+    // The deprecated fields keep their values, filled from the one watcher.
+    expect(mcpDetail).toMatchObject({
+      watcherCount: 1,
+      watchersOnline: 0,
+      watchersOffline: 1,
+      activeWatcherId: live.id,
+      activeWatcherHostname: "Agree-PC",
+      activeWatcherWatchDirectory: "D:\\Exports",
+      activeWatcherDeregistered: false,
+      filePatterns: ["*.aa", "*.zz"],
+    });
+    expect(mcpRow).toMatchObject({
+      watcherCount: 1,
+      watchersOnline: 0,
+      hasDeregisteredWatcher: true,
+      activeWatcherId: live.id,
+      filePatterns: ["*.aa", "*.zz"],
+    });
+    expect(rest.watcher_count).toBe(1);
   });
 
   // ---- Docs tools (end-to-end) ---------------------------------------------

@@ -243,8 +243,10 @@ export async function keepWatchersOnline(world: World): Promise<void> {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-// The seed's one token has the old full-access scope and a name that looks
-// like test data. Replace it with the tokens an admin would actually have.
+// The seed's admin token has the old full-access scope and a name that looks
+// like test data. Replace it with the tokens an admin would actually have. Other
+// tokens the seed created for the admin, such as a pending watcher's, stay as
+// they are.
 export async function addSampleTokens(world: World): Promise<void> {
   const now = Date.now();
   const preset = (id: string) =>
@@ -257,7 +259,9 @@ export async function addSampleTokens(world: World): Promise<void> {
       scopes: preset("lambda"),
       createdAt: new Date(now - 60 * DAY_MS),
     })
-    .where(eq(schema.personalAccessTokens.createdBy, world.admin.userId));
+    .where(
+      eq(schema.personalAccessTokens.tokenHash, hashToken(world.admin.token))
+    );
 
   const samples = [
     {

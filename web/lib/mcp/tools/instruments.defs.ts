@@ -10,7 +10,7 @@ export const listInstrumentsTool = {
   name: "list_instruments",
   title: "List Instruments",
   description:
-    "List all registered lab instruments with run counts, watcher status, and file patterns. Optionally filter by status.",
+    "List all registered lab instruments with run counts, the instrument's connection (whether new files can reach Data Hub, and why not), its one active watcher (host, folder, file patterns, upload mode, settings state), and how many past watchers it has had. Optionally filter by status. watcherCount, watchersOnline, hasDeregisteredWatcher, lastWatcherHeartbeatAt, activeWatcherId and the top-level filePatterns are deprecated: use watcher and connection.",
   group: "instruments",
   scope: "instruments:read",
   inputSchema: {
@@ -27,7 +27,7 @@ export const getInstrumentTool = {
   name: "get_instrument",
   title: "Get Instrument",
   description:
-    "Get detailed information about a specific instrument, including watcher online/offline counts and file patterns.",
+    "Get detailed information about a specific instrument: its connection (online, restarting, connecting or offline, with the reason when offline), its one active watcher (host, OS, version, folder, file patterns, upload mode, settings state, other instruments on the same computer), and how many past watchers it has had. watcherCount, watchersOnline, watchersOffline, lastWatcherHeartbeatAt, the activeWatcher* fields and the top-level filePatterns are deprecated: use watcher and connection.",
   group: "instruments",
   scope: "instruments:read",
   inputSchema: {
