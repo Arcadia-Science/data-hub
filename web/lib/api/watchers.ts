@@ -1,6 +1,5 @@
 import {
   and,
-  asc,
   count,
   desc,
   eq,
@@ -8,6 +7,7 @@ import {
   inArray,
   isNotNull,
   isNull,
+  lt,
   or,
   type SQL,
   sql,
@@ -26,16 +26,22 @@ import {
   NOT_FOUND,
   WATCHER_DEREGISTERED,
 } from "@/lib/api/errors";
-import { instrumentHasOnlineWatcher } from "@/lib/api/instruments";
+import { getInstrumentConnectionState } from "@/lib/api/instrument-watchers";
 import { touchRuns } from "@/lib/api/touch-runs";
 import {
   decideWatcherBinding,
   isBoundToOtherToken,
 } from "@/lib/api/watcher-binding";
-import type { ConfigRevisionStatus } from "@/lib/api/watcher-config/revisions";
 import {
-  isRestartStopReason,
+  type ConfigRevisionStatus,
+  currentRevisionStatusSql,
+  pcEditAwaitingRestartSql,
+} from "@/lib/api/watcher-config/revisions";
+import {
+  computeEffectiveStatus,
+  type EffectiveStatus,
   RESTART_STOP_REASONS,
+  STALE_THRESHOLD_MS,
   UPLOAD_REQUEST_REVERT_GRACE_MS,
 } from "@/lib/api/watcher-status";
 import { type DbExecutor, db } from "@/lib/db";
@@ -45,14 +51,11 @@ import {
   instruments,
   personalAccessTokens,
   users,
-  watcherConfigRevisions,
   watcherEvents,
   watcherEventTypeEnum,
   watcherHeartbeats,
   watchers,
 } from "@/lib/db/schema";
-
-export const STALE_THRESHOLD_MS = 5 * 60 * 1000;
 
 export async function findActiveWatcher(watcherId: string) {
   const [watcher] = await db
@@ -321,7 +324,16 @@ export async function revertUploadQueueIfWatcherOffline(
   },
   executor: DbExecutor = db
 ): Promise<number> {
-  if (await instrumentHasOnlineWatcher(opts.instrumentId, executor)) {
+  // Only an online watcher drains the queue, so any other state reverts. The
+  // callers decide when to ask: the heartbeat route skips a stop for a restart,
+  // and the sweep waits out `UPLOAD_REQUEST_REVERT_GRACE_MS`. That keeps an
+  // upload request accepted while the watcher restarts queued for it until
+  // then.
+  const connectionState = await getInstrumentConnectionState(
+    opts.instrumentId,
+    executor
+  );
+  if (connectionState === "online") {
     return 0;
   }
 
@@ -416,66 +428,6 @@ export async function deregisterInstrumentWatchers(
   return active.length;
 }
 
-interface WatcherLike {
-  /** Set when the watcher was deregistered. */
-  deletedAt: Date | null;
-  lastHeartbeatAt: Date | null;
-  status: string;
-  /** Why the watcher is `waiting`, or why it `stopped` for a restart. */
-  statusReason: string | null;
-}
-
-export type EffectiveStatus =
-  | "registered"
-  | "watching"
-  | "stopped"
-  | "waiting"
-  | "stale";
-
-/**
- * Derives the display status from stored status, stop reason, and heartbeat
- * recency. "stale" is never stored in the DB: it's a virtual status computed
- * here, and `effectiveStatusCondition` below must agree with it.
- *
- * - Deregistered: always `stopped`. It can no longer send heartbeats, so
- *   staleness is moot, whatever it reported last.
- * - `registered`: no heartbeat yet, so it is exempt from staleness checks.
- * - `watching` and `waiting`: `stale` once the last heartbeat is more than
- *   `STALE_THRESHOLD_MS` old, or missing.
- * - `stopped` for a restart (see `RESTART_STOP_REASONS`): the watcher is
- *   expected back, so it reads `stale` once the last heartbeat is more than
- *   `UPLOAD_REQUEST_REVERT_GRACE_MS` old, or missing.
- * - Any other `stopped`: always `stopped`. The watcher said it was stopping,
- *   so it can't send another heartbeat and its silence is not a fault.
- */
-export function computeEffectiveStatus(
-  watcher: WatcherLike,
-  now: Date = new Date()
-): EffectiveStatus {
-  if (watcher.deletedAt) {
-    return "stopped";
-  }
-
-  if (watcher.status === "registered") {
-    return "registered";
-  }
-
-  const age = watcher.lastHeartbeatAt
-    ? now.getTime() - watcher.lastHeartbeatAt.getTime()
-    : Number.POSITIVE_INFINITY;
-
-  if (watcher.status === "stopped") {
-    const expectedBack = isRestartStopReason(watcher.statusReason);
-    return expectedBack && age > UPLOAD_REQUEST_REVERT_GRACE_MS
-      ? "stale"
-      : "stopped";
-  }
-
-  return age > STALE_THRESHOLD_MS
-    ? "stale"
-    : (watcher.status as EffectiveStatus);
-}
-
 /**
  * The SQL condition that selects the watchers whose `computeEffectiveStatus`
  * is `status`, for list filters. It uses the same thresholds as that function,
@@ -549,64 +501,42 @@ export interface WatcherListItem {
   watcherVersion: string | null;
 }
 
-// Status of the watcher's current config revision: the newest one that
-// wasn't superseded. A pending change can sit below a higher superseded PC
-// edit (when Data Hub wins an offline conflict), so this skips superseded
-// rows rather than reading the highest revision.
-const currentRevisionStatus = sql<ConfigRevisionStatus | null>`(
-  select ${watcherConfigRevisions.status}
-  from ${watcherConfigRevisions}
-  where ${watcherConfigRevisions.watcherId} = ${watchers.id}
-    and ${watcherConfigRevisions.status} <> 'superseded'
-  order by ${watcherConfigRevisions.revision} desc
-  limit 1
-)`;
+/**
+ * The columns of a list row. `toWatcherListItem` maps a row selected with them.
+ * Every list of watchers (the MCP tools and Settings › Watchers) builds its
+ * rows from these two, so they can't drift apart.
+ */
+export const watcherListColumns = {
+  id: watchers.id,
+  instrumentId: watchers.instrumentId,
+  instrumentDisplayName: instruments.displayName,
+  hostname: watchers.hostname,
+  watcherVersion: watchers.watcherVersion,
+  status: watchers.status,
+  statusReason: watchers.statusReason,
+  configRevision: watchers.configRevision,
+  appliedConfigRevision: watchers.appliedConfigRevision,
+  configRevisionStatus: currentRevisionStatusSql,
+  pcEditAwaitingRestart: pcEditAwaitingRestartSql,
+  lastHeartbeatAt: watchers.lastHeartbeatAt,
+  createdAt: watchers.createdAt,
+  deletedAt: watchers.deletedAt,
+};
 
-// Same rule as `pickRestartPending`: the newest pending or applied revision
-// is an applied PC edit newer than the revision the watcher reports running.
-// False when the watcher hasn't reported one.
-const pcEditAwaitingRestart = sql<boolean>`coalesce((
-  select ${watcherConfigRevisions.status} = 'applied'
-    and ${watcherConfigRevisions.source} = 'pc'
-    and ${watcherConfigRevisions.revision} > ${watchers.appliedConfigRevision}
-  from ${watcherConfigRevisions}
-  where ${watcherConfigRevisions.watcherId} = ${watchers.id}
-    and ${watcherConfigRevisions.status} in ('pending', 'applied')
-  order by ${watcherConfigRevisions.revision} desc
-  limit 1
-), false)`;
-
-// Fetches all watchers (optionally including soft-deleted ones) with their
-// parent instrument's display name. The total count is small enough that we
-// fetch everything and partition active vs deregistered in JS on the server.
-export async function getWatcherList(opts: {
-  includeDeleted: boolean;
-}): Promise<WatcherListItem[]> {
-  const conditions = opts.includeDeleted ? [] : [isNull(watchers.deletedAt)];
-
-  const rows = await db
-    .select({
-      id: watchers.id,
-      instrumentId: watchers.instrumentId,
-      instrumentDisplayName: instruments.displayName,
-      hostname: watchers.hostname,
-      watcherVersion: watchers.watcherVersion,
-      status: watchers.status,
-      statusReason: watchers.statusReason,
-      configRevision: watchers.configRevision,
-      appliedConfigRevision: watchers.appliedConfigRevision,
-      configRevisionStatus: currentRevisionStatus,
-      pcEditAwaitingRestart,
-      lastHeartbeatAt: watchers.lastHeartbeatAt,
-      createdAt: watchers.createdAt,
-      deletedAt: watchers.deletedAt,
-    })
+const selectWatcherListRows = () =>
+  db
+    .select(watcherListColumns)
     .from(watchers)
-    .leftJoin(instruments, eq(instruments.id, watchers.instrumentId))
-    .where(conditions.length > 0 ? and(...conditions) : undefined)
-    .orderBy(desc(watchers.createdAt));
+    .leftJoin(instruments, eq(instruments.id, watchers.instrumentId));
 
-  return rows.map((row) => ({
+/** A row selected with `watcherListColumns`. */
+export type WatcherListRow = Awaited<
+  ReturnType<typeof selectWatcherListRows>
+>[number];
+
+/** Maps a row selected with `watcherListColumns` to a list item. */
+export function toWatcherListItem(row: WatcherListRow): WatcherListItem {
+  return {
     id: row.id,
     instrumentId: row.instrumentId,
     instrumentDisplayName: row.instrumentDisplayName,
@@ -621,7 +551,22 @@ export async function getWatcherList(opts: {
     lastHeartbeatAt: row.lastHeartbeatAt,
     createdAt: row.createdAt,
     deletedAt: row.deletedAt,
-  }));
+  };
+}
+
+// Fetches all watchers (optionally including soft-deleted ones) with their
+// parent instrument's display name. The total count is small enough that we
+// fetch everything and partition active vs deregistered in JS on the server.
+export async function getWatcherList(opts: {
+  includeDeleted: boolean;
+}): Promise<WatcherListItem[]> {
+  const conditions = opts.includeDeleted ? [] : [isNull(watchers.deletedAt)];
+
+  const rows = await selectWatcherListRows()
+    .where(conditions.length > 0 ? and(...conditions) : undefined)
+    .orderBy(desc(watchers.createdAt));
+
+  return rows.map(toWatcherListItem);
 }
 
 // ---------------------------------------------------------------------------
@@ -654,8 +599,8 @@ export const getWatcherById = cache(async function getWatcherById(
       statusReason: watchers.statusReason,
       configRevision: watchers.configRevision,
       appliedConfigRevision: watchers.appliedConfigRevision,
-      configRevisionStatus: currentRevisionStatus,
-      pcEditAwaitingRestart,
+      configRevisionStatus: currentRevisionStatusSql,
+      pcEditAwaitingRestart: pcEditAwaitingRestartSql,
       lastHeartbeatAt: watchers.lastHeartbeatAt,
       configYaml: watchers.configYaml,
       configChecksum: watchers.configChecksum,
@@ -786,34 +731,6 @@ export async function getWatcherHeartbeats(
   return { rows, total };
 }
 
-export async function getAllWatcherHeartbeats(
-  watcherId: string,
-  opts: { since?: Date } = {}
-): Promise<WatcherHeartbeatRow[]> {
-  const since = opts.since ?? new Date(Date.now() - DEFAULT_LOOKBACK_MS);
-
-  return await db
-    .select({
-      id: watcherHeartbeats.id,
-      timestamp: watcherHeartbeats.timestamp,
-      status: watcherHeartbeats.status,
-      uploadMode: watcherHeartbeats.uploadMode,
-      filesUploadedSinceLast: watcherHeartbeats.filesUploadedSinceLast,
-      runsReportedSinceLast: watcherHeartbeats.runsReportedSinceLast,
-      errorsSinceLast: watcherHeartbeats.errorsSinceLast,
-      uptimeSeconds: watcherHeartbeats.uptimeSeconds,
-    })
-    .from(watcherHeartbeats)
-    .where(
-      and(
-        eq(watcherHeartbeats.watcherId, watcherId),
-        gte(watcherHeartbeats.timestamp, since)
-      )
-    )
-    .orderBy(asc(watcherHeartbeats.timestamp))
-    .limit(5000);
-}
-
 // ---------------------------------------------------------------------------
 // Events
 // ---------------------------------------------------------------------------
@@ -830,7 +747,14 @@ export async function getWatcherEvents(
   watcherId: string,
   opts: {
     since?: Date;
+    /** Exclusive: events at this moment or later are left out. */
+    until?: Date;
     eventTypes?: string[];
+    /**
+     * Leave out the `upload_failed` events of a file the watcher will try again
+     * (`details.will_retry`), which wait for the file and have not failed.
+     */
+    excludeRetries?: boolean;
     page?: number;
     pageSize?: number;
   } = {}
@@ -843,6 +767,9 @@ export async function getWatcherEvents(
     eq(watcherEvents.watcherId, watcherId),
     gte(watcherEvents.timestamp, since),
   ];
+  if (opts.until) {
+    conditions.push(lt(watcherEvents.timestamp, opts.until));
+  }
   // URL params arrive as plain strings — validate against the Drizzle enum
   // values so the inArray query is type-safe and ignores bogus filter values.
   if (opts.eventTypes && opts.eventTypes.length > 0) {
@@ -854,6 +781,12 @@ export async function getWatcherEvents(
     if (filtered.length > 0) {
       conditions.push(inArray(watcherEvents.eventType, filtered));
     }
+  }
+
+  if (opts.excludeRetries) {
+    conditions.push(
+      sql`not (${watcherEvents.eventType} = 'upload_failed' and coalesce(${watcherEvents.details}->>'will_retry', '') = 'true')`
+    );
   }
 
   const [rows, [{ value: total }]] = await Promise.all([

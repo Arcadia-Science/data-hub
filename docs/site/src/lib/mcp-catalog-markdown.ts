@@ -32,10 +32,12 @@ function formatFieldLine(
   qualifier?: string
 ): string {
   const description = field.description ? ` — ${field.description}` : "";
-  const meta = qualifier
-    ? `(${qualifier}, \`${field.type}\`)`
-    : `(\`${field.type}\`)`;
-  return `${indent}- \`${field.name}\` ${meta}${description}`;
+  const parts = [
+    qualifier,
+    `\`${field.type}\``,
+    field.deprecated ? "deprecated" : undefined,
+  ].filter((part) => part !== undefined);
+  return `${indent}- \`${field.name}\` (${parts.join(", ")})${description}`;
 }
 
 function formatNestedFields(

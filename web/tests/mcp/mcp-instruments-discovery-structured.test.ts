@@ -1,6 +1,7 @@
 import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport, McpServer } from "@modelcontextprotocol/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import {
   getMeOutputSchema,
   getSystemStatusOutputSchema,
@@ -13,14 +14,33 @@ import {
 } from "@/lib/mcp/tools/instruments.output";
 
 const { MOCK_LIST_INSTRUMENT, MOCK_INSTRUMENT_DETAIL } = vi.hoisted(() => {
+  const MOCK_WATCHER = {
+    id: "watcher-1",
+    hostname: "lab-pc",
+    osInfo: "Windows 11",
+    version: "1.4.2",
+    status: "watching" as const,
+    statusReason: null,
+    lastHeartbeatAt: new Date("2025-01-01T00:00:00.000Z"),
+    watchDirectory: "C:\\Data",
+    filePatterns: ["*.txt"],
+    uploadMode: "auto" as const,
+    configState: "none" as const,
+    sharedComputerWith: [
+      { instrumentId: "test-gel-doc", displayName: "Test Gel Doc" },
+    ],
+  };
   const MOCK_LIST_INSTRUMENT = {
     id: "test-plate-reader",
     displayName: "Test Plate Reader",
     status: "active" as const,
     instrumentType: "plate_reader" as const,
     filePatterns: ["*.txt"],
+    watcher: MOCK_WATCHER,
+    connection: { state: "online" as const, reason: null },
+    pastWatcherCount: 1,
     activeWatcherId: "watcher-1",
-    hasDeregisteredWatcher: false,
+    hasDeregisteredWatcher: true,
     runCount: 3,
     runsThisWeek: 1,
     lastRunAt: new Date("2025-01-01T00:00:00.000Z"),
@@ -37,6 +57,9 @@ const { MOCK_LIST_INSTRUMENT, MOCK_INSTRUMENT_DETAIL } = vi.hoisted(() => {
       status: MOCK_LIST_INSTRUMENT.status,
       instrumentType: MOCK_LIST_INSTRUMENT.instrumentType,
       filePatterns: MOCK_LIST_INSTRUMENT.filePatterns,
+      watcher: MOCK_WATCHER,
+      connection: MOCK_LIST_INSTRUMENT.connection,
+      pastWatcherCount: MOCK_LIST_INSTRUMENT.pastWatcherCount,
       runCount: MOCK_LIST_INSTRUMENT.runCount,
       watcherCount: MOCK_LIST_INSTRUMENT.watcherCount,
       watchersOnline: MOCK_LIST_INSTRUMENT.watchersOnline,
@@ -85,7 +108,8 @@ vi.mock("@/lib/api/dashboard", () => ({
       runCount: 3,
       lastRunAt: new Date("2025-01-01T00:00:00.000Z"),
       filesPendingUpload: 0,
-      watcherStatus: "online",
+      connection: { state: "restarting", reason: null },
+      watcherStatus: "offline",
     },
   ]),
   getUserById: vi.fn().mockResolvedValue({
@@ -193,6 +217,101 @@ describe("instruments + discovery structuredContent", () => {
     expect(getInstrumentOutputSchema.parse(parsed)).toEqual(parsed);
   });
 
+  it("returns the watcher, connection and past watcher count on both tools", async () => {
+    const list = parseText(
+      (await client.callTool({ name: "list_instruments", arguments: {} }))
+        .content
+    ) as { instruments: Record<string, unknown>[] };
+    const detail = parseText(
+      (
+        await client.callTool({
+          name: "get_instrument",
+          arguments: { instrumentId: "test-plate-reader" },
+        })
+      ).content
+    ) as Record<string, unknown>;
+
+    for (const instrument of [list.instruments[0], detail]) {
+      expect(instrument).toMatchObject({
+        connection: { state: "online", reason: null },
+        pastWatcherCount: 1,
+        watcher: {
+          id: "watcher-1",
+          hostname: "lab-pc",
+          status: "watching",
+          lastHeartbeatAt: "2025-01-01T00:00:00.000Z",
+          watchDirectory: "C:\\Data",
+          filePatterns: ["*.txt"],
+          uploadMode: "auto",
+          configState: "none",
+          sharedComputerWith: [
+            { instrumentId: "test-gel-doc", displayName: "Test Gel Doc" },
+          ],
+        },
+        // The deprecated fields keep their values.
+        watcherCount: 1,
+        watchersOnline: 1,
+        activeWatcherId: "watcher-1",
+      });
+    }
+  });
+
+  it("marks the deprecated instrument fields in the advertised output schema", async () => {
+    interface FieldSchema {
+      deprecated?: boolean;
+      description?: string;
+    }
+    const { tools } = await client.listTools();
+    const fieldsOf = (name: string, path: "detail" | "list") => {
+      const schema = tools.find((t) => t.name === name)?.outputSchema as {
+        properties: Record<string, FieldSchema & { items?: unknown }>;
+      };
+      return path === "list"
+        ? (
+            schema.properties.instruments.items as {
+              properties: Record<string, FieldSchema>;
+            }
+          ).properties
+        : (schema.properties as Record<string, FieldSchema>);
+    };
+
+    const deprecatedOnList = [
+      "watcherCount",
+      "watchersOnline",
+      "hasDeregisteredWatcher",
+      "lastWatcherHeartbeatAt",
+      "activeWatcherId",
+      "filePatterns",
+    ];
+    const deprecatedOnDetail = [
+      "watcherCount",
+      "watchersOnline",
+      "watchersOffline",
+      "lastWatcherHeartbeatAt",
+      "activeWatcherId",
+      "activeWatcherHostname",
+      "activeWatcherWatchDirectory",
+      "activeWatcherDeregistered",
+      "filePatterns",
+    ];
+    for (const [name, path, deprecated] of [
+      ["list_instruments", "list", deprecatedOnList],
+      ["get_instrument", "detail", deprecatedOnDetail],
+    ] as const) {
+      const fields = fieldsOf(name, path);
+      for (const field of deprecated) {
+        expect(fields[field]?.deprecated, `${name}.${field}`).toBe(true);
+        expect(fields[field]?.description, `${name}.${field}`).toMatch(
+          /^Deprecated\./
+        );
+      }
+      for (const field of ["watcher", "connection", "pastWatcherCount"]) {
+        expect(fields[field], `${name}.${field}`).toBeDefined();
+        expect(fields[field]?.deprecated, `${name}.${field}`).toBeUndefined();
+      }
+    }
+  });
+
   it("get_instrument_filter_options structuredContent matches text and schema", async () => {
     const result = await client.callTool({
       name: "get_instrument_filter_options",
@@ -217,6 +336,46 @@ describe("instruments + discovery structuredContent", () => {
     expect(globalSearchOutputSchema.parse(parsed)).toEqual(parsed);
   });
 
+  it("global_search instrument results carry the connection their badge reads", () => {
+    const instrument = {
+      type: "instrument",
+      id: "test-plate-reader",
+      displayName: "Test Plate Reader",
+      status: "active",
+      connection: { state: "offline", reason: "folder_missing" },
+      watcherStatus: "offline",
+      lastWatcherHeartbeatAt: "2025-01-01T00:00:00.000Z",
+      runCount: 3,
+      matchReason: "name",
+      matchedPattern: null,
+    };
+    const result = {
+      runs: [],
+      files: [],
+      instruments: [instrument],
+      users: [],
+      comments: [],
+      counts: {
+        runs: 0,
+        files: 0,
+        instruments: 1,
+        users: 0,
+        comments: 0,
+        total: 1,
+      },
+    };
+    expect(globalSearchOutputSchema.parse(result)).toEqual(result);
+
+    // The output schema is strict, so a result without it would be refused.
+    const { connection: _connection, ...withoutConnection } = instrument;
+    expect(
+      globalSearchOutputSchema.safeParse({
+        ...result,
+        instruments: [withoutConnection],
+      }).success
+    ).toBe(false);
+  });
+
   it("get_system_status structuredContent matches text and schema", async () => {
     const result = await client.callTool({
       name: "get_system_status",
@@ -229,6 +388,47 @@ describe("instruments + discovery structuredContent", () => {
     expect(Array.isArray(parsed.instruments)).toBe(true);
     expect(result.structuredContent).toEqual(parsed);
     expect(getSystemStatusOutputSchema.parse(parsed)).toEqual(parsed);
+    // A restarting instrument reads `restarting`, not just the legacy offline.
+    expect(parsed.instruments[0]).toMatchObject({
+      connection: { state: "restarting", reason: null },
+    });
+  });
+
+  it("get_system_status marks watcherStatus deprecated and requires connection", () => {
+    const summary = {
+      id: "test-plate-reader",
+      displayName: "Test Plate Reader",
+      status: "active",
+      runCount: 3,
+      lastRunAt: null,
+      filesPendingUpload: 0,
+      connection: { state: "online", reason: null },
+      watcherStatus: "online",
+    };
+    expect(
+      getSystemStatusOutputSchema.safeParse({ instruments: [summary] }).success
+    ).toBe(true);
+    const { connection: _connection, ...withoutConnection } = summary;
+    expect(
+      getSystemStatusOutputSchema.safeParse({
+        instruments: [withoutConnection],
+      }).success
+    ).toBe(false);
+
+    const json = z.toJSONSchema(getSystemStatusOutputSchema) as unknown as {
+      properties: {
+        instruments: {
+          items: {
+            properties: {
+              watcherStatus: { deprecated?: boolean; description?: string };
+            };
+          };
+        };
+      };
+    };
+    const field = json.properties.instruments.items.properties.watcherStatus;
+    expect(field.deprecated).toBe(true);
+    expect(field.description).toMatch(/^Deprecated\./);
   });
 
   it("get_me errors without auth (no structuredContent)", async () => {

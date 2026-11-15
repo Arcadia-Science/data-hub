@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { RelativeTime } from "@/components/dashboard/relative-time";
 import { EmptyState } from "@/components/empty-state";
 import { FilePatterns } from "@/components/instruments/file-patterns";
-import { InstrumentStatusBadge } from "@/components/instruments/instrument-status-badge";
+import { InstrumentBadge } from "@/components/instruments/instrument-badge";
 import { InstrumentNotificationSwitch } from "@/components/notifications/instrument-notification-toggle";
 import { RowControl, RowLink } from "@/components/row-link";
 import { TruncatedTooltip } from "@/components/truncated-tooltip";
@@ -16,8 +16,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { getWatcherOnlineStatus } from "@/components/watchers/watcher-online-status";
-import { WatcherStatusBadge } from "@/components/watchers/watcher-status-badge";
 import type { InstrumentListItem } from "@/lib/api/instruments";
 
 /**
@@ -182,75 +180,70 @@ export function InstrumentsTable({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {data.map((row) => {
-            // Active + no live watcher but a deregistered one reads as
-            // "Deregistered" rather than "No Watcher".
-            const watcherStatus =
-              row.watcherCount === 0 && row.hasDeregisteredWatcher
-                ? "deregistered"
-                : getWatcherOnlineStatus(row);
-            return (
-              <TableRow className="relative text-sm" key={row.id}>
-                <TableCell>
-                  <TruncatedTooltip text={row.displayName}>
-                    <RowLink
-                      className="block max-w-72 truncate font-medium"
-                      href={`/instruments/${row.id}`}
-                    >
-                      {row.displayName}
-                    </RowLink>
-                  </TruncatedTooltip>
-                  <span className="mt-0.5 block text-muted-foreground text-xs">
-                    {row.runCount} total {row.runCount === 1 ? "run" : "runs"}
-                  </span>
-                </TableCell>
+          {data.map((row) => (
+            <TableRow className="relative text-sm" key={row.id}>
+              <TableCell>
+                <TruncatedTooltip text={row.displayName}>
+                  <RowLink
+                    className="block max-w-72 truncate font-medium"
+                    href={`/instruments/${row.id}`}
+                  >
+                    {row.displayName}
+                  </RowLink>
+                </TruncatedTooltip>
+                <span className="mt-0.5 block text-muted-foreground text-xs">
+                  {row.runCount} total {row.runCount === 1 ? "run" : "runs"}
+                </span>
+              </TableCell>
+              <TableCell>
+                {/* Its link goes to the watcher page, above the row's link. */}
+                <RowControl>
+                  <InstrumentBadge
+                    connection={row.connection}
+                    instrumentId={row.id}
+                    instrumentName={row.displayName}
+                    status={row.status}
+                    uploadMode={row.watcher?.uploadMode}
+                  />
+                </RowControl>
+              </TableCell>
+              <TableCell>
+                <RowControl>
+                  <FilePatterns
+                    maxVisible={2}
+                    patterns={row.watcher?.filePatterns ?? []}
+                  />
+                </RowControl>
+              </TableCell>
+              <TableCell className="font-mono">{row.runsThisWeek}</TableCell>
+              <TableCell>
+                {row.lastRunAt ? (
+                  <RelativeTime date={row.lastRunAt.toISOString()} />
+                ) : (
+                  <span className="text-muted-foreground">—</span>
+                )}
+              </TableCell>
+              {notifications ? (
                 <TableCell>
                   <RowControl>
-                    {row.status === "active" ? (
-                      <WatcherStatusBadge
-                        lastOnlineAt={row.lastWatcherHeartbeatAt}
-                        status={watcherStatus}
-                      />
-                    ) : (
-                      <InstrumentStatusBadge status={row.status} />
-                    )}
+                    <InstrumentNotificationSwitch
+                      initialEnabled={
+                        notifications.subscriptions.get(row.id) ?? false
+                      }
+                      instrumentId={row.id}
+                      masterMuted={notifications.masterMuted}
+                      size="sm"
+                    />
                   </RowControl>
                 </TableCell>
+              ) : null}
+              {renderRowActions ? (
                 <TableCell>
-                  <RowControl>
-                    <FilePatterns maxVisible={2} patterns={row.filePatterns} />
-                  </RowControl>
+                  <RowControl>{renderRowActions(row)}</RowControl>
                 </TableCell>
-                <TableCell className="font-mono">{row.runsThisWeek}</TableCell>
-                <TableCell>
-                  {row.lastRunAt ? (
-                    <RelativeTime date={row.lastRunAt.toISOString()} />
-                  ) : (
-                    <span className="text-muted-foreground">—</span>
-                  )}
-                </TableCell>
-                {notifications ? (
-                  <TableCell>
-                    <RowControl>
-                      <InstrumentNotificationSwitch
-                        initialEnabled={
-                          notifications.subscriptions.get(row.id) ?? false
-                        }
-                        instrumentId={row.id}
-                        masterMuted={notifications.masterMuted}
-                        size="sm"
-                      />
-                    </RowControl>
-                  </TableCell>
-                ) : null}
-                {renderRowActions ? (
-                  <TableCell>
-                    <RowControl>{renderRowActions(row)}</RowControl>
-                  </TableCell>
-                ) : null}
-              </TableRow>
-            );
-          })}
+              ) : null}
+            </TableRow>
+          ))}
         </TableBody>
       </Table>
       {footer ? <div className="border-t">{footer}</div> : null}

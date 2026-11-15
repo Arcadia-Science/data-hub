@@ -8,37 +8,26 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useViewerTimeZone } from "@/components/viewer-time-zone-provider";
-import type { WatcherOnlineStatus } from "@/components/watchers/watcher-online-status";
 import {
   AUTO_UPDATE_STATUS_REASON,
+  type EffectiveStatus,
   isRestartStopReason,
   type RestartStopReason,
   SYSTEM_SHUTDOWN_STATUS_REASON,
   UPLOAD_REQUEST_REVERT_GRACE_MS,
 } from "@/lib/api/watcher-status";
-import type { EffectiveStatus } from "@/lib/api/watchers";
 import { formatTime } from "@/lib/date";
 import { cn, formatRelativeTime } from "@/lib/utils";
 
 /**
- * Union of every status this badge can render:
- *   - `WatcherOnlineStatus` is the instrument-level aggregate (any watcher
- *     online vs none) used in the instruments table and instrument header.
- *   - `EffectiveStatus` is the per-watcher state used in the watchers table
- *     and watcher detail header.
+ * Every status this badge can render: the per-watcher state on the watchers
+ * table and the watcher page's header, and `deregistered` for a past watcher.
+ * The instrument's own badge, for scientists, is `InstrumentBadge`.
  *
- * `watching` and `online` collapse to the same green "Online" treatment;
- * `stale` and `offline` collapse to the same destructive treatment but with
- * different labels ("Unresponsive" vs "Offline") since the aggregate badge
- * can't tell why an instrument's watchers are silent, while the per-watcher
- * badge can.
+ * `watching` reads "Online" and `stale` reads "Unresponsive", since the badge
+ * knows why a watcher is silent.
  */
-export type WatcherBadgeStatus =
-  | WatcherOnlineStatus
-  | EffectiveStatus
-  // Active instrument whose only watcher was deregistered. Distinct from
-  // `no_watcher` (never had one), so the header can still link to the watcher.
-  | "deregistered";
+export type WatcherBadgeStatus = EffectiveStatus | "deregistered";
 
 const ONLINE_CLASSNAME =
   "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300";
@@ -46,7 +35,11 @@ const ONLINE_CLASSNAME =
 const OFFLINE_CLASSNAME =
   "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300";
 
-const MUTED_FILLED_CLASSNAME = "bg-muted text-muted-foreground";
+// The badge's default variant sets a blue fill for dark mode, and `bg-muted`
+// alone doesn't replace that one, so the dark fill is set here as well. It is
+// the neutral dark fill of the instrument badge's Restarting and Connecting.
+const MUTED_FILLED_CLASSNAME =
+  "bg-muted text-muted-foreground dark:bg-slate-950 dark:text-slate-300";
 
 const WARNING_CLASSNAME =
   "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300";
@@ -62,20 +55,11 @@ const STATUS_CONFIG: Record<
     className: string;
   }
 > = {
-  // Instrument-level aggregate
-  online: { label: "Online", Icon: Radio, className: ONLINE_CLASSNAME },
-  offline: { label: "Offline", Icon: WifiOff, className: OFFLINE_CLASSNAME },
-  no_watcher: {
-    label: "No Watcher",
-    Icon: WifiOff,
-    className: MUTED_NEUTRAL_CLASSNAME,
-  },
   deregistered: {
     label: "Deregistered",
     Icon: Unplug,
     className: MUTED_NEUTRAL_CLASSNAME,
   },
-  // Per-watcher
   watching: { label: "Online", Icon: Radio, className: ONLINE_CLASSNAME },
   stale: {
     label: "Unresponsive",
@@ -109,7 +93,7 @@ const STATUS_CONFIG: Record<
 // only for a stop after which the watcher is expected back (see
 // `RESTART_STOP_REASONS`). That tooltip says when the watcher starts to read
 // as unresponsive, and it is built separately below.
-const TOOLTIP_STATUSES = new Set<WatcherBadgeStatus>(["offline", "stale"]);
+const TOOLTIP_STATUSES = new Set<WatcherBadgeStatus>(["stale"]);
 
 const RESTART_STOP_LEAD: Record<RestartStopReason, string> = {
   [SYSTEM_SHUTDOWN_STATUS_REASON]: "Stopped for a Windows restart or shutdown.",
@@ -120,7 +104,6 @@ export function WatcherStatusBadge({
   status,
   lastOnlineAt,
   reason,
-  verbose = false,
   className,
 }: {
   status: WatcherBadgeStatus;
@@ -131,32 +114,21 @@ export function WatcherStatusBadge({
   reason?: string | null;
   /**
    * Most recent watcher heartbeat. When the badge is in an "unexpected
-   * silence" state (`offline` / `stale`) and this is provided, the tooltip
+   * silence" state (`stale`) and this is provided, the tooltip
    * leads with it so users can tell at a glance how long the watcher has
    * been silent. For a watcher that stopped for a restart, it sets the time
    * the tooltip gives for when the watcher starts to read as unresponsive.
    */
   lastOnlineAt?: Date | null;
-  /**
-   * When true, prefixes the aggregate online/offline labels with "Watcher"
-   * (e.g. "Watcher Online"). Useful in headers where the badge stands alone
-   * outside a status column. Has no effect on per-watcher labels or on
-   * `no_watcher`, where prefixing would be redundant or wrong.
-   */
-  verbose?: boolean;
   className?: string;
 }) {
   const timeZone = useViewerTimeZone();
   const { label, Icon, className: variantClassName } = STATUS_CONFIG[status];
-  const fullLabel =
-    verbose && (status === "online" || status === "offline")
-      ? `Watcher ${label}`
-      : label;
 
   const badge = (
     <Badge className={cn(variantClassName, className)}>
       <Icon />
-      {fullLabel}
+      {label}
     </Badge>
   );
 
@@ -164,12 +136,11 @@ export function WatcherStatusBadge({
     return (
       <Tooltip>
         <TooltipTrigger asChild>{badge}</TooltipTrigger>
-        <TooltipContent className="flex max-w-80 flex-col items-start gap-1">
+        <TooltipContent className="flex max-w-80 flex-col items-start gap-0.5">
           {reason ? <p className="break-all font-medium">{reason}</p> : null}
           <p>
             The watcher is running but can&apos;t find its watch folder. Fix the
-            folder on the PC, or change it from the watcher&apos;s Configuration
-            tab.
+            folder on the PC, or change it on the watcher&apos;s Settings tab.
           </p>
         </TooltipContent>
       </Tooltip>
@@ -198,7 +169,7 @@ export function WatcherStatusBadge({
   return (
     <Tooltip>
       <TooltipTrigger asChild>{badge}</TooltipTrigger>
-      <TooltipContent className="flex flex-col items-start gap-1">
+      <TooltipContent className="flex flex-col items-start gap-0.5">
         {lastOnlineAt ? (
           <p className="font-medium">
             Last online {formatRelativeTime(lastOnlineAt)}

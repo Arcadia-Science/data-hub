@@ -4,7 +4,17 @@
 // the instrument PC arrive through `PUT /watchers/:id/config` and are
 // recorded as `pc` revisions, so every change lands in one history.
 
-import { and, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
+import {
+  and,
+  desc,
+  eq,
+  getTableName,
+  inArray,
+  isNull,
+  ne,
+  sql,
+} from "drizzle-orm";
+import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import {
   type Actor,
   type ActorRef,
@@ -789,35 +799,85 @@ export async function recordConfigRevisionResult(opts: {
 
 export const PREVIEW_SAMPLE_SIZE = 200;
 
-/** Runs `settings` against the instrument's latest raw file paths. */
-export async function previewConfigForInstrument(
+/**
+ * Paths of the instrument's newest raw files, newest first, one per path.
+ * Reprocessed or re-uploaded files repeat a path, so this reads extra rows and
+ * keeps the newest of each. A file's path is its relative path, or its name
+ * when the watcher didn't send one.
+ */
+export async function latestRawFilePaths(
   instrumentId: string,
-  settings: WatcherConfigSettings
-): Promise<{ sample_size: number; files: PreviewFile[] }> {
-  const rows = await db
+  limit: number,
+  executor: DbExecutor = db
+): Promise<string[]> {
+  const rows = await executor
     .select({ relativePath: files.relativePath, filename: files.filename })
     .from(files)
     .innerJoin(instrumentRuns, eq(instrumentRuns.id, files.instrumentRunId))
     .where(
       and(
         eq(instrumentRuns.instrumentId, instrumentId),
+        // Deleting a run marks the run, not its files.
+        isNull(instrumentRuns.deletedAt),
         eq(files.category, "raw"),
         isNull(files.deletedAt)
       )
     )
     .orderBy(desc(files.createdAt), desc(files.id))
-    // Reprocessed or re-uploaded files repeat a path, so read extra rows and
-    // keep the newest of each.
-    .limit(PREVIEW_SAMPLE_SIZE * 2);
+    .limit(limit * 2);
 
-  const paths = [
+  return [
     ...new Set(rows.map((row) => row.relativePath ?? row.filename)),
-  ].slice(0, PREVIEW_SAMPLE_SIZE);
+  ].slice(0, limit);
+}
+
+/** Runs `settings` against the instrument's latest raw file paths. */
+export async function previewConfigForInstrument(
+  instrumentId: string,
+  settings: WatcherConfigSettings
+): Promise<{ sample_size: number; files: PreviewFile[] }> {
+  const paths = await latestRawFilePaths(instrumentId, PREVIEW_SAMPLE_SIZE);
   return {
     sample_size: paths.length,
     files: previewSettings(settings, paths),
   };
 }
+
+// SQL for list reads: each is a correlated subquery on the `watchers` table,
+// so it works in any select that has `watchers` in its FROM clause.
+//
+// The `watchers` columns are written out with their table name. Drizzle leaves
+// the table name off every column in a select that reads one table, and a bare
+// `id` inside these subqueries would be the revision's own.
+const watchersColumn = (column: AnyPgColumn) =>
+  sql`${sql.identifier(getTableName(watchers))}.${sql.identifier(column.name)}`;
+
+// Status of the watcher's current config revision: the newest one that
+// wasn't superseded. A pending change can sit below a higher superseded PC
+// edit (when Data Hub wins an offline conflict), so this skips superseded
+// rows rather than reading the highest revision.
+export const currentRevisionStatusSql = sql<ConfigRevisionStatus | null>`(
+  select ${watcherConfigRevisions.status}
+  from ${watcherConfigRevisions}
+  where ${watcherConfigRevisions.watcherId} = ${watchersColumn(watchers.id)}
+    and ${watcherConfigRevisions.status} <> 'superseded'
+  order by ${watcherConfigRevisions.revision} desc
+  limit 1
+)`;
+
+// Same rule as `pickRestartPending`: the newest pending or applied revision
+// is an applied PC edit newer than the revision the watcher reports running.
+// False when the watcher hasn't reported one.
+export const pcEditAwaitingRestartSql = sql<boolean>`coalesce((
+  select ${watcherConfigRevisions.status} = 'applied'
+    and ${watcherConfigRevisions.source} = 'pc'
+    and ${watcherConfigRevisions.revision} > ${watchersColumn(watchers.appliedConfigRevision)}
+  from ${watcherConfigRevisions}
+  where ${watcherConfigRevisions.watcherId} = ${watchersColumn(watchers.id)}
+    and ${watcherConfigRevisions.status} in ('pending', 'applied')
+  order by ${watcherConfigRevisions.revision} desc
+  limit 1
+), false)`;
 
 export interface WatcherConfigState {
   /** The revision the watcher reports running, from its heartbeat. */

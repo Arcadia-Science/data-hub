@@ -155,7 +155,11 @@ A stop for an automatic update carries `status_reason: auto_update` (`AUTO_UPDAT
 
 Only an update that the running watcher starts itself sends the reason. `data-hub-watcher self-update` on a service host dispatches the same worker, but from a separate process that has no say in the service's `UpgradeHandoff`, and the stop that the worker causes carries no reason: the server cancels the requested uploads, as for `service stop`.
 
-`computeEffectiveStatus` (in `web/lib/api/watchers.ts`) uses the stored reason. A watcher that stopped for one of these reasons reads `stale` (Unresponsive) once its last heartbeat is more than `UPLOAD_REQUEST_REVERT_GRACE_MS` old, the same window the sweep uses. Any other `stopped` watcher reads `stopped` however old its last heartbeat is, because it can't send another one. A `watching` or `waiting` watcher reads `stale` after 5 minutes, and a deregistered watcher always reads `stopped`. `GET /api/v1/watchers?status=…` follows the same rules through `effectiveStatusCondition`, so a watcher is listed under exactly the status it shows. The status badge in the web app turns the reason and the last heartbeat into a tooltip that gives the time the watcher will read Unresponsive.
+`computeEffectiveStatus` (in `web/lib/api/watcher-status.ts`) uses the stored reason. A watcher that stopped for one of these reasons reads `stale` (Unresponsive) once its last heartbeat is more than `UPLOAD_REQUEST_REVERT_GRACE_MS` old, the same window the sweep uses. Any other `stopped` watcher reads `stopped` however old its last heartbeat is, because it can't send another one. A `watching` or `waiting` watcher reads `stale` after 5 minutes, and a deregistered watcher always reads `stopped`. `GET /api/v1/watchers?status=…` follows the same rules through `effectiveStatusCondition`, so a watcher is listed under exactly the status it shows. The status badge in the web app turns the reason and the last heartbeat into a tooltip that gives the time the watcher will read Unresponsive.
+
+An instrument has at most one active watcher, and `computeConnection` (in `web/lib/instruments/connection.ts`) turns that watcher's effective status into the instrument's connection. `watching` is `online`. `registered` is `connecting`. `stopped` with a restart reason, inside its 15 minutes, is `restarting`. Everything else is `offline`, with a reason: `waiting` is `folder_missing`, `stale` is `unresponsive`, and any other `stopped` is `stopped`. An instrument with no active watcher is `offline` with the reason `deregistered` when it has had one and `no_watcher` when it never has. `instrumentBadgeState` lets the instrument's own status win: Pending and Retired show instead of the connection. `InstrumentBadge` (`web/components/instruments/instrument-badge.tsx`) draws that badge in the instrument header, the instruments table and the dashboard, and links it to the watcher page. When the badge reads Offline, `instrumentProblemNotice` (`web/lib/instruments/problem-notice.ts`) picks the notice above the instrument's runs from the connection's reason, and from whether the viewer is an admin.
+
+The routes that queue uploads (`request-upload` and `request-upload-all`, through `prepareUploadTarget` in `web/lib/api/run-uploads.ts`) and the run page's Upload buttons follow one table, `getRunUploadAvailability` in `web/lib/runs/upload-availability.ts`. A request is accepted while the badge is Online or Restarting, and refused with 409 `WATCHER_OFFLINE` for Connecting, Offline, Pending and Retired. A request made while the watcher restarts stays queued for it, and the offline sweep cancels it once the watcher's last heartbeat is more than 15 minutes old (`UPLOAD_REQUEST_REVERT_GRACE_MS`), counted from that heartbeat and not from the request.
 
 ##### An upgrade handed to the Windows worker
 
@@ -250,7 +254,7 @@ Each watcher is bound to the personal access token (PAT) that registered it. Hea
 When you rotate a PC's PAT:
 
 1. **Recommended for a straight rotation:** delete the old PAT in the Data Hub UI (Settings → Tokens). That nulls `watchers.registered_by_token`; the next check-in with the new key re-claims the binding (trust-on-first-use). Update `~/.data-hub/.env.<environment>` with the new key before the watcher checks in again.
-2. **Clean reinstall:** deregister the watcher in the UI (Watchers → open the watcher → Deregister), then re-run `data-hub-watcher init` on the PC with the new PAT. That registers a fresh watcher row bound to the new credential.
+2. **Clean reinstall:** deregister the watcher in the UI (open `/instruments/<id>/watcher` and choose Deregister from its ⋮ menu), then re-run `data-hub-watcher init` on the PC with the new PAT. That registers a fresh watcher row bound to the new credential.
 
 There is no token-adoptable API for rebinding an already-claimed watcher — any such endpoint gated by `watchers:report` would reopen cross-watcher control.
 
@@ -457,7 +461,7 @@ The waiting state replaces the old behavior of exiting at startup, which made th
 
 ### Settings Data Hub can't read
 
-The server reads the editable settings out of each pushed `config.yaml` with the same rules it applies to web edits. The watcher runs some configs those rules refuse: more than 50 file patterns, a pattern longer than 200 characters, or a Python-style named group such as `(?P<run>…)` in the run regex. For such a config the server records no revision for edits made on the PC, and the web app shows a notice on the Configuration tab naming the setting it can't read. `init` and `config edit` refuse those values, `config validate` warns about them without failing, and the watcher logs a warning at startup. Existing configs still load.
+The server reads the editable settings out of each pushed `config.yaml` with the same rules it applies to web edits. The watcher runs some configs those rules refuse: more than 50 file patterns, a pattern longer than 200 characters, or a Python-style named group such as `(?P<run>…)` in the run regex. For such a config the server records no revision for edits made on the PC, and the web app shows a notice on the watcher page's Settings tab naming the setting it can't read. `init` and `config edit` refuse those values, `config validate` warns about them without failing, and the watcher logs a warning at startup. Existing configs still load.
 
 ### Older servers
 
@@ -552,6 +556,20 @@ The watcher's primary observability surface is the per-watcher event log served 
 | `pending_upload_missing` | An auto-mode upload waiting for a retry was no longer on disk when the watcher started, so the retry was dropped. `details` includes `relative_path`, `run_id`. |
 | `update_check_failed` | `GET /watchers/:id/update-check` failed for 3 consecutive attempts (~3 hours of going dark on the update channel). |
 | `watch_directory_unavailable` | The watch folder was missing, unreadable, not answering (`watch_directory not responding`) or can't be watched (`watch_directory can't be watched`), so the watcher entered the [waiting state](#the-waiting-state), at startup or, from 1.4.3, while it was running. `details` includes `watch_directory`, `reason`. |
+
+### How the web app shows events
+
+The watcher page's Activity tab gives every event a plain label and message with `describeEvent` in `web/lib/watchers/event-messages.ts`, which covers each event type and `details.kind` in the tables above. A type or kind it doesn't know still shows, with a label written from its name and the watcher's own message. When you add a kind or change what `details` carries, add it there too and cover it in `web/tests/unit/watcher-event-messages.test.ts`.
+
+The Health tab reads two things from events, so don't reword them without changing the web app:
+
+- A restart is a `watcher_stopped` event that the web app can tie to an update or to Windows shutting down. The event itself has no reason field, and a service that the upgrade worker stops says only `Service stopped`, so the server takes the reason from elsewhere, in this order (`restartReasonOf` in `web/lib/watchers/stop-reasons.ts`, and the same rules in SQL in `web/lib/api/watcher-health.ts`):
+  1. `details.stop_reason`, which the server copies from the `status_reason` of the final `stopped` heartbeat (`auto_update` or `system_shutdown`) onto the watcher's stop event, whichever of the two arrives first (the heartbeat route and the events route; `web/lib/api/watcher-stop-reasons.ts`). It never replaces a value that is already there, and it adds no column.
+  2. A stop within ten minutes after an `update_started` event with `details.via_worker` (the hand-off to the upgrade worker), with no `update_failed` or `watcher_started` in between, unless its message names another cause. This covers events from before the server copied the reason.
+  3. The message: `restarting for auto-update` or `Windows is shutting down` (`RESTART_STOP_FRAGMENTS`).
+
+  Any other stop isn't a restart. Keep the `update_started` event and its `via_worker` flag, and the `status_reason` values, as they are, or change the web app with them.
+- A missed heartbeat is an `error` event with `details.kind="heartbeat_recovered"`. Its `gap_seconds` colours the connectivity grid.
 
 ### File timestamps
 

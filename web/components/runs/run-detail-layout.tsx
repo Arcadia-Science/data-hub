@@ -3,6 +3,7 @@ import { CancelQueuedDialog } from "@/components/runs/cancel-queued-dialog";
 import { DeleteRunDialog } from "@/components/runs/delete-run-dialog";
 import { RestoreRunButton } from "@/components/runs/restore-run-button";
 import { RunDetail, type RunDetailProps } from "@/components/runs/run-detail";
+import { RunOfflineNotice } from "@/components/runs/run-offline-notice";
 import { canCancelQueued } from "@/lib/runs/cancel-queued";
 
 type RunDetailLayoutProps = Pick<
@@ -78,6 +79,11 @@ export function RunDetailLayout({
           {badges}
         </RunDetail.Metadata>
         {notebookLinksSlot}
+        {/* A deleted run can't queue uploads, so what is left on the PC is
+            not worth a warning. */}
+        {isDeleted ? null : (
+          <RunOfflineNotice waitingFileCount={fileStats.pending} />
+        )}
         <RunDetail.Files
           files={files}
           filteredDownloadableCount={filesDownloadableCount}

@@ -2,7 +2,7 @@
 
 import { ExternalLink, Plus } from "lucide-react";
 import { DocsLink } from "@/components/docs-link";
-import { InstrumentStatusBadge } from "@/components/instruments/instrument-status-badge";
+import { InstrumentBadgePill } from "@/components/instruments/instrument-badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -24,7 +24,7 @@ const STEPS = [
     title: "Activate it here",
     description: (
       <>
-        It appears with a <InstrumentStatusBadge status="pending" /> badge. An
+        It appears with a <InstrumentBadgePill state="pending" /> badge. An
         admin clicks Confirm.
       </>
     ),

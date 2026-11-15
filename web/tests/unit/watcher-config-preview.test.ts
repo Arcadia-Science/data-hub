@@ -156,4 +156,33 @@ describe("previewSettings", () => {
       run_id: "run-1",
     });
   });
+
+  it("gives no run ID, instead of hanging, for a pattern that backtracks", () => {
+    const started = performance.now();
+    const [file] = previewSettings(
+      {
+        file_patterns: ["*.csv"],
+        run_detection: { pattern: "^(a+)+$", recursive: true },
+      },
+      [`${"a".repeat(40)}!.csv`]
+    );
+    expect(file).toMatchObject({ matches: true, run_id: null });
+    // The guard ends the match after 50 ms; unguarded, this runs for hours.
+    expect(performance.now() - started).toBeLessThan(5000);
+  });
+
+  it("gives no run ID for a pattern that doesn't compile", () => {
+    const [file] = previewSettings(
+      {
+        file_patterns: ["*.csv"],
+        run_detection: { pattern: "([", recursive: true },
+      },
+      ["a.csv"]
+    );
+    expect(file).toEqual({
+      relative_path: "a.csv",
+      matches: true,
+      run_id: null,
+    });
+  });
 });

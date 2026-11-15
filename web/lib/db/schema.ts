@@ -452,7 +452,7 @@ export const watchers = pgTable(
       mode: "date",
     }),
     // `stale` is computed at query time, never stored. See
-    // `computeEffectiveStatus` in `lib/api/watchers.ts`: a `watching` or
+    // `computeEffectiveStatus` in `lib/api/watcher-status.ts`: a `watching` or
     // `waiting` watcher goes stale after 5 minutes without a heartbeat, and a
     // `stopped` one only if it stopped for a restart and is not back in 15.
     status: watcherStatusEnum("status").notNull().default("registered"),

@@ -23,7 +23,7 @@
     {
       "name": "list_instruments",
       "title": "List Instruments",
-      "description": "List all registered lab instruments with run counts, watcher status, and file patterns. Optionally filter by status.",
+      "description": "List all registered lab instruments with run counts, the instrument's connection (whether new files can reach Data Hub, and why not), its one active watcher (host, folder, file patterns, upload mode, settings state), and how many past watchers it has had. Optionally filter by status. watcherCount, watchersOnline, hasDeregisteredWatcher, lastWatcherHeartbeatAt, activeWatcherId and the top-level filePatterns are deprecated: use watcher and connection.",
       "group": "instruments",
       "scope": "instruments:read",
       "annotations": {
@@ -54,12 +54,6 @@
             "items": {
               "type": "object",
               "properties": {
-                "activeWatcherId": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
                 "id": {
                   "type": "string"
                 },
@@ -90,14 +84,188 @@
                     "aunty"
                   ]
                 },
+                "watcher": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "hostname": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "osInfo": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "version": {
+                          "description": "Installed watcher version. Null until its first heartbeat.",
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "registered",
+                            "watching",
+                            "waiting",
+                            "stopped",
+                            "stale"
+                          ],
+                          "description": "Detailed watcher status. `stale` means no heartbeat for 5 minutes, or no return from a restart within 15."
+                        },
+                        "statusReason": {
+                          "description": "Why the watcher is waiting (the missing folder), or why it stopped for a restart (`system_shutdown` or `auto_update`). The reason stays while the status reads `stale`.",
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "lastHeartbeatAt": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "format": "date-time",
+                              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "watchDirectory": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "filePatterns": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "File patterns from the watcher's config, in config order."
+                        },
+                        "uploadMode": {
+                          "type": "string",
+                          "enum": [
+                            "auto",
+                            "manual"
+                          ]
+                        },
+                        "configState": {
+                          "type": "string",
+                          "enum": [
+                            "none",
+                            "pending",
+                            "applied",
+                            "rejected",
+                            "edited_on_pc"
+                          ],
+                          "description": "State of the watcher's settings: `pending` (a change is waiting for the watcher), `rejected` (the watcher refused the latest change), `edited_on_pc` (a PC edit takes effect when the watcher restarts), `applied`, or `none`."
+                        },
+                        "sharedComputerWith": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "instrumentId": {
+                                "type": "string"
+                              },
+                              "displayName": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "instrumentId",
+                              "displayName"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "description": "Other instruments whose active watchers run on the same computer (hostnames compared without case)."
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "hostname",
+                        "osInfo",
+                        "version",
+                        "status",
+                        "statusReason",
+                        "lastHeartbeatAt",
+                        "watchDirectory",
+                        "filePatterns",
+                        "uploadMode",
+                        "configState",
+                        "sharedComputerWith"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The instrument's one active watcher, or null when it has none. Replaces watcherCount, watchersOnline and the activeWatcher* fields."
+                },
+                "connection": {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "online",
+                        "restarting",
+                        "connecting",
+                        "offline"
+                      ]
+                    },
+                    "reason": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "folder_missing",
+                            "unresponsive",
+                            "stopped",
+                            "no_watcher",
+                            "deregistered"
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Why the instrument is offline. Null in every other state."
+                    }
+                  },
+                  "required": [
+                    "state",
+                    "reason"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Whether new files can reach Data Hub. `online`: the watcher checked in within 5 minutes. `restarting`: the watcher stopped for a Windows restart or an automatic update less than 15 minutes ago. `connecting`: the watcher registered and hasn't sent a heartbeat yet. `offline`: anything else. This does not take the instrument's status into account: a pending instrument can be `online`."
+                },
+                "pastWatcherCount": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "How many deregistered watchers the instrument has had."
+                },
                 "filePatterns": {
                   "type": "array",
                   "items": {
                     "type": "string"
-                  }
-                },
-                "hasDeregisteredWatcher": {
-                  "type": "boolean"
+                  },
+                  "deprecated": true,
+                  "description": "Deprecated. Use `watcher.filePatterns`, which keeps the config's order. This list is de-duplicated and sorted."
                 },
                 "runCount": {
                   "type": "integer",
@@ -121,6 +289,24 @@
                     }
                   ]
                 },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                },
+                "activeWatcherId": {
+                  "deprecated": true,
+                  "description": "Deprecated. Use `watcher.id`. This also names the most recently deregistered watcher when none is active.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "hasDeregisteredWatcher": {
+                  "type": "boolean",
+                  "deprecated": true,
+                  "description": "Deprecated. Use `pastWatcherCount > 0`, or `connection.reason`."
+                },
                 "lastWatcherHeartbeatAt": {
                   "anyOf": [
                     {
@@ -131,39 +317,43 @@
                     {
                       "type": "null"
                     }
-                  ]
+                  ],
+                  "deprecated": true,
+                  "description": "Deprecated. Use `watcher.lastHeartbeatAt`."
                 },
                 "watcherCount": {
                   "type": "integer",
                   "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
+                  "maximum": 9007199254740991,
+                  "deprecated": true,
+                  "description": "Deprecated. An instrument has at most one watcher. Use `watcher`."
                 },
                 "watchersOnline": {
                   "type": "integer",
                   "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                "createdAt": {
-                  "type": "string",
-                  "format": "date-time",
-                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                  "maximum": 9007199254740991,
+                  "deprecated": true,
+                  "description": "Deprecated. Use `connection.state === \"online\"`."
                 }
               },
               "required": [
-                "activeWatcherId",
                 "id",
                 "displayName",
                 "status",
                 "instrumentType",
+                "watcher",
+                "connection",
+                "pastWatcherCount",
                 "filePatterns",
-                "hasDeregisteredWatcher",
                 "runCount",
                 "runsThisWeek",
                 "lastRunAt",
+                "createdAt",
+                "activeWatcherId",
+                "hasDeregisteredWatcher",
                 "lastWatcherHeartbeatAt",
                 "watcherCount",
-                "watchersOnline",
-                "createdAt"
+                "watchersOnline"
               ],
               "additionalProperties": false
             }
@@ -178,7 +368,7 @@
     {
       "name": "get_instrument",
       "title": "Get Instrument",
-      "description": "Get detailed information about a specific instrument, including watcher online/offline counts and file patterns.",
+      "description": "Get detailed information about a specific instrument: its connection (online, restarting, connecting or offline, with the reason when offline), its one active watcher (host, OS, version, folder, file patterns, upload mode, settings state, other instruments on the same computer), and how many past watchers it has had. watcherCount, watchersOnline, watchersOffline, lastWatcherHeartbeatAt, the activeWatcher* fields and the top-level filePatterns are deprecated: use watcher and connection.",
       "group": "instruments",
       "scope": "instruments:read",
       "annotations": {
@@ -232,11 +422,188 @@
               "aunty"
             ]
           },
+          "watcher": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "hostname": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "osInfo": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "version": {
+                    "description": "Installed watcher version. Null until its first heartbeat.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "registered",
+                      "watching",
+                      "waiting",
+                      "stopped",
+                      "stale"
+                    ],
+                    "description": "Detailed watcher status. `stale` means no heartbeat for 5 minutes, or no return from a restart within 15."
+                  },
+                  "statusReason": {
+                    "description": "Why the watcher is waiting (the missing folder), or why it stopped for a restart (`system_shutdown` or `auto_update`). The reason stays while the status reads `stale`.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "lastHeartbeatAt": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "date-time",
+                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "watchDirectory": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "filePatterns": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "File patterns from the watcher's config, in config order."
+                  },
+                  "uploadMode": {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "manual"
+                    ]
+                  },
+                  "configState": {
+                    "type": "string",
+                    "enum": [
+                      "none",
+                      "pending",
+                      "applied",
+                      "rejected",
+                      "edited_on_pc"
+                    ],
+                    "description": "State of the watcher's settings: `pending` (a change is waiting for the watcher), `rejected` (the watcher refused the latest change), `edited_on_pc` (a PC edit takes effect when the watcher restarts), `applied`, or `none`."
+                  },
+                  "sharedComputerWith": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "instrumentId": {
+                          "type": "string"
+                        },
+                        "displayName": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "instrumentId",
+                        "displayName"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "description": "Other instruments whose active watchers run on the same computer (hostnames compared without case)."
+                  }
+                },
+                "required": [
+                  "id",
+                  "hostname",
+                  "osInfo",
+                  "version",
+                  "status",
+                  "statusReason",
+                  "lastHeartbeatAt",
+                  "watchDirectory",
+                  "filePatterns",
+                  "uploadMode",
+                  "configState",
+                  "sharedComputerWith"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The instrument's one active watcher, or null when it has none. Replaces watcherCount, watchersOnline and the activeWatcher* fields."
+          },
+          "connection": {
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "online",
+                  "restarting",
+                  "connecting",
+                  "offline"
+                ]
+              },
+              "reason": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "folder_missing",
+                      "unresponsive",
+                      "stopped",
+                      "no_watcher",
+                      "deregistered"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Why the instrument is offline. Null in every other state."
+              }
+            },
+            "required": [
+              "state",
+              "reason"
+            ],
+            "additionalProperties": false,
+            "description": "Whether new files can reach Data Hub. `online`: the watcher checked in within 5 minutes. `restarting`: the watcher stopped for a Windows restart or an automatic update less than 15 minutes ago. `connecting`: the watcher registered and hasn't sent a heartbeat yet. `offline`: anything else. This does not take the instrument's status into account: a pending instrument can be `online`."
+          },
+          "pastWatcherCount": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "How many deregistered watchers the instrument has had."
+          },
           "filePatterns": {
             "type": "array",
             "items": {
               "type": "string"
-            }
+            },
+            "deprecated": true,
+            "description": "Deprecated. Use `watcher.filePatterns`, which keeps the config's order. This list is de-duplicated and sorted."
           },
           "runCount": {
             "type": "integer",
@@ -246,17 +613,23 @@
           "watcherCount": {
             "type": "integer",
             "minimum": -9007199254740991,
-            "maximum": 9007199254740991
+            "maximum": 9007199254740991,
+            "deprecated": true,
+            "description": "Deprecated. An instrument has at most one watcher. Use `watcher`."
           },
           "watchersOnline": {
             "type": "integer",
             "minimum": -9007199254740991,
-            "maximum": 9007199254740991
+            "maximum": 9007199254740991,
+            "deprecated": true,
+            "description": "Deprecated. Use `connection.state === \"online\"`."
           },
           "watchersOffline": {
             "type": "integer",
             "minimum": -9007199254740991,
-            "maximum": 9007199254740991
+            "maximum": 9007199254740991,
+            "deprecated": true,
+            "description": "Deprecated. Use `connection.state`."
           },
           "lastWatcherHeartbeatAt": {
             "anyOf": [
@@ -268,28 +641,38 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "deprecated": true,
+            "description": "Deprecated. Use `watcher.lastHeartbeatAt`."
           },
           "activeWatcherId": {
+            "deprecated": true,
+            "description": "Deprecated. Use `watcher.id`. This also names the most recently deregistered watcher when none is active.",
             "type": [
               "string",
               "null"
             ]
           },
           "activeWatcherHostname": {
+            "deprecated": true,
+            "description": "Deprecated. Use `watcher.hostname`.",
             "type": [
               "string",
               "null"
             ]
           },
           "activeWatcherWatchDirectory": {
+            "deprecated": true,
+            "description": "Deprecated. Use `watcher.watchDirectory`.",
             "type": [
               "string",
               "null"
             ]
           },
           "activeWatcherDeregistered": {
-            "type": "boolean"
+            "type": "boolean",
+            "deprecated": true,
+            "description": "Deprecated. Use `connection.reason === \"deregistered\"`."
           },
           "retiredAt": {
             "anyOf": [
@@ -376,6 +759,9 @@
           "displayName",
           "status",
           "instrumentType",
+          "watcher",
+          "connection",
+          "pastWatcherCount",
           "filePatterns",
           "runCount",
           "watcherCount",
@@ -3258,7 +3644,7 @@
     {
       "name": "request_run_upload",
       "title": "Request Run Upload",
-      "description": "Queue specific detected files for watcher upload (max 100). Requires an online watcher. Idempotent for files already in upload_requested.",
+      "description": "Queue specific detected files for watcher upload (max 100). Requires an instrument whose watcher is online or restarting; a request made during a restart waits until the watcher is back. Offline, connecting, pending and retired instruments are refused. Idempotent for files already in upload_requested.",
       "group": "runs",
       "scope": "runs:upload",
       "annotations": {
@@ -3359,7 +3745,7 @@
     {
       "name": "request_run_upload_all",
       "title": "Request Run Upload All",
-      "description": "Queue every detected file on a run for watcher upload. Requires an online watcher.",
+      "description": "Queue every detected file on a run for watcher upload. Requires an instrument whose watcher is online or restarting; a request made during a restart waits until the watcher is back. Offline, connecting, pending and retired instruments are refused.",
       "group": "runs",
       "scope": "runs:upload",
       "annotations": {
@@ -6247,6 +6633,44 @@
                     "inactive"
                   ]
                 },
+                "connection": {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "online",
+                        "restarting",
+                        "connecting",
+                        "offline"
+                      ]
+                    },
+                    "reason": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "folder_missing",
+                            "unresponsive",
+                            "stopped",
+                            "no_watcher",
+                            "deregistered"
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Why the instrument is offline. Null in every other state."
+                    }
+                  },
+                  "required": [
+                    "state",
+                    "reason"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Whether new files can reach Data Hub. `online`: the watcher checked in within 5 minutes. `restarting`: the watcher stopped for a Windows restart or an automatic update less than 15 minutes ago. `connecting`: the watcher registered and hasn't sent a heartbeat yet. `offline`: anything else. This does not take the instrument's status into account: a pending instrument can be `online`."
+                },
                 "watcherStatus": {
                   "type": "string",
                   "enum": [
@@ -6254,7 +6678,9 @@
                     "offline",
                     "no_watcher",
                     "deregistered"
-                  ]
+                  ],
+                  "deprecated": true,
+                  "description": "Deprecated. Use `connection.state`, or `connection.reason`."
                 },
                 "lastWatcherHeartbeatAt": {
                   "anyOf": [
@@ -6266,7 +6692,9 @@
                     {
                       "type": "null"
                     }
-                  ]
+                  ],
+                  "deprecated": true,
+                  "description": "Deprecated. Get the instrument for its `watcher.lastHeartbeatAt`."
                 },
                 "runCount": {
                   "type": "integer",
@@ -6292,6 +6720,7 @@
                 "id",
                 "displayName",
                 "status",
+                "connection",
                 "watcherStatus",
                 "lastWatcherHeartbeatAt",
                 "runCount",
@@ -6538,7 +6967,7 @@
     {
       "name": "get_system_status",
       "title": "Get System Status",
-      "description": "Get a dashboard-level overview: per-instrument run counts, watcher health (online/offline/no_watcher), and pending upload counts.",
+      "description": "Get a dashboard-level overview: per-instrument run counts, whether new files can reach Data Hub (`connection`: online, restarting, connecting, or offline, with a reason when offline), and pending upload counts.",
       "group": "discovery",
       "scope": "instruments:read",
       "annotations": {
@@ -6595,13 +7024,53 @@
                   "minimum": -9007199254740991,
                   "maximum": 9007199254740991
                 },
+                "connection": {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "online",
+                        "restarting",
+                        "connecting",
+                        "offline"
+                      ]
+                    },
+                    "reason": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "folder_missing",
+                            "unresponsive",
+                            "stopped",
+                            "no_watcher",
+                            "deregistered"
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Why the instrument is offline. Null in every other state."
+                    }
+                  },
+                  "required": [
+                    "state",
+                    "reason"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Whether new files can reach Data Hub. `online`: the watcher checked in within 5 minutes. `restarting`: the watcher stopped for a Windows restart or an automatic update less than 15 minutes ago. `connecting`: the watcher registered and hasn't sent a heartbeat yet. `offline`: anything else. This does not take the instrument's status into account: a pending instrument can be `online`."
+                },
                 "watcherStatus": {
                   "type": "string",
                   "enum": [
                     "online",
                     "offline",
                     "no_watcher"
-                  ]
+                  ],
+                  "deprecated": true,
+                  "description": "Deprecated. Use `connection.state`, or `connection.reason`."
                 }
               },
               "required": [
@@ -6611,6 +7080,7 @@
                 "runCount",
                 "lastRunAt",
                 "filesPendingUpload",
+                "connection",
                 "watcherStatus"
               ],
               "additionalProperties": false

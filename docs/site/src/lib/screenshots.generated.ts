@@ -34,18 +34,26 @@ import instrumentEditDialogLight from "../../public/images/instrument-edit-dialo
 import instrumentEditDialogDark from "../../public/images/instrument-edit-dialog.dark.webp";
 import instrumentRetireDialogLight from "../../public/images/instrument-retire-dialog.webp";
 import instrumentRetireDialogDark from "../../public/images/instrument-retire-dialog.dark.webp";
-import watchersListLight from "../../public/images/watchers-list.webp";
-import watchersListDark from "../../public/images/watchers-list.dark.webp";
-import watcherDetailLight from "../../public/images/watcher-detail.webp";
-import watcherDetailDark from "../../public/images/watcher-detail.dark.webp";
+import instrumentConfirmDialogLight from "../../public/images/instrument-confirm-dialog.webp";
+import instrumentConfirmDialogDark from "../../public/images/instrument-confirm-dialog.dark.webp";
+import instrumentStatusBadgeLight from "../../public/images/instrument-status-badge.webp";
+import instrumentStatusBadgeDark from "../../public/images/instrument-status-badge.dark.webp";
+import instrumentOfflineNoticeLight from "../../public/images/instrument-offline-notice.webp";
+import instrumentOfflineNoticeDark from "../../public/images/instrument-offline-notice.dark.webp";
+import watcherActivityLight from "../../public/images/watcher-activity.webp";
+import watcherActivityDark from "../../public/images/watcher-activity.dark.webp";
+import watcherHealthLight from "../../public/images/watcher-health.webp";
+import watcherHealthDark from "../../public/images/watcher-health.dark.webp";
+import watcherSettingsLight from "../../public/images/watcher-settings.webp";
+import watcherSettingsDark from "../../public/images/watcher-settings.dark.webp";
 import qpcrRunDetailLight from "../../public/images/qpcr-run-detail.webp";
 import qpcrRunDetailDark from "../../public/images/qpcr-run-detail.dark.webp";
 import auntyRunDetailLight from "../../public/images/aunty-run-detail.webp";
 import auntyRunDetailDark from "../../public/images/aunty-run-detail.dark.webp";
 import workspaceMembersLight from "../../public/images/workspace-members.webp";
 import workspaceMembersDark from "../../public/images/workspace-members.dark.webp";
-import watcherSettingsLight from "../../public/images/watcher-settings.webp";
-import watcherSettingsDark from "../../public/images/watcher-settings.dark.webp";
+import settingsWatchersLight from "../../public/images/settings-watchers.webp";
+import settingsWatchersDark from "../../public/images/settings-watchers.dark.webp";
 import tokensListLight from "../../public/images/tokens-list.webp";
 import tokensListDark from "../../public/images/tokens-list.dark.webp";
 import tokenCreateDialogLight from "../../public/images/token-create-dialog.webp";
@@ -64,6 +72,8 @@ import mcpConsentLight from "../../public/images/mcp-consent.webp";
 import mcpConsentDark from "../../public/images/mcp-consent.dark.webp";
 import manualUploadLight from "../../public/images/manual-upload.webp";
 import manualUploadDark from "../../public/images/manual-upload.dark.webp";
+import runOfflineNoticeLight from "../../public/images/run-offline-notice.webp";
+import runOfflineNoticeDark from "../../public/images/run-offline-notice.dark.webp";
 import deletedRunLight from "../../public/images/deleted-run.webp";
 import deletedRunDark from "../../public/images/deleted-run.dark.webp";
 
@@ -182,17 +192,41 @@ export const screenshots: Record<string, Screenshot> = {
     kind: "closeup",
     light: instrumentRetireDialogLight,
   },
-  "watchers-list": {
-    address: "datahub.example.com/watchers",
-    dark: watchersListDark,
-    kind: "window",
-    light: watchersListLight,
+  "instrument-confirm-dialog": {
+    address: "datahub.example.com/instruments",
+    dark: instrumentConfirmDialogDark,
+    kind: "closeup",
+    light: instrumentConfirmDialogLight,
   },
-  "watcher-detail": {
-    address: "datahub.example.com/watchers/3f2a9c1e-7b4d-4e0a-9c55-1d2e8f6a7b90",
-    dark: watcherDetailDark,
+  "instrument-status-badge": {
+    address: "datahub.example.com/instruments/spectramax-id5-plate-reader",
+    dark: instrumentStatusBadgeDark,
     kind: "window",
-    light: watcherDetailLight,
+    light: instrumentStatusBadgeLight,
+  },
+  "instrument-offline-notice": {
+    address: "datahub.example.com/instruments/colony-counter-g",
+    dark: instrumentOfflineNoticeDark,
+    kind: "window",
+    light: instrumentOfflineNoticeLight,
+  },
+  "watcher-activity": {
+    address: "datahub.example.com/instruments/jolene-fplc/watcher",
+    dark: watcherActivityDark,
+    kind: "window",
+    light: watcherActivityLight,
+  },
+  "watcher-health": {
+    address: "datahub.example.com/instruments/jolene-fplc/watcher/health",
+    dark: watcherHealthDark,
+    kind: "window",
+    light: watcherHealthLight,
+  },
+  "watcher-settings": {
+    address: "datahub.example.com/instruments/instantraman/watcher/settings",
+    dark: watcherSettingsDark,
+    kind: "window",
+    light: watcherSettingsLight,
   },
   "qpcr-run-detail": {
     address: "datahub.example.com/instruments/azure-cielo-qpcr/runs/Experiment_20260129",
@@ -212,11 +246,11 @@ export const screenshots: Record<string, Screenshot> = {
     kind: "window",
     light: workspaceMembersLight,
   },
-  "watcher-settings": {
+  "settings-watchers": {
     address: "datahub.example.com/settings/watchers",
-    dark: watcherSettingsDark,
+    dark: settingsWatchersDark,
     kind: "window",
-    light: watcherSettingsLight,
+    light: settingsWatchersLight,
   },
   "tokens-list": {
     address: "datahub.example.com/settings/tokens",
@@ -271,6 +305,12 @@ export const screenshots: Record<string, Screenshot> = {
     dark: manualUploadDark,
     kind: "window",
     light: manualUploadLight,
+  },
+  "run-offline-notice": {
+    address: "datahub.example.com/instruments/balance-f/runs/weighing-batch-a",
+    dark: runOfflineNoticeDark,
+    kind: "window",
+    light: runOfflineNoticeLight,
   },
   "deleted-run": {
     address: "datahub.example.com/instruments/spectramax-id5-plate-reader/runs/260720_OD595_flat_BBB",

@@ -2,7 +2,7 @@
 
 import { Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { type MouseEvent, useTransition } from "react";
+import { type MouseEvent, type RefObject, useTransition } from "react";
 import { toast } from "sonner";
 import {
   AlertDialog,
@@ -14,20 +14,41 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { useReturnFocus } from "@/hooks/use-return-focus";
 
 export function DeregisterDialog({
   watcherId,
   hostname,
   open,
   onOpenChange,
+  returnFocusRef,
 }: {
   watcherId: string;
   hostname: string | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /**
+   * The control to focus when the dialog closes. A dialog opened from a menu
+   * item can't tell what to return to: the menu has closed by the time the
+   * dialog opens, so pass the menu's trigger.
+   */
+  returnFocusRef?: RefObject<HTMLElement | null>;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const returnFocus = useReturnFocus();
+  const contentFocus = {
+    ...returnFocus,
+    onCloseAutoFocus(event: Event) {
+      const target = returnFocusRef?.current;
+      if (target?.isConnected) {
+        event.preventDefault();
+        target.focus();
+        return;
+      }
+      returnFocus.onCloseAutoFocus(event);
+    },
+  };
 
   // Soft-deletes the watcher via the existing API (sets deleted_at). The
   // watcher CLI will receive a 404 on its next heartbeat and shut down.
@@ -57,7 +78,7 @@ export function DeregisterDialog({
 
   return (
     <AlertDialog onOpenChange={onOpenChange} open={open}>
-      <AlertDialogContent>
+      <AlertDialogContent {...contentFocus}>
         <AlertDialogHeader>
           <AlertDialogTitle>Deregister watcher?</AlertDialogTitle>
           <AlertDialogDescription>

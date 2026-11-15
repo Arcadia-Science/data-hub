@@ -43,8 +43,8 @@ export async function GET(request: NextRequest) {
     // DB error) must not abort the rest of the sweep. The next cron tick retries
     // anything skipped here.
     try {
-      // Newest heartbeat among active watchers decides staleness; a null one (no
-      // active watcher, or never checked in) counts as stale. Skip inside the
+      // The instrument's one active watcher decides staleness; a null heartbeat
+      // (no active watcher, or never checked in) counts as stale. Skip inside the
       // grace window so a brief blip doesn't churn the queue.
       const [active] = await db
         .select({ lastHeartbeatAt: watchers.lastHeartbeatAt })

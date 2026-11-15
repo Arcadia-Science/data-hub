@@ -20,7 +20,10 @@ import {
 } from "@/components/ui/tooltip";
 
 import { type FileRef, useFileSelection } from "./file-selection-provider";
-import { WatcherGatedUploadButton } from "./watcher-gated-upload-button";
+import {
+  UploadReasonLine,
+  WatcherGatedUploadButton,
+} from "./watcher-gated-upload-button";
 
 // ---------------------------------------------------------------------------
 // Bulk action bar shown above the run files table when at least one file is
@@ -58,25 +61,28 @@ export function FileBulkActionBar({
   const noun = count === 1 ? "file" : "files";
 
   return (
-    <div className="flex items-center justify-between gap-2 border-b bg-muted/40 px-3 py-2">
+    <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-2 border-b bg-muted/40 px-3 py-2">
       <div className="text-sm">
         <span className="font-medium">{count}</span>{" "}
         <span className="text-muted-foreground">{noun} selected</span>
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center justify-end gap-2">
         {meta.allCanUpload && (
-          <WatcherGatedUploadButton
-            className="h-7 gap-1.5 text-xs"
-            disabled={isPending}
-            onClick={() => onUpload(ids)}
-            onlineTooltip={`Request upload for ${count} ${noun}`}
-            size="sm"
-            type="button"
-            variant="default"
-          >
-            <Upload className="size-3.5" />
-            Upload
-          </WatcherGatedUploadButton>
+          <>
+            <UploadReasonLine />
+            <WatcherGatedUploadButton
+              className="h-7 gap-1.5 text-xs"
+              disabled={isPending}
+              enabledTooltip={`Request upload for ${count} ${noun}`}
+              onClick={() => onUpload(ids)}
+              size="sm"
+              type="button"
+              variant="default"
+            >
+              <Upload className="size-3.5" />
+              Upload
+            </WatcherGatedUploadButton>
+          </>
         )}
 
         {meta.allCanDismiss && (

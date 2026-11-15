@@ -28,7 +28,7 @@ time, or its created time when that is missing. The dashboard uses the
 viewer's timezone, so its daily counts can differ.
 
 Stalled runs recover with reprocess_run. Pending runs need
-request_run_upload_all and an online watcher.
+request_run_upload_all and a watcher that is online or restarting.
 
 Tool routing:
 - global_search for filenames, instrument names, users, comments, or a

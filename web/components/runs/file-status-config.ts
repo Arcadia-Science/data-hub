@@ -77,7 +77,7 @@ export const FILE_STATUS_CONFIG: Record<
   FileStatusConfigEntry
 > = {
   pending: {
-    label: "Pending",
+    label: "Waiting to upload",
     description: "found, not yet uploaded",
     Icon: Clock,
     className: "text-muted-foreground",

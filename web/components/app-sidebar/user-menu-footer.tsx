@@ -1,13 +1,6 @@
 "use client";
 
-import {
-  BookOpen,
-  ChevronsUpDown,
-  ExternalLink,
-  LogOut,
-  ScrollText,
-  Settings,
-} from "lucide-react";
+import { ChevronsUpDown } from "lucide-react";
 import Link from "next/link";
 import { type ReactNode, useState, useTransition } from "react";
 import { useChangelog } from "@/components/changelog/changelog-provider";
@@ -120,7 +113,6 @@ export function UserMenuFooter({
                 changelog.open();
               }}
             >
-              <ScrollText data-icon="inline-start" />
               {unseen ? (
                 <>
                   <span className="sr-only">Changelog, new entries</span>
@@ -141,24 +133,16 @@ export function UserMenuFooter({
             </DropdownMenuItem>
             {children}
             <DropdownMenuItem asChild>
-              <DocsLink href={DOCS_URL}>
-                <BookOpen data-icon="inline-start" />
-                Docs
-                <ExternalLink className="ml-auto size-3.5 text-muted-foreground" />
-              </DocsLink>
+              <DocsLink href={DOCS_URL}>Docs</DocsLink>
             </DropdownMenuItem>
             <DropdownMenuItem asChild>
-              <Link href="/settings/notifications">
-                <Settings data-icon="inline-start" />
-                Settings
-              </Link>
+              <Link href="/settings/notifications">Settings</Link>
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem
               disabled={isPending}
               onClick={() => startTransition(() => signOutAction())}
             >
-              <LogOut data-icon="inline-start" />
               Sign out
             </DropdownMenuItem>
           </DropdownMenuContent>

@@ -1,7 +1,7 @@
 "use client";
 
-import { EllipsisVertical, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { EllipsisVertical } from "lucide-react";
+import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -10,28 +10,28 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { DeregisterDialog } from "@/components/watchers/deregister-dialog";
-import type { WatcherListItem } from "@/lib/api/watchers";
+import type { ActiveWatcherRow } from "@/lib/watchers/roster";
 
 export type WatcherActionTarget = Pick<
-  WatcherListItem,
-  "deletedAt" | "hostname" | "id"
+  ActiveWatcherRow,
+  "hostname" | "id" | "instrumentDisplayName" | "instrumentId"
 >;
 
 export function WatcherActions({ watcher }: { watcher: WatcherActionTarget }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [deregisterOpen, setDeregisterOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
-  if (watcher.deletedAt) {
-    return null;
-  }
+  const instrumentName = watcher.instrumentDisplayName ?? watcher.instrumentId;
 
   return (
     <div className="flex items-center justify-end">
       <DropdownMenu onOpenChange={setMenuOpen} open={menuOpen}>
         <DropdownMenuTrigger asChild>
           <Button
-            aria-label="More actions"
+            aria-label={`Actions for the ${instrumentName} watcher`}
             className="size-7"
+            ref={triggerRef}
             size="icon"
             type="button"
             variant="ghost"
@@ -48,7 +48,6 @@ export function WatcherActions({ watcher }: { watcher: WatcherActionTarget }) {
             }}
             variant="destructive"
           >
-            <Trash2 className="size-3.5" />
             Deregister
           </DropdownMenuItem>
         </DropdownMenuContent>
@@ -58,6 +57,7 @@ export function WatcherActions({ watcher }: { watcher: WatcherActionTarget }) {
         hostname={watcher.hostname}
         onOpenChange={setDeregisterOpen}
         open={deregisterOpen}
+        returnFocusRef={triggerRef}
         watcherId={watcher.id}
       />
     </div>

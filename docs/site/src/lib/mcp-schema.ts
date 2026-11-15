@@ -7,6 +7,8 @@ export interface SchemaParameter {
 }
 
 export interface SchemaField {
+  /** The field is still returned, but clients should move off it. */
+  deprecated?: boolean;
   description?: string;
   fields?: SchemaField[];
   name: string;
@@ -171,6 +173,10 @@ function objectFields(
       name,
       type: formatType(property),
       required: required.has(name),
+      deprecated:
+        property.deprecated === true || peeled.schema.deprecated === true
+          ? true
+          : undefined,
       description,
       fields: collectFields(peeled.schema),
       variants: collectVariants(peeled.schema),

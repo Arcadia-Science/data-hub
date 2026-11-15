@@ -6,7 +6,6 @@ import {
   Home,
   ListChecks,
   type LucideIcon,
-  Radio,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -67,9 +66,6 @@ export function MainNav({ currentUserId, instruments }: MainNavProps) {
       }));
   }, [instruments, recentlyViewedIds, recentlyViewedInstruments.length]);
 
-  const isWatchersActive =
-    pathname === "/watchers" || pathname.startsWith("/watchers/");
-
   return (
     <SidebarGroup>
       <SidebarGroupLabel>Navigation</SidebarGroupLabel>
@@ -115,19 +111,6 @@ export function MainNav({ currentUserId, instruments }: MainNavProps) {
             )}
             viewAllHref="/instruments"
           />
-
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              asChild
-              isActive={isWatchersActive}
-              tooltip="Watchers"
-            >
-              <Link href="/watchers" prefetch={false}>
-                <Radio />
-                <span>Watchers</span>
-              </Link>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
         </SidebarMenu>
       </SidebarGroupContent>
     </SidebarGroup>

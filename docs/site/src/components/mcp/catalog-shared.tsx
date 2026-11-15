@@ -160,6 +160,10 @@ function RequiredMark() {
   return <span className="font-medium text-fd-error text-xs">required</span>;
 }
 
+function DeprecatedBadge() {
+  return <Badge variant="warning">deprecated</Badge>;
+}
+
 function SchemaFieldLayout({
   field,
   nameAccessory,
@@ -176,6 +180,7 @@ function SchemaFieldLayout({
           {field.name}
         </code>
         {nameAccessory}
+        {field.deprecated ? <DeprecatedBadge /> : null}
       </div>
       <code className="font-mono text-fd-info text-xs opacity-80">
         {field.type}

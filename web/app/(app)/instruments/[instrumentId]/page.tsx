@@ -6,7 +6,9 @@ import {
   InstrumentHeader,
   InstrumentHeaderSkeleton,
 } from "@/components/instruments/instrument-header";
+import { InstrumentProblemNoticeSection } from "@/components/instruments/instrument-problem-notice";
 import { InstrumentRunsToolbar } from "@/components/instruments/instrument-runs-toolbar";
+import { PendingInstrumentCard } from "@/components/instruments/pending-instrument-card";
 import {
   InstrumentRunsTableShell,
   type RanByOption,
@@ -27,6 +29,7 @@ import {
   TablePendingBoundary,
   TablePendingProvider,
 } from "@/components/table-pending";
+import { getInstrumentConfirmReview } from "@/lib/api/instrument-confirm-review";
 import {
   buildRunListQuery,
   getInstrumentFilterOptions,
@@ -39,8 +42,6 @@ import {
   listInstrumentSubscriptions,
 } from "@/lib/api/notifications";
 import { parseHasNotebookLinkParam } from "@/lib/api/validators";
-import { getWatcherConfigState } from "@/lib/api/watcher-config/revisions";
-import { getWatcherById } from "@/lib/api/watchers";
 import { auth } from "@/lib/auth";
 import {
   hasActiveInstrumentFilters,
@@ -177,8 +178,8 @@ export default async function InstrumentDetailPage({
   const filters = instrumentDetailParamsCache.parse(await searchParams);
   const userId = session.user.id;
 
-  // The header and the runs table stream independently: each is its own
-  // Suspense child so their queries run in parallel (the shared
+  // The header, the problem notice and the runs table stream independently:
+  // each is its own Suspense child so their queries run in parallel (the shared
   // `getInstrumentById` is `cache()`-deduped) and the header paints without
   // waiting on the heavier runs / filter-option queries.
   const isAdmin = session.user.isAdmin === true;
@@ -193,10 +194,17 @@ export default async function InstrumentDetailPage({
           userId={userId}
         />
       </Suspense>
+      <Suspense fallback={null}>
+        <InstrumentProblemNoticeSection
+          instrumentId={instrumentId}
+          isAdmin={isAdmin}
+        />
+      </Suspense>
       <Suspense fallback={<InstrumentRunsSkeleton />}>
         <InstrumentRunsSection
           filters={filters}
           instrumentId={instrumentId}
+          isAdmin={isAdmin}
           userId={userId}
         />
       </Suspense>
@@ -233,13 +241,6 @@ async function InstrumentHeaderSection({
     (s) => s.instrumentId === instrumentId
   );
 
-  // Admins get an "Edit watcher config" action for the live watcher.
-  const watcherConfig = await loadWatcherConfigForAdmin(
-    isAdmin && !instrument.activeWatcherDeregistered
-      ? instrument.activeWatcherId
-      : null
-  );
-
   return (
     <InstrumentHeader
       instrument={instrument}
@@ -248,36 +249,43 @@ async function InstrumentHeaderSection({
         enabled: subscriptionForThisInstrument?.enabled ?? false,
         masterMuted: notificationPrefs.runsAllMuted,
       }}
-      watcherConfig={watcherConfig}
     />
   );
 }
 
-async function loadWatcherConfigForAdmin(watcherId: string | null) {
-  if (!watcherId) {
-    return null;
+// A pending instrument's page: an admin sees the watcher's settings and the
+// Confirm button, and everyone else sees one line.
+async function PendingInstrumentSection({
+  instrumentId,
+  isAdmin,
+}: {
+  instrumentId: string;
+  isAdmin: boolean;
+}) {
+  if (!isAdmin) {
+    return (
+      <p className="rounded-xl border bg-card p-5 text-muted-foreground text-sm">
+        This instrument is waiting for an admin to confirm it. Runs will appear
+        here after that.
+      </p>
+    );
   }
-  const watcher = await getWatcherById(watcherId);
-  if (!watcher || watcher.deletedAt) {
-    return null;
+  const review = await getInstrumentConfirmReview(instrumentId);
+  if (!review) {
+    notFound();
   }
-  return {
-    watcherId: watcher.id,
-    hostname: watcher.hostname,
-    online:
-      watcher.effectiveStatus === "watching" ||
-      watcher.effectiveStatus === "waiting",
-    state: await getWatcherConfigState(watcher),
-  };
+  return <PendingInstrumentCard review={review} />;
 }
 
 async function InstrumentRunsSection({
   instrumentId,
   filters,
+  isAdmin,
   userId,
 }: {
   instrumentId: string;
   filters: InstrumentDetailFilters;
+  isAdmin: boolean;
   userId: string;
 }) {
   // `getInstrumentById` is `cache()`-deduped, so this resolves against the
@@ -286,6 +294,14 @@ async function InstrumentRunsSection({
   const instrument = await getInstrumentById(instrumentId);
   if (!instrument) {
     notFound();
+  }
+
+  // A pending instrument has no runs yet. An admin reviews its watcher and
+  // confirms it here; everyone else is told to wait.
+  if (instrument.status === "pending") {
+    return (
+      <PendingInstrumentSection instrumentId={instrumentId} isAdmin={isAdmin} />
+    );
   }
 
   // Paginated runs plus the per-instrument filter options and attribution

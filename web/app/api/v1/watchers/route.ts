@@ -3,10 +3,8 @@ import type { NextRequest } from "next/server";
 import { authorize } from "@/lib/api/auth";
 import { apiError, VALIDATION_ERROR } from "@/lib/api/errors";
 import { watcherStatusSchema } from "@/lib/api/openapi";
-import {
-  computeEffectiveStatus,
-  effectiveStatusCondition,
-} from "@/lib/api/watchers";
+import { computeEffectiveStatus } from "@/lib/api/watcher-status";
+import { effectiveStatusCondition } from "@/lib/api/watchers";
 import { db } from "@/lib/db";
 import { instruments, watchers } from "@/lib/db/schema";
 

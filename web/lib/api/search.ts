@@ -9,10 +9,6 @@ import {
   type SQL,
   sql,
 } from "drizzle-orm";
-import {
-  getWatcherOnlineStatus,
-  type WatcherOnlineStatus,
-} from "@/components/watchers/watcher-online-status";
 import { type ActorToken, actorUser, resolveActor } from "@/lib/api/actor";
 import { getInstrumentListWithCounts } from "@/lib/api/instruments";
 import { db } from "@/lib/db";
@@ -26,6 +22,11 @@ import {
   runNotebookLinks,
   users,
 } from "@/lib/db/schema";
+import {
+  type Connection,
+  type LegacyWatcherStatus,
+  toLegacyWatcherStatus,
+} from "@/lib/instruments/connection";
 import {
   notebookLinkDisplayName,
   notebookSearchKey,
@@ -98,8 +99,14 @@ export interface SearchFileResult {
 export type InstrumentMatchReason = "name" | "pattern";
 
 export interface SearchInstrumentResult {
+  // How the instrument is connected to its watcher, the same value its
+  // instrument responses carry. The badge reads it, with `status`.
+  connection: Connection;
   displayName: string;
   id: string;
+  /**
+   * @deprecated Get the instrument for its `watcher.lastHeartbeatAt`.
+   */
   lastWatcherHeartbeatAt: string | null;
   // Set only when `matchReason` is "pattern" — the configured pattern that
   // matched (e.g. "*.nd2"), so the client can highlight it.
@@ -108,9 +115,12 @@ export interface SearchInstrumentResult {
   runCount: number;
   status: "pending" | "active" | "inactive";
   type: "instrument";
-  // `deregistered` (active instrument, only watcher deregistered) is distinct
-  // from `no_watcher`. Only meaningful when `status` is `active`.
-  watcherStatus: WatcherOnlineStatus | "deregistered";
+  /**
+   * `deregistered` (active instrument, only watcher deregistered) is distinct
+   * from `no_watcher`. Only meaningful when `status` is `active`.
+   * @deprecated Use `connection.state`, or `connection.reason`.
+   */
+  watcherStatus: LegacyWatcherStatus;
 }
 
 export interface SearchUserResult {
@@ -367,13 +377,10 @@ async function searchInstruments(
           id: row.id,
           displayName: row.displayName,
           status: row.status,
-          watcherStatus:
-            row.watcherCount === 0 && row.hasDeregisteredWatcher
-              ? ("deregistered" as const)
-              : getWatcherOnlineStatus(row),
-          lastWatcherHeartbeatAt: row.lastWatcherHeartbeatAt
-            ? row.lastWatcherHeartbeatAt.toISOString()
-            : null,
+          connection: row.connection,
+          watcherStatus: toLegacyWatcherStatus(row.connection),
+          lastWatcherHeartbeatAt:
+            row.watcher?.lastHeartbeatAt?.toISOString() ?? null,
           runCount: row.runCount,
           matchReason: nameHit ? ("name" as const) : ("pattern" as const),
           matchedPattern: nameHit ? null : (matchedPattern ?? null),

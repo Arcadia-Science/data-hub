@@ -46,6 +46,10 @@ describe("getFileStatusKey", () => {
     expect(FILE_STATUS_CONFIG[key("queued")].label).toBe("Queued");
   });
 
+  it("labels a detected file Waiting to upload", () => {
+    expect(FILE_STATUS_CONFIG[key("detected")].label).toBe("Waiting to upload");
+  });
+
   it("lets a stalled processing file read as stalled", () => {
     expect(key("processing", { stalledProcessing: true })).toBe("stalled");
   });

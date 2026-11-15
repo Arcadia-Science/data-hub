@@ -1,62 +1,62 @@
 "use client";
 
-import { Filter, X } from "lucide-react";
+import { ListFilter, X } from "lucide-react";
 import { useQueryStates } from "nuqs";
+import type { DateRange } from "@/components/runs/runs-date-filter";
 import { useTablePending } from "@/components/table-pending";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { useViewerTimeZone } from "@/components/viewer-time-zone-provider";
-import { todayDateString } from "@/lib/date";
+import { WatcherRangeFilter } from "@/components/watchers/watcher-range-filter";
 import { watcherDetailSearchParams } from "@/lib/search-params";
+import { EVENT_TYPE_OPTIONS } from "@/lib/watchers/event-messages";
 
-const EVENT_TYPES = [
-  { value: "watcher_started", label: "Started" },
-  { value: "watcher_stopped", label: "Stopped" },
-  { value: "file_uploaded", label: "File Uploaded" },
-  { value: "upload_failed", label: "Upload Failed" },
-  { value: "run_reported", label: "Run Reported" },
-  { value: "config_synced", label: "Config Synced" },
-  { value: "upload_requests_cancelled", label: "Uploads Cancelled" },
-  { value: "error", label: "Error" },
-] as const;
-
-export function EventLogToolbar() {
-  // shallow: false pushes filter changes to the URL and triggers a full
-  // server-side re-render, so the event list refetches with the new filters.
-  // startTransition ties the refetch to the surrounding table's pending UI.
+/**
+ * The Activity tab's filters: the event types to list and the days to list them
+ * for. Both live in the URL, so a filtered log is a link.
+ */
+export function EventLogToolbar({
+  rangeFallback,
+}: {
+  /** What the range picker shows when the URL names no range. */
+  rangeFallback: DateRange;
+}) {
+  // shallow: false pushes a change to the URL and renders the page again on the
+  // server, so the events are read again with the new filters.
   const { startTransition } = useTablePending();
   const [filters, setFilters] = useQueryStates(watcherDetailSearchParams, {
     shallow: false,
-    throttleMs: 300,
     startTransition,
   });
 
-  const timeZone = useViewerTimeZone();
-  const today = todayDateString(timeZone);
   const hasFilters =
     filters.event_type.length > 0 ||
-    (filters.events_since !== null && filters.events_since !== today);
+    filters.date_from !== null ||
+    filters.date_to !== null ||
+    filters.since !== null ||
+    filters.events_since !== null;
 
   function toggleEventType(type: string) {
     const current = filters.event_type;
     const next = current.includes(type)
       ? current.filter((t) => t !== type)
       : [...current, type];
-    setFilters({ event_type: next, logs_page: null });
+    setFilters({ event_type: next, shown: null });
   }
 
   function clearFilters() {
     setFilters({
       event_type: [],
+      date_from: null,
+      date_to: null,
+      since: null,
       events_since: null,
-      logs_page: null,
+      shown: null,
     });
   }
 
@@ -64,7 +64,7 @@ export function EventLogToolbar() {
     <div className="flex flex-wrap items-center gap-2">
       {hasFilters && (
         <Button
-          className="h-8 gap-1 text-xs"
+          className="h-9 gap-1 text-xs"
           onClick={clearFilters}
           size="sm"
           variant="ghost"
@@ -76,33 +76,37 @@ export function EventLogToolbar() {
 
       <Popover>
         <PopoverTrigger asChild>
-          <Button className="h-8 gap-1 text-sm" size="sm" variant="outline">
-            <Filter className="size-3" />
-            Event Type
+          <Button className="h-9 gap-2 font-normal" size="sm" variant="outline">
+            <ListFilter
+              aria-hidden="true"
+              className="size-3.5 text-muted-foreground"
+            />
+            <span className="text-sm">Event type</span>
             {filters.event_type.length > 0 && (
-              <span className="ml-1 rounded-full bg-primary px-1.5 text-[10px] text-primary-foreground">
+              <span className="rounded-full bg-primary px-1.5 text-[10px] text-primary-foreground">
                 {filters.event_type.length}
+                <span className="sr-only"> selected</span>
               </span>
             )}
           </Button>
         </PopoverTrigger>
-        <PopoverContent align="start" className="w-48 p-2">
+        <PopoverContent align="end" className="w-56 p-2">
           <div className="flex flex-col gap-1">
-            {EVENT_TYPES.map((et) => (
+            {EVENT_TYPE_OPTIONS.map((option) => (
               <div
                 className="flex items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-muted"
-                key={et.value}
+                key={option.value}
               >
                 <Checkbox
-                  checked={filters.event_type.includes(et.value)}
-                  id={`event-type-${et.value}`}
-                  onCheckedChange={() => toggleEventType(et.value)}
+                  checked={filters.event_type.includes(option.value)}
+                  id={`event-type-${option.value}`}
+                  onCheckedChange={() => toggleEventType(option.value)}
                 />
                 <Label
                   className="flex-1 cursor-pointer font-normal"
-                  htmlFor={`event-type-${et.value}`}
+                  htmlFor={`event-type-${option.value}`}
                 >
-                  {et.label}
+                  {option.label}
                 </Label>
               </div>
             ))}
@@ -110,18 +114,7 @@ export function EventLogToolbar() {
         </PopoverContent>
       </Popover>
 
-      <Input
-        aria-label="Events since"
-        className="h-8 w-36 text-xs"
-        onChange={(e) =>
-          setFilters({
-            events_since: e.target.value || null,
-            logs_page: null,
-          })
-        }
-        type="date"
-        value={filters.events_since ?? today}
-      />
+      <WatcherRangeFilter fallback={rangeFallback} />
     </div>
   );
 }

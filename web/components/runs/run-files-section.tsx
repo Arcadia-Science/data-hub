@@ -1,6 +1,6 @@
 "use client";
 
-import { Download, Search } from "lucide-react";
+import { Download, Search, Upload } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { debounce, useQueryStates } from "nuqs";
 import { toast } from "sonner";
@@ -56,6 +56,10 @@ import {
   ReadOnlyRunFilesTable,
 } from "./run-files-table";
 import { type TrackFiles, usePendingFiles } from "./use-pending-files";
+import {
+  UploadReasonLine,
+  WatcherGatedUploadButton,
+} from "./watcher-gated-upload-button";
 
 // Wait this long after the last search keystroke before writing the query to
 // the URL and refetching the page.
@@ -80,7 +84,7 @@ const FILES_CATEGORY_OPTIONS: FilesFilterOption<FilesCategoryFilter>[] = [
 // "Processing" is in-flight work only; files past the stall cutoff answer to
 // "Stalled" instead, matching what the status column labels them.
 const FILES_STATUS_OPTIONS: FilesFilterOption<FilesLifecycleFilter>[] = [
-  { value: "pending", label: "Pending" },
+  { value: "pending", label: "Waiting to upload" },
   { value: "uploaded", label: "Uploaded" },
   { value: "queued", label: "Queued" },
   { value: "processing", label: "Processing" },
@@ -209,9 +213,43 @@ function RunFilesSectionContent({
       : (pagination.page - 1) * pagination.per_page + 1;
   const to = Math.min(pagination.page * pagination.per_page, pagination.total);
 
+  // The files Upload all queues: every `detected` file of the run, not only
+  // the page on screen. A deleted run is read-only and can't queue uploads.
+  const uploadAllCount = isDeleted ? 0 : stats.detected;
+  // The rows of this page that Upload all covers, so they show a spinner.
+  const uploadAllPageIds = files
+    .filter((file) => file.status === "detected" && file.deletedAt === null)
+    .map((file) => file.id);
+
   return (
     <div className="flex flex-col gap-2">
       <RunSectionHeading
+        actions={
+          uploadAllCount > 0 ? (
+            <div className="flex flex-wrap items-center justify-end gap-x-2.5 gap-y-2">
+              <UploadReasonLine />
+              <WatcherGatedUploadButton
+                disabled={isPending}
+                enabledTooltip={`Request upload for ${uploadAllCount} ${uploadAllCount === 1 ? "file" : "files"} still on the instrument PC`}
+                onClick={() =>
+                  handleUploadAll(
+                    uploadAllPageIds,
+                    instrumentId,
+                    runId,
+                    track,
+                    router,
+                    autoRefreshActions.restart
+                  )
+                }
+                size="sm"
+                type="button"
+              >
+                <Upload data-icon="inline-start" />
+                Upload all ({uploadAllCount})
+              </WatcherGatedUploadButton>
+            </div>
+          ) : undefined
+        }
         countLabel={formatFilesSectionCount(stats)}
         title="Files"
       />
@@ -398,7 +436,8 @@ function RunFilesSectionContent({
               : ""}
           </span>
           <span>
-            {stats.pending} pending &middot; {stats.uploaded} uploaded
+            {stats.pending} waiting on the instrument PC &middot;{" "}
+            {stats.uploaded} uploaded
           </span>
         </div>
       </div>
@@ -451,6 +490,9 @@ function BulkActionBarHost({
       if (!res.ok) {
         const body = await res.json().catch(() => null);
         toast.error(body?.error?.message ?? "Failed to request uploads");
+        // The badge was read at page load, so a refusal means the page is out
+        // of date: refresh it so the buttons and the line match the server.
+        router.refresh();
         return;
       }
       toast.success(`Upload requested for ${ids.length} file(s)`);
@@ -576,9 +618,52 @@ function handleSingleUpload(
     if (!res.ok) {
       const body = await res.json().catch(() => null);
       toast.error(body?.error?.message ?? "Failed to request upload");
+      // The badge was read at page load, so a refusal means the page is out
+      // of date: refresh it so the buttons and the line match the server.
+      router.refresh();
       return;
     }
     toast.success("Upload requested");
+    onWorkStarted();
+    router.refresh();
+  });
+}
+
+// Queues every `detected` file of the run through the run-level endpoint that
+// the runs list also uses. `pageFileIds` are only the rows on screen, which
+// lock while the request runs.
+function handleUploadAll(
+  pageFileIds: number[],
+  instrumentId: string,
+  runId: string,
+  track: TrackFiles,
+  router: ReturnType<typeof useRouter>,
+  onWorkStarted: () => void
+) {
+  track(pageFileIds, async () => {
+    const res = await fetch(
+      `/api/v1/instruments/${instrumentId}/runs/${encodeURIComponent(runId)}/request-upload-all`,
+      { method: "POST" }
+    );
+    const body = await res.json().catch(() => null);
+    if (!res.ok) {
+      toast.error(body?.error?.message ?? "Failed to request uploads");
+      // The badge was read at page load, so a refusal means the page is out
+      // of date: refresh it so the buttons and the line match the server.
+      router.refresh();
+      return;
+    }
+    const queued = Number(body?.files_queued ?? 0);
+    if (queued === 0) {
+      // Another request queued them first, so there was nothing left to ask for.
+      toast.info("The files were already requested for upload");
+    } else {
+      toast.success(
+        queued === 1
+          ? "Upload requested for 1 file"
+          : `Upload requested for ${queued} files`
+      );
+    }
     onWorkStarted();
     router.refresh();
   });

@@ -1,6 +1,7 @@
 "use client";
 
-import type * as React from "react";
+import { RefreshCw, WifiOff } from "lucide-react";
+import { type ComponentProps, useId } from "react";
 import { DisabledReasonButton } from "@/components/disabled-reason-button";
 import { Button } from "@/components/ui/button";
 import {
@@ -8,60 +9,123 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import type { UploadReasonTone } from "@/lib/runs/upload-availability";
+import { cn } from "@/lib/utils";
 
 import { useWatcherStatus } from "./watcher-status-provider";
 
-const DEFAULT_OFFLINE_TOOLTIP =
-  "Watcher is offline. Bring the watcher online before requesting uploads — otherwise nothing will transfer to S3.";
+const TONE_CLASSNAME: Record<UploadReasonTone, string> = {
+  destructive: "text-red-700 dark:text-red-400",
+  info: "text-blue-700 dark:text-blue-400",
+  muted: "text-muted-foreground",
+};
 
 /**
- * Renders an upload-style `Button` that is fully interactive when the
- * instrument's watcher is online, and a dimmed button with an
- * explanatory tooltip when it is offline.
+ * Renders an upload-style `Button` that follows the run page's upload table
+ * (see `getRunUploadAvailability`): fully interactive while the watcher is
+ * online or restarting, and a dimmed button with the reason while it can't
+ * take uploads.
  *
- * Watcher status is read from the nearest `WatcherStatusProvider`, so
- * callers don't need to thread `isWatcherOnline` down through the tree.
+ * The state is read from the nearest `WatcherStatusProvider`, so callers don't
+ * thread it down through the tree. The reason is the button's tooltip and its
+ * accessible description, so it reaches a keyboard or screen reader user
+ * without a visible line. Put an `UploadReasonLine` beside the button where one
+ * line covers several buttons.
  *
- * The offline path uses `DisabledReasonButton`, so the tooltip stays reachable
- * by hover and by keyboard focus. Each state owns its tooltip, so a caller
- * passes `onlineTooltip` here instead of wrapping the button in a second one.
+ * A disabled button uses `DisabledReasonButton`, so it stays focusable and its
+ * tooltip opens on focus as well as hover. Each state owns its tooltip, so a
+ * caller passes `enabledTooltip` here instead of wrapping the button in a
+ * second one.
  */
 export function WatcherGatedUploadButton({
-  offlineTooltip = DEFAULT_OFFLINE_TOOLTIP,
-  onlineTooltip,
+  enabledTooltip,
   className,
   children,
   ...buttonProps
-}: React.ComponentProps<typeof Button> & {
-  offlineTooltip?: string;
-  onlineTooltip?: React.ReactNode;
+}: ComponentProps<typeof Button> & {
+  /** What the button does, as a tooltip while Upload is available. */
+  enabledTooltip?: string;
 }) {
-  const { isWatcherOnline } = useWatcherStatus();
+  const { upload } = useWatcherStatus();
+  const reasonId = useId();
+  const describedBy = upload.reason ? reasonId : undefined;
+  const reasonText = upload.reason ? (
+    <span hidden id={reasonId}>
+      {upload.reason}
+    </span>
+  ) : null;
 
-  if (isWatcherOnline) {
-    const button = (
-      <Button className={className} {...buttonProps}>
-        {children}
-      </Button>
-    );
-    if (!onlineTooltip) {
-      return button;
-    }
+  if (!upload.enabled) {
     return (
-      <Tooltip>
-        <TooltipTrigger asChild>{button}</TooltipTrigger>
-        <TooltipContent>{onlineTooltip}</TooltipContent>
-      </Tooltip>
+      <>
+        <DisabledReasonButton
+          {...buttonProps}
+          aria-describedby={describedBy}
+          className={className}
+          reason={upload.reason}
+        >
+          {children}
+        </DisabledReasonButton>
+        {reasonText}
+      </>
     );
   }
 
-  return (
-    <DisabledReasonButton
-      {...buttonProps}
+  const button = (
+    <Button
+      aria-describedby={describedBy}
       className={className}
-      reason={offlineTooltip}
+      {...buttonProps}
     >
       {children}
-    </DisabledReasonButton>
+    </Button>
+  );
+  const tooltip = [enabledTooltip, upload.reason].filter(Boolean);
+  if (tooltip.length === 0) {
+    return button;
+  }
+  return (
+    <>
+      <Tooltip>
+        <TooltipTrigger asChild>{button}</TooltipTrigger>
+        <TooltipContent className="max-w-xs">
+          {tooltip.map((line) => (
+            <p key={line}>{line}</p>
+          ))}
+        </TooltipContent>
+      </Tooltip>
+      {reasonText}
+    </>
+  );
+}
+
+/**
+ * The line beside an Upload button that says why uploads wait or can't start:
+ * blue while the instrument PC restarts, red while the watcher is offline,
+ * grey for the quieter states. Renders nothing while Online. It is plain text,
+ * so it is visible to everyone and not only in a tooltip.
+ */
+export function UploadReasonLine({ className }: { className?: string }) {
+  const { upload } = useWatcherStatus();
+  if (!(upload.reason && upload.tone)) {
+    return null;
+  }
+  let Icon: typeof RefreshCw | null = null;
+  if (upload.tone === "info") {
+    Icon = RefreshCw;
+  } else if (upload.tone === "destructive") {
+    Icon = WifiOff;
+  }
+  return (
+    <p
+      className={cn(
+        "flex items-center gap-1.5 text-[13px] leading-snug",
+        TONE_CLASSNAME[upload.tone],
+        className
+      )}
+    >
+      {Icon ? <Icon aria-hidden="true" className="size-3.5 shrink-0" /> : null}
+      {upload.reason}
+    </p>
   );
 }

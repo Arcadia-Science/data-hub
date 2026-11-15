@@ -1,6 +1,10 @@
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { cache } from "react";
 import { attributedToUser } from "@/lib/api/attributions";
+import {
+  getInstrumentWatcherInfo,
+  NO_WATCHER_INFO,
+} from "@/lib/api/instrument-watchers";
 import type { UserAvatarUser } from "@/lib/avatar-color";
 import { startOfTodayISO, startOfWeekISO } from "@/lib/date";
 import { db } from "@/lib/db";
@@ -11,30 +15,35 @@ import {
   runAttributions,
   runComments,
   users,
-  watchers,
 } from "@/lib/db/schema";
+import {
+  type Connection,
+  toLegacyWatcherStatus,
+} from "@/lib/instruments/connection";
 import { toInitials } from "@/lib/utils";
 import { getViewerTimeZone } from "@/lib/viewer-timezone";
 
 export interface InstrumentSummary {
+  // How the instrument is connected to its watcher, the same value its
+  // instrument responses carry.
+  connection: Connection;
   displayName: string;
   filesPendingUpload: number;
   id: string;
   lastRunAt: Date | null;
   runCount: number;
   status: "pending" | "active" | "inactive";
+  /**
+   * @deprecated Use `connection.state`, or `connection.reason`.
+   */
   watcherStatus: "online" | "offline" | "no_watcher";
 }
 
-// A watcher is considered stale (offline) if it hasn't sent a heartbeat
-// within this window, even if its DB status is still "watching".
-const HEARTBEAT_STALE_MINUTES = 5;
-
 export const getInstrumentSummaries = cache(
   async function getInstrumentSummaries(): Promise<InstrumentSummary[]> {
-    // Instrument stats and watcher liveness are fetched separately to avoid a
+    // Instrument stats and watcher state are fetched separately to avoid a
     // combinatorial explosion from joining instruments × runs × files × watchers
-    // in a single query. The watcher lookup is lightweight (one row per agent).
+    // in a single query.
     const rows = await db
       .select({
         id: instruments.id,
@@ -50,56 +59,26 @@ export const getInstrumentSummaries = cache(
       .groupBy(instruments.id, instruments.displayName, instruments.status)
       .orderBy(instruments.displayName);
 
-    const watcherRows = await db
-      .select({
-        instrumentId: watchers.instrumentId,
-        status: watchers.status,
-        lastHeartbeatAt: watchers.lastHeartbeatAt,
-      })
-      .from(watchers)
-      .where(isNull(watchers.deletedAt));
-
-    // Index watchers by instrument so we can do O(1) lookups when enriching rows.
-    const watcherMap = new Map<
-      string,
-      { status: string; lastHeartbeatAt: Date | null }[]
-    >();
-    for (const w of watcherRows) {
-      const arr = watcherMap.get(w.instrumentId) ?? [];
-      arr.push(w);
-      watcherMap.set(w.instrumentId, arr);
-    }
-
-    const staleThreshold = new Date(
-      Date.now() - HEARTBEAT_STALE_MINUTES * 60 * 1000
-    );
+    const infoById = await getInstrumentWatcherInfo(rows.map((r) => r.id));
 
     return rows.map((row) => {
-      const instrumentWatchers = watcherMap.get(row.id) ?? [];
-      let watcherStatus: InstrumentSummary["watcherStatus"] = "no_watcher";
-
-      // An instrument is "online" only if at least one watcher is actively
-      // heartbeating. Registered watchers that have gone silent are "offline".
-      if (instrumentWatchers.length > 0) {
-        const hasOnline = instrumentWatchers.some(
-          (w) =>
-            w.status === "watching" &&
-            w.lastHeartbeatAt &&
-            w.lastHeartbeatAt > staleThreshold
-        );
-        watcherStatus = hasOnline ? "online" : "offline";
-      }
+      const { connection } = infoById.get(row.id) ?? NO_WATCHER_INFO;
+      // This status never named a deregistered watcher: an instrument whose
+      // only watcher was deregistered reads `no_watcher`, as one that never had
+      // a watcher does.
+      const legacy = toLegacyWatcherStatus(connection);
 
       return {
         id: row.id,
         displayName: row.displayName,
         status: row.status,
+        connection,
         runCount: row.runCount,
         // SQL `max(...)` can land as a Postgres timestamp string; normalize
         // like `hydrateInstrumentRow` so callers get a real Date.
         lastRunAt: row.lastRunAt ? new Date(row.lastRunAt) : null,
         filesPendingUpload: row.filesPendingUpload,
-        watcherStatus,
+        watcherStatus: legacy === "deregistered" ? "no_watcher" : legacy,
       };
     });
   }

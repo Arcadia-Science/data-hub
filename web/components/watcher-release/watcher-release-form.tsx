@@ -6,7 +6,13 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardFooter } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+} from "@/components/ui/card";
 import {
   Field,
   FieldContent,
@@ -121,11 +127,9 @@ export function WatcherReleaseForm({
   );
 
   return (
-    // The form renders as a content-only Card (body + footer separated
-    // by a single border). The page-level heading + description live in
-    // the route's `page.tsx` so they align with the sibling settings
-    // pages and the sidebar "Settings" label. Width is constrained by
-    // `SettingsPageContent` on the route; CardContent fills the card.
+    // The form renders as a content-only Card (header, body and footer, with
+    // the footer separated by a single border). The page-level heading lives in
+    // the route's `page.tsx`. Width comes from the settings layout.
     //
     // The fields stay in a single Card (rather than one-card-per-field)
     // because they all configure the same logical resource — the
@@ -138,69 +142,73 @@ export function WatcherReleaseForm({
       }}
     >
       <Card>
+        <CardHeader>
+          <h2 className="font-semibold text-base leading-normal">
+            Release version
+          </h2>
+          <CardDescription>
+            The version every watcher updates itself to.
+          </CardDescription>
+        </CardHeader>
         <CardContent>
           <FieldGroup>
-            <form.Field name="latestVersion">
-              {(field) => {
-                const isInvalid =
-                  field.state.meta.isTouched && !field.state.meta.isValid;
-                return (
-                  <VersionField
-                    availableVersions={availableVersions}
-                    description={
-                      <>
-                        The release watchers will self-upgrade to. Leave blank
-                        to temporarily disable self-updates (the endpoint
-                        returns{" "}
-                        <code className="font-mono">latest_version: null</code>{" "}
-                        and clients skip the upgrade).
-                      </>
-                    }
-                    errors={field.state.meta.errors}
-                    id={field.name}
-                    isInvalid={isInvalid}
-                    label="Latest version"
-                    noneLabel="None — disable self-updates"
-                    onBlur={field.handleBlur}
-                    onChange={field.handleChange}
-                    placeholder="e.g. 0.4.2"
-                    pypiReachable={pypiReachable}
-                    value={field.state.value}
-                  />
-                );
-              }}
-            </form.Field>
+            <div className="grid gap-7 sm:grid-cols-2 sm:gap-x-4">
+              <form.Field name="latestVersion">
+                {(field) => {
+                  const isInvalid =
+                    field.state.meta.isTouched && !field.state.meta.isValid;
+                  return (
+                    <VersionField
+                      availableVersions={availableVersions}
+                      description={
+                        <>
+                          Watchers update to this when they&apos;re idle. Leave
+                          blank to pause updates.
+                        </>
+                      }
+                      errors={field.state.meta.errors}
+                      id={field.name}
+                      isInvalid={isInvalid}
+                      label="Latest version"
+                      noneLabel="None — pause updates"
+                      onBlur={field.handleBlur}
+                      onChange={field.handleChange}
+                      placeholder="e.g. 0.4.2"
+                      pypiReachable={pypiReachable}
+                      value={field.state.value}
+                    />
+                  );
+                }}
+              </form.Field>
 
-            <form.Field name="minSupportedVersion">
-              {(field) => {
-                const isInvalid =
-                  field.state.meta.isTouched && !field.state.meta.isValid;
-                return (
-                  <VersionField
-                    availableVersions={availableVersions}
-                    description={
-                      <>
-                        Optional floor. Watchers reporting an installed version
-                        below this have their heartbeats rejected with{" "}
-                        <code className="font-mono">426 Upgrade Required</code>,
-                        forcing them to self-update before they can check in
-                        again. Leave blank to disable the floor.
-                      </>
-                    }
-                    errors={field.state.meta.errors}
-                    id={field.name}
-                    isInvalid={isInvalid}
-                    label="Minimum supported version"
-                    noneLabel="None — no version floor"
-                    onBlur={field.handleBlur}
-                    onChange={field.handleChange}
-                    placeholder="e.g. 0.1.0"
-                    pypiReachable={pypiReachable}
-                    value={field.state.value}
-                  />
-                );
-              }}
-            </form.Field>
+              <form.Field name="minSupportedVersion">
+                {(field) => {
+                  const isInvalid =
+                    field.state.meta.isTouched && !field.state.meta.isValid;
+                  return (
+                    <VersionField
+                      availableVersions={availableVersions}
+                      description={
+                        <>
+                          Older watchers must update before they can check in
+                          again. Leave blank for no minimum.
+                        </>
+                      }
+                      errors={field.state.meta.errors}
+                      id={field.name}
+                      isInvalid={isInvalid}
+                      label="Minimum supported version"
+                      noneLabel="None — no minimum"
+                      onBlur={field.handleBlur}
+                      onChange={field.handleChange}
+                      placeholder="e.g. 0.1.0"
+                      pypiReachable={pypiReachable}
+                      value={field.state.value}
+                    />
+                  );
+                }}
+              </form.Field>
+            </div>
 
             <form.Field name="mandatory">
               {(field) => (
@@ -230,10 +238,8 @@ export function WatcherReleaseForm({
                           Mandatory update
                         </FieldLabel>
                         <FieldDescription>
-                          Skip the watcher&apos;s activity-window guard so
-                          mid-acquisition PCs upgrade immediately. Reserve for
-                          security fixes or wire-protocol breaks. Has no effect
-                          when the latest version is blank.
+                          Update right away, even mid-acquisition. Only for
+                          security fixes or breaking changes.
                         </FieldDescription>
                       </FieldContent>
                       {/* checked = value && !empty mirrors the original

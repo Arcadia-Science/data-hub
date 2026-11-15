@@ -118,18 +118,29 @@ You can also run `npm run db:seed` on its own — it calls the schema-driven `cl
 | Entity | Count | Notes |
 | --- | --- | --- |
 | `user` | 26 | `alice@example.com` (admin) + Bob–Zoe teammates (`@example.com`) |
-| `personal_access_tokens` | 1 | Wildcard scope, no expiry (Alice) |
-| `instruments` | 11 | Production catalog (10 active) + 1 pending for the activate-instrument UI |
-| `watchers` | 11 (one per instrument) | Prod-like hostnames; mix of `watching` / `registered` / `stopped` |
-| `watcher_heartbeats` | ~10 per watching watcher | Spread over the last hour |
-| `watcher_events` | 3 per watching watcher | `watcher_started`, `config_synced`, `file_uploaded` |
-| `instrument_runs` | 8 per active instrument | Calendar-relative `acquired_at` (today, yesterday, this week, ~7d / ~10d / ~22d / earlier this month) so date-filter presets and today/this-week stats have distinct non-empty sets; alternating `lambda` / `watcher` source |
+| `personal_access_tokens` | 2 | Wildcard scope, no expiry (Alice), and `Lab PC token` (watcher scope), which the pending instrument's watcher registered with |
+| `instruments` | 18 | Production catalog (10 active) + 7 made-up active instruments for the watcher states listed below + 1 pending for the activate-instrument UI |
+| `watchers` | 18 | One current watcher for each of the 16 active and pending instruments that have one, plus 2 deregistered watchers. Their states are listed below |
+| `watcher_heartbeats` | ~16,000 | Three watchers have a week of heartbeats: one every minute for Jolene FPLC, and one every five minutes for SpectraMax iD3 Plate Reader and Agilent 4150 TapeStation. Every other watching watcher has about 10, spread over the last hour |
+| `watcher_events` | 144 | `watcher_started`, `config_synced`, and `file_uploaded` for each watching watcher, plus the history, restarts, missed heartbeats, and other states listed below |
+| `watcher_config_revisions` | 8 | Pending, rejected, and edited-on-PC changes, each with the revision before it, plus the first revision of each deregistered watcher |
+| `instrument_runs` | 138 | 8 per active instrument (17 active), plus 2 runs with files waiting for upload. Calendar-relative `acquired_at` (today, yesterday, this week, ~7d / ~10d / ~22d / earlier this month) so date-filter presets and today/this-week stats have distinct non-empty sets; alternating `lambda` / `watcher` source |
 | `files` | 1–4 per run | Mix of `uploaded` / `completed` / `failed`. Fixture instruments (qPCR, gel doc, both SpectraMax readers) render the real fixture bytes in `LOCAL_S3_MIRROR`; other instruments use production-shaped synthetic filenames (see [Working with file bytes locally](#working-with-file-bytes-locally)) |
 | `run_comments` | multi-author threads | Q&A / notes across Alice + teammates; richer threads on ~⅓ of runs |
 | `run_attributions` | 1 per run | Rotated across Alice + teammates |
 | `run_notebook_links` | 0–2 per run | Every other run links to a synthetic Notion or ELN page, every sixth run to two; some links have labels |
 | `archive_jobs` | 3 | One each of `ready` / `building` / `failed` |
-| `watcher_release_config` | 1 (singleton) | `1.0.0 / 0.1.0 / false` (matches seeded watcher version) |
+| `watcher_release_config` | 1 (singleton) | `1.4.3 / 0.1.0 / false` (the version most seeded watchers run; Colony Counter G runs 1.4.0 and Balance F runs 1.3.2, so one is behind and one needs an update before its settings can be edited) |
+
+The watcher states are spread over these instruments. The seven made-up instruments have invented names and hostnames such as `LAB-PC-01`:
+
+- **A week of history:** Jolene FPLC has one heartbeat a minute, three automatic-update restarts with rising versions, and one gap. SpectraMax iD3 Plate Reader and Agilent 4150 TapeStation have one heartbeat every five minutes and one gap each. Each missed-heartbeat gap ends with a `heartbeat_recovered` error. The SpectraMax iD3 Plate Reader also has a failed upload.
+- **Shared computer:** Microplate Washer D (`LAB-PC-01`) and Shaker Incubator E (`lab-pc-01`). Shaker Incubator E is also in manual upload mode.
+- **Past watcher beside a current one:** Aunty. **Only a deregistered watcher:** Spectrophotometer B. **Never had a watcher:** Centrifuge C.
+- **Config changes:** InstantRaman has a pending change from a teammate, SpectraMax iD3 Plate Reader has a rejected change, and Agilent 4150 TapeStation has an edit made on the PC that awaits a restart.
+- **Waiting for its watch folder:** Colony Counter G. **Stopped by someone:** Azure Cielo qPCR and InstantRaman. **Unresponsive:** Balance F, last heard from two hours before the seed runs.
+- **Restarting:** Thermal Mixer H was stopped for an automatic update about four minutes before the seed runs. It reads as Restarting until 15 minutes after that stop, which is about 11 minutes after the seed runs, and then as Unresponsive.
+- **Pending instrument:** its watcher registered with the `Lab PC token`.
 
 Externally-visible identifiers used in URLs and API paths are deterministic across reseeds, so screenshots, bug reports, and `curl` examples stay stable. Instrument ids and display names mirror production (`agilent-4150-tapestation`, `instantraman`, `spectramax-id5-plate-reader`, …). Fixture-backed instruments keep realistic run ids (`Experiment_20260129`, `26.02.02_10.45.05`, `012926_AR_OD600`, …); other instruments use production-shaped synthetic run ids and filenames.
 
@@ -250,7 +261,7 @@ How it works:
 
 - It uses its own database, `data_hub_screenshots`, and its own file mirror under `web/.docs-screenshots/`, so your local data is untouched and `make dev` can keep running.
 - It runs the app with `next dev`, because the local file mirror that serves the gel images, PDFs, and plate maps is turned off in production builds. It restores `web/tsconfig.json` and `web/next-env.d.ts`, which `next dev` edits when it starts.
-- The data is the same as `make db-reseed` ([web/scripts/seed-workspace.ts](../../web/scripts/seed-workspace.ts)), plus a few things only the screenshots need ([web/scripts/docs-screenshots/setup.ts](../../web/scripts/docs-screenshots/setup.ts)): realistic access tokens, a fake Linear workspace from the feedback package's test server, sample feedback reports, and a sample AI client for the sign-in approval screen. Shots that change data, such as the manual-upload run and the deleted run, undo their change when they finish.
+- The data is the same as `make db-reseed` ([web/scripts/seed-workspace.ts](../../web/scripts/seed-workspace.ts)), plus a few things only the screenshots need ([web/scripts/docs-screenshots/setup.ts](../../web/scripts/docs-screenshots/setup.ts)): realistic access tokens, a fake Linear workspace from the feedback package's test server, sample feedback reports, and a sample AI client for the sign-in approval screen. It also moves the seeded watchers to a current version, so the settings form is on, and marks the seed's waiting files uploaded, so Home shows no backlog. Shots that change data, such as the manual-upload run, the offline run with its waiting files, and the deleted run, undo their change when they finish.
 - It signs in by writing a session row for Alice, so the dev-only sign-in form isn't needed.
 - Dates are real, and every run rewrites every image. Before each shot it moves the seeded watcher heartbeats forward, because a watcher shows as offline after five minutes without one.
 - With `--serve`, it writes `web/.docs-screenshots/serve.json` with the app's address and a session cookie, so you can drive the app yourself while you work out the steps for a new shot.
