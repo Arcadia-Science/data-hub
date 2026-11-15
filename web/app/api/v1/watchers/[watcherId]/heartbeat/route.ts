@@ -5,6 +5,7 @@ import { apiError, UPGRADE_REQUIRED, VALIDATION_ERROR } from "@/lib/api/errors";
 import { heartbeatBody, readJsonBody } from "@/lib/api/openapi";
 import { isValidUUID } from "@/lib/api/validators";
 import { isRestartStopReason } from "@/lib/api/watcher-status";
+import { stampStopReasonOnRecentStop } from "@/lib/api/watcher-stop-reasons";
 import { isBelowFloor } from "@/lib/api/watcher-versions";
 import {
   callerMayActForWatcher,
@@ -146,6 +147,22 @@ export async function POST(
       })
       .where(eq(watchers.id, watcherId)),
   ]);
+
+  // The stop's own event can't always say why (an update installed through the
+  // Windows upgrade worker stops the service from outside, so its message is
+  // plain "Service stopped"), so the reason goes onto that event, where
+  // Activity and Health read it. Best-effort, like the revert below: the
+  // heartbeat is already committed. If the event hasn't arrived yet, the events
+  // route does the same from the watcher's row.
+  if (stoppedForRestart && reportedReason) {
+    try {
+      await stampStopReasonOnRecentStop(watcherId, reportedReason, timestamp);
+    } catch (err) {
+      console.error(
+        `[watcher-heartbeat] stop reason not recorded for watcher ${watcherId}: ${err}`
+      );
+    }
+  }
 
   // A graceful `stopped` heartbeat (shutdown) means this watcher can't drain
   // its queue, so revert anything left in `upload_requested`. We deliberately

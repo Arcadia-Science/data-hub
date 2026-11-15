@@ -107,17 +107,29 @@ export const instrumentDetailParamsCache = createSearchParamsCache(
   instrumentDetailSearchParams
 );
 
-// Watcher page filters. `event_type` and `events_since` are controlled by
-// EventLogToolbar on the Activity tab. `since` (heartbeat time range) is
-// controlled by StatusToolbar on the Health tab; both default to today when
-// absent, or to the deregistration day for a past watcher (see
-// lib/watchers/since.ts). The tab is the route, and `?watcher=` and `?focus=`
-// are read by the pages themselves.
+// Watcher page filters, shared by the Activity and Health tabs. `date_from` and
+// `date_to` are the range that `RunsDateFilter` writes. `event_type` and `shown`
+// are Activity's: the event types to list, and how many rows are showing (the
+// "Show more" button asks for another page of them). The tab is the route, and
+// `?watcher=` and `?focus=` are read by the pages themselves.
+//
+// `since` (Health) and `events_since` (Activity) are what links to the old
+// one-day toolbars carry. They are read, so those links still work, and cleared
+// whenever a new range is picked, but never written.
+export const WATCHER_EVENTS_PAGE_SIZE = 20;
+
+/** The most events "Show more" reveals. A longer log needs a narrower range. */
+export const WATCHER_EVENTS_MAX_SHOWN = 1000;
+
 export const watcherDetailSearchParams = {
   event_type: parseAsArrayOf(parseAsString).withDefault([]),
+  date_from: parseAsString.withOptions({ clearOnDefault: true }),
+  date_to: parseAsString.withOptions({ clearOnDefault: true }),
+  shown: parseAsInteger
+    .withDefault(WATCHER_EVENTS_PAGE_SIZE)
+    .withOptions({ clearOnDefault: true }),
   since: parseAsString,
   events_since: parseAsString,
-  logs_page: parseAsInteger.withDefault(1),
 };
 
 export const watcherDetailParamsCache = createSearchParamsCache(
