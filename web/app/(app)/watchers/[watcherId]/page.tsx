@@ -1,169 +1,50 @@
-import { notFound, redirect } from "next/navigation";
+import { notFound, permanentRedirect } from "next/navigation";
 import type { Metadata } from "next/types";
-import { Suspense } from "react";
-import { WatcherConfig } from "@/components/watchers/watcher-config";
+import { findWatcherIncludingDeleted } from "@/lib/api/watchers";
 import {
-  WatcherDetailTabs,
-  WatcherDetailTabsSkeleton,
-} from "@/components/watchers/watcher-detail-tabs";
-import {
-  WatcherHeader,
-  WatcherHeaderSkeleton,
-} from "@/components/watchers/watcher-header";
-import {
-  getWatcherConfigState,
-  listConfigRevisions,
-} from "@/lib/api/watcher-config/revisions";
-import {
-  getAllWatcherHeartbeats,
-  getWatcherById,
-  getWatcherEvents,
-  WATCHER_PAGE_SIZE,
-} from "@/lib/api/watchers";
-import { auth } from "@/lib/auth";
-import { loginHref } from "@/lib/callback-url";
-import { todayDateString } from "@/lib/date";
-import { getRequestPath } from "@/lib/request-path";
-import { watcherDetailParamsCache } from "@/lib/search-params";
-import { getViewerTimeZone } from "@/lib/viewer-timezone";
-
-type WatcherDetailFilters = Awaited<
-  ReturnType<typeof watcherDetailParamsCache.parse>
->;
+  firstQueryValue,
+  requireWatcherPageSession,
+} from "@/lib/watchers/load-page";
+import { isWatcherId, legacyWatcherRedirect } from "@/lib/watchers/routes";
 
 interface Props {
   params: Promise<{ watcherId: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }
 
-// The viewer's zone is a guess on a first visit, so query from a day early to
-// cover their whole local day. `<HeartbeatChart>` clips to the exact day, and
-// the event log orders by timestamp, so a wider window is harmless.
-function toTzSafeSince(dateString: string): Date {
-  const d = new Date(`${dateString}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() - 1);
-  return d;
-}
+// This route only redirects, so nothing shows in a link preview.
+export const metadata: Metadata = { title: "Watcher" };
 
-export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  const { watcherId } = await params;
-  const watcher = await getWatcherById(watcherId);
-  const title = watcher?.hostname || `Watcher ${watcherId.slice(0, 8)}`;
-  const description = `Connection status, recent uploads, and config for ${title}.`;
-  return {
-    title,
-    description,
-    openGraph: { title, description },
-    twitter: { title, description },
-  };
-}
-
-export default async function WatcherDetailPage({
+/**
+ * The old watcher page. A watcher belongs to its instrument now, so this
+ * redirects, permanently, to the instrument's watcher page: the sub-tab that
+ * `?tab=` names, and `?watcher=` for a deregistered watcher. Bookmarks and
+ * links people have already shared keep working.
+ */
+export default async function WatcherRedirectPage({
   params,
   searchParams,
 }: Props) {
-  const session = await auth();
-  if (!session) {
-    redirect(loginHref(await getRequestPath()));
-  }
+  await requireWatcherPageSession();
 
   const { watcherId } = await params;
-  const filters = watcherDetailParamsCache.parse(await searchParams);
+  const query = await searchParams;
 
-  const isAdmin = session.user.isAdmin === true;
-
-  // The header and the heartbeat/events tabs stream independently; the shared
-  // `getWatcherById` lookup is `cache()`-deduped so both sections resolve
-  // against a single query while their heavier data fetches run in parallel.
-  return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 pt-3.5 pb-6 2xl:w-6xl">
-      {/* `pt-3.5` centers the breadcrumbs on the sidebar's "Navigation" label. */}
-      <Suspense fallback={<WatcherHeaderSkeleton />}>
-        <WatcherHeaderSection isAdmin={isAdmin} watcherId={watcherId} />
-      </Suspense>
-      <Suspense fallback={<WatcherDetailTabsSkeleton />}>
-        <WatcherTabsSection
-          filters={filters}
-          isAdmin={isAdmin}
-          watcherId={watcherId}
-        />
-      </Suspense>
-    </div>
-  );
-}
-
-async function WatcherHeaderSection({
-  watcherId,
-  isAdmin,
-}: {
-  watcherId: string;
-  isAdmin: boolean;
-}) {
-  const watcher = await getWatcherById(watcherId);
-  if (!watcher) {
-    notFound();
-  }
-  return <WatcherHeader isAdmin={isAdmin} watcher={watcher} />;
-}
-
-async function WatcherTabsSection({
-  watcherId,
-  filters,
-  isAdmin,
-}: {
-  watcherId: string;
-  filters: WatcherDetailFilters;
-  isAdmin: boolean;
-}) {
-  const timeZone = await getViewerTimeZone();
-  const effectiveSince = filters.since ?? todayDateString(timeZone);
-  const heartbeatSince = toTzSafeSince(effectiveSince);
-
-  const effectiveEventsSince =
-    filters.events_since ?? todayDateString(timeZone);
-  const eventsSince = toTzSafeSince(effectiveEventsSince);
-
-  // `getWatcherById` is `cache()`-deduped, so this shares the header section's
-  // fetch rather than issuing a second query for `configYaml`.
-  const [watcher, heartbeats, eventResult, history] = await Promise.all([
-    getWatcherById(watcherId),
-    // Up to 5000 rows, and only the Status tab draws them. The tab lives in the
-    // URL, so the other tabs skip the query and the payload.
-    filters.tab === "status"
-      ? getAllWatcherHeartbeats(watcherId, { since: heartbeatSince })
-      : Promise.resolve(null),
-    getWatcherEvents(watcherId, {
-      since: eventsSince,
-      eventTypes:
-        filters.event_type.length > 0 ? filters.event_type : undefined,
-      page: filters.logs_page,
-    }),
-    listConfigRevisions(watcherId),
-  ]);
-
+  // A string that isn't a UUID can't be a watcher, and the database would
+  // refuse to compare it with the ID column.
+  const watcher = isWatcherId(watcherId)
+    ? await findWatcherIncludingDeleted(watcherId)
+    : null;
   if (!watcher) {
     notFound();
   }
 
-  const configState = await getWatcherConfigState(watcher, history);
-
-  const logsTotalPages = Math.ceil(eventResult.total / WATCHER_PAGE_SIZE);
-
-  return (
-    <WatcherDetailTabs
-      configTab={
-        <WatcherConfig
-          history={history}
-          isAdmin={isAdmin}
-          state={configState}
-          watcher={watcher}
-        />
-      }
-      events={eventResult.rows}
-      eventsPage={filters.logs_page}
-      eventsTotal={eventResult.total}
-      eventsTotalPages={logsTotalPages}
-      heartbeats={heartbeats}
-    />
+  permanentRedirect(
+    legacyWatcherRedirect({
+      instrumentId: watcher.instrumentId,
+      watcherId: watcher.id,
+      deregistered: watcher.deletedAt !== null,
+      tab: firstQueryValue(query.tab),
+    })
   );
 }

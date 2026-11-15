@@ -15,13 +15,15 @@ import {
   UnreadableConfigCallout,
 } from "@/components/watchers/watcher-config-status";
 import type { WatcherConfigState } from "@/lib/api/watcher-config/revisions";
+import { watcherPageHref } from "@/lib/watchers/routes";
 
 /**
  * The instrument page's "Edit watcher config" dialog. Shares the form with
- * the watcher's Configuration tab, which also has the history.
+ * the watcher page's Settings tab, which also has the history.
  */
 export function EditWatcherConfigDialog({
   watcherId,
+  instrumentId,
   hostname,
   watcherOnline,
   state,
@@ -29,6 +31,7 @@ export function EditWatcherConfigDialog({
   onOpenChange,
 }: {
   watcherId: string;
+  instrumentId: string;
   hostname: string | null;
   watcherOnline: boolean;
   state: WatcherConfigState;
@@ -45,9 +48,9 @@ export function EditWatcherConfigDialog({
             about a minute. See every change on the{" "}
             <Link
               className="underline underline-offset-2"
-              href={`/watchers/${watcherId}?tab=configuration`}
+              href={watcherPageHref(instrumentId, { tab: "settings" })}
             >
-              watcher&apos;s Configuration tab
+              watcher&apos;s Settings tab
             </Link>
             .
           </DialogDescription>

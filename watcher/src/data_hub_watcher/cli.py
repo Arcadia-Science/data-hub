@@ -11,6 +11,7 @@ import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import click
 from pydantic import ValidationError
@@ -146,6 +147,15 @@ def _clean_api_key(value: str) -> str:
             "the Data Hub UI; the value may have been truncated on paste."
         )
     return cleaned
+
+
+def _watcher_page_url(api_base_url: str, instrument_id: str) -> str:
+    """The web app page of an instrument's watcher, where an admin can deregister it.
+
+    The CLI knows the API base URL (`https://host/api/v1`), and the page is on the same host.
+    """
+    server_url = api_base_url.rstrip("/").removesuffix("/api/v1")
+    return f"{server_url}/instruments/{quote(instrument_id, safe='')}/watcher"
 
 
 def _make_client(
@@ -363,7 +373,8 @@ def init(ctx: click.Context, show_key: bool) -> None:
             raise click.ClickException(
                 f"Instrument '{selected.id}' already has an active watcher{id_suffix}.\n"
                 "If this is a replacement install, deregister the existing watcher first:\n"
-                "  - In the web UI: Watchers → open the existing watcher → Deregister\n"
+                f"  - In the web app, open {_watcher_page_url(api_base_url, selected.id)}\n"
+                "    and choose Deregister from its actions menu (an admin action).\n"
                 f"  - Or via API: DELETE /api/v1/watchers/{existing_id or '<watcher_id>'}\n"
                 "Then re-run `data-hub-watcher init`."
             ) from exc
@@ -541,7 +552,9 @@ def _push_config_to_api(
         )
 
 
-def _register_watcher_for_switch(client: DataHubClient, instrument_id: str) -> str:
+def _register_watcher_for_switch(
+    client: DataHubClient, instrument_id: str, api_base_url: str
+) -> str:
     """Register a watcher for *instrument_id*, mirroring `init`'s 409 handling."""
     try:
         reg = client.register_watcher(
@@ -557,7 +570,9 @@ def _register_watcher_for_switch(client: DataHubClient, instrument_id: str) -> s
             id_suffix = f" (id: {existing_id})" if existing_id else ""
             raise click.ClickException(
                 f"Instrument '{instrument_id}' already has an active watcher{id_suffix} "
-                "in the target environment. Deregister it there first, then retry."
+                "in the target environment. Deregister it there first, then retry:\n"
+                f"  open {_watcher_page_url(api_base_url, instrument_id)}\n"
+                "  and choose Deregister from its actions menu (an admin action)."
             ) from exc
         raise click.ClickException(f"Failed to register watcher: {exc.message}") from exc
     return reg.watcher_id
@@ -703,7 +718,7 @@ def _switch_environment(
             f"No watcher is registered for '{target}' and --no-register was set."
         )
     else:
-        watcher_id = _register_watcher_for_switch(client, inst.id)
+        watcher_id = _register_watcher_for_switch(client, inst.id, target_url)
         watcher_ids[target] = watcher_id
         click.echo(f"Registered watcher for {target}: {watcher_id}")
 

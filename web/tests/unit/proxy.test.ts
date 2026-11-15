@@ -42,6 +42,18 @@ describe("proxy", () => {
       "/login?callbackURL=%2Funknown%2Fpage%3Fa%3D1%26b%3D2",
     ],
     ["/watchers/abc", "/login?callbackURL=%2Fwatchers%2Fabc"],
+    [
+      "/instruments/plate-reader-a/watcher",
+      "/login?callbackURL=%2Finstruments%2Fplate-reader-a%2Fwatcher",
+    ],
+    [
+      "/instruments/plate-reader-a/watcher/health?since=2026-11-01",
+      "/login?callbackURL=%2Finstruments%2Fplate-reader-a%2Fwatcher%2Fhealth%3Fsince%3D2026-11-01",
+    ],
+    [
+      "/instruments/plate-reader-a/watcher/settings?watcher=3f2a9c1e-7b4d-4e0a-9c55-1d2e8f6a7b90&focus=watch_directory",
+      "/login?callbackURL=%2Finstruments%2Fplate-reader-a%2Fwatcher%2Fsettings%3Fwatcher%3D3f2a9c1e-7b4d-4e0a-9c55-1d2e8f6a7b90%26focus%3Dwatch_directory",
+    ],
     ["/users/u1?tab=x", "/login?callbackURL=%2Fusers%2Fu1%3Ftab%3Dx"],
   ])("redirects a signed-out visitor from %s", (path, location) => {
     const response = proxy(request(path));
@@ -54,12 +66,26 @@ describe("proxy", () => {
     "/",
     "/?changelog=2026-10-08-entry",
     "/instruments/a/runs/b?tab=files",
+    "/instruments/plate-reader-a",
+    "/instruments/plate-reader-a/watchers",
     "/settings/tokens",
     "/watchers",
   ])("passes public route %s through with its address", (path) => {
     const response = proxy(request(path));
     expect(response.status).toBe(200);
     expect(forwardedPath(response)).toBe(path);
+  });
+
+  it("passes a signed-in visitor through to a watcher page", () => {
+    const response = proxy(
+      request("/instruments/plate-reader-a/watcher/health?watcher=w1", {
+        cookie: SESSION_COOKIE,
+      })
+    );
+    expect(response.status).toBe(200);
+    expect(forwardedPath(response)).toBe(
+      "/instruments/plate-reader-a/watcher/health?watcher=w1"
+    );
   });
 
   it("passes a signed-in visitor through with the address", () => {

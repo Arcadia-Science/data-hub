@@ -2,7 +2,14 @@
 
 import { Eye, Loader2, Plus, X } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useId, useMemo, useRef, useState, useTransition } from "react";
+import {
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import { toast } from "sonner";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -122,9 +129,9 @@ async function readError(res: Response, fallback: string) {
 
 /**
  * Structured editor for a watcher's web-editable settings, used on the
- * watcher's Configuration tab and in the instrument page's dialog. Saving
- * stores a pending revision that the watcher applies after its next
- * heartbeat. Remount it (with `key`) when the base revision changes.
+ * watcher's Settings tab and in the instrument page's dialog. Saving stores a
+ * pending revision that the watcher applies after its next heartbeat. Remount
+ * it (with `key`) when the base revision changes.
  */
 export function WatcherConfigForm({
   watcherId,
@@ -134,6 +141,7 @@ export function WatcherConfigForm({
   editable,
   watcherVersion,
   onSaved,
+  focusField,
 }: {
   watcherId: string;
   /** The latest revision number, sent back so stale saves are refused. */
@@ -149,9 +157,15 @@ export function WatcherConfigForm({
   editable: boolean;
   watcherVersion: string | null;
   onSaved?: () => void;
+  /**
+   * Puts the cursor in this field once, when the form first shows. A link
+   * such as "Change folder" sets it through `?focus=` in the page's address.
+   */
+  focusField?: "watch_directory";
 }) {
   const router = useRouter();
   const idPrefix = useId();
+  const folderInput = useRef<HTMLInputElement>(null);
   const nextPatternId = useRef(initialSettings.file_patterns.length);
   const [state, setState] = useState<FormState>(() =>
     toFormState(initialSettings)
@@ -159,6 +173,22 @@ export function WatcherConfigForm({
   const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [isSaving, startSaving] = useTransition();
   const [isPreviewing, startPreviewing] = useTransition();
+
+  // Focus once, then drop `?focus=` from the address so that saving, which
+  // shows the form again, doesn't move the cursor a second time.
+  useEffect(() => {
+    if (focusField !== "watch_directory") {
+      return;
+    }
+    // Focusing alone scrolls the field to the viewport's edge; center it.
+    folderInput.current?.focus({ preventScroll: true });
+    folderInput.current?.scrollIntoView({ block: "center" });
+    const url = new URL(window.location.href);
+    if (url.searchParams.has("focus")) {
+      url.searchParams.delete("focus");
+      window.history.replaceState(null, "", url);
+    }
+  }, [focusField]);
 
   const { settings, errors } = useMemo(
     () => fieldErrors(toCandidate(state)),
@@ -276,7 +306,7 @@ export function WatcherConfigForm({
       >
         <Field
           error={errorFor("watch_directory")}
-          hint="Admins can point this at any folder on the instrument PC. The watcher checks that the folder exists before it switches."
+          hint="Any folder on the instrument PC. The watcher checks that it exists before it switches."
           htmlFor={id("folder")}
           label="Watch folder"
         >
@@ -286,6 +316,7 @@ export function WatcherConfigForm({
             id={id("folder")}
             onChange={(e) => update({ watchDirectory: e.target.value })}
             placeholder="D:\Exports\Plate reader"
+            ref={folderInput}
             value={state.watchDirectory}
           />
         </Field>
@@ -346,7 +377,7 @@ export function WatcherConfigForm({
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field htmlFor={id("preset")} label="Run detection">
+          <Field htmlFor={id("preset")} label="How files become runs">
             <Select onValueChange={choosePreset} value={presetKey}>
               <SelectTrigger
                 className="w-full min-w-0 data-[size=default]:h-9"

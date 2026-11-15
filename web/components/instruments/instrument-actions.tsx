@@ -25,6 +25,7 @@ import {
 import { EditWatcherConfigDialog } from "@/components/watchers/edit-watcher-config-dialog";
 import type { InstrumentListItem } from "@/lib/api/instruments";
 import type { WatcherConfigState } from "@/lib/api/watcher-config/revisions";
+import { watcherPageHref } from "@/lib/watchers/routes";
 
 // Loaded only on the instrument page, for admins, when a live watcher exists.
 export interface InstrumentWatcherConfig {
@@ -128,7 +129,7 @@ export function InstrumentActions({
           ) : null}
           {instrument.activeWatcherId ? (
             <DropdownMenuItem asChild>
-              <Link href={`/watchers/${instrument.activeWatcherId}`}>
+              <Link href={watcherPageHref(instrument.id)}>
                 <Radio className="size-3.5" />
                 View watcher
               </Link>
@@ -172,6 +173,7 @@ export function InstrumentActions({
       {watcherConfig ? (
         <EditWatcherConfigDialog
           hostname={watcherConfig.hostname}
+          instrumentId={instrument.id}
           onOpenChange={setWatcherConfigOpen}
           open={watcherConfigOpen}
           state={watcherConfig.state}

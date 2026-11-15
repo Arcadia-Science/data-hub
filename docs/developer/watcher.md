@@ -252,7 +252,7 @@ Each watcher is bound to the personal access token (PAT) that registered it. Hea
 When you rotate a PC's PAT:
 
 1. **Recommended for a straight rotation:** delete the old PAT in the Data Hub UI (Settings → Tokens). That nulls `watchers.registered_by_token`; the next check-in with the new key re-claims the binding (trust-on-first-use). Update `~/.data-hub/.env.<environment>` with the new key before the watcher checks in again.
-2. **Clean reinstall:** deregister the watcher in the UI (Watchers → open the watcher → Deregister), then re-run `data-hub-watcher init` on the PC with the new PAT. That registers a fresh watcher row bound to the new credential.
+2. **Clean reinstall:** deregister the watcher in the UI (open `/instruments/<id>/watcher` and choose Deregister from its ⋮ menu), then re-run `data-hub-watcher init` on the PC with the new PAT. That registers a fresh watcher row bound to the new credential.
 
 There is no token-adoptable API for rebinding an already-claimed watcher — any such endpoint gated by `watchers:report` would reopen cross-watcher control.
 
@@ -459,7 +459,7 @@ The waiting state replaces the old behavior of exiting at startup, which made th
 
 ### Settings Data Hub can't read
 
-The server reads the editable settings out of each pushed `config.yaml` with the same rules it applies to web edits. The watcher runs some configs those rules refuse: more than 50 file patterns, a pattern longer than 200 characters, or a Python-style named group such as `(?P<run>…)` in the run regex. For such a config the server records no revision for edits made on the PC, and the web app shows a notice on the Configuration tab naming the setting it can't read. `init` and `config edit` refuse those values, `config validate` warns about them without failing, and the watcher logs a warning at startup. Existing configs still load.
+The server reads the editable settings out of each pushed `config.yaml` with the same rules it applies to web edits. The watcher runs some configs those rules refuse: more than 50 file patterns, a pattern longer than 200 characters, or a Python-style named group such as `(?P<run>…)` in the run regex. For such a config the server records no revision for edits made on the PC, and the web app shows a notice on the watcher page's Settings tab naming the setting it can't read. `init` and `config edit` refuse those values, `config validate` warns about them without failing, and the watcher logs a warning at startup. Existing configs still load.
 
 ### Older servers
 

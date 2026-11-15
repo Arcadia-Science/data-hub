@@ -1,7 +1,7 @@
 "use client";
 
 import { EllipsisVertical, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -20,6 +20,7 @@ export type WatcherActionTarget = Pick<
 export function WatcherActions({ watcher }: { watcher: WatcherActionTarget }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [deregisterOpen, setDeregisterOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   if (watcher.deletedAt) {
     return null;
@@ -32,6 +33,7 @@ export function WatcherActions({ watcher }: { watcher: WatcherActionTarget }) {
           <Button
             aria-label="More actions"
             className="size-7"
+            ref={triggerRef}
             size="icon"
             type="button"
             variant="ghost"
@@ -58,6 +60,7 @@ export function WatcherActions({ watcher }: { watcher: WatcherActionTarget }) {
         hostname={watcher.hostname}
         onOpenChange={setDeregisterOpen}
         open={deregisterOpen}
+        returnFocusRef={triggerRef}
         watcherId={watcher.id}
       />
     </div>

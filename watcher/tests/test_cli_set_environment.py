@@ -115,6 +115,58 @@ class TestSwitchRegistration:
         assert cfg.watcher_ids == {"staging": "w-staging", "production": "w-prod"}
 
 
+class TestSwitchWhenTheInstrumentHasAWatcher:
+    """A 409 on registering names the instrument's watcher page, where an admin deregisters it."""
+
+    def test_the_409_points_at_the_instruments_watcher_page(
+        self, tmp_path: Path, fake_client: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake_client.register_watcher.side_effect = ApiError("conflict", status_code=409)
+        path = _write_config(tmp_path, environment="staging", watcher_ids={"staging": "w-staging"})
+
+        result = _invoke(path, monkeypatch, ["production", "--api-key", "dhub_key"])
+
+        assert result.exit_code != 0
+        assert "already has an active watcher" in result.output
+        page_url = "https://production.example.test/instruments/test-instrument/watcher"
+        assert page_url in result.output
+        assert "Deregister from its actions menu" in result.output
+        # A Windows console on a legacy code page can't always print more than ASCII.
+        assert result.output.split("Error:", 1)[1].isascii()
+        # The old directions, through a Watchers list, are gone.
+        assert "Watchers →" not in result.output
+        assert load_config(path).environment == "staging"
+
+
+class TestWatcherPageUrl:
+    """`_watcher_page_url` turns the API base URL into the instrument's watcher page."""
+
+    @pytest.mark.parametrize(
+        "api_base_url",
+        [
+            "https://datahub.example.com/api/v1",
+            "https://datahub.example.com/api/v1/",
+            "https://datahub.example.com",
+        ],
+    )
+    def test_the_page_is_on_the_servers_own_address(self, api_base_url: str) -> None:
+        assert (
+            cli_module._watcher_page_url(api_base_url, "plate-reader-a")
+            == "https://datahub.example.com/instruments/plate-reader-a/watcher"
+        )
+
+    def test_a_preview_deployment_keeps_its_host(self) -> None:
+        assert (
+            cli_module._watcher_page_url(PREVIEW_A, "plate-reader-a")
+            == "https://data-hub-git-branch-a.vercel.app/instruments/plate-reader-a/watcher"
+        )
+
+    def test_the_instrument_id_is_encoded_once(self) -> None:
+        assert cli_module._watcher_page_url("https://h.test/api/v1", "a b/c").endswith(
+            "/instruments/a%20b%2Fc/watcher"
+        )
+
+
 class TestSwitchFailures:
     def test_preview_without_url_fails_before_any_call(
         self, tmp_path: Path, fake_client: MagicMock, monkeypatch: pytest.MonkeyPatch

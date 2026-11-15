@@ -1,6 +1,6 @@
 "use client";
 
-import { Loader2, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { Loader2, MoreHorizontal } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -166,7 +166,6 @@ export function RunCommentItem({
               <DropdownMenuContent align="end" className="min-w-32">
                 {canEdit && (
                   <DropdownMenuItem onSelect={() => setIsEditing(true)}>
-                    <Pencil className="size-3.5" />
                     Edit
                   </DropdownMenuItem>
                 )}
@@ -179,7 +178,6 @@ export function RunCommentItem({
                     }}
                     variant="destructive"
                   >
-                    <Trash2 className="size-3.5" />
                     Delete
                   </DropdownMenuItem>
                 )}

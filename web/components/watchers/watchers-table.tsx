@@ -19,6 +19,7 @@ import {
 import { WatcherStatusBadge } from "@/components/watchers/watcher-status-badge";
 import type { WatcherListItem } from "@/lib/api/watchers";
 import { cn } from "@/lib/utils";
+import { watcherPageHref } from "@/lib/watchers/routes";
 
 /**
  * Placeholder mirroring `WatchersTable` columns and row height so streamed
@@ -112,7 +113,13 @@ export function WatchersTable({
               key={row.id}
             >
               <TableCell>
-                <RowLink href={`/watchers/${row.id}`}>
+                <RowLink
+                  href={watcherPageHref(row.instrumentId, {
+                    // A deregistered watcher opens by its own ID. An active one
+                    // is the instrument's current watcher.
+                    watcherId: row.deletedAt ? row.id : null,
+                  })}
+                >
                   {row.instrumentDisplayName ? (
                     row.instrumentDisplayName
                   ) : (
