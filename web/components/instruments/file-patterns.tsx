@@ -7,11 +7,19 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 
-function PatternBadge(props: ComponentProps<typeof Badge>) {
+/** A badge for a literal value, such as a file pattern or a folder path. */
+export function CodeBadge({
+  className,
+  ...props
+}: ComponentProps<typeof Badge>) {
   return (
     <Badge
-      className="bg-slate-200 font-mono font-normal text-slate-800 text-xs dark:bg-slate-800 dark:text-slate-200"
+      className={cn(
+        "bg-slate-200 font-mono font-normal text-slate-800 text-xs dark:bg-slate-700 dark:text-slate-100",
+        className
+      )}
       variant="outline"
       {...props}
     />
@@ -47,16 +55,16 @@ export function FilePatterns({
         >
           <span className="sr-only">File patterns: </span>
           {visible.map((pattern) => (
-            <PatternBadge key={pattern}>{pattern}</PatternBadge>
+            <CodeBadge key={pattern}>{pattern}</CodeBadge>
           ))}
           {hidden.length > 0 ? (
-            <PatternBadge aria-label={`${hidden.length} more`}>
+            <CodeBadge aria-label={`${hidden.length} more`}>
               +{hidden.length}
-            </PatternBadge>
+            </CodeBadge>
           ) : null}
         </button>
       </TooltipTrigger>
-      <TooltipContent className="flex-col items-start" side="bottom">
+      <TooltipContent className="flex-col items-start gap-0.5" side="bottom">
         <p className="font-medium">File patterns</p>
         <p>
           The watcher only picks up files whose names match one of these
@@ -65,7 +73,7 @@ export function FilePatterns({
         {hidden.length > 0 ? (
           <div className="mt-1 flex flex-wrap gap-1">
             {hidden.map((pattern) => (
-              <PatternBadge key={pattern}>{pattern}</PatternBadge>
+              <CodeBadge key={pattern}>{pattern}</CodeBadge>
             ))}
           </div>
         ) : null}

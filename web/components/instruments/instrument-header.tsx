@@ -1,8 +1,12 @@
 "use client";
 
-import { CloudUpload, FolderOpen } from "lucide-react";
+import { CloudUpload } from "lucide-react";
 import Link from "next/link";
-import { FilePatterns } from "@/components/instruments/file-patterns";
+import { toast } from "sonner";
+import {
+  CodeBadge,
+  FilePatterns,
+} from "@/components/instruments/file-patterns";
 import { InstrumentActions } from "@/components/instruments/instrument-actions";
 import { InstrumentBadge } from "@/components/instruments/instrument-badge";
 import { InstrumentNotificationPill } from "@/components/notifications/instrument-notification-toggle";
@@ -63,20 +67,34 @@ function ManualUploadPill() {
   );
 }
 
+// Selecting the folder copies its path, for pasting into File Explorer on the
+// instrument PC.
 function WatchDirectory({ path }: { path: string }) {
+  async function copyPath() {
+    try {
+      await navigator.clipboard.writeText(path);
+      toast.success("Folder path copied");
+    } catch {
+      toast.error("Couldn't copy the folder path.");
+    }
+  }
+
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <button
-          className="flex min-w-0 cursor-default items-center gap-1.5 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="group/folder flex min-w-0 cursor-pointer rounded-4xl text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          onClick={copyPath}
           type="button"
         >
-          <FolderOpen aria-hidden="true" className="size-4 shrink-0" />
-          <span className="sr-only">Watched folder: </span>
-          <span className="break-all font-mono text-[13px]">{path}</span>
+          <span className="sr-only">Copy watched folder: </span>
+          {/* A long path wraps inside the badge instead of being cut off. */}
+          <CodeBadge className="h-auto min-h-5 min-w-0 shrink justify-start whitespace-normal break-all group-hover/folder:bg-slate-300 dark:group-hover/folder:bg-slate-600">
+            {path}
+          </CodeBadge>
         </button>
       </TooltipTrigger>
-      <TooltipContent className="flex-col items-start" side="bottom">
+      <TooltipContent className="flex-col items-start gap-0.5" side="bottom">
         <p className="font-medium">Watch folder on the instrument PC</p>
         <p>
           The watcher only looks for files in this folder. Files saved anywhere
