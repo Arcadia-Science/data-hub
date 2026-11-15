@@ -16,7 +16,7 @@ import { mcpActorTokenSchema, mcpActorUserSchema } from "./common.output";
 // Marks a field as deprecated in the tool's output schema. The JSON Schema
 // gets `deprecated: true`, and the description starts with "Deprecated." so
 // that it shows wherever a client or the docs site lists the field.
-const deprecated = (replacement: string) => ({
+export const deprecated = (replacement: string) => ({
   deprecated: true,
   description: `Deprecated. ${replacement}`,
 });

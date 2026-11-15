@@ -1,16 +1,18 @@
 "use client";
 
-import { FolderOpen } from "lucide-react";
+import { CloudUpload } from "lucide-react";
 import Link from "next/link";
-import { FilePatterns } from "@/components/instruments/file-patterns";
+import { toast } from "sonner";
 import {
-  InstrumentActions,
-  type InstrumentWatcherConfig,
-} from "@/components/instruments/instrument-actions";
-import { InstrumentStatusBadge } from "@/components/instruments/instrument-status-badge";
+  CodeBadge,
+  FilePatterns,
+} from "@/components/instruments/file-patterns";
+import { InstrumentActions } from "@/components/instruments/instrument-actions";
+import { InstrumentBadge } from "@/components/instruments/instrument-badge";
 import { InstrumentNotificationPill } from "@/components/notifications/instrument-notification-toggle";
 import { RecordInstrumentVisit } from "@/components/recent-instrument-visit";
 import { ActorLabel } from "@/components/token-actor";
+import { Badge } from "@/components/ui/badge";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -26,10 +28,8 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useViewerTimeZone } from "@/components/viewer-time-zone-provider";
-import { WatcherStatusBadge } from "@/components/watchers/watcher-status-badge";
 import type { InstrumentDetail } from "@/lib/api/instruments";
 import { formatDate } from "@/lib/date";
-import { toLegacyWatcherStatus } from "@/lib/instruments/connection";
 
 export function InstrumentHeaderSkeleton() {
   return (
@@ -56,45 +56,46 @@ export function InstrumentHeaderSkeleton() {
   );
 }
 
-// For `pending`/`inactive` instruments the lifecycle badge pre-empts the
-// watcher badge, since "No Watcher"/"Offline" would read as a fault rather than
-// an intentional decommission.
-function renderStatusBadge(instrument: InstrumentDetail) {
-  if (instrument.status === "pending" || instrument.status === "inactive") {
-    return <InstrumentStatusBadge status={instrument.status} />;
-  }
-
+// Shown whenever the watcher's upload mode is manual, whatever the badge says.
+// Manual mode isn't a problem, so it gets a permanent note, not a notice.
+function ManualUploadPill() {
   return (
-    <WatcherStatusBadge
-      lastOnlineAt={instrument.watcher?.lastHeartbeatAt ?? null}
-      status={toLegacyWatcherStatus(instrument.connection)}
-    />
+    <Badge className="gap-1.5 bg-blue-50 text-blue-800 dark:bg-blue-950 dark:text-blue-300">
+      <CloudUpload aria-hidden="true" />
+      Files upload when someone requests them
+    </Badge>
   );
 }
 
-function WatchDirectory({
-  path,
-  hostname,
-}: {
-  path: string;
-  hostname: string | null;
-}) {
+// Selecting the folder copies its path, for pasting into File Explorer on the
+// instrument PC.
+function WatchDirectory({ path }: { path: string }) {
+  async function copyPath() {
+    try {
+      await navigator.clipboard.writeText(path);
+      toast.success("Folder path copied");
+    } catch {
+      toast.error("Couldn't copy the folder path.");
+    }
+  }
+
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <button
-          className="flex min-w-0 cursor-default items-center gap-1.5 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="group/folder flex min-w-0 cursor-pointer rounded-4xl text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          onClick={copyPath}
           type="button"
         >
-          <FolderOpen aria-hidden="true" className="size-4 shrink-0" />
-          <span className="sr-only">Watched folder: </span>
-          <span className="break-all font-mono text-[13px]">{path}</span>
+          <span className="sr-only">Copy watched folder: </span>
+          {/* A long path wraps inside the badge instead of being cut off. */}
+          <CodeBadge className="h-auto min-h-5 min-w-0 shrink justify-start whitespace-normal break-all group-hover/folder:bg-slate-300 dark:group-hover/folder:bg-slate-600">
+            {path}
+          </CodeBadge>
         </button>
       </TooltipTrigger>
-      <TooltipContent className="flex-col items-start" side="bottom">
-        <p className="font-medium">
-          Watched folder{hostname ? ` on ${hostname}` : ""}
-        </p>
+      <TooltipContent className="flex-col items-start gap-0.5" side="bottom">
+        <p className="font-medium">Watch folder on the instrument PC</p>
         <p>
           The watcher only looks for files in this folder. Files saved anywhere
           else, such as a shared network drive, won't appear in Data Hub.
@@ -108,11 +109,8 @@ export function InstrumentHeader({
   instrument,
   notifications,
   isAdmin = false,
-  watcherConfig = null,
 }: {
   instrument: InstrumentDetail;
-  /** Admins only: the live watcher's config, for the edit dialog. */
-  watcherConfig?: InstrumentWatcherConfig | null;
   /** Admins get the actions menu (edit, watcher, retire / reactivate). */
   isAdmin?: boolean;
   /**
@@ -127,6 +125,8 @@ export function InstrumentHeader({
 }) {
   const timeZone = useViewerTimeZone();
   const watchDirectory = instrument.watcher?.watchDirectory ?? null;
+  const filePatterns = instrument.watcher?.filePatterns ?? [];
+  const isManualUpload = instrument.watcher?.uploadMode === "manual";
   const retiredAt =
     instrument.status === "inactive" ? instrument.retiredAt : null;
 
@@ -162,22 +162,26 @@ export function InstrumentHeader({
             <h1 className="font-semibold text-2xl tracking-tight">
               {instrument.displayName}
             </h1>
-            {renderStatusBadge(instrument)}
+            <InstrumentBadge
+              connection={instrument.connection}
+              instrumentId={instrument.id}
+              instrumentName={instrument.displayName}
+              status={instrument.status}
+              uploadMode={instrument.watcher?.uploadMode}
+            />
           </div>
 
-          {watchDirectory || retiredAt ? (
+          {watchDirectory || retiredAt || isManualUpload ? (
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground text-sm">
               {watchDirectory ? (
                 <>
-                  <WatchDirectory
-                    hostname={instrument.watcher?.hostname ?? null}
-                    path={watchDirectory}
-                  />
-                  {instrument.filePatterns.length > 0 ? (
-                    <FilePatterns patterns={instrument.filePatterns} />
+                  <WatchDirectory path={watchDirectory} />
+                  {filePatterns.length > 0 ? (
+                    <FilePatterns patterns={filePatterns} />
                   ) : null}
                 </>
               ) : null}
+              {isManualUpload ? <ManualUploadPill /> : null}
               {retiredAt ? (
                 <>
                   {watchDirectory ? <span>·</span> : null}
@@ -212,11 +216,7 @@ export function InstrumentHeader({
             />
           ) : null}
           {isAdmin ? (
-            <InstrumentActions
-              instrument={instrument}
-              variant="expanded"
-              watcherConfig={watcherConfig}
-            />
+            <InstrumentActions instrument={instrument} variant="expanded" />
           ) : null}
         </div>
       </div>

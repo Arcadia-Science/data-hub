@@ -23,6 +23,7 @@ import {
   users,
 } from "@/lib/db/schema";
 import {
+  type Connection,
   type LegacyWatcherStatus,
   toLegacyWatcherStatus,
 } from "@/lib/instruments/connection";
@@ -98,8 +99,14 @@ export interface SearchFileResult {
 export type InstrumentMatchReason = "name" | "pattern";
 
 export interface SearchInstrumentResult {
+  // How the instrument is connected to its watcher, the same value its
+  // instrument responses carry. The badge reads it, with `status`.
+  connection: Connection;
   displayName: string;
   id: string;
+  /**
+   * @deprecated Get the instrument for its `watcher.lastHeartbeatAt`.
+   */
   lastWatcherHeartbeatAt: string | null;
   // Set only when `matchReason` is "pattern" — the configured pattern that
   // matched (e.g. "*.nd2"), so the client can highlight it.
@@ -108,8 +115,11 @@ export interface SearchInstrumentResult {
   runCount: number;
   status: "pending" | "active" | "inactive";
   type: "instrument";
-  // `deregistered` (active instrument, only watcher deregistered) is distinct
-  // from `no_watcher`. Only meaningful when `status` is `active`.
+  /**
+   * `deregistered` (active instrument, only watcher deregistered) is distinct
+   * from `no_watcher`. Only meaningful when `status` is `active`.
+   * @deprecated Use `connection.state`, or `connection.reason`.
+   */
   watcherStatus: LegacyWatcherStatus;
 }
 
@@ -367,6 +377,7 @@ async function searchInstruments(
           id: row.id,
           displayName: row.displayName,
           status: row.status,
+          connection: row.connection,
           watcherStatus: toLegacyWatcherStatus(row.connection),
           lastWatcherHeartbeatAt:
             row.watcher?.lastHeartbeatAt?.toISOString() ?? null,

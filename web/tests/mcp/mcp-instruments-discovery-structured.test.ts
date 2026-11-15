@@ -1,6 +1,7 @@
 import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport, McpServer } from "@modelcontextprotocol/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import {
   getMeOutputSchema,
   getSystemStatusOutputSchema,
@@ -107,7 +108,8 @@ vi.mock("@/lib/api/dashboard", () => ({
       runCount: 3,
       lastRunAt: new Date("2025-01-01T00:00:00.000Z"),
       filesPendingUpload: 0,
-      watcherStatus: "online",
+      connection: { state: "restarting", reason: null },
+      watcherStatus: "offline",
     },
   ]),
   getUserById: vi.fn().mockResolvedValue({
@@ -334,6 +336,46 @@ describe("instruments + discovery structuredContent", () => {
     expect(globalSearchOutputSchema.parse(parsed)).toEqual(parsed);
   });
 
+  it("global_search instrument results carry the connection their badge reads", () => {
+    const instrument = {
+      type: "instrument",
+      id: "test-plate-reader",
+      displayName: "Test Plate Reader",
+      status: "active",
+      connection: { state: "offline", reason: "folder_missing" },
+      watcherStatus: "offline",
+      lastWatcherHeartbeatAt: "2025-01-01T00:00:00.000Z",
+      runCount: 3,
+      matchReason: "name",
+      matchedPattern: null,
+    };
+    const result = {
+      runs: [],
+      files: [],
+      instruments: [instrument],
+      users: [],
+      comments: [],
+      counts: {
+        runs: 0,
+        files: 0,
+        instruments: 1,
+        users: 0,
+        comments: 0,
+        total: 1,
+      },
+    };
+    expect(globalSearchOutputSchema.parse(result)).toEqual(result);
+
+    // The output schema is strict, so a result without it would be refused.
+    const { connection: _connection, ...withoutConnection } = instrument;
+    expect(
+      globalSearchOutputSchema.safeParse({
+        ...result,
+        instruments: [withoutConnection],
+      }).success
+    ).toBe(false);
+  });
+
   it("get_system_status structuredContent matches text and schema", async () => {
     const result = await client.callTool({
       name: "get_system_status",
@@ -346,6 +388,47 @@ describe("instruments + discovery structuredContent", () => {
     expect(Array.isArray(parsed.instruments)).toBe(true);
     expect(result.structuredContent).toEqual(parsed);
     expect(getSystemStatusOutputSchema.parse(parsed)).toEqual(parsed);
+    // A restarting instrument reads `restarting`, not just the legacy offline.
+    expect(parsed.instruments[0]).toMatchObject({
+      connection: { state: "restarting", reason: null },
+    });
+  });
+
+  it("get_system_status marks watcherStatus deprecated and requires connection", () => {
+    const summary = {
+      id: "test-plate-reader",
+      displayName: "Test Plate Reader",
+      status: "active",
+      runCount: 3,
+      lastRunAt: null,
+      filesPendingUpload: 0,
+      connection: { state: "online", reason: null },
+      watcherStatus: "online",
+    };
+    expect(
+      getSystemStatusOutputSchema.safeParse({ instruments: [summary] }).success
+    ).toBe(true);
+    const { connection: _connection, ...withoutConnection } = summary;
+    expect(
+      getSystemStatusOutputSchema.safeParse({
+        instruments: [withoutConnection],
+      }).success
+    ).toBe(false);
+
+    const json = z.toJSONSchema(getSystemStatusOutputSchema) as unknown as {
+      properties: {
+        instruments: {
+          items: {
+            properties: {
+              watcherStatus: { deprecated?: boolean; description?: string };
+            };
+          };
+        };
+      };
+    };
+    const field = json.properties.instruments.items.properties.watcherStatus;
+    expect(field.deprecated).toBe(true);
+    expect(field.description).toMatch(/^Deprecated\./);
   });
 
   it("get_me errors without auth (no structuredContent)", async () => {

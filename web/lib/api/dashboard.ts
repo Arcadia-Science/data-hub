@@ -16,17 +16,26 @@ import {
   runComments,
   users,
 } from "@/lib/db/schema";
-import { toLegacyWatcherStatus } from "@/lib/instruments/connection";
+import {
+  type Connection,
+  toLegacyWatcherStatus,
+} from "@/lib/instruments/connection";
 import { toInitials } from "@/lib/utils";
 import { getViewerTimeZone } from "@/lib/viewer-timezone";
 
 export interface InstrumentSummary {
+  // How the instrument is connected to its watcher, the same value its
+  // instrument responses carry.
+  connection: Connection;
   displayName: string;
   filesPendingUpload: number;
   id: string;
   lastRunAt: Date | null;
   runCount: number;
   status: "pending" | "active" | "inactive";
+  /**
+   * @deprecated Use `connection.state`, or `connection.reason`.
+   */
   watcherStatus: "online" | "offline" | "no_watcher";
 }
 
@@ -63,6 +72,7 @@ export const getInstrumentSummaries = cache(
         id: row.id,
         displayName: row.displayName,
         status: row.status,
+        connection,
         runCount: row.runCount,
         // SQL `max(...)` can land as a Postgres timestamp string; normalize
         // like `hydrateInstrumentRow` so callers get a real Date.

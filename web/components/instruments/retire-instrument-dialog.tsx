@@ -18,19 +18,20 @@ import {
 import { cn } from "@/lib/utils";
 
 // Sets the instrument to `inactive` (shown as "Retired"); the server always
-// deregisters its watchers as part of the same request.
+// deregisters its watcher as part of the same request.
 export function RetireInstrumentDialog({
   instrumentId,
   displayName,
   runCount,
-  watcherCount,
+  hasWatcher,
   open,
   onOpenChange,
 }: {
   instrumentId: string;
   displayName: string;
   runCount: number;
-  watcherCount: number;
+  /** Whether the instrument has a current watcher to deregister. */
+  hasWatcher: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -60,8 +61,6 @@ export function RetireInstrumentDialog({
     });
   }
 
-  const hasWatchers = watcherCount > 0;
-
   return (
     <AlertDialog onOpenChange={onOpenChange} open={open}>
       <AlertDialogContent>
@@ -86,20 +85,17 @@ export function RetireInstrumentDialog({
           <li
             className={cn(
               "flex items-center gap-2.5 px-3 py-2.5",
-              hasWatchers && "border-b"
+              hasWatcher && "border-b"
             )}
           >
             <Check className="size-4 shrink-0 text-green-600 dark:text-green-500" />
             <span>Nothing is deleted from storage — this is reversible</span>
           </li>
-          {hasWatchers ? (
+          {hasWatcher ? (
             <li className="flex items-center gap-2.5 px-3 py-2.5">
               <Power className="size-4 shrink-0 text-muted-foreground" />
               <span>
-                Its <strong>{watcherCount}</strong>{" "}
-                {watcherCount === 1 ? "watcher" : "watchers"} will be
-                deregistered so {watcherCount === 1 ? "it stops" : "they stop"}{" "}
-                heartbeating
+                Its watcher will be deregistered so it stops checking in
               </span>
             </li>
           ) : null}

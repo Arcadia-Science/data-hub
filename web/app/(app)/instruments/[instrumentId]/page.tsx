@@ -6,6 +6,7 @@ import {
   InstrumentHeader,
   InstrumentHeaderSkeleton,
 } from "@/components/instruments/instrument-header";
+import { InstrumentProblemNoticeSection } from "@/components/instruments/instrument-problem-notice";
 import { InstrumentRunsToolbar } from "@/components/instruments/instrument-runs-toolbar";
 import {
   InstrumentRunsTableShell,
@@ -39,8 +40,6 @@ import {
   listInstrumentSubscriptions,
 } from "@/lib/api/notifications";
 import { parseHasNotebookLinkParam } from "@/lib/api/validators";
-import { getWatcherConfigState } from "@/lib/api/watcher-config/revisions";
-import { getWatcherById } from "@/lib/api/watchers";
 import { auth } from "@/lib/auth";
 import {
   hasActiveInstrumentFilters,
@@ -177,8 +176,8 @@ export default async function InstrumentDetailPage({
   const filters = instrumentDetailParamsCache.parse(await searchParams);
   const userId = session.user.id;
 
-  // The header and the runs table stream independently: each is its own
-  // Suspense child so their queries run in parallel (the shared
+  // The header, the problem notice and the runs table stream independently:
+  // each is its own Suspense child so their queries run in parallel (the shared
   // `getInstrumentById` is `cache()`-deduped) and the header paints without
   // waiting on the heavier runs / filter-option queries.
   const isAdmin = session.user.isAdmin === true;
@@ -191,6 +190,12 @@ export default async function InstrumentDetailPage({
           instrumentId={instrumentId}
           isAdmin={isAdmin}
           userId={userId}
+        />
+      </Suspense>
+      <Suspense fallback={null}>
+        <InstrumentProblemNoticeSection
+          instrumentId={instrumentId}
+          isAdmin={isAdmin}
         />
       </Suspense>
       <Suspense fallback={<InstrumentRunsSkeleton />}>
@@ -233,11 +238,6 @@ async function InstrumentHeaderSection({
     (s) => s.instrumentId === instrumentId
   );
 
-  // Admins get an "Edit watcher config" action for the live watcher.
-  const watcherConfig = await loadWatcherConfigForAdmin(
-    isAdmin ? (instrument.watcher?.id ?? null) : null
-  );
-
   return (
     <InstrumentHeader
       instrument={instrument}
@@ -246,27 +246,8 @@ async function InstrumentHeaderSection({
         enabled: subscriptionForThisInstrument?.enabled ?? false,
         masterMuted: notificationPrefs.runsAllMuted,
       }}
-      watcherConfig={watcherConfig}
     />
   );
-}
-
-async function loadWatcherConfigForAdmin(watcherId: string | null) {
-  if (!watcherId) {
-    return null;
-  }
-  const watcher = await getWatcherById(watcherId);
-  if (!watcher || watcher.deletedAt) {
-    return null;
-  }
-  return {
-    watcherId: watcher.id,
-    hostname: watcher.hostname,
-    online:
-      watcher.effectiveStatus === "watching" ||
-      watcher.effectiveStatus === "waiting",
-    state: await getWatcherConfigState(watcher),
-  };
 }
 
 async function InstrumentRunsSection({

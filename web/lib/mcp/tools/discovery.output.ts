@@ -3,6 +3,7 @@ import {
   instrumentStatusSchema,
   isoDateTime,
 } from "@/lib/api/openapi/schemas/common";
+import { deprecated, instrumentConnectionSchema } from "./instruments.output";
 
 /** Success shape for `get_me` — matches `AuthenticatedUser` from `getUserById`. */
 export const getMeOutputSchema = z.object({
@@ -56,8 +57,13 @@ const searchInstrumentResultSchema = z.object({
   id: z.string(),
   displayName: z.string(),
   status: instrumentStatusSchema,
-  watcherStatus: z.enum(["online", "offline", "no_watcher", "deregistered"]),
-  lastWatcherHeartbeatAt: isoDateTime.nullable(),
+  connection: instrumentConnectionSchema,
+  watcherStatus: z
+    .enum(["online", "offline", "no_watcher", "deregistered"])
+    .meta(deprecated("Use `connection.state`, or `connection.reason`.")),
+  lastWatcherHeartbeatAt: isoDateTime
+    .nullable()
+    .meta(deprecated("Get the instrument for its `watcher.lastHeartbeatAt`.")),
   runCount: z.number().int(),
   matchReason: z.enum(["name", "pattern"]),
   matchedPattern: z.string().nullable(),
@@ -112,7 +118,10 @@ export const instrumentSummarySchema = z.object({
   runCount: z.number().int(),
   lastRunAt: isoDateTime.nullable(),
   filesPendingUpload: z.number().int(),
-  watcherStatus: z.enum(["online", "offline", "no_watcher"]),
+  connection: instrumentConnectionSchema,
+  watcherStatus: z
+    .enum(["online", "offline", "no_watcher"])
+    .meta(deprecated("Use `connection.state`, or `connection.reason`.")),
 });
 
 // Object root so 2025-era MCP clients don't SEP-2106-wrap a bare array as

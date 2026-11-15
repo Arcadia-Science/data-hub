@@ -197,6 +197,15 @@ describe("Global search API", () => {
     expect(instrument?.matchReason).toBe("name");
   });
 
+  it("returns an instrument's connection, which its badge reads", async () => {
+    const result = await search(token, "Hina", "instruments");
+    const instrument = result.instruments.find(
+      (i) => i.id === "hina-microscope"
+    );
+    expect(instrument?.status).toBe("active");
+    expect(instrument?.connection).toEqual({ state: "online", reason: null });
+  });
+
   it("scopes results to a single type when requested", async () => {
     const result = await search(token, "nd2", "runs");
     expect(result.runs.length).toBeGreaterThan(0);

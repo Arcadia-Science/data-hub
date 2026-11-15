@@ -1,7 +1,6 @@
-import { ArrowRight, ExternalLink, History, Radio } from "lucide-react";
+import { ArrowRight, History, Radio } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { DocsLink } from "@/components/docs-link";
 import { EmptyState } from "@/components/empty-state";
 import { LinkTabs } from "@/components/link-tabs";
 import {
@@ -12,6 +11,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
+import { SetupGuideLink } from "@/components/watchers/setup-guide-link";
 import {
   NOTICE_LINK_CLASSNAME,
   WatcherNotice,
@@ -20,7 +20,6 @@ import { WatcherPageMenu } from "@/components/watchers/watcher-page-menu";
 import { WatcherStatusBadge } from "@/components/watchers/watcher-status-badge";
 import { WatcherSummaryStrip } from "@/components/watchers/watcher-summary-strip";
 import { readInstrumentConfigFields } from "@/lib/api/watcher-config/from-yaml";
-import { ADD_INSTRUMENT_DOCS_URL } from "@/lib/docs";
 import { getViewerTimeZone } from "@/lib/viewer-timezone";
 import type { WatcherPageData } from "@/lib/watchers/load-page";
 import { describeDeregistration } from "@/lib/watchers/registrations";
@@ -65,16 +64,6 @@ function WatcherBreadcrumb({
         </BreadcrumbItem>
       </BreadcrumbList>
     </Breadcrumb>
-  );
-}
-
-function SetupGuideLink({ children }: { children: ReactNode }) {
-  return (
-    <DocsLink className={NOTICE_LINK_CLASSNAME} href={ADD_INSTRUMENT_DOCS_URL}>
-      {children}
-      <ExternalLink aria-hidden="true" className="size-3.5" />
-      <span className="sr-only">(opens in a new tab)</span>
-    </DocsLink>
   );
 }
 
