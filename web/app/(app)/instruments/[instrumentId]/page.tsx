@@ -8,6 +8,7 @@ import {
 } from "@/components/instruments/instrument-header";
 import { InstrumentProblemNoticeSection } from "@/components/instruments/instrument-problem-notice";
 import { InstrumentRunsToolbar } from "@/components/instruments/instrument-runs-toolbar";
+import { PendingInstrumentCard } from "@/components/instruments/pending-instrument-card";
 import {
   InstrumentRunsTableShell,
   type RanByOption,
@@ -28,6 +29,7 @@ import {
   TablePendingBoundary,
   TablePendingProvider,
 } from "@/components/table-pending";
+import { getInstrumentConfirmReview } from "@/lib/api/instrument-confirm-review";
 import {
   buildRunListQuery,
   getInstrumentFilterOptions,
@@ -202,6 +204,7 @@ export default async function InstrumentDetailPage({
         <InstrumentRunsSection
           filters={filters}
           instrumentId={instrumentId}
+          isAdmin={isAdmin}
           userId={userId}
         />
       </Suspense>
@@ -250,13 +253,39 @@ async function InstrumentHeaderSection({
   );
 }
 
+// A pending instrument's page: an admin sees the watcher's settings and the
+// Confirm button, and everyone else sees one line.
+async function PendingInstrumentSection({
+  instrumentId,
+  isAdmin,
+}: {
+  instrumentId: string;
+  isAdmin: boolean;
+}) {
+  if (!isAdmin) {
+    return (
+      <p className="rounded-xl border bg-card p-5 text-muted-foreground text-sm">
+        This instrument is waiting for an admin to confirm it. Runs will appear
+        here after that.
+      </p>
+    );
+  }
+  const review = await getInstrumentConfirmReview(instrumentId);
+  if (!review) {
+    notFound();
+  }
+  return <PendingInstrumentCard review={review} />;
+}
+
 async function InstrumentRunsSection({
   instrumentId,
   filters,
+  isAdmin,
   userId,
 }: {
   instrumentId: string;
   filters: InstrumentDetailFilters;
+  isAdmin: boolean;
   userId: string;
 }) {
   // `getInstrumentById` is `cache()`-deduped, so this resolves against the
@@ -265,6 +294,14 @@ async function InstrumentRunsSection({
   const instrument = await getInstrumentById(instrumentId);
   if (!instrument) {
     notFound();
+  }
+
+  // A pending instrument has no runs yet. An admin reviews its watcher and
+  // confirms it here; everyone else is told to wait.
+  if (instrument.status === "pending") {
+    return (
+      <PendingInstrumentSection instrumentId={instrumentId} isAdmin={isAdmin} />
+    );
   }
 
   // Paginated runs plus the per-instrument filter options and attribution

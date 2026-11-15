@@ -799,30 +799,44 @@ export async function recordConfigRevisionResult(opts: {
 
 export const PREVIEW_SAMPLE_SIZE = 200;
 
-/** Runs `settings` against the instrument's latest raw file paths. */
-export async function previewConfigForInstrument(
+/**
+ * Paths of the instrument's newest raw files, newest first, one per path.
+ * Reprocessed or re-uploaded files repeat a path, so this reads extra rows and
+ * keeps the newest of each. A file's path is its relative path, or its name
+ * when the watcher didn't send one.
+ */
+export async function latestRawFilePaths(
   instrumentId: string,
-  settings: WatcherConfigSettings
-): Promise<{ sample_size: number; files: PreviewFile[] }> {
-  const rows = await db
+  limit: number,
+  executor: DbExecutor = db
+): Promise<string[]> {
+  const rows = await executor
     .select({ relativePath: files.relativePath, filename: files.filename })
     .from(files)
     .innerJoin(instrumentRuns, eq(instrumentRuns.id, files.instrumentRunId))
     .where(
       and(
         eq(instrumentRuns.instrumentId, instrumentId),
+        // Deleting a run marks the run, not its files.
+        isNull(instrumentRuns.deletedAt),
         eq(files.category, "raw"),
         isNull(files.deletedAt)
       )
     )
     .orderBy(desc(files.createdAt), desc(files.id))
-    // Reprocessed or re-uploaded files repeat a path, so read extra rows and
-    // keep the newest of each.
-    .limit(PREVIEW_SAMPLE_SIZE * 2);
+    .limit(limit * 2);
 
-  const paths = [
+  return [
     ...new Set(rows.map((row) => row.relativePath ?? row.filename)),
-  ].slice(0, PREVIEW_SAMPLE_SIZE);
+  ].slice(0, limit);
+}
+
+/** Runs `settings` against the instrument's latest raw file paths. */
+export async function previewConfigForInstrument(
+  instrumentId: string,
+  settings: WatcherConfigSettings
+): Promise<{ sample_size: number; files: PreviewFile[] }> {
+  const paths = await latestRawFilePaths(instrumentId, PREVIEW_SAMPLE_SIZE);
   return {
     sample_size: paths.length,
     files: previewSettings(settings, paths),

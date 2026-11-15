@@ -52,7 +52,7 @@ export const RUN_DETECTION_PRESETS = [
   },
   {
     key: "filename_stem",
-    label: "Each file is its own run (filename without extension)",
+    label: "Each file is its own run (file name without extension)",
     pattern: String.raw`^(?:.+/)?([^/]+?)\.[^/.]+$`,
     recursive: false,
   },
