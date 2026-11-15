@@ -2,7 +2,6 @@ import { Clock, Power, Radio, RefreshCw, WifiOff } from "lucide-react";
 import { describe, expect, it } from "vitest";
 import {
   INSTRUMENT_BADGE_CONFIG,
-  INSTRUMENT_BADGE_TOOLTIP_HINT,
   instrumentBadgeSentence,
 } from "@/components/instruments/instrument-badge-config";
 import type { InstrumentBadgeState } from "@/lib/instruments/connection";
@@ -99,11 +98,5 @@ describe("instrumentBadgeSentence", () => {
         instrumentBadgeSentence(state, "auto")
       );
     }
-  });
-});
-
-describe("the tooltip's last line", () => {
-  it("says where the badge's link goes", () => {
-    expect(INSTRUMENT_BADGE_TOOLTIP_HINT).toBe("Click for watcher details.");
   });
 });

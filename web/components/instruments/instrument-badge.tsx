@@ -3,7 +3,6 @@
 import Link from "next/link";
 import {
   INSTRUMENT_BADGE_CONFIG,
-  INSTRUMENT_BADGE_TOOLTIP_HINT,
   instrumentBadgeSentence,
 } from "@/components/instruments/instrument-badge-config";
 import { Badge } from "@/components/ui/badge";
@@ -97,10 +96,12 @@ export function InstrumentBadge({
           <InstrumentBadgePill className={className} state={state} />
         </Link>
       </TooltipTrigger>
-      <TooltipContent className="flex flex-col items-start gap-1" side="bottom">
+      <TooltipContent
+        className="flex flex-col items-start gap-0.5"
+        side="bottom"
+      >
         <p className="font-semibold">{label}</p>
         <p>{instrumentBadgeSentence(state, uploadMode)}</p>
-        <p className="text-background/70">{INSTRUMENT_BADGE_TOOLTIP_HINT}</p>
       </TooltipContent>
     </Tooltip>
   );

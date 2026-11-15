@@ -92,6 +92,3 @@ export function instrumentBadgeSentence(
   }
   return TOOLTIP_SENTENCES[state];
 }
-
-/** The line that ends every tooltip. */
-export const INSTRUMENT_BADGE_TOOLTIP_HINT = "Click for watcher details.";
