@@ -500,37 +500,42 @@ export interface WatcherListItem {
   watcherVersion: string | null;
 }
 
-// Fetches all watchers (optionally including soft-deleted ones) with their
-// parent instrument's display name. The total count is small enough that we
-// fetch everything and partition active vs deregistered in JS on the server.
-export async function getWatcherList(opts: {
-  includeDeleted: boolean;
-}): Promise<WatcherListItem[]> {
-  const conditions = opts.includeDeleted ? [] : [isNull(watchers.deletedAt)];
+/**
+ * The columns of a list row. `toWatcherListItem` maps a row selected with them.
+ * Every list of watchers (the MCP tools and Settings › Watchers) builds its
+ * rows from these two, so they can't drift apart.
+ */
+export const watcherListColumns = {
+  id: watchers.id,
+  instrumentId: watchers.instrumentId,
+  instrumentDisplayName: instruments.displayName,
+  hostname: watchers.hostname,
+  watcherVersion: watchers.watcherVersion,
+  status: watchers.status,
+  statusReason: watchers.statusReason,
+  configRevision: watchers.configRevision,
+  appliedConfigRevision: watchers.appliedConfigRevision,
+  configRevisionStatus: currentRevisionStatusSql,
+  pcEditAwaitingRestart: pcEditAwaitingRestartSql,
+  lastHeartbeatAt: watchers.lastHeartbeatAt,
+  createdAt: watchers.createdAt,
+  deletedAt: watchers.deletedAt,
+};
 
-  const rows = await db
-    .select({
-      id: watchers.id,
-      instrumentId: watchers.instrumentId,
-      instrumentDisplayName: instruments.displayName,
-      hostname: watchers.hostname,
-      watcherVersion: watchers.watcherVersion,
-      status: watchers.status,
-      statusReason: watchers.statusReason,
-      configRevision: watchers.configRevision,
-      appliedConfigRevision: watchers.appliedConfigRevision,
-      configRevisionStatus: currentRevisionStatusSql,
-      pcEditAwaitingRestart: pcEditAwaitingRestartSql,
-      lastHeartbeatAt: watchers.lastHeartbeatAt,
-      createdAt: watchers.createdAt,
-      deletedAt: watchers.deletedAt,
-    })
+const selectWatcherListRows = () =>
+  db
+    .select(watcherListColumns)
     .from(watchers)
-    .leftJoin(instruments, eq(instruments.id, watchers.instrumentId))
-    .where(conditions.length > 0 ? and(...conditions) : undefined)
-    .orderBy(desc(watchers.createdAt));
+    .leftJoin(instruments, eq(instruments.id, watchers.instrumentId));
 
-  return rows.map((row) => ({
+/** A row selected with `watcherListColumns`. */
+export type WatcherListRow = Awaited<
+  ReturnType<typeof selectWatcherListRows>
+>[number];
+
+/** Maps a row selected with `watcherListColumns` to a list item. */
+export function toWatcherListItem(row: WatcherListRow): WatcherListItem {
+  return {
     id: row.id,
     instrumentId: row.instrumentId,
     instrumentDisplayName: row.instrumentDisplayName,
@@ -545,7 +550,22 @@ export async function getWatcherList(opts: {
     lastHeartbeatAt: row.lastHeartbeatAt,
     createdAt: row.createdAt,
     deletedAt: row.deletedAt,
-  }));
+  };
+}
+
+// Fetches all watchers (optionally including soft-deleted ones) with their
+// parent instrument's display name. The total count is small enough that we
+// fetch everything and partition active vs deregistered in JS on the server.
+export async function getWatcherList(opts: {
+  includeDeleted: boolean;
+}): Promise<WatcherListItem[]> {
+  const conditions = opts.includeDeleted ? [] : [isNull(watchers.deletedAt)];
+
+  const rows = await selectWatcherListRows()
+    .where(conditions.length > 0 ? and(...conditions) : undefined)
+    .orderBy(desc(watchers.createdAt));
+
+  return rows.map(toWatcherListItem);
 }
 
 // ---------------------------------------------------------------------------

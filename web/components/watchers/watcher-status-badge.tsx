@@ -35,7 +35,11 @@ const ONLINE_CLASSNAME =
 const OFFLINE_CLASSNAME =
   "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300";
 
-const MUTED_FILLED_CLASSNAME = "bg-muted text-muted-foreground";
+// The badge's default variant sets a blue fill for dark mode, and `bg-muted`
+// alone doesn't replace that one, so the dark fill is set here as well. It is
+// the neutral dark fill of the instrument badge's Restarting and Connecting.
+const MUTED_FILLED_CLASSNAME =
+  "bg-muted text-muted-foreground dark:bg-slate-950 dark:text-slate-300";
 
 const WARNING_CLASSNAME =
   "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300";
@@ -132,7 +136,7 @@ export function WatcherStatusBadge({
     return (
       <Tooltip>
         <TooltipTrigger asChild>{badge}</TooltipTrigger>
-        <TooltipContent className="flex max-w-80 flex-col items-start gap-1">
+        <TooltipContent className="flex max-w-80 flex-col items-start gap-0.5">
           {reason ? <p className="break-all font-medium">{reason}</p> : null}
           <p>
             The watcher is running but can&apos;t find its watch folder. Fix the
@@ -165,7 +169,7 @@ export function WatcherStatusBadge({
   return (
     <Tooltip>
       <TooltipTrigger asChild>{badge}</TooltipTrigger>
-      <TooltipContent className="flex flex-col items-start gap-1">
+      <TooltipContent className="flex flex-col items-start gap-0.5">
         {lastOnlineAt ? (
           <p className="font-medium">
             Last online {formatRelativeTime(lastOnlineAt)}

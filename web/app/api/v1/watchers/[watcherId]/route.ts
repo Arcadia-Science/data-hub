@@ -78,8 +78,9 @@ export async function DELETE(
     return authResult;
   }
 
-  // Browser callers (the Deregister dialog on `/watchers`) must additionally
-  // be admins. PAT callers pass through purely on the `watchers:admin` scope.
+  // Browser callers (the Deregister dialog in Settings › Watchers) must
+  // additionally be admins. PAT callers pass through purely on the
+  // `watchers:admin` scope.
   const adminGate = await requireAdminForSession(authResult);
   if (adminGate) {
     return adminGate;

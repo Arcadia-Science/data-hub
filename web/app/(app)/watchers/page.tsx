@@ -1,58 +1,32 @@
+import { permanentRedirect } from "next/navigation";
 import type { Metadata } from "next/types";
-import { Suspense } from "react";
-import { SignInRequired } from "@/components/auth/sign-in-required";
 import {
-  WatchersView,
-  WatchersViewSkeleton,
-} from "@/components/watchers/watchers-view";
-import { getWatcherList } from "@/lib/api/watchers";
-import { auth } from "@/lib/auth";
+  firstQueryValue,
+  requireWatcherPageSession,
+} from "@/lib/watchers/load-page";
+import { legacyWatchersRedirect } from "@/lib/watchers/routes";
 
-const description =
-  "The software running alongside each instrument that uploads new files as they appear.";
-
-export const metadata: Metadata = {
-  title: "Watchers",
-  description,
-  openGraph: { title: "Watchers", description },
-  twitter: { title: "Watchers", description },
-};
-
-export default async function WatchersPage() {
-  const session = await auth();
-  if (!session) {
-    return <SignInRequired>Sign in to view watchers.</SignInRequired>;
-  }
-
-  // Deregister is admin-only; everyone else sees the same listing tabs.
-  const isAdmin = session.user.isAdmin === true;
-
-  return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6 2xl:w-6xl">
-      <div className="flex items-center justify-between">
-        <h1 className="font-semibold text-2xl tracking-tight">Watchers</h1>
-      </div>
-      <Suspense fallback={<WatchersViewSkeleton />}>
-        <WatchersListSection isAdmin={isAdmin} />
-      </Suspense>
-    </div>
-  );
+interface Props {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }
 
-async function WatchersListSection({ isAdmin }: { isAdmin: boolean }) {
-  // Fetch all watchers in a single query and partition client-side. The total
-  // count is small (typically <50), so this avoids two separate DB round-trips
-  // and lets the toggle between active/deregistered be instant (no refetch).
-  const allWatchers = await getWatcherList({ includeDeleted: true });
+// This route only redirects, so nothing shows in a link preview.
+export const metadata: Metadata = { title: "Watchers" };
 
-  const active = allWatchers.filter((w) => !w.deletedAt);
-  const deregistered = allWatchers.filter((w) => w.deletedAt);
+/**
+ * The old watcher list. Admins find it in Settings › Watchers, on the
+ * Deregistered tab when the old URL asked for it. Members have no list, so they
+ * go to the instruments. Both redirects are permanent. A signed-out visitor
+ * goes to sign-in first, and comes back here afterwards.
+ */
+export default async function WatchersRedirectPage({ searchParams }: Props) {
+  const session = await requireWatcherPageSession();
+  const query = await searchParams;
 
-  return (
-    <WatchersView
-      activeData={active}
-      deregisteredData={deregistered}
-      isAdmin={isAdmin}
-    />
+  permanentRedirect(
+    legacyWatchersRedirect({
+      isAdmin: session.user.isAdmin === true,
+      tab: firstQueryValue(query.tab),
+    })
   );
 }
