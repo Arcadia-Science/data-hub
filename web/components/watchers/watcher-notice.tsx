@@ -61,7 +61,7 @@ export function WatcherNotice({
         <p className="font-semibold">{title}</p>
         {children ? <div className="mt-0.5 break-words">{children}</div> : null}
         {actions ? (
-          <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-2">
+          <div className="mt-0.5 flex flex-wrap items-center gap-x-4 gap-y-2">
             {actions}
           </div>
         ) : null}
