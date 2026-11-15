@@ -32,8 +32,11 @@ import type {
 export interface ActivityRow {
   description: EventDescription;
   id: number;
-  /** The event as the watcher sent it. Set for admins only. */
-  raw: { details: unknown; eventType: string; message: string } | null;
+  /**
+   * The event as the watcher sent it, as JSON and as highlighted HTML from
+   * the server. Set for admins only.
+   */
+  raw: { html: string; json: string } | null;
   /** ISO 8601. */
   timestamp: string;
 }
@@ -193,6 +196,7 @@ function EventRow({
           className="flex flex-col gap-3 px-4 pb-3.5 text-[13px] text-muted-foreground"
           id={panelId}
         >
+          {row.raw ? <RawEvent raw={row.raw} /> : null}
           <div className="flex flex-wrap gap-x-6 gap-y-1">
             {description.facts.map((fact, index) => (
               <Fact
@@ -206,7 +210,6 @@ function EventRow({
               {formatDateTimeShort(new Date(row.timestamp), timeZone)}
             </span>
           </div>
-          {row.raw ? <RawEvent raw={row.raw} /> : null}
         </div>
       )}
     </li>
@@ -214,26 +217,20 @@ function EventRow({
 }
 
 function RawEvent({ raw }: { raw: NonNullable<ActivityRow["raw"]> }) {
-  const json = JSON.stringify(
-    { event_type: raw.eventType, message: raw.message, details: raw.details },
-    null,
-    2
-  );
   return (
-    <div className="flex flex-col gap-1.5">
-      <span>Raw event, as the watcher sent it</span>
-      <div className="relative">
-        <CopyButton
-          className="absolute top-1.5 right-1.5 text-muted-foreground"
-          label="Copy raw event"
-          size="icon-xs"
-          value={json}
-          variant="ghost"
-        />
-        <pre className="overflow-x-auto rounded-md bg-muted p-3 font-mono text-foreground text-xs leading-relaxed">
-          {json}
-        </pre>
-      </div>
+    <div className="relative">
+      <CopyButton
+        className="absolute top-1.5 right-1.5 z-10 text-muted-foreground"
+        label="Copy raw event"
+        size="icon-xs"
+        value={raw.json}
+        variant="ghost"
+      />
+      <div
+        className="overflow-x-auto rounded-md bg-muted font-mono text-xs leading-relaxed [&_pre]:p-3"
+        // biome-ignore lint/security/noDangerouslySetInnerHtml: shiki emits syntax-highlighting markup and escapes the event's text
+        dangerouslySetInnerHTML={{ __html: raw.html }}
+      />
     </div>
   );
 }

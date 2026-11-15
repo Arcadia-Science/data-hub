@@ -1,3 +1,4 @@
+import { highlightCode } from "@/components/code-block";
 import type { DateRange } from "@/components/runs/runs-date-filter";
 import { TablePendingProvider } from "@/components/table-pending";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -12,6 +13,24 @@ import {
 import { describeEvent } from "@/lib/watchers/event-messages";
 import { pluralize } from "@/lib/watchers/phrases";
 import { describeRange, type WatcherRange } from "@/lib/watchers/range";
+
+/** The event as the watcher sent it, as JSON and highlighted the same way. */
+async function rawEvent(event: {
+  eventType: string;
+  message: string;
+  details: unknown;
+}) {
+  const json = JSON.stringify(
+    {
+      event_type: event.eventType,
+      message: event.message,
+      details: event.details,
+    },
+    null,
+    2
+  );
+  return { json, html: await highlightCode(json, "json") };
+}
 
 export function WatcherActivitySkeleton() {
   return (
@@ -86,22 +105,18 @@ export async function WatcherActivity({
       .map((event) => event.id)
   );
 
-  const rows = events.rows.map((event) => ({
-    id: event.id,
-    timestamp: event.timestamp.toISOString(),
-    description: describeEvent({
-      ...event,
-      afterUpdateStart: stopsAfterUpdate.has(event.id),
-    }),
-    // Only an admin is shown the raw event, so only an admin is sent it.
-    raw: isAdmin
-      ? {
-          eventType: event.eventType,
-          message: event.message,
-          details: event.details,
-        }
-      : null,
-  }));
+  const rows = await Promise.all(
+    events.rows.map(async (event) => ({
+      id: event.id,
+      timestamp: event.timestamp.toISOString(),
+      description: describeEvent({
+        ...event,
+        afterUpdateStart: stopsAfterUpdate.has(event.id),
+      }),
+      // Only an admin is shown the raw event, so only an admin is sent it.
+      raw: isAdmin ? await rawEvent(event) : null,
+    }))
+  );
 
   return (
     <TablePendingProvider>
