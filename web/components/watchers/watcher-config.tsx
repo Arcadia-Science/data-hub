@@ -4,13 +4,14 @@ import { CopyButton } from "@/components/copy-button";
 import { EmptyState } from "@/components/empty-state";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { EditSettingsDialog } from "@/components/watchers/edit-settings-dialog";
 import { SettingValue } from "@/components/watchers/setting-value";
-import { WatcherConfigForm } from "@/components/watchers/watcher-config-form";
 import { WatcherConfigHistory } from "@/components/watchers/watcher-config-history";
 import {
   ConfigStateNotice,
@@ -92,6 +93,19 @@ export function WatcherConfig({
           <CardDescription>
             What the watcher is running now, as it last reported.
           </CardDescription>
+          {canEdit && state.baseSettings ? (
+            <CardAction>
+              <EditSettingsDialog
+                baseRevision={state.configRevision}
+                editable={state.editable}
+                focusField={focusField}
+                initialSettings={state.baseSettings}
+                savedSettings={state.savedSettings}
+                watcherId={watcher.id}
+                watcherVersion={state.watcherVersion}
+              />
+            </CardAction>
+          ) : null}
         </CardHeader>
         <CardContent>
           {running ? (
@@ -117,31 +131,6 @@ export function WatcherConfig({
           )}
         </CardContent>
       </Card>
-
-      {canEdit && state.baseSettings ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Edit settings</CardTitle>
-            <CardDescription>
-              Saved changes reach the watcher within about a minute. If it
-              can&apos;t apply one, it keeps its current settings and the change
-              shows as rejected.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <WatcherConfigForm
-              baseRevision={state.configRevision}
-              editable={state.editable}
-              focusField={focusField}
-              initialSettings={state.baseSettings}
-              key={state.configRevision ?? "none"}
-              savedSettings={state.savedSettings}
-              watcherId={watcher.id}
-              watcherVersion={state.watcherVersion}
-            />
-          </CardContent>
-        </Card>
-      ) : null}
 
       <Card>
         <CardHeader>
