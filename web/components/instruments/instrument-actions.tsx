@@ -1,12 +1,6 @@
 "use client";
 
-import {
-  Archive,
-  EllipsisVertical,
-  Pencil,
-  Radio,
-  RotateCcw,
-} from "lucide-react";
+import { EllipsisVertical } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { EditInstrumentDialog } from "@/components/instruments/edit-instrument-dialog";
@@ -91,14 +85,10 @@ export function InstrumentActions({
               setEditOpen(true);
             }}
           >
-            <Pencil className="size-3.5" />
             Edit details
           </DropdownMenuItem>
           <DropdownMenuItem asChild>
-            <Link href={watcherPageHref(instrument.id)}>
-              <Radio className="size-3.5" />
-              Watcher
-            </Link>
+            <Link href={watcherPageHref(instrument.id)}>Watcher</Link>
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           {isRetired ? (
@@ -109,7 +99,6 @@ export function InstrumentActions({
                 setReactivateOpen(true);
               }}
             >
-              <RotateCcw className="size-3.5" />
               Reactivate
             </DropdownMenuItem>
           ) : (
@@ -121,7 +110,6 @@ export function InstrumentActions({
               }}
               variant="destructive"
             >
-              <Archive className="size-3.5" />
               Retire
             </DropdownMenuItem>
           )}
