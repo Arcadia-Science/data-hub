@@ -1,15 +1,16 @@
 import { Layers } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { HeartbeatValue } from "@/components/watchers/heartbeat-value";
 import { WatcherSwitcher } from "@/components/watchers/watcher-switcher";
 import type { SharedComputerInstrument } from "@/lib/instruments/connection";
-import { cn } from "@/lib/utils";
 import type { WatcherRegistration } from "@/lib/watchers/registrations";
 import { type WatcherTab, watcherPageHref } from "@/lib/watchers/routes";
 import {
   sharedComputerLine,
+  type VersionSuffix,
   versionSuffix,
   versionSuffixText,
 } from "@/lib/watchers/summary";
@@ -23,6 +24,14 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
+// The same green and amber as the rollout label in Settings › Watchers.
+const VERSION_BADGE_CLASSNAME: Record<VersionSuffix["kind"], string> = {
+  up_to_date:
+    "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300",
+  update_available:
+    "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300",
+};
+
 function VersionValue({
   version,
   latestVersion,
@@ -35,22 +44,14 @@ function VersionValue({
   }
   const suffix = versionSuffix(version, latestVersion);
   return (
-    <>
+    <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
       {version}
       {suffix ? (
-        <span
-          className={cn(
-            "text-xs",
-            suffix.kind === "up_to_date"
-              ? "text-green-700 dark:text-green-400"
-              : "text-muted-foreground"
-          )}
-        >
-          {" "}
-          · {versionSuffixText(suffix)}
-        </span>
+        <Badge className={VERSION_BADGE_CLASSNAME[suffix.kind]}>
+          {versionSuffixText(suffix)}
+        </Badge>
       ) : null}
-    </>
+    </span>
   );
 }
 

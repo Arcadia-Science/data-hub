@@ -22,7 +22,6 @@ import { WatcherSummaryStrip } from "@/components/watchers/watcher-summary-strip
 import { readInstrumentConfigFields } from "@/lib/api/watcher-config/from-yaml";
 import { ADD_INSTRUMENT_DOCS_URL } from "@/lib/docs";
 import { getViewerTimeZone } from "@/lib/viewer-timezone";
-import { WATCHER_DESCRIPTION } from "@/lib/watchers/copy";
 import type { WatcherPageData } from "@/lib/watchers/load-page";
 import { describeDeregistration } from "@/lib/watchers/registrations";
 import {
@@ -192,7 +191,6 @@ export async function WatcherFrame({
               />
             ) : null}
           </div>
-          <p className="text-muted-foreground">{WATCHER_DESCRIPTION}</p>
         </div>
         {isAdmin && watcher && !isPast ? (
           <WatcherPageMenu hostname={watcher.hostname} watcherId={watcher.id} />
