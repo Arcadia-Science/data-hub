@@ -57,7 +57,7 @@ export function RunOfflineNotice({
             the server render and hydration around midnight. */}
         <p suppressHydrationWarning>{body}</p>
         <Link
-          className="mt-2.5 inline-flex w-fit items-center gap-1 rounded-sm font-medium underline underline-offset-3 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="inline-flex w-fit items-center gap-1 rounded-sm font-medium underline underline-offset-3 outline-none focus-visible:ring-2 focus-visible:ring-ring"
           href={`/instruments/${encodeURIComponent(instrumentId)}/watcher`}
         >
           See details
