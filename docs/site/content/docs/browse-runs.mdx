@@ -1,6 +1,6 @@
 ---
 title: Browse and analyze runs
-description: Use the web app to find runs, inspect processed results, claim attribution, download files, comment, and manage run lifecycle.
+description: Use the web app to find runs, check that new files will arrive, inspect processed results, claim attribution, download files, comment, and manage run lifecycle.
 contentType: How-to
 ---
 
@@ -16,7 +16,7 @@ The sidebar and the home page are the two starting points for daily work.
 
 ![Home dashboard with instrument status and recent runs](/images/home.webp)
 
-**Instruments** in the sidebar lists five instruments, and **View all** opens the full list. Each instrument’s page shows the folder its watcher reads from and the file patterns it uploads, then a runs table with column filters that match the instrument type (for example wavelengths on a plate reader).
+**Instruments** in the sidebar lists five instruments, and **View all** opens the full list. Each instrument’s page starts with its name and a status badge that says whether new files can arrive; see [Check that new files will arrive](#check-files-will-arrive). Under the name are the folder its watcher reads from and the file patterns it uploads, then a runs table with column filters that match the instrument type (for example wavelengths on a plate reader).
 
 ![Plate reader instrument page with the runs table and column filters](/images/plate-reader-runs-table.webp)
 
@@ -57,6 +57,40 @@ A run’s status tells you how far its files have got from the instrument to the
 | Empty | The run has no files. |
 
 A run with files in several states shows the first status in this table that applies. For example, a run with one failed file and nine completed files shows **Failed**.
+
+## Check that new files will arrive [#check-files-will-arrive]
+
+If a file you saved on the instrument PC hasn’t shown up, start with the badge beside the instrument’s name. It says whether new files can reach Data Hub. The same badge appears in the instruments table, on Home, and in search results.
+
+| Badge | What it means |
+| --- | --- |
+| **Online** | New files upload automatically. For an instrument in manual upload mode, new files upload when someone requests them. |
+| **Restarting** | The instrument PC is restarting or updating. This usually takes a minute or two, and you don’t need to do anything. |
+| **Connecting** | The watcher was just set up and hasn’t checked in yet. |
+| **Offline** | New files won’t appear right now. A notice under the instrument’s name says why. |
+| **Pending** | An admin hasn’t confirmed this instrument yet. Admins see a card in place of the runs table; members see one line. |
+| **Retired** | The instrument no longer takes new runs. Its runs stay browsable. |
+
+Hover over the badge, or focus it with the keyboard, for a short explanation. Select it to open the instrument’s watcher page, where anyone signed in can read its activity, health, and settings. Only admins can change anything there. The watcher is the program on the instrument PC that finds new files and uploads them; [Concepts](/docs/concepts#instrument-status) has the full rules for each badge.
+
+![Instrument page with an Online badge and its explanation in a tooltip](/images/instrument-status-badge.webp)
+
+### When the badge reads Offline [#when-offline]
+
+A red notice sits between the instrument’s name and its runs. It says what happened in plain words:
+
+| Notice | What happened |
+| --- | --- |
+| **New files aren’t being picked up** | The watcher is running but can’t find its watch folder, which the notice names. An admin can choose **Change folder** to fix it. |
+| **The watcher isn’t checking in** | The watcher hasn’t checked in for 5 minutes, or didn’t come back within 15 minutes of a restart. The notice says when it last did. The PC may be off, or the watcher may have crashed. |
+| **Uploads from this instrument are paused** | Someone stopped the watcher on the PC. New files appear once it’s started again. |
+| **This instrument isn’t connected to a watcher** | The instrument never had a watcher, or its watcher was deregistered, which the notice dates and credits. Admins can choose **Connect a watcher**, which opens [Set up an instrument](/docs/set-up-an-instrument). |
+
+**See details** opens the watcher’s **Activity** tab. Members see only that link, and none when there is no watcher to look at. Tell an admin what the notice says, or send them the link: the [troubleshooting guide](/docs/troubleshoot-a-watcher#instrument-shows-offline) covers each reason.
+
+![Instrument page with a red Offline badge and a notice that the watcher can’t find its watch folder, with Change folder and See details](/images/instrument-offline-notice.webp)
+
+An instrument in manual upload mode, whatever its badge says, shows a blue note beside its file patterns: “Files upload when someone requests them.” That isn’t a problem. Files wait until someone chooses **Upload**; see [Request an upload](#request-upload).
 
 ## Search the workspace [#search]
 
@@ -139,7 +173,7 @@ Select the checkbox on one or more run rows to open an action bar at the bottom 
 
 - **I ran these**: claim every selected run in one step
 - **Remove my attribution**: unclaim them
-- **Upload**: ask the watcher to upload files that are still on the instrument PC
+- **Upload**: ask the watcher to upload files that are still on the instrument PC. Data Hub refuses the request for a run whose instrument isn’t **Online** or **Restarting**, and a message says how many failed; see [Request an upload](#request-upload)
 - **Download**: download a zip of each selected run
 - **Reprocess**: run server-side processing again, including on runs whose files have stalled
 - **Add notebook link**: link every selected run to the same [lab notebook](#lab-notebook) page. Runs that already link to it keep their link and are skipped
@@ -150,7 +184,7 @@ Select the checkbox on one or more run rows to open an action bar at the bottom 
 
 The selection stays when you move to another page of the same results. It clears when you change the search, a filter, or the sort, so the bar never acts on runs from a list you are no longer looking at.
 
-The files table on a run page works the same way: select files to get **Upload**, **Dismiss**, **Reprocess**, and **Download** for just those files. Its selection also clears when you change the files search, a filter, or the sort.
+The files table on a run page works the same way: select files to get **Upload**, **Dismiss**, **Reprocess**, and **Download** for just those files. Its **Upload** follows the instrument’s badge, like the other [Upload buttons](#request-upload). Its selection also clears when you change the files search, a filter, or the sort.
 
 ![Run list with several runs selected and the bulk action bar open](/images/bulk-actions.webp)
 
@@ -174,7 +208,7 @@ Reprocessing sends only the original instrument files. Files Data Hub generated,
 
 **Delete** marks the run deleted without removing stored files. To find a deleted run again, turn on **Show deleted runs** under **Add filter**, then open it and choose **Restore**. Anyone signed in can delete or restore a run. Files that were queued for reprocessing when the run was deleted stay queued and don’t start while the run is deleted. If you restore the run, they start as processing slots free up.
 
-Deleting a run also cancels the uploads that were requested for its files, so the watcher stops trying to send them. Those files go back to **Pending**. Restoring the run doesn’t bring the requests back. Choose **Upload** again if you still want the files. See [Request an upload](/docs/browse-runs#request-upload).
+Deleting a run also cancels the uploads that were requested for its files, so the watcher stops trying to send them. Those files go back to **Waiting to upload**. Restoring the run doesn’t bring the requests back. Choose **Upload** again if you still want the files. See [Request an upload](/docs/browse-runs#request-upload).
 
 While a run is deleted, Data Hub refuses a watcher’s reports of it, so the watcher’s new files aren’t added. After you restore the run, restart the watcher to send them, or choose **Upload** on a file to have the watcher send that file without a restart. Watchers before 1.4.3 also send them when another file of the run finishes. See [A run was deleted on Data Hub](/docs/troubleshoot-a-watcher#a-run-was-deleted-on-data-hub).
 
@@ -198,11 +232,30 @@ If a file that the queue started never finishes, for example because Data Hub re
 
 ### Request an upload [#request-upload]
 
-A file that the watcher found but hasn’t uploaded shows **Pending**. Choose **Upload** on that file, or select runs and choose **Upload**, to ask the watcher to send it. The watcher picks up the request within a minute. On instruments that upload automatically, this needs watcher 1.2.1 or later; see [Roll out watcher releases](/docs/watcher-releases#what-each-version-adds).
+A file that the watcher found but hasn’t uploaded reads **Waiting to upload**. Choose **Upload** on that file to ask the watcher to send it, or **Upload all** at the top of the **Files** section to ask for every waiting file in the run. The watcher picks up the request within a minute. On instruments that upload automatically, this needs watcher 1.2.1 or later; see [Roll out watcher releases](/docs/watcher-releases#what-each-version-adds). The footer under the files table counts how many are waiting on the instrument PC and how many are uploaded.
+
+The **Upload** and **Upload all** buttons on a run page follow the instrument’s badge. When one is turned off, the reason shows beside it:
+
+| Badge | Upload buttons | Beside them |
+| --- | --- | --- |
+| **Online** | On | Nothing |
+| **Restarting** | On. Requests wait until the watcher is back | “The instrument PC is restarting. Uploads start once it’s back.” |
+| **Connecting** | Off | “The watcher hasn’t checked in yet.” |
+| **Offline** | Off | “Can’t upload while the watcher is offline.” |
+| **Pending** | Off | “This instrument is waiting for an admin to confirm it.” |
+| **Retired** | Off | “This instrument is retired.” |
+
+If the badge reads **Offline** and the run has files that are still on the instrument PC, a red notice sits above the **Files** section. It says how many files are still on the PC, which watcher isn’t running, and when it last checked in, and links to **See details**. A run with no waiting files never shows the notice, whatever the badge says.
+
+![Run page for an offline instrument, with a notice that four files are still on the instrument PC and a turned-off Upload all button with the reason beside it](/images/run-offline-notice.webp)
+
+Data Hub keeps a request made while the instrument is **Restarting** and the watcher uploads the files once it’s back. If no heartbeat arrives for about 15 minutes, Data Hub cancels the request and the files read **Waiting to upload** again.
+
+The **Upload** button on a runs list doesn’t follow the badge. Select runs and choose it to ask for every waiting file in them. For an instrument that is **Offline**, **Connecting**, **Pending**, or **Retired**, Data Hub refuses that run’s request, and a message reports how many runs failed. Choose **Upload** from the run page instead to see why.
 
 For instruments in [manual upload mode](/docs/concepts#upload-mode), every file waits for this approval. **Dismiss** tells the watcher not to upload a file. See [Manage the watcher fleet](/docs/manage-watchers#approving-manual-uploads).
 
-![Run page for a manual-upload instrument with its pending files selected and a bar offering Upload and Dismiss](/images/manual-upload.webp)
+![Run page for a manual-upload instrument with its waiting files selected and a bar offering Upload and Dismiss](/images/manual-upload.webp)
 
 ## Use the same data outside the UI [#programmatic-access]
 

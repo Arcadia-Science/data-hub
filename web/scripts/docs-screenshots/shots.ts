@@ -7,14 +7,16 @@
 // Linear. The shots that change data come last, and undo their change.
 
 import { eq } from "drizzle-orm";
-import type { Locator, Page } from "playwright";
-import { personalAccessTokens, watchers } from "@/lib/db/schema";
+import type { Page } from "playwright";
+import { personalAccessTokens } from "@/lib/db/schema";
 import {
   addPendingUploadRun,
   insertConsentClient,
   pendingUploadRunPath,
   removePendingUploadRun,
   setRunDeleted,
+  setWaitingRunFiles,
+  WAITING_RUN,
   type World,
 } from "./setup";
 import type { ManualShot, Shot } from "./types";
@@ -61,26 +63,6 @@ async function openInstrumentMenu(
   await page.getByRole("row", { name: row }).getByRole("button").last().click();
   await page.getByRole("menuitem", { name: item }).click();
   await page.getByRole(dialogRole).waitFor();
-}
-
-// Tabs are server-rendered, so a click that lands before hydration is lost.
-// Clicking again after a short wait gets past that without a fixed delay.
-async function clickUntilVisible(
-  target: Locator,
-  expected: Locator,
-  attempts = 5
-) {
-  for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    await target.click();
-    try {
-      await expected.first().waitFor({ timeout: 3000 });
-      return;
-    } catch (err) {
-      if (attempt === attempts) {
-        throw err;
-      }
-    }
-  }
 }
 
 async function scrollToBottom(page: Page) {
@@ -230,7 +212,7 @@ export const SHOTS: Shot[] = [
     name: "instruments-pending",
     pages: ["set-up-an-instrument", "manage-instruments"],
     path: "/instruments?tab=pending",
-    ready: (page) => page.getByRole("button", { name: "Confirm" }).waitFor(),
+    ready: (page) => page.getByRole("button", { name: /Confirm…/ }).waitFor(),
   },
   {
     name: "instrument-edit-dialog",
@@ -269,30 +251,60 @@ export const SHOTS: Shot[] = [
     },
   },
   {
-    name: "watchers-list",
-    pages: ["manage-watchers"],
-    path: "/watchers",
-    ready: (page) => waitFor(page, "Azure 600 Gel Doc"),
+    name: "instrument-confirm-dialog",
+    pages: ["manage-instruments", "set-up-an-instrument"],
+    path: "/instruments?tab=pending",
+    address: "/instruments",
+    closeup: (page) => page.getByRole("dialog"),
+    ready: (page) => page.getByRole("button", { name: /Confirm…/ }).waitFor(),
+    steps: async ({ page }) => {
+      await page.getByRole("button", { name: /Confirm…/ }).click();
+      const dialog = page.getByRole("dialog");
+      await dialog.getByText("Instrument type", { exact: true }).waitFor();
+      // The review of the watcher's settings loads after the dialog opens.
+      await dialog.getByText("Registered from").waitFor();
+      await dialog.getByText("Upload mode", { exact: true }).waitFor();
+    },
   },
   {
-    name: "watcher-detail",
-    pages: ["manage-watchers"],
-    path: async (world) => {
-      const [watcher] = await world.db
-        .select({ id: watchers.id })
-        .from(watchers)
-        .where(eq(watchers.instrumentId, "azure-600-gel-doc"))
-        .limit(1);
-      return `/watchers/${watcher.id}`;
-    },
-    address: `/watchers/${EXAMPLE_ID}`,
-    ready: (page) => waitFor(page, "Event Log"),
+    name: "instrument-status-badge",
+    pages: ["browse-runs"],
+    path: "/instruments/spectramax-id5-plate-reader",
+    viewport: { height: 560 },
+    ready: (page) => waitFor(page, "260721_OD750_AAA"),
+    // The badge is a link, and its tooltip opens on hover or focus.
     steps: async ({ page }) => {
-      await clickUntilVisible(
-        page.getByText("Status", { exact: true }).first(),
-        page.getByText("Connectivity")
-      );
+      await page.getByRole("link", { name: /watcher details for/ }).hover();
+      await page.getByRole("tooltip").waitFor();
     },
+  },
+  {
+    name: "instrument-offline-notice",
+    pages: ["browse-runs", "manage-instruments", "troubleshoot-a-watcher"],
+    path: "/instruments/colony-counter-g",
+    viewport: { height: 640 },
+    ready: (page) => waitFor(page, "New files aren't being picked up"),
+  },
+  {
+    name: "watcher-activity",
+    pages: ["manage-watchers"],
+    path: "/instruments/jolene-fplc/watcher",
+    viewport: { height: 1100 },
+    ready: (page) => waitFor(page, "Event log"),
+  },
+  {
+    name: "watcher-health",
+    pages: ["manage-watchers"],
+    path: "/instruments/jolene-fplc/watcher/health",
+    viewport: { height: 1250 },
+    ready: (page) => waitFor(page, /Each block is 30 minutes/),
+  },
+  {
+    name: "watcher-settings",
+    pages: ["manage-watchers"],
+    path: "/instruments/instantraman/watcher/settings",
+    viewport: { height: 2000 },
+    ready: (page) => waitFor(page, "Current settings"),
   },
   {
     name: "qpcr-run-detail",
@@ -325,10 +337,21 @@ export const SHOTS: Shot[] = [
     ready: (page) => waitFor(page, "bob@example.com"),
   },
   {
-    name: "watcher-settings",
-    pages: ["watcher-releases"],
+    // The release form above the list of every watcher, so one image serves
+    // both docs pages.
+    name: "settings-watchers",
+    pages: ["manage-watchers", "watcher-releases"],
     path: "/settings/watchers",
+    viewport: { height: 1300 },
     ready: (page) => waitFor(page, "Latest version"),
+    steps: async ({ page }) => {
+      await waitFor(page, "Azure 600 Gel Doc");
+      // The shared-computer marker is an icon; its count is its name.
+      await page
+        .getByRole("img", { name: /on this computer/ })
+        .first()
+        .waitFor();
+    },
   },
   {
     name: "tokens-list",
@@ -397,7 +420,7 @@ export const SHOTS: Shot[] = [
       await openAccountMenu(page, "Feedback");
       const dialog = page.getByRole("dialog");
       await dialog
-        .getByPlaceholder(/Export fails/)
+        .getByPlaceholder(/short summary of the problem/)
         .fill("Plate map colors don't match the legend");
       await dialog
         .getByPlaceholder(/What you expected/)
@@ -448,6 +471,15 @@ export const SHOTS: Shot[] = [
       await page.getByRole("table").getByRole("checkbox").first().check();
       await page.getByRole("button", { name: "Dismiss" }).first().waitFor();
     },
+  },
+  {
+    name: "run-offline-notice",
+    pages: ["browse-runs"],
+    path: `/instruments/${WAITING_RUN.instrumentId}/runs/${WAITING_RUN.runId}`,
+    viewport: RUN_PAGE,
+    prepare: (world) => setWaitingRunFiles(world, true),
+    cleanup: (world) => setWaitingRunFiles(world, false),
+    ready: (page) => waitFor(page, /files from this run are still on/),
   },
   {
     name: "deleted-run",
