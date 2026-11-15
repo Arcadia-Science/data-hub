@@ -52,7 +52,7 @@ The document covers the integrator surface: instruments, runs, comments, lab not
 
 An instrument has at most one active watcher, so `GET /instruments` and `GET /instruments/:id` describe it with one object, not counts:
 
-- `watcher`: the instrument’s active watcher, or `null` when it has none. It carries `id`, `hostname`, `os_info`, `version`, `status`, `status_reason`, `last_heartbeat_at`, `watch_directory`, `file_patterns`, `upload_mode`, `config_state`, and `shared_computer_with`.
+- `watcher`: the instrument’s active watcher, or `null` when it has none. It carries `id`, `status`, `status_reason`, `last_heartbeat_at`, `file_patterns`, `upload_mode`, and `config_state`. With the `watchers:read` scope it also carries the fields that say where the watcher runs: `hostname`, `os_info`, `version`, `watch_directory`, and `shared_computer_with`. A token that has `instruments:read` but not `watchers:read` gets the watcher without those five fields; they are missing from the object, not `null`. A signed-in browser session has every scope, so it always gets them.
 - `connection`: whether new files can reach Data Hub. `state` is `online`, `restarting`, `connecting`, or `offline`, and `reason` says why it is offline (`folder_missing`, `unresponsive`, `stopped`, `no_watcher`, or `deregistered`) and is `null` otherwise. The rules are the ones behind the badge in the web app; see [Instrument status](/docs/concepts#instrument-status). `connection` ignores the instrument’s own `status`, so a `pending` instrument can be `online`. The web app shows **Pending** or **Retired** first, and `connection.state` only after that.
 - `past_watcher_count`: how many deregistered watchers the instrument has had.
 

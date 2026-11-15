@@ -95,7 +95,7 @@ Clients that speak MCP but not OAuth can bridge through [`mcp-remote`](https://w
 
 ## Instruments and their watcher [#instrument-connection]
 
-`list_instruments` and `get_instrument` describe an instrument’s one active watcher with a `watcher` object, which is `null` when it has none, and say whether new files can reach Data Hub with `connection`, whose `state` is `online`, `restarting`, `connecting`, or `offline`, with a `reason` when it is offline. Both also return `pastWatcherCount`. The fields match the REST API’s, in camelCase; see [Instruments and their watcher](/docs/api#instrument-connection).
+`list_instruments` and `get_instrument` describe an instrument’s one active watcher with a `watcher` object, which is `null` when it has none, and say whether new files can reach Data Hub with `connection`, whose `state` is `online`, `restarting`, `connecting`, or `offline`, with a `reason` when it is offline. Both also return `pastWatcherCount`. The fields match the REST API’s, in camelCase; see [Instruments and their watcher](/docs/api#instrument-connection). MCP signs you in with OAuth, not a token with chosen scopes, so `watcher` always includes where the watcher runs, as `list_watchers` and `get_watcher` do.
 
 These older fields still come back with the values they had, but are deprecated, and the [tools catalog](/docs/mcp/tools) marks each one with the field to use instead:
 
