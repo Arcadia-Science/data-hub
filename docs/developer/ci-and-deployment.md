@@ -2,7 +2,7 @@
 
 ## GitHub Actions
 
-Six workflows run on pushes to `staging`/`production` and on pull requests targeting those branches. `apply-migrations.yml` runs on merges to `staging`/`production` that touch migration files, `deploy-lambda.yml` runs on merges that touch the Lambda or its infrastructure (see [Lambda (AWS)](#lambda-aws)), and `publish-watcher.yml` runs only on `watcher-v*` tag pushes and manual dispatch. `watcher-e2e.yml` is never part of a pull request: it runs on pushes to `production`, on manual dispatch, and as a job of `publish-watcher.yml`. `docs-screenshots.yml` runs monthly and on demand (see [Docs screenshots](local-development.md#docs-screenshots)).
+Six workflows run on pushes to `staging`/`production` and on pull requests targeting those branches. `apply-migrations.yml` runs on merges to `staging`/`production` that touch migration files, `deploy-lambda.yml` runs on merges that touch the Lambda or its infrastructure (see [Lambda (AWS)](#lambda-aws)), and `publish-watcher.yml` runs only on `watcher-v*` tag pushes and manual dispatch. `watcher-e2e.yml` is never part of a pull request: it runs as a job of `publish-watcher.yml` and on manual dispatch. `docs-screenshots.yml` runs monthly and on demand (see [Docs screenshots](local-development.md#docs-screenshots)).
 
 ### Python lint and typecheck (`python-lint.yml`)
 
@@ -60,9 +60,10 @@ Production is gated by a required-reviewer protection rule on the `production` G
 
 Runs the end-to-end suite described in [Testing](testing.md#end-to-end-tests-of-the-watcher): the real watcher against the real Next.js server and Postgres. It is not part of pull-request CI. It runs:
 
-- on every push to `production`, with no path filter,
-- on `workflow_dispatch`, from the Actions tab on any branch, to try a change before it is promoted, and
-- through `workflow_call`, as the `e2e` job of `publish-watcher.yml`. That call passes the name of the artifact that holds the wheel the release built (`wheel-artifact: dist`), which the job downloads and hands to the suite in `DATA_HUB_E2E_WHEEL`, so the release is tested as built.
+- through `workflow_call`, as the `e2e` job of `publish-watcher.yml`. That call passes the name of the artifact that holds the wheel the release built (`wheel-artifact: dist`), which the job downloads and hands to the suite in `DATA_HUB_E2E_WHEEL`, so the release is tested as built, and
+- on `workflow_dispatch`, from the Actions tab on any branch, to try a change before it is promoted.
+
+A push to `production` doesn't run it, so a watcher release runs the suite once, on its tag. A release with server changes only gets no end-to-end run unless you start one by hand.
 
 The `linux` job (`ubuntu-latest`, 45-minute limit):
 
@@ -70,8 +71,6 @@ The `linux` job (`ubuntu-latest`, 45-minute limit):
 2. Downloads the wheel artifact, when one is named.
 3. `make py-test-e2e`, with `DATA_HUB_E2E_ARTIFACTS` set to a folder under the runner's temp directory. The step has a 35-minute limit of its own, under the job's, so a hung test fails the step and the steps after it still run (a job that hits its own limit is cancelled with no chance to upload). `pytest` prints the stack of every thread when one test takes longer than 5 minutes (`-o faulthandler_timeout=300` in the Makefile target), which shows where a hang is.
 4. If the tests fail or the job is cancelled, uploads that folder as the `watcher-e2e-linux-artifacts` artifact (kept 14 days): per failed test, or for the test that was running when the run was cancelled, the watcher logs and state database, the server log, the fault proxy's request log, and a listing of the S3 stand-in.
-
-A release commit runs the suite twice: once when it is pushed to `production`, and again when the `watcher-v*` tag on it starts `publish-watcher.yml`, whose `e2e` job is a release gate. That is intended, because the tag run tests the wheel it is about to publish. Don't tag before the push run has finished unless you want the suite to run twice at once.
 
 The `windows` job (`windows-latest`, 90-minute limit) runs the same suite against the real Windows service, with `DATA_HUB_E2E_DRIVER=service`. The suite installs the watcher with `uv tool install`, sets it up with `init` and `service install`, and drives the service from outside. It has the same triggers and inputs as the `linux` job.
 
