@@ -44,6 +44,21 @@ export const RUN_STATUS_VALUES = [
 
 export type RunStatus = (typeof RUN_STATUS_VALUES)[number];
 
+// Run statuses that need someone to act, in the order the dashboard's "Runs
+// needing attention" card lists them.
+export const NEEDS_ATTENTION_RUN_STATUSES = [
+  "upload_failed",
+  "failed",
+  "stalled",
+] as const satisfies readonly RunStatus[];
+
+export interface RunsNeedingAttention {
+  failed: number;
+  stalled: number;
+  total: number;
+  uploadFailed: number;
+}
+
 // `pending` was one status for every file not yet in S3. It is still accepted
 // as a status filter (REST, MCP, saved links) and means both statuses that
 // replaced it. No run reports it.

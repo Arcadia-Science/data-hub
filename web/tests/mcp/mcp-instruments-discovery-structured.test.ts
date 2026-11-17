@@ -108,6 +108,12 @@ vi.mock("@/lib/api/dashboard", () => ({
       runCount: 3,
       lastRunAt: new Date("2025-01-01T00:00:00.000Z"),
       filesPendingUpload: 0,
+      runsNeedingAttention: {
+        uploadFailed: 1,
+        failed: 0,
+        stalled: 0,
+        total: 1,
+      },
       connection: { state: "restarting", reason: null },
       watcherStatus: "offline",
     },
@@ -402,6 +408,12 @@ describe("instruments + discovery structuredContent", () => {
       runCount: 3,
       lastRunAt: null,
       filesPendingUpload: 0,
+      runsNeedingAttention: {
+        uploadFailed: 0,
+        failed: 0,
+        stalled: 0,
+        total: 0,
+      },
       connection: { state: "online", reason: null },
       watcherStatus: "online",
     };

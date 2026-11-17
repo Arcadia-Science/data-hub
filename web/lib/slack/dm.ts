@@ -254,6 +254,24 @@ export function buildFeedbackUpdatedBlocks(opts: {
   ];
 }
 
+export function buildUploadFailedBlocks(opts: {
+  instrumentDisplayName: string;
+  message: string;
+  runDisplayId: string;
+  runUrl: string;
+}): (Block | KnownBlock)[] {
+  return [
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `*Upload failed on ${escapeMrkdwn(opts.instrumentDisplayName)}*\nRun \`${escapeMrkdwn(opts.runDisplayId)}\`: ${escapeMrkdwn(opts.message)}\n<${opts.runUrl}|View in Data Hub>`,
+        verbatim: true,
+      },
+    },
+  ];
+}
+
 export function buildGenericBlocks(opts: {
   actorDisplayName: string;
   message: string;

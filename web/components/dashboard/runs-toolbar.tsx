@@ -21,7 +21,11 @@ import {
 } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
 import { preloader } from "@/lib/preload";
-import { dashboardSearchParams, hasActiveFilters } from "@/lib/search-params";
+import {
+  ALL_TIME_DATE_FROM,
+  dashboardSearchParams,
+  hasActiveFilters,
+} from "@/lib/search-params";
 
 interface Instrument {
   displayName: string;
@@ -160,6 +164,7 @@ export function RunsToolbar({
 
           <RunsDateFilter
             align="end"
+            allTimeFrom={dateDefaultPreset ? ALL_TIME_DATE_FROM : undefined}
             defaultPreset={dateDefaultPreset}
             onChange={(range) =>
               setFilters({

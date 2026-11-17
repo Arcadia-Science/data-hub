@@ -11,6 +11,7 @@ import {
   notifyFeedbackSubmitted,
   notifyFeedbackUpdated,
   notifyRunCreated,
+  notifyUploadFailed,
   setInstrumentSubscription,
   updatePreferences,
 } from "@/lib/api/notifications";
@@ -122,6 +123,8 @@ describe("Notifications", () => {
         feedbackUpdatedEnabled: true,
         slackFeedbackSubmittedEnabled: false,
         slackFeedbackUpdatedEnabled: false,
+        uploadFailedEnabled: true,
+        slackUploadFailedEnabled: false,
       });
 
       // Defaults are lazy-upserted so subsequent reads hit the row, not
@@ -148,6 +151,8 @@ describe("Notifications", () => {
         feedbackUpdatedEnabled: true,
         slackFeedbackSubmittedEnabled: false,
         slackFeedbackUpdatedEnabled: false,
+        uploadFailedEnabled: true,
+        slackUploadFailedEnabled: false,
       });
 
       // A partial patch on the other axis leaves the first one intact.
@@ -166,6 +171,8 @@ describe("Notifications", () => {
         feedbackUpdatedEnabled: true,
         slackFeedbackSubmittedEnabled: false,
         slackFeedbackUpdatedEnabled: false,
+        uploadFailedEnabled: true,
+        slackUploadFailedEnabled: false,
       });
     });
 
@@ -1406,6 +1413,84 @@ describe("Notifications", () => {
       expect(updated?.text).toBe(
         `Your feedback "${escapedTitle}" was marked Resolved (&lt;!here&gt;).`
       );
+    });
+
+    // -----------------------------------------------------------------------
+    // notifyUploadFailed: the requesters of files the watcher gave up on
+    // -----------------------------------------------------------------------
+
+    function uploadFailedGroup(
+      instrumentRunId: string,
+      requesterIds: string[]
+    ) {
+      return {
+        failedCount: 3,
+        folder: "run-upload-failed",
+        instrumentRunId,
+        reason: "folder_missing" as const,
+        requesterIds,
+        runId: "run-upload-failed",
+      };
+    }
+
+    it("upload_failed: notifies each requester in the app and in Slack", async () => {
+      const { userId: alice } = await seedTestUser();
+      const { userId: bob } = await seedTestUser();
+      await connectSlack(alice, "U_UPLOAD_FAILED");
+      await updatePreferences(alice, { slackUploadFailedEnabled: true });
+      const runInternalId = await seedRun(instrumentId, "run-upload-failed");
+
+      await notifyUploadFailed({
+        groups: [uploadFailedGroup(runInternalId, [alice, bob])],
+        instrumentId,
+        origin,
+      });
+
+      const db = getTestDb();
+      const rows = await db
+        .select()
+        .from(notifications)
+        .where(eq(notifications.type, "upload_failed"));
+      expect(rows.map((row) => row.userId).sort()).toEqual([alice, bob].sort());
+      expect(rows[0]).toMatchObject({
+        runId: runInternalId,
+        body: "3 files couldn't upload: folder no longer on the instrument PC.",
+      });
+      const dms = await getCapturedSlackDms();
+      expect(dms).toHaveLength(1);
+      expect(dms[0].channel).toBe("U_UPLOAD_FAILED");
+      expect(dms[0].text).toContain(
+        `Upload failed on ${instrumentDisplayName}, run \`run-upload-failed\`: 3 files couldn't upload`
+      );
+    });
+
+    it("upload_failed: respects both toggles and sends nothing without a requester", async () => {
+      const { userId } = await seedTestUser();
+      await connectSlack(userId, "U_UPLOAD_FAILED_OFF");
+      await updatePreferences(userId, {
+        uploadFailedEnabled: false,
+        slackUploadFailedEnabled: false,
+      });
+      const runInternalId = await seedRun(instrumentId, "run-upload-failed");
+
+      await notifyUploadFailed({
+        groups: [
+          uploadFailedGroup(runInternalId, [userId]),
+          // An auto-mode give-up: nobody asked for these files.
+          uploadFailedGroup(runInternalId, []),
+        ],
+        instrumentId,
+        origin,
+      });
+
+      const db = getTestDb();
+      expect(
+        await db
+          .select()
+          .from(notifications)
+          .where(eq(notifications.type, "upload_failed"))
+      ).toHaveLength(0);
+      expect(await getCapturedSlackDms()).toHaveLength(0);
     });
 
     it("delivers both in-app and Slack for comment_participated", async () => {

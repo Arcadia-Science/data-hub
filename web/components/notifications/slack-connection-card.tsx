@@ -115,6 +115,7 @@ const slackPreferencesSchema = z.object({
   slackGenericEnabled: z.boolean(),
   slackFeedbackUpdatedEnabled: z.boolean(),
   slackFeedbackSubmittedEnabled: z.boolean().optional(),
+  slackUploadFailedEnabled: z.boolean(),
 });
 
 export type SlackPreferences = z.infer<typeof slackPreferencesSchema>;
@@ -151,6 +152,7 @@ function Connected({
             value.slackCommentsParticipatedEnabled,
           slack_generic_enabled: value.slackGenericEnabled,
           slack_feedback_updated_enabled: value.slackFeedbackUpdatedEnabled,
+          slack_upload_failed_enabled: value.slackUploadFailedEnabled,
           ...(value.slackFeedbackSubmittedEnabled === undefined
             ? {}
             : {
@@ -275,6 +277,28 @@ function Connected({
                     </FieldContent>
                     <Switch
                       aria-label="Send participated comment notifications via Slack DM"
+                      checked={field.state.value}
+                      id={field.name}
+                      name={field.name}
+                      onCheckedChange={field.handleChange}
+                    />
+                  </Field>
+                )}
+              </form.Field>
+
+              <form.Field name="slackUploadFailedEnabled">
+                {(field) => (
+                  <Field orientation="horizontal">
+                    <FieldContent>
+                      <FieldLabel htmlFor={field.name}>
+                        Uploads that failed
+                      </FieldLabel>
+                      <FieldDescription>
+                        DM me when files I requested couldn&apos;t upload.
+                      </FieldDescription>
+                    </FieldContent>
+                    <Switch
+                      aria-label="Send failed upload notifications via Slack DM"
                       checked={field.state.value}
                       id={field.name}
                       name={field.name}

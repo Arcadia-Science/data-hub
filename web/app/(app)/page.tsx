@@ -41,7 +41,11 @@ import { listCommentFeed } from "@/lib/api/run-comments";
 import { parseHasNotebookLinkParam } from "@/lib/api/validators";
 import { auth } from "@/lib/auth";
 import { startOfTodayISO } from "@/lib/date";
-import { dashboardParamsCache, hasActiveFilters } from "@/lib/search-params";
+import {
+  ALL_TIME_DATE_FROM,
+  dashboardParamsCache,
+  hasActiveFilters,
+} from "@/lib/search-params";
 import { getViewerTimeZone } from "@/lib/viewer-timezone";
 
 type DashboardParams = Awaited<ReturnType<typeof dashboardParamsCache.parse>>;
@@ -87,7 +91,7 @@ export default async function DashboardPage({
         </Suspense>
       </section>
 
-      <section className="flex flex-col gap-3">
+      <section className="flex scroll-mt-6 flex-col gap-3" id="runs">
         <h2 className="font-medium text-lg tracking-tight">
           Recent instrument runs
         </h2>
@@ -174,7 +178,10 @@ async function DashboardRunsSection({
     buildRunListQuery({
       instrumentId: instrumentIds,
       search: params.search || undefined,
-      dateFrom: params.date_from ?? defaultDateFrom,
+      dateFrom:
+        params.date_from === ALL_TIME_DATE_FROM
+          ? undefined
+          : (params.date_from ?? defaultDateFrom),
       dateTo: params.date_to ?? undefined,
       page: params.page,
       perPage: params.per_page,

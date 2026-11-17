@@ -147,4 +147,25 @@ describe("buildNotificationFeed", () => {
     );
     expect(feed[0].entries.map((entry) => entry.kind)).toEqual(["feedback"]);
   });
+
+  it("gives each failed-upload row its own entry, apart from runs and comments", () => {
+    const feed = buildNotificationFeed(
+      [
+        item({
+          id: "fail-1",
+          type: "upload_failed",
+          body: "129 files couldn't upload: folder no longer on the instrument PC.",
+        }),
+        item({ id: "fail-2", type: "upload_failed", runId: "r2" }),
+        item({ id: "run", runId: "r3", runDisplayId: "run-3" }),
+      ],
+      TZ,
+      NOW
+    );
+    expect(feed[0].entries.map((entry) => [entry.kind, entry.id])).toEqual([
+      ["upload_failed", "fail-1"],
+      ["upload_failed", "fail-2"],
+      ["run_group", "group:2026-09-16:spectramax-id5-plate-reader"],
+    ]);
+  });
 });

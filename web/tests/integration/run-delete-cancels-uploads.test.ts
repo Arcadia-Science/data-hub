@@ -523,9 +523,9 @@ describe("Deleting a run cancels its requested uploads", () => {
   });
 });
 
-// The dashboard's "Pending uploads" card counts the files of every active
-// instrument, so these tests get the database to themselves.
-describe("Dashboard pending uploads after a run is deleted", () => {
+// The dashboard's "Runs needing attention" card counts the runs of every
+// active instrument, so these tests get the database to themselves.
+describe("Dashboard runs needing attention after a run is deleted", () => {
   let token: string;
   let cookie: string;
 
@@ -541,7 +541,7 @@ describe("Dashboard pending uploads after a run is deleted", () => {
   });
 
   // The number on the card and the line under it, read from the page HTML.
-  async function readPendingCard(): Promise<{ count: string; note: string }> {
+  async function readAttentionCard(): Promise<{ count: string; note: string }> {
     const res = await api("/", {
       headers: { Accept: "text/html", Cookie: cookie },
       redirect: "manual",
@@ -549,29 +549,50 @@ describe("Dashboard pending uploads after a run is deleted", () => {
     expect(res.status).toBe(200);
     const html = await res.text();
     const match = html.match(
-      /Pending uploads<\/p><p[^>]*>([^<]*)<\/p><p[^>]*>([^<]*)<\/p>/
+      /Runs needing attention<\/p><p[^>]*>([^<]*)<\/p><p[^>]*>([^<]*)<\/p>/
     );
     if (!match) {
-      throw new Error("The Pending uploads card is not in the page");
+      throw new Error("The Runs needing attention card is not in the page");
     }
     return { count: match[1], note: match[2] };
   }
 
-  it("leaves the files of a deleted run out of the card", async () => {
+  async function markUploadFailed(ids: number[]): Promise<void> {
+    await getTestDb()
+      .update(files)
+      .set({
+        status: "upload_failed",
+        uploadFailureReason: "folder_missing",
+        uploadFailedAt: new Date(),
+        errorMessage: "The folder is no longer on the instrument PC.",
+      })
+      .where(inArray(files.id, ids));
+  }
+
+  it("leaves a deleted run out of the card", async () => {
     const instrumentId = "dashboard-count-inst";
     await seedInstrument(instrumentId);
     await seedWatcher(instrumentId);
     const doomed = await seedRun(token, instrumentId, "doomed", ["a", "b"]);
-    await seedRun(token, instrumentId, "kept", ["c"]);
-    await markRequested(Object.values(doomed.fileIds));
+    const kept = await seedRun(token, instrumentId, "kept", ["c"]);
+    await markUploadFailed([
+      ...Object.values(doomed.fileIds),
+      ...Object.values(kept.fileIds),
+    ]);
 
-    expect((await readPendingCard()).count).toBe("3");
+    expect(await readAttentionCard()).toEqual({
+      count: "2",
+      note: "2 upload failed",
+    });
     await deleteRun(token, instrumentId, "doomed");
-    expect((await readPendingCard()).count).toBe("1");
+    expect(await readAttentionCard()).toEqual({
+      count: "1",
+      note: "1 upload failed",
+    });
     await deleteRun(token, instrumentId, "kept");
-    expect(await readPendingCard()).toEqual({
+    expect(await readAttentionCard()).toEqual({
       count: "0",
-      note: "Upload queue is clear",
+      note: "Nothing needs attention",
     });
   });
 });

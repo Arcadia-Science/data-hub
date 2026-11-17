@@ -87,12 +87,14 @@ async function NotificationsFormSection({
         commentsParticipatedEnabled: prefs.commentsParticipatedEnabled,
         genericEnabled: prefs.genericEnabled,
         feedbackUpdatedEnabled: prefs.feedbackUpdatedEnabled,
+        uploadFailedEnabled: prefs.uploadFailedEnabled,
         slackRunsEnabled: prefs.slackRunsEnabled,
         slackCommentsAttributedEnabled: prefs.slackCommentsAttributedEnabled,
         slackCommentsParticipatedEnabled:
           prefs.slackCommentsParticipatedEnabled,
         slackGenericEnabled: prefs.slackGenericEnabled,
         slackFeedbackUpdatedEnabled: prefs.slackFeedbackUpdatedEnabled,
+        slackUploadFailedEnabled: prefs.slackUploadFailedEnabled,
       }}
       slackConnection={
         slackConn

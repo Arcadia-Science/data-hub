@@ -66,6 +66,10 @@ import {
   inFlightProcessingSql,
   stalledProcessingSql,
 } from "@/lib/runs/stalled-processing.sql";
+import {
+  groupUploadFailures,
+  type UploadFailureGroup,
+} from "@/lib/runs/upload-failure";
 import { getS3ObjectStream } from "@/lib/s3";
 
 // ---------------------------------------------------------------------------
@@ -391,6 +395,20 @@ function runStatusCondition(status: RunStatus, now: Date): SQL {
     existsRawFileInBucket(status, now),
   ];
   return sql`(${sql.join(parts, sql` and `)})`;
+}
+
+// Select columns that count runs in each status that needs someone to act
+// (`NEEDS_ATTENTION_RUN_STATUSES`), for a query whose FROM includes
+// `instrument_runs`. Uses the same predicates as the runs-list status filter,
+// so the dashboard card's counts match the list its link opens.
+export function runsNeedingAttentionColumns(now: Date) {
+  const countWhere = (status: RunStatus) =>
+    sql<number>`cast(count(*) filter (where ${runStatusCondition(status, now)}) as int)`;
+  return {
+    failed: countWhere("failed"),
+    stalled: countWhere("stalled"),
+    uploadFailed: countWhere("upload_failed"),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1059,6 +1077,9 @@ export interface RunFileStats {
   uploaded: number;
   // Files the watcher gave up on (status = upload_failed).
   uploadFailed: number;
+  // The same files grouped by reason and folder, for the run page's banner.
+  // Empty when `uploadFailed` is 0.
+  uploadFailureGroups: UploadFailureGroup[];
   // Files actively uploading to S3 (status = upload_requested). Tracked
   // separately from `pending` so the table only auto-refreshes while work is
   // genuinely in flight (not while files merely await a manual upload).
@@ -1101,9 +1122,34 @@ export async function getRunFileStats(
     .from(files)
     .where(eq(files.instrumentRunId, runInternalId));
 
+  // The run page's banner groups the files the watcher gave up on. Most runs
+  // have none, so the read happens only when the count says there are some.
+  const uploadFailureGroups =
+    row.uploadFailed > 0
+      ? groupUploadFailures(
+          await db
+            .select({
+              errorMessage: files.errorMessage,
+              id: files.id,
+              relativePath: files.relativePath,
+              uploadFailedAt: files.uploadFailedAt,
+              uploadFailureReason: files.uploadFailureReason,
+            })
+            .from(files)
+            .where(
+              and(
+                eq(files.instrumentRunId, runInternalId),
+                eq(files.status, "upload_failed"),
+                isNull(files.deletedAt)
+              )
+            )
+        )
+      : [];
+
   return {
     ...row,
     rawTotalSizeBytes: Number(row.rawTotalSizeBytes),
+    uploadFailureGroups,
   };
 }
 

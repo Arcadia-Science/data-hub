@@ -5,6 +5,7 @@ import {
   buildFeedbackUpdatedBlocks,
   buildGenericBlocks,
   buildRunCreatedBlocks,
+  buildUploadFailedBlocks,
 } from "@/lib/slack/dm";
 import { escapeMrkdwn } from "@/lib/slack/mrkdwn";
 
@@ -122,6 +123,32 @@ describe("buildGenericBlocks", () => {
       buildGenericBlocks({ actorDisplayName: "Bot", message: HOSTILE })
     );
     expect(angleBracketSpans(text.text)).toEqual([]);
+  });
+});
+
+describe("buildUploadFailedBlocks", () => {
+  const text = sectionText(
+    buildUploadFailedBlocks({
+      instrumentDisplayName: HOSTILE,
+      message:
+        "2 files couldn't upload: folder no longer on the instrument PC.",
+      runDisplayId: `run\`${HOSTILE_MENTION}`,
+      runUrl: RUN_URL,
+    })
+  );
+
+  it("escapes the instrument name and run ID", () => {
+    expect(text.text).toContain(
+      `*Upload failed on ${ESCAPED_HOSTILE}*`
+    );
+    expect(text.text).toContain("Run `run`&lt;!channel&gt;`: 2 files");
+  });
+
+  it("keeps the Data Hub link as the only angle-bracket span", () => {
+    expect(angleBracketSpans(text.text)).toEqual([
+      `<${RUN_URL}|View in Data Hub>`,
+    ]);
+    expect(text.verbatim).toBe(true);
   });
 });
 

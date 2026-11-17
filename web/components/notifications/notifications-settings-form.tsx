@@ -38,6 +38,7 @@ const inAppPreferencesSchema = z.object({
   genericEnabled: z.boolean(),
   feedbackUpdatedEnabled: z.boolean(),
   feedbackSubmittedEnabled: z.boolean().optional(),
+  uploadFailedEnabled: z.boolean(),
 });
 
 type InAppPreferences = z.infer<typeof inAppPreferencesSchema>;
@@ -121,6 +122,7 @@ export function NotificationsSettingsForm({
         initialPreferences.commentsParticipatedEnabled,
       genericEnabled: initialPreferences.genericEnabled,
       feedbackUpdatedEnabled: initialPreferences.feedbackUpdatedEnabled,
+      uploadFailedEnabled: initialPreferences.uploadFailedEnabled,
       ...(adminNewFeedback
         ? { feedbackSubmittedEnabled: adminNewFeedback.inApp }
         : {}),
@@ -146,6 +148,7 @@ export function NotificationsSettingsForm({
         comments_participated_enabled: value.commentsParticipatedEnabled,
         generic_enabled: value.genericEnabled,
         feedback_updated_enabled: value.feedbackUpdatedEnabled,
+        upload_failed_enabled: value.uploadFailedEnabled,
         ...(adminNewFeedback
           ? {
               feedback_submitted_enabled: value.feedbackSubmittedEnabled,
@@ -278,6 +281,32 @@ export function NotificationsSettingsForm({
                     </FieldContent>
                     <Switch
                       aria-label="Notify me when someone replies on a run I've commented on"
+                      checked={field.state.value}
+                      id={field.name}
+                      name={field.name}
+                      onCheckedChange={field.handleChange}
+                    />
+                  </Field>
+                )}
+              </prefsForm.Field>
+
+              <FieldSeparator />
+
+              <prefsForm.Field name="uploadFailedEnabled">
+                {(field) => (
+                  <Field orientation="horizontal">
+                    <FieldContent>
+                      <FieldLabel htmlFor={field.name}>
+                        Uploads that failed
+                      </FieldLabel>
+                      <FieldDescription>
+                        Notify me when files I requested couldn&apos;t upload,
+                        for example because they&apos;re no longer on the
+                        instrument PC.
+                      </FieldDescription>
+                    </FieldContent>
+                    <Switch
+                      aria-label="Notify me when files I requested couldn't upload"
                       checked={field.state.value}
                       id={field.name}
                       name={field.name}
@@ -477,6 +506,8 @@ export function NotificationsSettingsForm({
             slackGenericEnabled: initialPreferences.slackGenericEnabled,
             slackFeedbackUpdatedEnabled:
               initialPreferences.slackFeedbackUpdatedEnabled,
+            slackUploadFailedEnabled:
+              initialPreferences.slackUploadFailedEnabled,
             ...(adminNewFeedback?.slack === null || !adminNewFeedback
               ? {}
               : {
