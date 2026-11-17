@@ -182,7 +182,7 @@ def test_manual_mode_reports_files_and_uploads_nothing(
 
     files = detect_run(server, instrument_id, watch_dir, RUN, {"a.csv": SMALL, "b.csv": LARGE})
     assert {n: f.row.status for n, f in files.items()} == {"a.csv": "detected", "b.csv": "detected"}
-    assert server.run_status(instrument_id, RUN) == "pending"
+    assert server.run_status(instrument_id, RUN) == "not_uploaded"
     reported = server.wait_for_event(pc.watcher_id, event_type="run_reported")
     assert reported.details["run_id"] == RUN
 
@@ -248,7 +248,8 @@ def test_requested_files_are_queued_and_the_next_poll_uploads_them(
     )
     assert statuses(server, instrument_id, RUN)["c.csv"] == "detected"
     assert not server.object_exists(instrument_id, RUN, "c.csv")
-    assert server.run_status(instrument_id, RUN) == "pending"  # c is still waiting
+    # c is still only on the PC, which ranks below the uploaded files.
+    assert server.run_status(instrument_id, RUN) == "uploaded"
     uploaded = {
         e.details["s3_key"]: e.details["part_count"]
         for e in server.wait_for_events(pc.watcher_id, event_type="file_uploaded", count=2)

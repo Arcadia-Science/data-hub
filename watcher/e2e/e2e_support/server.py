@@ -47,7 +47,41 @@ __all__ = [
 STALE_AFTER_MINUTES = 5
 SWEEP_GRACE_MINUTES = 15
 
-RunStatus = Literal["failed", "pending", "uploaded", "processing", "completed", "empty"]
+RunStatus = Literal[
+    "failed",
+    "upload_failed",
+    "waiting_upload",
+    "uploaded",
+    "queued",
+    "processing",
+    "not_uploaded",
+    "completed",
+    "empty",
+]
+
+# The run status each file status counts toward, and the order a run takes the first one
+# that has a file: ``RUN_BUCKET_BY_FILE_STATUS`` in web/lib/runs/file-buckets.ts and
+# ``RUN_STATUS_VALUES`` in web/lib/runs/run-status.ts, without the stalled state. A
+# ``detected`` file counts as waiting while the watcher has said it will upload it.
+_RUN_BUCKET_BY_FILE_STATUS: dict[str, RunStatus] = {
+    "upload_requested": "waiting_upload",
+    "upload_failed": "upload_failed",
+    "uploaded": "uploaded",
+    "queued": "queued",
+    "processing": "processing",
+    "completed": "completed",
+    "failed": "failed",
+}
+_RUN_STATUS_ORDER: tuple[RunStatus, ...] = (
+    "failed",
+    "upload_failed",
+    "waiting_upload",
+    "uploaded",
+    "queued",
+    "processing",
+    "not_uploaded",
+    "completed",
+)
 
 
 @dataclass(frozen=True)
@@ -393,25 +427,27 @@ class ServerView:
 
     def run_status(self, instrument_id: str, run_id: str) -> RunStatus:
         """The run's status, derived from its live raw files the way the web app does it
-        (``deriveRunStatus`` in web/lib/runs/run-status.ts, without the stalled state):
-        any failed file makes the run ``failed``, then any file still waiting for its upload
-        makes it ``pending``, then ``uploaded``, ``processing``, ``completed``, and a run
-        with no files is ``empty``."""
+        (``deriveRunStatus`` in web/lib/runs/run-status.ts, without the stalled state): the
+        first of ``failed``, ``upload_failed``, ``waiting_upload``, ``uploaded``, ``queued``,
+        ``processing``, ``not_uploaded`` and ``completed`` that one of its files counts
+        toward, and ``empty`` for a run with no files."""
         rows = self.query(
-            """SELECT DISTINCT f.status::text FROM files f
+            """SELECT DISTINCT f.status::text, f.auto_upload_expected_at IS NOT NULL
+               FROM files f
                JOIN instrument_runs r ON r.id = f.instrument_run_id
                WHERE r.instrument_id = %s AND r.run_id = %s
                  AND f.category = 'raw' AND f.deleted_at IS NULL""",
             (instrument_id, run_id),
         )
-        statuses = {cast("str", r[0]) for r in rows}
-        if "failed" in statuses:
-            return "failed"
-        if statuses & {"detected", "upload_requested"}:
-            return "pending"
-        for status in ("uploaded", "processing", "completed"):
-            if status in statuses:
-                return cast("RunStatus", status)
+        buckets: set[RunStatus] = set()
+        for status, marked in rows:
+            if status == "detected":
+                buckets.add("waiting_upload" if marked else "not_uploaded")
+            else:
+                buckets.add(_RUN_BUCKET_BY_FILE_STATUS[cast("str", status)])
+        for status in _RUN_STATUS_ORDER:
+            if status in buckets:
+                return status
         return "empty"
 
     # ------------------------------------------------------------------

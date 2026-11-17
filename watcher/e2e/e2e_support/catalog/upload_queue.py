@@ -22,7 +22,7 @@ TRANSITIONS: tuple[Transition, ...] = (
         MACHINE,
         "queue.manual_mode->files_detected",
         "In manual mode a reported run's files stay `detected`, nothing is uploaded, and "
-        "the run's derived status is pending.",
+        "the run's derived status is not uploaded.",
     ),
     covered(
         MACHINE,
