@@ -88,10 +88,13 @@ export interface AnalyticsEvents {
 }
 
 // People are identified by `user_id`; API tokens by `token_id`. A token never
-// carries a user id, so the two shapes cannot be mixed.
+// carries a user id, so the shapes cannot be mixed. MCP always acts as a
+// signed-in person, and `client` is the MCP client label, as in
+// `mcp_tool_call`.
 export type SurfaceEvent =
   | { surface: "web"; user_id: string }
-  | { surface: "api"; token_id: string };
+  | { surface: "api"; token_id: string }
+  | { surface: "mcp"; user_id: string; client: string };
 
 export type AnalyticsEventName = keyof AnalyticsEvents;
 

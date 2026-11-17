@@ -1,5 +1,9 @@
 import { Client } from "@modelcontextprotocol/client";
-import { InMemoryTransport, McpServer } from "@modelcontextprotocol/server";
+import {
+  type AuthInfo,
+  InMemoryTransport,
+  McpServer,
+} from "@modelcontextprotocol/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // ---------------------------------------------------------------------------
@@ -521,6 +525,7 @@ vi.mock("@/lib/api/files", () => ({
     if (id === 42) {
       return {
         ok: true,
+        category: MOCK_FILE.category,
         contentType: MOCK_FILE.contentType,
         filename: MOCK_FILE.filename,
         runUuid: MOCK_FILE.instrumentRunId,
@@ -700,6 +705,18 @@ vi.mock("@/lib/s3", () => ({
   PRESIGNED_DOWNLOAD_URL_EXPIRY_SECONDS: 15 * 60,
   s3BucketOrigin: (bucket: string) =>
     `https://${bucket}.s3.us-west-1.amazonaws.com`,
+}));
+
+// Outside production `trackEvent` drops events, so spy on it to see which
+// download events the tools record.
+const { trackEvent } = vi.hoisted(() => ({ trackEvent: vi.fn() }));
+vi.mock("@/lib/analytics/track", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/analytics/track")>()),
+  trackEvent: (...args: unknown[]) => trackEvent(...args),
+}));
+
+vi.mock("@/lib/mcp/client-name", () => ({
+  mcpClientLabel: vi.fn().mockResolvedValue("Claude"),
 }));
 
 // ---------------------------------------------------------------------------
@@ -2552,5 +2569,138 @@ describe("MCP Protocol (in-memory)", () => {
       argument: { name: "instrumentId", value: "test-" },
     });
     expect(result.completion.values).toContain("test-plate-reader");
+  });
+});
+
+// The anonymous client above records no events, as in production calls
+// without a signed-in user. This client signs every request in, as the
+// route's auth wrapper does.
+describe("MCP download analytics (signed in)", () => {
+  const SIGNED_IN: AuthInfo = {
+    token: "token",
+    clientId: "client-1",
+    scopes: ["read"],
+    extra: { userId: "user-1" },
+  };
+  const BUILDING = {
+    ok: true as const,
+    status: "building" as const,
+    jobId: "job-abc",
+    runId: "run-1",
+    unclaimed: false,
+    ownsBuild: true,
+    retryAfterSeconds: 5,
+  };
+
+  let client: Client;
+  let mcpServer: McpServer;
+
+  beforeEach(async () => {
+    trackEvent.mockReset();
+    mcpServer = new McpServer(
+      { name: "data-hub-test", version: "1.0.0" },
+      { capabilities: { tools: {} } }
+    );
+    registerTools(mcpServer);
+
+    client = new Client({ name: "test-client", version: "1.0.0" });
+    const [clientTransport, serverTransport] =
+      InMemoryTransport.createLinkedPair();
+    const send = clientTransport.send.bind(clientTransport);
+    clientTransport.send = (message, options) =>
+      send(message, { ...options, authInfo: SIGNED_IN });
+    await Promise.all([
+      client.connect(clientTransport),
+      mcpServer.connect(serverTransport),
+    ]);
+  });
+
+  afterEach(async () => {
+    await client.close();
+    await mcpServer.close();
+  });
+
+  function downloadEvents(): unknown[] {
+    return trackEvent.mock.calls
+      .map(([name]) => name)
+      .filter(
+        (name) => name === "archive_downloaded" || name === "file_downloaded"
+      );
+  }
+
+  async function eventProps(name: string): Promise<unknown> {
+    const props = trackEvent.mock.calls.find(([n]) => n === name)?.[1];
+    return typeof props === "function" ? await props() : props;
+  }
+
+  it("records one archive download for a build that becomes ready", async () => {
+    const { prepareRunArchive } = await import("@/lib/api/run-archive");
+    vi.mocked(prepareRunArchive)
+      .mockResolvedValueOnce(BUILDING)
+      .mockResolvedValueOnce(BUILDING);
+
+    const statuses: string[] = [];
+    for (let call = 0; call < 3; call++) {
+      const result = await client.callTool({
+        name: "get_run_archive",
+        arguments: { instrumentId: "test-plate-reader", runId: "run-1" },
+      });
+      statuses.push((result.structuredContent as { status: string }).status);
+    }
+
+    expect(statuses).toEqual(["building", "building", "ready"]);
+    expect(downloadEvents()).toEqual(["archive_downloaded"]);
+    await expect(eventProps("archive_downloaded")).resolves.toEqual({
+      surface: "mcp",
+      user_id: "user-1",
+      client: "Claude",
+    });
+  });
+
+  it("records a file download with the file's category", async () => {
+    const result = await client.callTool({
+      name: "get_file_download_url",
+      arguments: { fileId: 42 },
+    });
+    expect(result.isError).toBeFalsy();
+    expect(downloadEvents()).toEqual(["file_downloaded"]);
+    await expect(eventProps("file_downloaded")).resolves.toEqual({
+      surface: "mcp",
+      user_id: "user-1",
+      client: "Claude",
+      category: "raw",
+    });
+  });
+
+  it("records no download when the tool hands out no link", async () => {
+    const { prepareRunArchive } = await import("@/lib/api/run-archive");
+    vi.mocked(prepareRunArchive).mockResolvedValueOnce({
+      ok: false,
+      status: 404,
+      message: "No downloadable files for this run",
+    });
+    const { getRunClaimStatus } = await import("@/lib/api/run-attributions");
+    vi.mocked(getRunClaimStatus).mockResolvedValueOnce(null);
+
+    const archive = await client.callTool({
+      name: "get_run_archive",
+      arguments: { instrumentId: "test-plate-reader", runId: "run-empty" },
+    });
+    const notUploaded = await client.callTool({
+      name: "get_file_download_url",
+      arguments: { fileId: 99 },
+    });
+    // The run was deleted between the two lookups.
+    const runGone = await client.callTool({
+      name: "get_file_download_url",
+      arguments: { fileId: 42 },
+    });
+
+    expect([archive, notUploaded, runGone].map((r) => r.isError)).toEqual([
+      true,
+      true,
+      true,
+    ]);
+    expect(downloadEvents()).toEqual([]);
   });
 });

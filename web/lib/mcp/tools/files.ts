@@ -7,6 +7,7 @@ import {
 } from "@/lib/api/files";
 import { prepareRunArchive } from "@/lib/api/run-archive";
 import { getRunClaimStatus } from "@/lib/api/run-attributions";
+import { trackArchiveDownload, trackFileDownload } from "@/lib/mcp/analytics";
 import { toolRegistrationConfig } from "@/lib/mcp/catalog/register";
 import {
   errorResult,
@@ -47,7 +48,7 @@ export function registerFileTools(server: McpServer) {
   server.registerTool(
     getFileDownloadUrlTool.name,
     toolRegistrationConfig(getFileDownloadUrlTool),
-    async ({ fileId }) => {
+    async ({ fileId }, ctx) => {
       const lookup = await lookupFileForDownload(fileId);
       if (!lookup.ok) {
         if (lookup.reason === "not_uploaded") {
@@ -73,6 +74,7 @@ export function registerFileTools(server: McpServer) {
         return errorResult(`File '${fileId}' not found.`);
       }
 
+      trackFileDownload(ctx, lookup.category);
       return structuredResult({
         fileId,
         filename: lookup.filename,
@@ -101,6 +103,7 @@ export function registerFileTools(server: McpServer) {
       }
 
       if (result.status === "ready") {
+        trackArchiveDownload(ctx);
         return structuredResult({
           status: "ready",
           instrumentId,

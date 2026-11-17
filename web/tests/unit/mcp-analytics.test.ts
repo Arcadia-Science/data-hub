@@ -32,8 +32,10 @@ vi.mock("@/lib/mcp/client-name", async (importOriginal) => {
 });
 
 import {
+  trackArchiveDownload,
   trackDocsRead,
   trackDocsSearch,
+  trackFileDownload,
   trackMcpConnect,
   withMcpTracking,
 } from "@/lib/mcp/analytics";
@@ -357,6 +359,45 @@ describe("docs analytics", () => {
   it("records nothing when no user is signed in", () => {
     trackDocsSearch({ http: {} }, 3);
     trackDocsRead({ http: {} }, "manage-tokens");
+    expect(trackEvent).not.toHaveBeenCalled();
+  });
+});
+
+describe("download analytics", () => {
+  beforeEach(() => {
+    trackEvent.mockReset();
+    mcpClientLabel.mockClear();
+  });
+
+  it("records an archive download on the mcp surface", async () => {
+    trackArchiveDownload(httpCtx());
+    expect(trackEvent).toHaveBeenCalledTimes(1);
+    expect(trackEvent.mock.calls[0]?.[0]).toBe("archive_downloaded");
+    // The client label is looked up when the event is sent, after the
+    // response.
+    expect(mcpClientLabel).not.toHaveBeenCalled();
+    await expect(lastProps()).resolves.toEqual({
+      surface: "mcp",
+      user_id: "user-1",
+      client: "Cursor",
+    });
+  });
+
+  it("records a file download with its category", async () => {
+    trackFileDownload(httpCtx(), "processed");
+    expect(trackEvent).toHaveBeenCalledTimes(1);
+    expect(trackEvent.mock.calls[0]?.[0]).toBe("file_downloaded");
+    await expect(lastProps()).resolves.toEqual({
+      surface: "mcp",
+      user_id: "user-1",
+      client: "Cursor",
+      category: "processed",
+    });
+  });
+
+  it("records no download when no user is signed in", () => {
+    trackArchiveDownload({ http: {} });
+    trackFileDownload({ http: {} }, "raw");
     expect(trackEvent).not.toHaveBeenCalled();
   });
 });
