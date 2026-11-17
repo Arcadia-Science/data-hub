@@ -19,7 +19,7 @@ import {
   actorColumns,
   resolveActor,
 } from "@/lib/api/actor";
-import type { AuthResult } from "@/lib/api/auth";
+import type { AuthResult, TokenAuthResult } from "@/lib/api/auth";
 import {
   apiError,
   FORBIDDEN,
@@ -32,6 +32,7 @@ import { UPLOAD_REQUEST_CANCELLED_RESET } from "@/lib/api/upload-state";
 import {
   decideWatcherBinding,
   isBoundToOtherToken,
+  tokenMayChangeInstrumentFiles,
 } from "@/lib/api/watcher-binding";
 import {
   type ConfigRevisionStatus,
@@ -203,6 +204,34 @@ export async function enforceWatcherBinding(
   }
 
   return apiError(403, FORBIDDEN, "Token is not authorized for this watcher");
+}
+
+/**
+ * Returns null when this token may change a file on `instrumentId`, or a 403
+ * the handler should return. A watcher's token is limited to its own
+ * instrument's files, and every other token, such as the Lambda's, is not
+ * limited. See `tokenMayChangeInstrumentFiles` for the rule.
+ */
+export async function enforceWatcherTokenInstrument(
+  authResult: TokenAuthResult,
+  instrumentId: string
+): Promise<Response | null> {
+  const registeredWatchers = await db
+    .select({
+      deletedAt: watchers.deletedAt,
+      instrumentId: watchers.instrumentId,
+    })
+    .from(watchers)
+    .where(eq(watchers.registeredByToken, authResult.tokenId));
+
+  if (tokenMayChangeInstrumentFiles(registeredWatchers, instrumentId)) {
+    return null;
+  }
+  return apiError(
+    403,
+    FORBIDDEN,
+    "Token is not authorized for this file's instrument"
+  );
 }
 
 /**

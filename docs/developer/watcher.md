@@ -249,7 +249,7 @@ The config file lives at `~/.data-hub/config.yaml` by default. Override with `--
 
 ### API key binding and rotation
 
-Each watcher is bound to the personal access token (PAT) that registered it. Heartbeats, config sync, events, upload-queue polls, and update-checks from a different PAT receive `403 Forbidden`. Those agent endpoints also reject browser sessions — they accept a PAT only. Prefer **one PAT per instrument PC** so a compromised key on one machine cannot control other watchers.
+Each watcher is bound to the personal access token (PAT) that registered it. Heartbeats, config sync, events, upload-queue polls, and update-checks from a different PAT receive `403 Forbidden`. Those agent endpoints also reject browser sessions — they accept a PAT only. File updates (`PATCH /api/v1/files/:id`) from a PAT that registered a watcher are limited to the files of instruments whose active watcher it registered, and any other file gets `403 Forbidden`. A PAT that registered no watcher, such as the Lambda's, isn't limited. Prefer **one PAT per instrument PC** so a compromised key on one machine cannot control other watchers.
 
 When you rotate a PC's PAT:
 
