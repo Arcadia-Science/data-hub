@@ -49,14 +49,18 @@ A run’s status tells you how far its files have got from the instrument to the
 | --- | --- |
 | Failed | At least one file failed processing. The file’s row on the run page gives the reason. |
 | Stalled | At least one file has been processing for more than 20 minutes without finishing. Reprocess it to try again. |
-| Pending upload | The watcher found the files but hasn’t sent them yet. |
+| Upload failed | The watcher gave up on at least one file, for example because its folder is no longer on the instrument PC. See [When an upload fails](/docs/browse-runs#upload-failed). |
+| Waiting to upload | Files are on their way from the instrument PC: someone requested them, or the watcher uploads them on its own. |
 | Uploaded | The files are in storage. Processing hasn’t started, or this instrument type has no processor. |
 | Queued | You chose **Reprocess**, and the files are waiting for a free processing slot. They start as other files finish. |
 | Processing | The server is reading the files, extracting metadata, and building reports. |
+| Not uploaded | Some files are only on the instrument PC, and nothing will upload them until someone requests them. Common on instruments in manual upload mode. |
 | Completed | Processing finished. |
 | Empty | The run has no files. |
 
-A run with files in several states shows the first status in this table that applies. For example, a run with one failed file and nine completed files shows **Failed**.
+A run with files in several states shows the first status in this table that applies. For example, a run with one failed file and nine completed files shows **Failed**, and a run with three processed files and 285 that nobody requested shows **Not uploaded**.
+
+**Waiting to upload** and **Not uploaded** replace the earlier **Pending upload**. A saved link or API call that filters by `pending` still works and matches both.
 
 ## Check that new files will arrive [#check-files-will-arrive]
 
@@ -208,7 +212,7 @@ Reprocessing sends only the original instrument files. Files Data Hub generated,
 
 **Delete** marks the run deleted without removing stored files. To find a deleted run again, turn on **Show deleted runs** under **Add filter**, then open it and choose **Restore**. Anyone signed in can delete or restore a run. Files that were queued for reprocessing when the run was deleted stay queued and don’t start while the run is deleted. If you restore the run, they start as processing slots free up.
 
-Deleting a run also cancels the uploads that were requested for its files, so the watcher stops trying to send them. Those files go back to **Waiting to upload**. Restoring the run doesn’t bring the requests back. Choose **Upload** again if you still want the files. See [Request an upload](/docs/browse-runs#request-upload).
+Deleting a run also cancels the uploads that were requested for its files, so the watcher stops trying to send them. Those files go back to **Not uploaded**. Restoring the run doesn’t bring the requests back. Choose **Upload** again if you still want the files. See [Request an upload](/docs/browse-runs#request-upload).
 
 While a run is deleted, Data Hub refuses a watcher’s reports of it, so the watcher’s new files aren’t added. After you restore the run, restart the watcher to send them, or choose **Upload** on a file to have the watcher send that file without a restart. Watchers before 1.4.3 also send them when another file of the run finishes. See [A run was deleted on Data Hub](/docs/troubleshoot-a-watcher#a-run-was-deleted-on-data-hub).
 
@@ -220,7 +224,7 @@ Reprocessing starts at most 10 files at a time, counted across all runs and inst
 
 - A file that can start right away shows **Processing**.
 - A file that has to wait shows **Queued**. It starts when another file finishes, and files that were queued earlier start first.
-- A run with queued files shows **Queued** in the runs list, unless a file in it failed, stalled, is waiting to upload, or is uploaded and not yet processing.
+- A run with queued files shows **Queued** in the runs list, unless a file in it failed, stalled, couldn’t upload, is waiting to upload, or is uploaded and not yet processing.
 - If Data Hub can’t send a file to the processor, or the processor ends with an error without saving a result, the file shows **Failed** with a message that says so, and the next queued file starts. Reprocess the failed file to try again.
 - To take the waiting files out of the queue, choose **Cancel queued** at the top of the run page. Each queued file shows **Failed** with a message that says the reprocess was cancelled, and you can reprocess it again. Files that have already started aren’t affected.
 
@@ -232,7 +236,9 @@ If a file that the queue started never finishes, for example because Data Hub re
 
 ### Request an upload [#request-upload]
 
-A file that the watcher found but hasn’t uploaded reads **Waiting to upload**. Choose **Upload** on that file to ask the watcher to send it, or **Upload all** at the top of the **Files** section to ask for every waiting file in the run. The watcher picks up the request within a minute. On instruments that upload automatically, this needs watcher 1.2.1 or later; see [Roll out watcher releases](/docs/watcher-releases#what-each-version-adds). The footer under the files table counts how many are waiting on the instrument PC and how many are uploaded.
+A file that the watcher found but nobody requested reads **Not uploaded**. Choose **Upload** on that file to ask the watcher to send it, or **Upload all** at the top of the **Files** section to ask for every file in the run that is **Not uploaded** or **Upload failed**. A requested file reads **Uploading** until it arrives, and the watcher picks up the request within a minute. On instruments that upload automatically, this needs watcher 1.2.1 or later; see [Roll out watcher releases](/docs/watcher-releases#what-each-version-adds). The footer under the files table counts how many files are waiting on the instrument PC, how many couldn’t upload, and how many are uploaded.
+
+On an instrument that uploads automatically, a new file reads **Waiting to upload** until the watcher sends it. This needs watcher 1.4.5 or later; with an older watcher the file reads **Not uploaded** for the minute or two before it arrives.
 
 The **Upload** and **Upload all** buttons on a run page follow the instrument’s badge. When one is turned off, the reason shows beside it:
 
@@ -249,11 +255,26 @@ If the badge reads **Offline** and the run has files that are still on the instr
 
 ![Run page for an offline instrument, with a notice that four files are still on the instrument PC and a turned-off Upload all button with the reason beside it](/images/run-offline-notice.webp)
 
-Data Hub keeps a request made while the instrument is **Restarting** and the watcher uploads the files once it’s back. If no heartbeat arrives for about 15 minutes, Data Hub cancels the request and the files read **Waiting to upload** again.
+Data Hub keeps a request made while the instrument is **Restarting** and the watcher uploads the files once it’s back. If no heartbeat arrives for about 15 minutes, Data Hub cancels the request and the files read **Not uploaded** again.
 
 The **Upload** button on a runs list doesn’t follow the badge. Select runs and choose it to ask for every waiting file in them. For an instrument that is **Offline**, **Connecting**, **Pending**, or **Retired**, Data Hub refuses that run’s request, and a message reports how many runs failed. Choose **Upload** from the run page instead to see why.
 
 For instruments in [manual upload mode](/docs/concepts#upload-mode), every file waits for this approval. **Dismiss** tells the watcher not to upload a file. See [Manage the watcher fleet](/docs/manage-watchers#approving-manual-uploads).
+
+### When an upload fails [#upload-failed]
+
+The watcher gives up on a file when it can’t send it. The file then reads **Upload failed**, and hovering over the status shows why:
+
+- **The folder is no longer on the instrument PC.** Someone renamed or moved the run’s folder after the watcher found it. The files under the new name usually arrive as a new run, so look for a run with the same start time and a similar name.
+- **The file isn’t on the instrument PC.** The folder is there but the file was moved or deleted.
+- **The upload kept failing.** The watcher tried and the upload failed each time, usually a network problem. The message shows the last error.
+- **The path is outside the watch folder.** The watcher won’t upload a file outside the folder it watches.
+
+For a requested file, the watcher checks three times, about a minute apart, before it gives up. On an instrument that uploads automatically, it gives up as soon as an upload fails, and it tries again the next time it starts.
+
+Once the cause is fixed on the PC, choose **Upload** on the file, or **Upload all**, to try again. If the file is gone for good, choose **Dismiss**. The run reads **Upload failed** until every such file is uploaded or dismissed, and the watcher’s activity shows one “Couldn’t upload” entry per run and reason.
+
+Marking files **Upload failed** needs watcher 1.4.5 or later. An older watcher puts the file back to **Not uploaded** instead, without a reason; see [Roll out watcher releases](/docs/watcher-releases#what-each-version-adds).
 
 ![Run page for a manual-upload instrument with its waiting files selected and a bar offering Upload and Dismiss](/images/manual-upload.webp)
 

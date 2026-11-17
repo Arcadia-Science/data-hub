@@ -11,6 +11,8 @@ import {
   createWatcherConfigRevisionBody,
   heartbeatBody,
   registerWatcherBody,
+  uploadFailuresBody,
+  uploadFailuresResponse,
   watcherChecksumResponse,
   watcherConfigBody,
   watcherConfigPushResponse,
@@ -199,6 +201,16 @@ operation(
   "watchers:read",
   watcherUploadQueueResponse,
   { params: watcherParams },
+  true
+);
+operation(
+  "post",
+  "/watchers/{watcherId}/upload-failures",
+  "reportWatcherUploadFailures",
+  "Report files the watcher gave up on",
+  "watchers:report",
+  uploadFailuresResponse,
+  { params: watcherParams, body: body(uploadFailuresBody) },
   true
 );
 operation(

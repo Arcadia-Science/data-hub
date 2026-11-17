@@ -6,6 +6,7 @@ import {
   isoDateTime,
   paginationSchema,
   runSourceSchema,
+  uploadFailureReasonSchema,
 } from "@/lib/api/openapi/schemas/common";
 import { mcpActorTokenSchema, mcpActorUserSchema } from "./common.output";
 import { mcpNotebookLinkSchema } from "./notebook-links.output";
@@ -22,7 +23,9 @@ export const mcpRunFileSchema = z.object({
   status: fileStatusSchema,
   sizeBytes: z.number().nullable(),
   contentType: z.string().nullable(),
+  // Why processing failed (failed) or why the watcher gave up (upload_failed).
   errorMessage: z.string().nullable(),
+  uploadFailureReason: uploadFailureReasonSchema.nullable(),
   createdAt: isoDateTime,
   uploadedAt: isoDateTime.nullable(),
   processedAt: isoDateTime.nullable(),
@@ -78,6 +81,13 @@ export const searchRunsListItemSchema = z.object({
   file_count: z.number().int(),
   files_completed: z.number().int(),
   files_failed: z.number().int(),
+  // The watcher gave up on them (`upload_failed`).
+  files_upload_failed: z.number().int(),
+  // Requested, or the watcher uploads them on its own.
+  files_waiting_upload: z.number().int(),
+  // Only on the instrument PC; nothing uploads them until someone requests them.
+  files_not_uploaded: z.number().int(),
+  // Deprecated: files_waiting_upload + files_not_uploaded.
   files_pending_upload: z.number().int(),
   files_uploaded: z.number().int(),
   files_queued: z.number().int(),

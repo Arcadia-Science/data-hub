@@ -402,6 +402,40 @@ describe("describeEvent: event types", () => {
     });
   });
 
+  describe("uploads_failed", () => {
+    it("says how many files couldn't upload, links the run and names the folder", () => {
+      const event = describe_("uploads_failed", "", {
+        kind: "uploads_failed",
+        run_id: "run-0001",
+        reason: "folder_missing",
+        folder: "projects/run-0001",
+        failed_count: 129,
+      });
+      expect(event.label).toBe("Couldn't upload");
+      expect(event.tone).toBe("error");
+      expect(event.text).toBe(
+        "Couldn't upload 129 files in run run-0001: folder no longer on the instrument PC"
+      );
+      expect(event.message).toContainEqual({ kind: "run", runId: "run-0001" });
+      expect(event.facts).toContainEqual({
+        kind: "value",
+        label: "Folder",
+        value: "projects/run-0001",
+      });
+    });
+
+    it("falls back to the stored message for a reason it doesn't know", () => {
+      const event = describe_("uploads_failed", "Couldn't upload 2 files", {
+        kind: "uploads_failed",
+        run_id: "run-0001",
+        reason: "something_new",
+        failed_count: 2,
+      });
+      expect(event.label).toBe("Couldn't upload");
+      expect(event.text).toBe("Couldn't upload 2 files");
+    });
+  });
+
   describe("upload_requests_cancelled", () => {
     it("a deleted run links the run", () => {
       const event = describe_("upload_requests_cancelled", "", {
@@ -695,6 +729,7 @@ describe("eventTypeLabel", () => {
       "update_succeeded",
       "update_failed",
       "upload_requests_cancelled",
+      "uploads_failed",
     ]);
     expect(eventTypeLabel("update_succeeded")).toBe("Update finished");
   });

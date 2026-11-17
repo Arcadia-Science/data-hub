@@ -57,6 +57,19 @@ const MACHINE_ROUTES: {
     path: `/api/v1/watchers/${WATCHER_ID}/upload-queue`,
   },
   {
+    method: "POST",
+    path: `/api/v1/watchers/${WATCHER_ID}/upload-failures`,
+    body: {
+      files: [
+        {
+          file_id: 1,
+          requested_at: new Date().toISOString(),
+          reason: "file_missing",
+        },
+      ],
+    },
+  },
+  {
     method: "GET",
     path: `/api/v1/watchers/${WATCHER_ID}/config-checksum`,
   },

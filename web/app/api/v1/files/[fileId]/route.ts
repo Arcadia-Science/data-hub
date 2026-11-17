@@ -13,6 +13,10 @@ import { dispatchQueuedFiles } from "@/lib/api/file-reprocessing";
 import { dismissFile } from "@/lib/api/files";
 import { patchFileBody, readJsonBody } from "@/lib/api/openapi";
 import { touchRuns } from "@/lib/api/touch-runs";
+import {
+  UPLOAD_ARRIVED_RESET,
+  UPLOAD_REQUEST_CANCELLED_RESET,
+} from "@/lib/api/upload-state";
 import { db } from "@/lib/db";
 import { files, instrumentRuns } from "@/lib/db/schema";
 import { getS3RawDataBucket } from "@/lib/s3";
@@ -46,6 +50,10 @@ interface RouteContext {
 const VALID_TRANSITIONS: Record<string, string[]> = {
   detected: ["uploaded"],
   upload_requested: ["uploaded", "detected"],
+  // An auto-mode watcher retries a file it gave up on at its next start, and a
+  // success still lands. The give-up itself goes through
+  // POST /watchers/:id/upload-failures, not this route.
+  upload_failed: ["uploaded"],
   uploaded: ["processing"],
   queued: ["processing"],
   processing: ["processing", "completed", "failed"],
@@ -158,11 +166,17 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
       updates.s3Bucket = bucket;
       updates.s3Key = `${parentRun.instrumentId}/${parentRun.runId}/${file.filename}`;
     }
-    // Reverting a pending request back to detected (watcher cancel): clear
-    // upload_requested_at so the row leaves the upload queue, whose filter
-    // requires upload_requested_at to be non-null.
+    // The bytes arrived: a failure reason or an auto-upload mark from before no
+    // longer applies.
+    if (body.status === "uploaded") {
+      Object.assign(updates, UPLOAD_ARRIVED_RESET);
+    }
+    // Reverting a pending request back to detected (a watcher before 1.4.5
+    // cancelling): clear upload_requested_at so the row leaves the upload
+    // queue, whose filter requires upload_requested_at to be non-null, and the
+    // requester with it.
     if (body.status === "detected") {
-      updates.uploadRequestedAt = null;
+      Object.assign(updates, UPLOAD_REQUEST_CANCELLED_RESET);
     }
     // A repeat of the same final status keeps the time of the first.
     if (

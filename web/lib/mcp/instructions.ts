@@ -27,8 +27,10 @@ Dates: dateFrom/dateTo are inclusive UTC days, matched on a run's acquired
 time, or its created time when that is missing. The dashboard uses the
 viewer's timezone, so its daily counts can differ.
 
-Stalled runs recover with reprocess_run. Pending runs need
+Stalled runs recover with reprocess_run. Not-uploaded runs need
 request_run_upload_all and a watcher that is online or restarting.
+Upload-failed files say why in errorMessage (list_run_files); fix that on
+the instrument PC (often a renamed folder) before requesting them again.
 
 Tool routing:
 - global_search for filenames, instrument names, users, comments, or a

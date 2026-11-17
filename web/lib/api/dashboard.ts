@@ -20,7 +20,7 @@ import {
   type Connection,
   toLegacyWatcherStatus,
 } from "@/lib/instruments/connection";
-import { fileInRunBucketSql } from "@/lib/runs/file-buckets.sql";
+import { filePendingUploadSql } from "@/lib/runs/file-buckets.sql";
 import { toInitials } from "@/lib/utils";
 import { getViewerTimeZone } from "@/lib/viewer-timezone";
 
@@ -52,7 +52,7 @@ export const getInstrumentSummaries = cache(
         status: instruments.status,
         runCount: sql<number>`cast(count(distinct ${instrumentRuns.id}) filter (where ${instrumentRuns.deletedAt} is null) as int)`,
         lastRunAt: sql<Date | null>`max(coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt})) filter (where ${instrumentRuns.deletedAt} is null)`,
-        filesPendingUpload: sql<number>`cast(count(distinct ${files.id}) filter (where ${fileInRunBucketSql("pending", new Date())} and ${files.deletedAt} is null and ${instrumentRuns.deletedAt} is null) as int)`,
+        filesPendingUpload: sql<number>`cast(count(distinct ${files.id}) filter (where ${filePendingUploadSql(new Date())} and ${files.deletedAt} is null and ${instrumentRuns.deletedAt} is null) as int)`,
       })
       .from(instruments)
       .leftJoin(instrumentRuns, eq(instrumentRuns.instrumentId, instruments.id))
@@ -189,7 +189,7 @@ export const getDashboardStats = cache(
             eq(instruments.status, "active"),
             isNull(files.deletedAt),
             isNull(instrumentRuns.deletedAt),
-            fileInRunBucketSql("pending", new Date())
+            filePendingUploadSql(new Date())
           )
         ),
       db
@@ -386,7 +386,7 @@ export const getMyRunsStats = cache(async function getMyRunsStats(
           and(
             isNull(files.deletedAt),
             isNull(instrumentRuns.deletedAt),
-            fileInRunBucketSql("pending", new Date()),
+            filePendingUploadSql(new Date()),
             attributed
           )
         ),

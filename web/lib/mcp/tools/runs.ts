@@ -42,6 +42,7 @@ import {
   toMcpFile,
 } from "@/lib/mcp/tools/helpers";
 import { validateSearchRunsMetadataFilters } from "@/lib/mcp/validate-run-filters";
+import { expandRunStatusFilters } from "@/lib/runs/run-status";
 import {
   addRunCommentTool,
   cancelQueuedFilesTool,
@@ -111,7 +112,7 @@ export function registerRunTools(server: McpServer) {
         ...metadataFilters,
         ranBy,
         hasNotebookLink: args.hasNotebookLink,
-        statuses: args.status,
+        statuses: args.status ? expandRunStatusFilters(args.status) : undefined,
       });
       return structuredResult(result);
     }
@@ -565,6 +566,7 @@ export function registerRunTools(server: McpServer) {
         instrumentId,
         runId,
         fileIds,
+        requestedBy: getMcpUserId(ctx.http?.authInfo) ?? null,
       });
       if (!result.ok) {
         return errorResult(result.message);
@@ -586,7 +588,11 @@ export function registerRunTools(server: McpServer) {
       if (writeError) {
         return writeError;
       }
-      const result = await requestAllRunUploads(instrumentId, runId);
+      const result = await requestAllRunUploads(
+        instrumentId,
+        runId,
+        getMcpUserId(ctx.http?.authInfo) ?? null
+      );
       if (!result.ok) {
         return errorResult(result.message);
       }

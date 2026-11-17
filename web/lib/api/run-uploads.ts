@@ -1,17 +1,57 @@
 import { and, eq, inArray, isNull } from "drizzle-orm";
+import type { AuthResult } from "@/lib/api/auth";
 import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
 import { getInstrumentConnection } from "@/lib/api/instrument-watchers";
 import { touchRuns } from "@/lib/api/touch-runs";
+import { UPLOAD_FAILURE_RESET } from "@/lib/api/upload-state";
 import { db } from "@/lib/db";
-import { files, instrumentRuns, instruments } from "@/lib/db/schema";
+import {
+  files,
+  instrumentRuns,
+  instruments,
+  personalAccessTokens,
+} from "@/lib/db/schema";
 import {
   type InstrumentBadgeState,
   instrumentBadgeState,
 } from "@/lib/instruments/connection";
-import { PRE_UPLOAD_FILE_STATUSES } from "@/lib/runs/file-buckets";
+import {
+  isRequestableFileStatus,
+  PRE_UPLOAD_FILE_STATUSES,
+  REQUESTABLE_FILE_STATUSES,
+} from "@/lib/runs/file-buckets";
 import { getRunUploadAvailability } from "@/lib/runs/upload-availability";
 
 export const MAX_UPLOAD_FILE_IDS = 100;
+
+// The person to tell if a request fails: the signed-in user, or the person who
+// created the token that made the request. Null when no one is recorded (a
+// token whose creator was deleted).
+export async function uploadRequesterId(
+  auth: AuthResult
+): Promise<string | null> {
+  if (auth.authMethod === "session") {
+    return auth.userId;
+  }
+  const [token] = await db
+    .select({ createdBy: personalAccessTokens.createdBy })
+    .from(personalAccessTokens)
+    .where(eq(personalAccessTokens.id, auth.tokenId))
+    .limit(1);
+  return token?.createdBy ?? null;
+}
+
+// What a new request writes: the file joins the upload queue, remembers who
+// asked, and drops the reason an earlier request failed. A `detected` file
+// keeps its auto-upload mark; the watcher may still upload it on its own.
+function requestedUploadColumns(now: Date, requestedBy: string | null) {
+  return {
+    ...UPLOAD_FAILURE_RESET,
+    status: "upload_requested" as const,
+    uploadRequestedAt: now,
+    uploadRequestedBy: requestedBy,
+  };
+}
 
 const DELETED_RUN_MESSAGE = "Cannot request uploads for a soft-deleted run";
 
@@ -185,11 +225,13 @@ async function prepareUploadTarget(
 
 // Shared by REST `request-upload` and MCP `request_run_upload`. `fileIds` is
 // raw caller input; this is the single validation gate and fails closed so a
-// garbled batch can't queue a partial set.
+// garbled batch can't queue a partial set. `requestedBy` is the user making
+// the request (null when no user is known); they are told if it fails.
 export async function requestRunUploads(input: {
   instrumentId: string;
   runId: string;
   fileIds: readonly unknown[];
+  requestedBy: string | null;
 }): Promise<RequestUploadResult> {
   const prepared = await prepareUploadTarget(input.instrumentId, input.runId);
   if (!prepared.ok) {
@@ -271,21 +313,24 @@ export async function requestRunUploads(input: {
   }
 
   const now = new Date();
-  const toTransition = fileIds.filter(
-    (fid) => requestedById.get(fid)?.status === "detected"
-  );
+  // `detected` and `upload_failed` files move; an `upload_requested` file is
+  // already on its way and keeps its request.
+  const toTransition = fileIds.filter((fid) => {
+    const status = requestedById.get(fid)?.status;
+    return status !== undefined && isRequestableFileStatus(status);
+  });
 
   if (toTransition.length > 0) {
     // The conditions repeat what was checked above, because the run or a file
-    // can change in between. A file that is no longer `detected` is left as it
-    // is, and a deleted run is left alone.
+    // can change in between. A file that is no longer requestable is left as
+    // it is, and a deleted run is left alone.
     const queued = await db
       .update(files)
-      .set({ status: "upload_requested", uploadRequestedAt: now })
+      .set(requestedUploadColumns(now, input.requestedBy))
       .where(
         and(
           inArray(files.id, toTransition),
-          eq(files.status, "detected"),
+          inArray(files.status, [...REQUESTABLE_FILE_STATUSES]),
           isNull(files.deletedAt),
           runIsLive(run.id)
         )
@@ -323,10 +368,13 @@ export async function requestRunUploads(input: {
   };
 }
 
-// Shared by REST `request-upload-all` and MCP `request_run_upload_all`.
+// Shared by REST `request-upload-all` and MCP `request_run_upload_all`. Queues
+// every file of the run that is still on the instrument PC and not requested
+// yet: `detected` and `upload_failed`.
 export async function requestAllRunUploads(
   instrumentId: string,
-  runId: string
+  runId: string,
+  requestedBy: string | null
 ): Promise<RequestUploadResult> {
   const prepared = await prepareUploadTarget(instrumentId, runId);
   if (!prepared.ok) {
@@ -338,11 +386,11 @@ export async function requestAllRunUploads(
 
   const updated = await db
     .update(files)
-    .set({ status: "upload_requested", uploadRequestedAt: now })
+    .set(requestedUploadColumns(now, requestedBy))
     .where(
       and(
         eq(files.instrumentRunId, run.id),
-        eq(files.status, "detected"),
+        inArray(files.status, [...REQUESTABLE_FILE_STATUSES]),
         isNull(files.deletedAt),
         runIsLive(run.id)
       )

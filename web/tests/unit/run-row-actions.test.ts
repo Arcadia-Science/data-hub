@@ -29,6 +29,9 @@ const BASE: RunRow = {
   file_count: 0,
   files_completed: 0,
   files_failed: 0,
+  files_upload_failed: 0,
+  files_waiting_upload: 0,
+  files_not_uploaded: 0,
   files_pending_upload: 0,
   files_uploaded: 0,
   files_queued: 0,
@@ -126,8 +129,11 @@ describe("reprocessableFileCount", () => {
 });
 
 describe("the other row capabilities", () => {
-  it("offers upload only while files are still on the instrument PC", () => {
-    expect(canUploadRun(row({ file_count: 1, files_pending_upload: 1 }))).toBe(
+  it("offers upload while files on the instrument PC need a request", () => {
+    expect(canUploadRun(row({ file_count: 1, files_not_uploaded: 1 }))).toBe(
+      true
+    );
+    expect(canUploadRun(row({ file_count: 1, files_upload_failed: 1 }))).toBe(
       true
     );
     expect(canUploadRun(row({ file_count: 1, files_completed: 1 }))).toBe(
@@ -135,12 +141,27 @@ describe("the other row capabilities", () => {
     );
   });
 
+  // Requested files and files the watcher uploads on its own are on their way
+  // already, so Upload has nothing to add.
+  it("doesn't offer upload for files already on their way", () => {
+    expect(canUploadRun(row({ file_count: 1, files_waiting_upload: 1 }))).toBe(
+      false
+    );
+  });
+
   it("offers download once at least one file has reached S3", () => {
+    expect(canDownloadRun(row({ file_count: 2, files_not_uploaded: 1 }))).toBe(
+      true
+    );
     expect(
-      canDownloadRun(row({ file_count: 2, files_pending_upload: 1 }))
-    ).toBe(true);
-    expect(
-      canDownloadRun(row({ file_count: 2, files_pending_upload: 2 }))
+      canDownloadRun(
+        row({
+          file_count: 3,
+          files_not_uploaded: 1,
+          files_waiting_upload: 1,
+          files_upload_failed: 1,
+        })
+      )
     ).toBe(false);
     expect(canDownloadRun(BASE)).toBe(false);
   });

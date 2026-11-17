@@ -9,6 +9,7 @@ import { stampStopReasonOnRecentStop } from "@/lib/api/watcher-stop-reasons";
 import { isBelowFloor } from "@/lib/api/watcher-versions";
 import {
   callerMayActForWatcher,
+  clearAutoUploadMarks,
   enforceWatcherBinding,
   findWatcherIncludingDeleted,
   revertUploadQueueIfWatcherOffline,
@@ -191,6 +192,19 @@ export async function POST(
     } catch (err) {
       console.error(
         `[watcher-heartbeat] upload-queue revert failed for watcher ${watcherId}: ${err}`
+      );
+    }
+  }
+
+  // A watcher in manual mode uploads only what someone requests, so files it
+  // said it would upload (while in auto mode) read "Not uploaded" again.
+  // Best-effort, like the revert above.
+  if (body.upload_mode === "manual") {
+    try {
+      await clearAutoUploadMarks(watcher.instrumentId);
+    } catch (err) {
+      console.error(
+        `[watcher-heartbeat] auto-upload marks not cleared for watcher ${watcherId}: ${err}`
       );
     }
   }

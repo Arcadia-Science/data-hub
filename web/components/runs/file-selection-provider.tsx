@@ -5,6 +5,10 @@ import { createContext, use, useCallback, useMemo, useState } from "react";
 import { SelectionNotice } from "@/components/selection-notice";
 import type { RunFileRow } from "@/lib/api/instrument-runs";
 import type { InstrumentType } from "@/lib/db/schema";
+import {
+  IN_S3_FILE_STATUSES,
+  isRequestableFileStatus,
+} from "@/lib/runs/file-buckets";
 import { canReprocessFile } from "@/lib/runs/reprocessable-statuses";
 import { isFilesScopeParam, selectionScopeKey } from "@/lib/selection-scope";
 
@@ -16,13 +20,7 @@ import { isFilesScopeParam, selectionScopeKey } from "@/lib/selection-scope";
 // action sets are disjoint, so a mixed selection collapses to "Clear" only.
 // ---------------------------------------------------------------------------
 
-const DOWNLOADABLE_STATUSES = new Set([
-  "uploaded",
-  "queued",
-  "processing",
-  "completed",
-  "failed",
-]);
+const DOWNLOADABLE_STATUSES = new Set<string>(IN_S3_FILE_STATUSES);
 
 export interface FileCaps {
   dismiss: boolean;
@@ -47,18 +45,19 @@ export function buildFileRef(
   if (file.deletedAt !== null) {
     return null;
   }
-  const isDetected = file.status === "detected";
+  // `detected` and `upload_failed` files are on the PC and can be requested.
+  const isRequestable = isRequestableFileStatus(file.status);
   const canDownload = DOWNLOADABLE_STATUSES.has(file.status);
   const canReprocess = canReprocessFile(file, instrumentType);
-  if (!(isDetected || canDownload)) {
+  if (!(isRequestable || canDownload)) {
     return null;
   }
   return {
     id: file.id,
     filename: file.filename,
     caps: {
-      upload: isDetected,
-      dismiss: isDetected,
+      upload: isRequestable,
+      dismiss: isRequestable,
       reprocess: canReprocess,
       download: canDownload,
     },

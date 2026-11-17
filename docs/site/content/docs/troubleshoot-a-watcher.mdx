@@ -144,10 +144,22 @@ To stop the errors without restoring the run, move the run’s files out of the 
 
 - In **manual** mode, files wait for approval in the upload queue; see [Manage the watcher fleet](/docs/manage-watchers#approving-manual-uploads)
 - On the run page, the **Upload** buttons are turned off while the instrument is **Connecting**, **Offline**, **Pending**, or **Retired**, with the reason beside them. Fix the watcher first; see [An instrument shows Offline](#instrument-shows-offline). While the instrument is **Restarting** they stay on, and the request waits for the watcher
-- Files read **Waiting to upload** until they reach storage
+- Files read **Not uploaded** until someone requests them, or **Waiting to upload** while an auto-mode watcher (1.4.5 and later) is about to send them
+- A file that reads **Upload failed** is one the watcher gave up on. Hover over its status for the reason; see [A file reads Upload failed](#a-file-reads-upload-failed)
 - Check the log for `upload_failed`
 - A `state_write_failed` event in the watcher’s event log means the PC’s disk is full or the watcher’s state file can’t be written. Free up space; the watcher retries on its own and uploads the files once it can write again
 - A revoked or expired token surfaces as `401 Unauthorized`. Create a new token and re-run `init`; see [Issue and revoke tokens](/docs/manage-tokens#after-revoking-a-token)
+
+### A file reads Upload failed [#a-file-reads-upload-failed]
+
+Watcher 1.4.5 and later mark a file **Upload failed** when they give up on it, and the watcher’s activity shows one **Couldn’t upload** entry per run and reason. Hover over the file’s status for the reason:
+
+- **The folder is no longer on the instrument PC.** The run folder was renamed or moved after the watcher found it. The watcher reports the folder under its new name as a new run, so check for a run with the same start time and a similar name: its files are usually already uploaded, and you can dismiss the old ones.
+- **The file isn’t on the instrument PC.** The file was moved or deleted. Put it back and choose **Upload**, or choose **Dismiss**.
+- **The upload kept failing.** Usually a network or storage problem. The message shows the last error. Choose **Upload** to try again once it’s fixed.
+- **The path is outside the watch folder.** Check the watcher’s **Watch folder** setting.
+
+Older watchers put the file back to **Not uploaded** without a reason, and log a “Queued file missing” and a “Gave up uploading” error for each file instead. See [When an upload fails](/docs/browse-runs#upload-failed).
 
 ### A requested upload stays on Uploading
 
@@ -164,11 +176,11 @@ Watcher 1.2.1 and later retry an automatic upload that didn’t finish the next 
 - `upload_retries_exhausted`: the upload still failed after three starts. Choose **Upload** on the file’s run page to try again.
 - `pending_upload_missing`: the file was no longer on disk when the watcher started, so there was nothing to retry.
 
-Older watchers don’t retry; use **Upload** on the run page instead.
+From watcher 1.4.5, the file reads **Upload failed** as soon as an automatic upload fails, with the reason on the file instead of these events, and the watcher still retries it on its next starts. Older watchers don’t retry; use **Upload** on the run page instead.
 
 ### A file stays on Waiting to upload after the watcher restarted [#a-file-stays-pending-after-the-watcher-restarted]
 
-Watchers before 1.4.1 could lose track of a file in an automatic upload when the watcher stopped without shutting down cleanly, such as after a reboot, a power cut, or a crash, just after it reported the run. The run is in Data Hub, but the file reads **Waiting to upload** and nothing uploads it, because after the restart the watcher treats the file as already handled. Watcher 1.4.1 and later record a run and its files on the PC together, so a restart like that doesn’t leave a file behind.
+Watchers before 1.4.1 could lose track of a file in an automatic upload when the watcher stopped without shutting down cleanly, such as after a reboot, a power cut, or a crash, just after it reported the run. The run is in Data Hub, but the file reads **Not uploaded** and nothing uploads it, because after the restart the watcher treats the file as already handled. Watcher 1.4.1 and later record a run and its files on the PC together, so a restart like that doesn’t leave a file behind.
 
 Updating doesn’t pick up files that an older watcher already lost this way. Ask for them from the run page:
 
@@ -179,7 +191,7 @@ If the watcher is older than 1.2.1, update it first. Older watchers in auto mode
 </Step>
 
 <Step>
-Open the run, select the files that read **Waiting to upload**, and choose **Upload**. To ask for the files of several runs at once, select the runs in the run list and choose **Upload**. See [Request an upload](/docs/browse-runs#request-upload).
+Open the run, select the files that read **Not uploaded**, and choose **Upload**. To ask for the files of several runs at once, select the runs in the run list and choose **Upload**. See [Request an upload](/docs/browse-runs#request-upload).
 </Step>
 
 <Step>

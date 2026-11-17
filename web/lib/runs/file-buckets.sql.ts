@@ -1,4 +1,12 @@
-import { inArray, type SQL, sql } from "drizzle-orm";
+import {
+  and,
+  eq,
+  inArray,
+  isNotNull,
+  isNull,
+  type SQL,
+  sql,
+} from "drizzle-orm";
 import { files } from "@/lib/db/schema";
 import { runBucketSources } from "@/lib/runs/file-buckets";
 import type { RunFileBucket } from "@/lib/runs/run-status";
@@ -19,6 +27,22 @@ export function fileInRunBucketSql(bucket: RunFileBucket, now: Date): SQL {
   if (sources.statuses.length > 0) {
     conditions.push(inArray(files.status, sources.statuses));
   }
+  if (sources.detected.includes("autoUploadExpected")) {
+    conditions.push(
+      and(
+        eq(files.status, "detected"),
+        isNotNull(files.autoUploadExpectedAt)
+      ) as SQL
+    );
+  }
+  if (sources.detected.includes("otherwise")) {
+    conditions.push(
+      and(
+        eq(files.status, "detected"),
+        isNull(files.autoUploadExpectedAt)
+      ) as SQL
+    );
+  }
   if (sources.processing.includes("inFlight")) {
     conditions.push(inFlightProcessingSql(now));
   }
@@ -33,4 +57,11 @@ export function fileInRunBucketSql(bucket: RunFileBucket, now: Date): SQL {
     return conditions[0];
   }
   return sql`(${sql.join(conditions, sql` or `)})`;
+}
+
+// What the deprecated "pending" run status counted: files still on the
+// instrument PC that are waiting for an upload or a request. Leaves out
+// `upload_failed` files.
+export function filePendingUploadSql(now: Date): SQL {
+  return sql`(${fileInRunBucketSql("waiting_upload", now)} or ${fileInRunBucketSql("not_uploaded", now)})`;
 }

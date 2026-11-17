@@ -1,4 +1,5 @@
 import {
+  createParser,
   createSearchParamsCache,
   parseAsArrayOf,
   parseAsBoolean,
@@ -7,7 +8,34 @@ import {
   parseAsStringLiteral,
 } from "nuqs/server";
 import { FILES_LIFECYCLE_FILTER_VALUES } from "@/lib/runs/file-lifecycle-filter";
-import { RUN_STATUS_VALUES, type RunStatus } from "@/lib/runs/run-status";
+import {
+  expandRunStatusAlias,
+  RUN_STATUS_VALUES,
+  type RunStatus,
+} from "@/lib/runs/run-status";
+
+function isRunStatus(value: string): value is RunStatus {
+  return (RUN_STATUS_VALUES as readonly string[]).includes(value);
+}
+
+// The run-status multi-select, comma-separated like `parseAsArrayOf`. Old links
+// may say `pending`, which is read as both statuses that replaced it.
+export const parseAsRunStatuses = createParser<RunStatus[]>({
+  parse(value) {
+    const statuses = new Set<RunStatus>();
+    for (const part of value.split(",")) {
+      for (const status of expandRunStatusAlias(part.trim())) {
+        if (isRunStatus(status)) {
+          statuses.add(status);
+        }
+      }
+    }
+    return statuses.size > 0 ? [...statuses] : null;
+  },
+  serialize: (statuses) => statuses.join(","),
+  eq: (a, b) =>
+    a.length === b.length && a.every((status, i) => status === b[i]),
+});
 
 // "Lab Notebook" column filter: runs with at least one notebook link, or none.
 export const HAS_NOTEBOOK_LINK_VALUES = ["true", "false"] as const;
@@ -41,7 +69,7 @@ export const dashboardSearchParams = {
   comments_to: parseAsString.withOptions({ clearOnDefault: true }),
   include_deleted: parseAsBoolean.withDefault(false),
   // Derived run status, multi-select. Empty array = no filter (show all).
-  status: parseAsArrayOf(parseAsStringLiteral(RUN_STATUS_VALUES))
+  status: parseAsRunStatuses
     .withDefault([])
     .withOptions({ clearOnDefault: true }),
   // Attribution filter: either a userId or the reserved sentinel
@@ -97,7 +125,7 @@ export const instrumentDetailSearchParams = {
   ran_by: parseAsString,
   has_notebook_link: parseAsStringLiteral(HAS_NOTEBOOK_LINK_VALUES),
   // Derived run status, multi-select. Empty array = no filter (show all).
-  status: parseAsArrayOf(parseAsStringLiteral(RUN_STATUS_VALUES))
+  status: parseAsRunStatuses
     .withDefault([])
     .withOptions({ clearOnDefault: true }),
   ...runSortSearchParams,

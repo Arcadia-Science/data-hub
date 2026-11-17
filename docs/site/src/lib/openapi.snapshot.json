@@ -454,8 +454,22 @@
           "files_failed": {
             "type": "integer"
           },
+          "files_upload_failed": {
+            "type": "integer",
+            "description": "Files the watcher gave up on (`upload_failed`)."
+          },
+          "files_waiting_upload": {
+            "type": "integer",
+            "description": "Files on their way from the instrument PC: requested, or ones the watcher uploads on its own."
+          },
+          "files_not_uploaded": {
+            "type": "integer",
+            "description": "Files only on the instrument PC that nothing will upload until someone requests them."
+          },
           "files_pending_upload": {
-            "type": "integer"
+            "type": "integer",
+            "description": "Deprecated: `files_waiting_upload` plus `files_not_uploaded`.",
+            "deprecated": true
           },
           "files_uploaded": {
             "type": "integer"
@@ -516,6 +530,9 @@
           "file_count",
           "files_completed",
           "files_failed",
+          "files_upload_failed",
+          "files_waiting_upload",
+          "files_not_uploaded",
           "files_pending_upload",
           "files_uploaded",
           "files_queued",
@@ -870,6 +887,7 @@
             "enum": [
               "detected",
               "upload_requested",
+              "upload_failed",
               "uploaded",
               "queued",
               "processing",
@@ -888,7 +906,29 @@
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "Why processing failed (`failed`) or why the watcher couldn't upload the file (`upload_failed`)."
+          },
+          "upload_failure_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "folder_missing",
+              "file_missing",
+              "upload_error",
+              "unsafe_path",
+              null
+            ],
+            "description": "Set when the status is `upload_failed`: `folder_missing`, `file_missing`, `upload_error` or `unsafe_path`."
+          },
+          "upload_failed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
           },
           "detected_at": {
             "type": [
@@ -962,6 +1002,8 @@
           "status",
           "metadata",
           "error_message",
+          "upload_failure_reason",
+          "upload_failed_at",
           "detected_at",
           "upload_requested_at",
           "uploaded_at",
@@ -1307,6 +1349,7 @@
             "enum": [
               "detected",
               "upload_requested",
+              "upload_failed",
               "uploaded",
               "queued",
               "processing",
@@ -2292,12 +2335,15 @@
                   "enum": [
                     "failed",
                     "stalled",
-                    "pending",
+                    "upload_failed",
+                    "waiting_upload",
                     "uploaded",
                     "queued",
                     "processing",
+                    "not_uploaded",
                     "completed",
-                    "empty"
+                    "empty",
+                    "pending"
                   ]
                 },
                 {
@@ -2307,18 +2353,23 @@
                     "enum": [
                       "failed",
                       "stalled",
-                      "pending",
+                      "upload_failed",
+                      "waiting_upload",
                       "uploaded",
                       "queued",
                       "processing",
+                      "not_uploaded",
                       "completed",
-                      "empty"
+                      "empty",
+                      "pending"
                     ]
                   }
                 }
-              ]
+              ],
+              "description": "Derived run status. Several values (repeated, or comma-separated) match any of them. `pending` is deprecated: it matches `waiting_upload` and `not_uploaded`, and no run reports it."
             },
             "required": false,
+            "description": "Derived run status. Several values (repeated, or comma-separated) match any of them. `pending` is deprecated: it matches `waiting_upload` and `not_uploaded`, and no run reports it.",
             "name": "status",
             "in": "query"
           },
@@ -2593,12 +2644,15 @@
                   "enum": [
                     "failed",
                     "stalled",
-                    "pending",
+                    "upload_failed",
+                    "waiting_upload",
                     "uploaded",
                     "queued",
                     "processing",
+                    "not_uploaded",
                     "completed",
-                    "empty"
+                    "empty",
+                    "pending"
                   ]
                 },
                 {
@@ -2608,18 +2662,23 @@
                     "enum": [
                       "failed",
                       "stalled",
-                      "pending",
+                      "upload_failed",
+                      "waiting_upload",
                       "uploaded",
                       "queued",
                       "processing",
+                      "not_uploaded",
                       "completed",
-                      "empty"
+                      "empty",
+                      "pending"
                     ]
                   }
                 }
-              ]
+              ],
+              "description": "Derived run status. Several values (repeated, or comma-separated) match any of them. `pending` is deprecated: it matches `waiting_upload` and `not_uploaded`, and no run reports it."
             },
             "required": false,
+            "description": "Derived run status. Several values (repeated, or comma-separated) match any of them. `pending` is deprecated: it matches `waiting_upload` and `not_uploaded`, and no run reports it.",
             "name": "status",
             "in": "query"
           },
@@ -2824,6 +2883,10 @@
                         "file_created_at": {
                           "type": "string",
                           "format": "date-time"
+                        },
+                        "will_upload": {
+                          "type": "boolean",
+                          "description": "True when the watcher will upload this file on its own (auto mode). The file then reads as waiting to upload rather than not uploaded. Leave it out, or send false, when someone has to request the upload."
                         }
                       },
                       "required": [
@@ -3081,6 +3144,10 @@
                         "file_created_at": {
                           "type": "string",
                           "format": "date-time"
+                        },
+                        "will_upload": {
+                          "type": "boolean",
+                          "description": "True when the watcher will upload this file on its own (auto mode). The file then reads as waiting to upload rather than not uploaded. Leave it out, or send false, when someone has to request the upload."
                         }
                       },
                       "required": [
@@ -5969,6 +6036,7 @@
                     "enum": [
                       "detected",
                       "upload_requested",
+                      "upload_failed",
                       "uploaded",
                       "queued",
                       "processing",
@@ -7730,7 +7798,8 @@
                               "update_started",
                               "update_succeeded",
                               "update_failed",
-                              "upload_requests_cancelled"
+                              "upload_requests_cancelled",
+                              "uploads_failed"
                             ]
                           },
                           "message": {
@@ -8211,6 +8280,11 @@
                               "number",
                               "null"
                             ]
+                          },
+                          "upload_requested_at": {
+                            "type": "string",
+                            "format": "date-time",
+                            "description": "When the current request was made. Send it back as `requested_at` when reporting a failure to POST /watchers/{watcherId}/upload-failures, so a failure from an earlier request doesn't fail a newer one."
                           }
                         },
                         "required": [
@@ -8219,13 +8293,177 @@
                           "run_id",
                           "relative_path",
                           "filename",
-                          "size_bytes"
+                          "size_bytes",
+                          "upload_requested_at"
                         ]
                       }
                     }
                   },
                   "required": [
                     "files"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token does not have the required scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested resource was not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with resource state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/watchers/{watcherId}/upload-failures": {
+      "post": {
+        "operationId": "reportWatcherUploadFailures",
+        "summary": "Report files the watcher gave up on",
+        "description": "Requires scope `watchers:report`. PAT only; browser sessions are rejected.",
+        "tags": [
+          "Watchers"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "watcherId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "files": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "file_id": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "description": "A requested file's ID, from the upload queue. Send it with `requested_at`."
+                        },
+                        "requested_at": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "The `upload_requested_at` the upload queue gave for the file. A file requested again since then is skipped."
+                        },
+                        "run_id": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "With `relative_path`: names a file the watcher was uploading on its own (auto mode), whose ID it doesn't know."
+                        },
+                        "relative_path": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "reason": {
+                          "type": "string",
+                          "enum": [
+                            "folder_missing",
+                            "file_missing",
+                            "upload_error",
+                            "unsafe_path"
+                          ],
+                          "description": "`folder_missing`: the file's folder is gone from the instrument PC. `file_missing`: the folder is there but the file isn't. `upload_error`: the upload kept failing. `unsafe_path`: the path points outside the watch folder."
+                        },
+                        "detail": {
+                          "type": "string",
+                          "maxLength": 1000,
+                          "description": "The last error, for `upload_error`."
+                        }
+                      },
+                      "required": [
+                        "reason"
+                      ]
+                    },
+                    "minItems": 1,
+                    "maxItems": 1000
+                  }
+                },
+                "required": [
+                  "files"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Report files the watcher gave up on.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "failed": {
+                      "type": "integer",
+                      "description": "Files moved to `upload_failed`."
+                    },
+                    "skipped": {
+                      "type": "integer",
+                      "description": "Files left as they were: not this watcher's, no longer waiting (already failed, uploaded, dismissed or requested again), or in a deleted run. Reporting the same files twice is safe."
+                    }
+                  },
+                  "required": [
+                    "failed",
+                    "skipped"
                   ]
                 }
               }
