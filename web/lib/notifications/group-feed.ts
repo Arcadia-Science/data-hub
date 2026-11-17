@@ -45,6 +45,14 @@ export interface FeedbackEntry {
   notification: NotificationItem;
 }
 
+// Files the viewer requested from one run couldn't upload. Kept apart from
+// comments: it has no actor and links to the run, not a comment.
+export interface UploadFailedEntry {
+  id: string;
+  kind: "upload_failed";
+  notification: AnchoredNotificationItem;
+}
+
 export interface RunGroupEntry {
   id: string;
   instrumentDisplayName: string;
@@ -59,7 +67,8 @@ export type FeedEntry =
   | CommentEntry
   | FeedbackEntry
   | GenericEntry
-  | RunGroupEntry;
+  | RunGroupEntry
+  | UploadFailedEntry;
 
 export interface DaySection {
   dayKey: string;
@@ -98,6 +107,14 @@ export function buildNotificationFeed(
       continue;
     }
     if (!isAnchored(n)) {
+      continue;
+    }
+    if (n.type === "upload_failed") {
+      section.entries.push({
+        kind: "upload_failed",
+        id: n.id,
+        notification: n,
+      });
       continue;
     }
     if (n.type === "run_created") {

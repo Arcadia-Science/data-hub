@@ -3,18 +3,31 @@ import {
   archiveJobStatusEnum,
   fileCategoryEnum,
   fileStatusEnum,
+  uploadFailureReasonEnum,
   VALID_INSTRUMENT_TYPES,
   watcherEventTypeEnum,
 } from "@/lib/db/schema";
-import { RUN_STATUS_VALUES } from "@/lib/runs/run-status";
+import {
+  DEPRECATED_PENDING_RUN_STATUS,
+  RUN_STATUS_VALUES,
+} from "@/lib/runs/run-status";
 
 export const isoDateTime = z.string().datetime({ offset: true });
 export const instrumentTypeSchema = z.enum(VALID_INSTRUMENT_TYPES);
 export const instrumentStatusSchema = z.enum(["pending", "active", "inactive"]);
 export const runStatusSchema = z.enum(RUN_STATUS_VALUES);
+// A run-status filter value: any run status, or the deprecated `pending`,
+// which matches `waiting_upload` and `not_uploaded`.
+export const runStatusFilterSchema = z.enum([
+  ...RUN_STATUS_VALUES,
+  DEPRECATED_PENDING_RUN_STATUS,
+]);
 export const runSourceSchema = z.enum(["lambda", "watcher"]);
 export const fileCategorySchema = z.enum(fileCategoryEnum.enumValues);
 export const fileStatusSchema = z.enum(fileStatusEnum.enumValues);
+export const uploadFailureReasonSchema = z.enum(
+  uploadFailureReasonEnum.enumValues
+);
 export const watcherStatusSchema = z.enum([
   "registered",
   "watching",
@@ -28,6 +41,7 @@ export const watcherEventTypeSchema = z.enum(watcherEventTypeEnum.enumValues);
 // still use the full `watcherEventTypeSchema`.
 export const SERVER_ONLY_WATCHER_EVENT_TYPES = [
   "upload_requests_cancelled",
+  "uploads_failed",
 ] as const;
 export const watcherEventInputTypeSchema = watcherEventTypeSchema.exclude(
   SERVER_ONLY_WATCHER_EVENT_TYPES

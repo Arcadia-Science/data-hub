@@ -1,6 +1,7 @@
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { cache } from "react";
 import { attributedToUser } from "@/lib/api/attributions";
+import { runsNeedingAttentionColumns } from "@/lib/api/instrument-runs";
 import {
   getInstrumentWatcherInfo,
   NO_WATCHER_INFO,
@@ -20,6 +21,8 @@ import {
   type Connection,
   toLegacyWatcherStatus,
 } from "@/lib/instruments/connection";
+import { filePendingUploadSql } from "@/lib/runs/file-buckets.sql";
+import type { RunsNeedingAttention } from "@/lib/runs/run-status";
 import { toInitials } from "@/lib/utils";
 import { getViewerTimeZone } from "@/lib/viewer-timezone";
 
@@ -32,6 +35,7 @@ export interface InstrumentSummary {
   id: string;
   lastRunAt: Date | null;
   runCount: number;
+  runsNeedingAttention: RunsNeedingAttention;
   status: "pending" | "active" | "inactive";
   /**
    * @deprecated Use `connection.state`, or `connection.reason`.
@@ -51,7 +55,7 @@ export const getInstrumentSummaries = cache(
         status: instruments.status,
         runCount: sql<number>`cast(count(distinct ${instrumentRuns.id}) filter (where ${instrumentRuns.deletedAt} is null) as int)`,
         lastRunAt: sql<Date | null>`max(coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt})) filter (where ${instrumentRuns.deletedAt} is null)`,
-        filesPendingUpload: sql<number>`cast(count(distinct ${files.id}) filter (where ${files.status} in ('detected', 'upload_requested') and ${files.deletedAt} is null and ${instrumentRuns.deletedAt} is null) as int)`,
+        filesPendingUpload: sql<number>`cast(count(distinct ${files.id}) filter (where ${filePendingUploadSql(new Date())} and ${files.deletedAt} is null and ${instrumentRuns.deletedAt} is null) as int)`,
       })
       .from(instruments)
       .leftJoin(instrumentRuns, eq(instrumentRuns.instrumentId, instruments.id))
@@ -59,7 +63,23 @@ export const getInstrumentSummaries = cache(
       .groupBy(instruments.id, instruments.displayName, instruments.status)
       .orderBy(instruments.displayName);
 
-    const infoById = await getInstrumentWatcherInfo(rows.map((r) => r.id));
+    // Counted per run in its own query: the status predicates look at each
+    // run's files, so running them on the runs × files join above would
+    // repeat them for every file.
+    const [infoById, attentionRows] = await Promise.all([
+      getInstrumentWatcherInfo(rows.map((r) => r.id)),
+      db
+        .select({
+          instrumentId: instrumentRuns.instrumentId,
+          ...runsNeedingAttentionColumns(new Date()),
+        })
+        .from(instrumentRuns)
+        .where(isNull(instrumentRuns.deletedAt))
+        .groupBy(instrumentRuns.instrumentId),
+    ]);
+    const attentionById = new Map(
+      attentionRows.map((row) => [row.instrumentId, row])
+    );
 
     return rows.map((row) => {
       const { connection } = infoById.get(row.id) ?? NO_WATCHER_INFO;
@@ -78,6 +98,7 @@ export const getInstrumentSummaries = cache(
         // like `hydrateInstrumentRow` so callers get a real Date.
         lastRunAt: row.lastRunAt ? new Date(row.lastRunAt) : null,
         filesPendingUpload: row.filesPendingUpload,
+        runsNeedingAttention: toRunsNeedingAttention(attentionById.get(row.id)),
         watcherStatus: legacy === "deregistered" ? "no_watcher" : legacy,
       };
     });
@@ -101,10 +122,7 @@ export const getInstruments = cache(async function getInstruments(
 });
 
 export interface DashboardStats {
-  pendingUploads: {
-    count: number;
-    totalBytes: number;
-  };
+  runsNeedingAttention: RunsNeedingAttention;
   runsThisWeek: {
     total: number;
     bytesGenerated: number;
@@ -135,7 +153,7 @@ export const getDashboardStats = cache(
     const [
       [runsTodayRow],
       [bytesGeneratedRow],
-      [pendingRow],
+      [attentionRow],
       [runsThisWeekRow],
     ] = await Promise.all([
       db
@@ -175,20 +193,16 @@ export const getDashboardStats = cache(
             sql`coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) >= ${weekStart}::timestamptz`
           )
         ),
+      // Runs on active instruments whose status needs someone to act, of any
+      // age: a run that couldn't upload a year ago still does.
       db
-        .select({
-          count: sql<number>`cast(count(*) as int)`,
-          totalBytes: sql<number>`cast(coalesce(sum(${files.sizeBytes}), 0) as bigint)`,
-        })
-        .from(files)
-        .innerJoin(instrumentRuns, eq(files.instrumentRunId, instrumentRuns.id))
+        .select(runsNeedingAttentionColumns(new Date()))
+        .from(instrumentRuns)
         .innerJoin(instruments, eq(instruments.id, instrumentRuns.instrumentId))
         .where(
           and(
             eq(instruments.status, "active"),
-            isNull(files.deletedAt),
-            isNull(instrumentRuns.deletedAt),
-            sql`${files.status} in ('detected', 'upload_requested')`
+            isNull(instrumentRuns.deletedAt)
           )
         ),
       db
@@ -212,10 +226,7 @@ export const getDashboardStats = cache(
         // bigint sums come back as strings from pg; coerce explicitly.
         bytesGenerated: Number(bytesGeneratedRow?.bytesToday ?? 0),
       },
-      pendingUploads: {
-        count: pendingRow?.count ?? 0,
-        totalBytes: Number(pendingRow?.totalBytes ?? 0),
-      },
+      runsNeedingAttention: toRunsNeedingAttention(attentionRow),
       runsThisWeek: {
         total: runsThisWeekRow?.total ?? 0,
         bytesGenerated: Number(bytesGeneratedRow?.bytesWeek ?? 0),
@@ -223,6 +234,20 @@ export const getDashboardStats = cache(
     };
   }
 );
+
+function toRunsNeedingAttention(
+  row: { failed: number; stalled: number; uploadFailed: number } | undefined
+): RunsNeedingAttention {
+  const failed = row?.failed ?? 0;
+  const stalled = row?.stalled ?? 0;
+  const uploadFailed = row?.uploadFailed ?? 0;
+  return {
+    failed,
+    stalled,
+    uploadFailed,
+    total: failed + stalled + uploadFailed,
+  };
+}
 
 export interface UserProfile extends UserAvatarUser {
   email: string | null;
@@ -289,10 +314,7 @@ export interface MyRunsStats {
   commentsThisWeek: {
     count: number;
   };
-  pendingUploads: {
-    count: number;
-    totalBytes: number;
-  };
+  runsNeedingAttention: RunsNeedingAttention;
   runsThisWeek: {
     total: number;
     bytesGenerated: number;
@@ -322,7 +344,7 @@ export const getMyRunsStats = cache(async function getMyRunsStats(
   const todayStart = startOfTodayISO(timeZone);
   const weekStart = startOfWeekISO(timeZone);
 
-  const [[runsRow], [bytesRow], [commentsRow], [pendingRow]] =
+  const [[runsRow], [bytesRow], [commentsRow], [attentionRow]] =
     await Promise.all([
       // Both run-count windows in one pass — today is a subset of this week,
       // so a FILTER clause gives us both from one scan.
@@ -372,23 +394,12 @@ export const getMyRunsStats = cache(async function getMyRunsStats(
             attributed
           )
         ),
-      // Pending uploads across all of the viewer's attributed runs (no time
-      // window — a stuck upload from last month still needs attention).
+      // The viewer's attributed runs that need someone to act, of any age: a
+      // run that couldn't upload last month still does.
       db
-        .select({
-          count: sql<number>`cast(count(*) as int)`,
-          totalBytes: sql<number>`cast(coalesce(sum(${files.sizeBytes}), 0) as bigint)`,
-        })
-        .from(files)
-        .innerJoin(instrumentRuns, eq(files.instrumentRunId, instrumentRuns.id))
-        .where(
-          and(
-            isNull(files.deletedAt),
-            isNull(instrumentRuns.deletedAt),
-            sql`${files.status} in ('detected', 'upload_requested')`,
-            attributed
-          )
-        ),
+        .select(runsNeedingAttentionColumns(new Date()))
+        .from(instrumentRuns)
+        .where(and(isNull(instrumentRuns.deletedAt), attributed)),
     ]);
 
   return {
@@ -403,10 +414,7 @@ export const getMyRunsStats = cache(async function getMyRunsStats(
     commentsThisWeek: {
       count: commentsRow?.count ?? 0,
     },
-    pendingUploads: {
-      count: pendingRow?.count ?? 0,
-      totalBytes: Number(pendingRow?.totalBytes ?? 0),
-    },
+    runsNeedingAttention: toRunsNeedingAttention(attentionRow),
   };
 });
 

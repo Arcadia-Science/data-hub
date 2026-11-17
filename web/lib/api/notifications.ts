@@ -16,6 +16,7 @@ import {
   sql,
 } from "drizzle-orm";
 import { type ActorRef, type ActorToken, actorColumns } from "@/lib/api/actor";
+import type { FailedUploadsByRun } from "@/lib/api/upload-failures";
 import { runCommentHref } from "@/lib/comment-hash";
 import { db } from "@/lib/db";
 import {
@@ -32,12 +33,14 @@ import {
   slackConnections,
   users,
 } from "@/lib/db/schema";
+import { uploadFailedNotificationText } from "@/lib/runs/upload-failure";
 import {
   buildCommentBlocks,
   buildFeedbackSubmittedBlocks,
   buildFeedbackUpdatedBlocks,
   buildGenericBlocks,
   buildRunCreatedBlocks,
+  buildUploadFailedBlocks,
   deliverSlackDms,
   type SlackDmJob,
 } from "@/lib/slack/dm";
@@ -63,6 +66,9 @@ import { toInitials } from "@/lib/utils";
 //   - `feedback_updated`      : Linear moved a report's issue to a completed,
 //                                canceled, or duplicate state; the reporter
 //                                only.
+//   - `upload_failed`         : the watcher gave up on files someone
+//                                requested; that requester only, one row per
+//                                run and reason.
 //
 // Preference-mutating routes remain session-only — they're personal-UX
 // surfaces, never invoked by PATs.
@@ -86,6 +92,9 @@ export interface NotificationPreferencesDto {
   // Slack delivery — independent of in-app; all default false until the user
   // connects Slack (at which point the OAuth callback flips these to true).
   slackRunsEnabled: boolean;
+  slackUploadFailedEnabled: boolean;
+  // Files the user requested couldn't upload.
+  uploadFailedEnabled: boolean;
 }
 
 const DEFAULT_PREFERENCES: NotificationPreferencesDto = {
@@ -101,6 +110,8 @@ const DEFAULT_PREFERENCES: NotificationPreferencesDto = {
   feedbackUpdatedEnabled: true,
   slackFeedbackSubmittedEnabled: false,
   slackFeedbackUpdatedEnabled: false,
+  uploadFailedEnabled: true,
+  slackUploadFailedEnabled: false,
 };
 
 // ---------------------------------------------------------------------------
@@ -134,6 +145,9 @@ export async function getPreferences(
         notificationPreferences.slackFeedbackSubmittedEnabled,
       slackFeedbackUpdatedEnabled:
         notificationPreferences.slackFeedbackUpdatedEnabled,
+      uploadFailedEnabled: notificationPreferences.uploadFailedEnabled,
+      slackUploadFailedEnabled:
+        notificationPreferences.slackUploadFailedEnabled,
     })
     .from(notificationPreferences)
     .where(eq(notificationPreferences.userId, userId))
@@ -289,7 +303,8 @@ export interface NotificationDto {
     | "comment_participated"
     | "generic"
     | "feedback_submitted"
-    | "feedback_updated";
+    | "feedback_updated"
+    | "upload_failed";
 }
 
 export async function listNotifications(
@@ -1072,4 +1087,103 @@ export async function notifyFeedbackUpdated(
   // The setup wizard's test report shows this. `delivered` means the reporter
   // was told, in the app or in Slack.
   return inAppEnabled || slackSent ? "delivered" : "disabled";
+}
+
+// The people who requested the files the watcher gave up on: one row per
+// requester per run and reason, so a renamed run folder sends one
+// notification, not one per file. Auto-mode files have no requester and send
+// nothing. Missing preference rows count as in-app on. Errors are logged, not
+// thrown: the failures are already recorded.
+export async function notifyUploadFailed(input: {
+  groups: readonly FailedUploadsByRun[];
+  instrumentId: string;
+  // Needed for the Slack message's link. Without it, Slack DMs are skipped.
+  origin?: string;
+}): Promise<void> {
+  try {
+    const requesterIds = [
+      ...new Set(input.groups.flatMap((group) => group.requesterIds)),
+    ];
+    if (requesterIds.length === 0) {
+      return;
+    }
+
+    const [recipients, [instrument]] = await Promise.all([
+      db
+        .select({
+          userId: users.id,
+          uploadFailedEnabled: notificationPreferences.uploadFailedEnabled,
+          slackUserId: slackConnections.slackUserId,
+          slackUploadFailedEnabled:
+            notificationPreferences.slackUploadFailedEnabled,
+          slackRevokedAt: slackConnections.revokedAt,
+        })
+        .from(users)
+        .leftJoin(
+          notificationPreferences,
+          eq(notificationPreferences.userId, users.id)
+        )
+        .leftJoin(slackConnections, eq(slackConnections.userId, users.id))
+        .where(inArray(users.id, requesterIds)),
+      db
+        .select({ displayName: instruments.displayName })
+        .from(instruments)
+        .where(eq(instruments.id, input.instrumentId))
+        .limit(1),
+    ]);
+    const recipientById = new Map(recipients.map((row) => [row.userId, row]));
+
+    const inAppRows: (typeof notifications.$inferInsert)[] = [];
+    const slackJobs: SlackDmJob[] = [];
+    for (const group of input.groups) {
+      const message = uploadFailedNotificationText(
+        group.failedCount,
+        group.reason
+      );
+      for (const userId of group.requesterIds) {
+        const recipient = recipientById.get(userId);
+        if (!recipient) {
+          continue;
+        }
+        if (recipient.uploadFailedEnabled !== false) {
+          inAppRows.push({
+            userId,
+            type: "upload_failed",
+            runId: group.instrumentRunId,
+            body: message,
+          });
+        }
+        if (
+          input.origin &&
+          instrument &&
+          recipient.slackUserId &&
+          !recipient.slackRevokedAt &&
+          (recipient.slackUploadFailedEnabled ?? false)
+        ) {
+          const runUrl = `${input.origin}/instruments/${encodeURIComponent(input.instrumentId)}/runs/${encodeURIComponent(group.runId)}`;
+          slackJobs.push({
+            userId,
+            slackUserId: recipient.slackUserId,
+            payload: {
+              text: `Upload failed on ${escapeMrkdwn(instrument.displayName)}, run \`${escapeMrkdwn(group.runId)}\`: ${escapeMrkdwn(message)}`,
+              blocks: buildUploadFailedBlocks({
+                instrumentDisplayName: instrument.displayName,
+                message,
+                runDisplayId: group.runId,
+                runUrl,
+              }),
+            },
+          });
+        }
+      }
+    }
+
+    // In-app first, so a Slack outage never delays the bell.
+    if (inAppRows.length > 0) {
+      await db.insert(notifications).values(inAppRows);
+    }
+    await deliverSlackDms(slackJobs);
+  } catch (err) {
+    console.error("notifyUploadFailed failed", err);
+  }
 }

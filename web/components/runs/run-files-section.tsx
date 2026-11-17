@@ -40,6 +40,7 @@ import {
   REPROCESS_REQUEST_CONCURRENCY,
   settleWithConcurrency,
 } from "@/lib/runs/settle-with-concurrency";
+import { dismissFiles, requestFileUploads } from "@/lib/runs/upload-requests";
 import { runDetailSearchParams } from "@/lib/search-params";
 import { FileBulkActionBar } from "./file-bulk-action-bar";
 import {
@@ -84,7 +85,9 @@ const FILES_CATEGORY_OPTIONS: FilesFilterOption<FilesCategoryFilter>[] = [
 // "Processing" is in-flight work only; files past the stall cutoff answer to
 // "Stalled" instead, matching what the status column labels them.
 const FILES_STATUS_OPTIONS: FilesFilterOption<FilesLifecycleFilter>[] = [
-  { value: "pending", label: "Waiting to upload" },
+  { value: "not_uploaded", label: "Not uploaded" },
+  { value: "waiting_upload", label: "Waiting to upload" },
+  { value: "upload_failed", label: "Upload failed" },
   { value: "uploaded", label: "Uploaded" },
   { value: "queued", label: "Queued" },
   { value: "processing", label: "Processing" },
@@ -213,12 +216,17 @@ function RunFilesSectionContent({
       : (pagination.page - 1) * pagination.per_page + 1;
   const to = Math.min(pagination.page * pagination.per_page, pagination.total);
 
-  // The files Upload all queues: every `detected` file of the run, not only
-  // the page on screen. A deleted run is read-only and can't queue uploads.
-  const uploadAllCount = isDeleted ? 0 : stats.detected;
+  // The files Upload all queues: every `detected` or `upload_failed` file of
+  // the run, not only the page on screen. A deleted run is read-only and can't
+  // queue uploads.
+  const uploadAllCount = isDeleted ? 0 : stats.detected + stats.uploadFailed;
   // The rows of this page that Upload all covers, so they show a spinner.
   const uploadAllPageIds = files
-    .filter((file) => file.status === "detected" && file.deletedAt === null)
+    .filter(
+      (file) =>
+        (file.status === "detected" || file.status === "upload_failed") &&
+        file.deletedAt === null
+    )
     .map((file) => file.id);
 
   return (
@@ -437,6 +445,9 @@ function RunFilesSectionContent({
           </span>
           <span>
             {stats.pending} waiting on the instrument PC &middot;{" "}
+            {stats.uploadFailed > 0
+              ? `${stats.uploadFailed} couldn't upload · `
+              : ""}
             {stats.uploaded} uploaded
           </span>
         </div>
@@ -479,17 +490,10 @@ function BulkActionBarHost({
       return;
     }
     track(ids, async () => {
-      const res = await fetch(
-        `/api/v1/instruments/${instrumentId}/runs/${encodeURIComponent(runId)}/request-upload`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ file_ids: ids }),
-        }
-      );
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        toast.error(body?.error?.message ?? "Failed to request uploads");
+      // Batched: a selection can span pages and exceed one request's limit.
+      const result = await requestFileUploads(instrumentId, runId, ids);
+      if (!result.ok) {
+        toast.error(result.message);
         // The badge was read at page load, so a refusal means the page is out
         // of date: refresh it so the buttons and the line match the server.
         router.refresh();
@@ -507,13 +511,7 @@ function BulkActionBarHost({
       return;
     }
     track(ids, async () => {
-      const results = await Promise.allSettled(
-        ids.map((fid) => fetch(`/api/v1/files/${fid}`, { method: "DELETE" }))
-      );
-      const failed = results.filter(
-        (r) =>
-          r.status === "rejected" || (r.status === "fulfilled" && !r.value.ok)
-      ).length;
+      const { failed } = await dismissFiles(ids);
       if (failed > 0) {
         toast.error(`${failed} file(s) failed to dismiss`);
       } else {

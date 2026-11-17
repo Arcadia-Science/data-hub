@@ -6,19 +6,16 @@ name: Watcher end-to-end tests
 # docs/developer/testing.md.
 #
 # It is not part of pull-request CI: the suite takes a while and builds the web app. It runs
-#   * on every push to `production`, with no path filter,
-#   * from the Actions tab (workflow_dispatch) on any branch, to try a change, and
 #   * as the `e2e` job of publish-watcher.yml, which must pass before a release is
 #     published to PyPI. That call hands over the wheel it built, so the release is tested
-#     as built and not rebuilt from the checkout.
+#     as built and not rebuilt from the checkout, and
+#   * from the Actions tab (workflow_dispatch) on any branch, to try a change.
+# A push to `production` doesn't run it, so a release is tested once, on its tag.
 #
 # Two jobs run the suite: `linux` (the `watch` process) and `windows` (the real Windows
 # service, on `windows-latest`, as three parallel shards). They share these triggers and
 # inputs.
 on:
-  push:
-    branches:
-      - production
   workflow_dispatch:
   workflow_call:
     inputs:

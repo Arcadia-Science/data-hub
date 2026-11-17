@@ -16,7 +16,8 @@ import {
   isoDateTime,
   paginationSchema,
   runSourceSchema,
-  runStatusSchema,
+  runStatusFilterSchema,
+  uploadFailureReasonSchema,
 } from "./common";
 
 // Rejects path traversal in watcher-reported file locations. The watcher
@@ -47,6 +48,12 @@ export const detectedFileSchema = z.object({
   filename: safeRelativePath,
   size_bytes: z.number().int().nonnegative().optional(),
   file_created_at: isoDateTime.optional(),
+  // Sent by watcher 1.4.5 and later. Leave it out when someone has to request
+  // the file, for example in manual mode.
+  will_upload: z.boolean().optional().openapi({
+    description:
+      "True when the watcher will upload this file on its own (auto mode). The file then reads as waiting to upload rather than not uploaded. Leave it out, or send false, when someone has to request the upload.",
+  }),
 });
 
 export const createRunBody = z.object({
@@ -78,7 +85,13 @@ export const runListQuery = z.object({
   per_page: z.coerce.number().int().min(1).max(100).optional(),
   include_deleted: z.coerce.boolean().optional(),
   ran_by: z.string().optional(),
-  status: z.union([runStatusSchema, z.array(runStatusSchema)]).optional(),
+  status: z
+    .union([runStatusFilterSchema, z.array(runStatusFilterSchema)])
+    .optional()
+    .openapi({
+      description:
+        "Derived run status. Several values (repeated, or comma-separated) match any of them. `pending` is deprecated: it matches `waiting_upload` and `not_uploaded`, and no run reports it.",
+    }),
   has_notebook_link: z.enum(["true", "false"]).optional().openapi({
     description:
       "`true` lists only runs with at least one lab notebook link; `false` lists only runs with none.",
@@ -190,7 +203,15 @@ export const runDetailFile = z
     category: fileCategorySchema,
     status: fileStatusSchema,
     metadata: metadataObject.nullable(),
-    error_message: z.string().nullable(),
+    error_message: z.string().nullable().openapi({
+      description:
+        "Why processing failed (`failed`) or why the watcher couldn't upload the file (`upload_failed`).",
+    }),
+    upload_failure_reason: uploadFailureReasonSchema.nullable().openapi({
+      description:
+        "Set when the status is `upload_failed`: `folder_missing`, `file_missing`, `upload_error` or `unsafe_path`.",
+    }),
+    upload_failed_at: isoDateTime.nullable(),
     detected_at: isoDateTime.nullable(),
     upload_requested_at: isoDateTime.nullable(),
     uploaded_at: isoDateTime.nullable(),
@@ -240,7 +261,22 @@ export const runListItem = z
     file_count: z.number().int(),
     files_completed: z.number().int(),
     files_failed: z.number().int(),
-    files_pending_upload: z.number().int(),
+    files_upload_failed: z.number().int().openapi({
+      description: "Files the watcher gave up on (`upload_failed`).",
+    }),
+    files_waiting_upload: z.number().int().openapi({
+      description:
+        "Files on their way from the instrument PC: requested, or ones the watcher uploads on its own.",
+    }),
+    files_not_uploaded: z.number().int().openapi({
+      description:
+        "Files only on the instrument PC that nothing will upload until someone requests them.",
+    }),
+    files_pending_upload: z.number().int().openapi({
+      description:
+        "Deprecated: `files_waiting_upload` plus `files_not_uploaded`.",
+      deprecated: true,
+    }),
     files_uploaded: z.number().int(),
     files_queued: z.number().int(),
     // `files_processing` counts only files still inside the stall window;

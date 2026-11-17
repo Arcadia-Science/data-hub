@@ -983,19 +983,22 @@
             "type": "boolean"
           },
           "status": {
-            "description": "Filter by derived run status (OR'd together). Status is derived from a run's raw file states, priority-exclusive: failed (any file failed), stalled (a file has been in processing past the stall window and can be reprocessed), pending (files awaiting upload), uploaded, queued (reprocessing files waiting for a free processing slot), processing (in flight), completed (all done), empty (no files).",
+            "description": "Filter by derived run status (OR'd together). Status is derived from a run's raw file states, priority-exclusive: failed (any file failed processing), stalled (a file has been in processing past the stall window and can be reprocessed), upload_failed (the watcher gave up on a file, for example because it's no longer on the instrument PC), waiting_upload (files requested, or ones the watcher uploads on its own), uploaded, queued (reprocessing files waiting for a free processing slot), processing (in flight), not_uploaded (files only on the instrument PC that nobody requested), completed (all done), empty (no files). The deprecated pending means waiting_upload or not_uploaded.",
             "type": "array",
             "items": {
               "type": "string",
               "enum": [
                 "failed",
                 "stalled",
-                "pending",
+                "upload_failed",
+                "waiting_upload",
                 "uploaded",
                 "queued",
                 "processing",
+                "not_uploaded",
                 "completed",
-                "empty"
+                "empty",
+                "pending"
               ]
             }
           }
@@ -1110,6 +1113,21 @@
                   "maximum": 9007199254740991
                 },
                 "files_failed": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "files_upload_failed": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "files_waiting_upload": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "files_not_uploaded": {
                   "type": "integer",
                   "minimum": -9007199254740991,
                   "maximum": 9007199254740991
@@ -1368,6 +1386,9 @@
                 "file_count",
                 "files_completed",
                 "files_failed",
+                "files_upload_failed",
+                "files_waiting_upload",
+                "files_not_uploaded",
                 "files_pending_upload",
                 "files_uploaded",
                 "files_queued",
@@ -1847,6 +1868,7 @@
                   "enum": [
                     "detected",
                     "upload_requested",
+                    "upload_failed",
                     "uploaded",
                     "queued",
                     "processing",
@@ -1870,6 +1892,22 @@
                   "type": [
                     "string",
                     "null"
+                  ]
+                },
+                "uploadFailureReason": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "folder_missing",
+                        "file_missing",
+                        "upload_error",
+                        "unsafe_path"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
                   ]
                 },
                 "createdAt": {
@@ -1914,6 +1952,7 @@
                 "sizeBytes",
                 "contentType",
                 "errorMessage",
+                "uploadFailureReason",
                 "createdAt",
                 "uploadedAt",
                 "processedAt",
@@ -2264,6 +2303,7 @@
                   "enum": [
                     "detected",
                     "upload_requested",
+                    "upload_failed",
                     "uploaded",
                     "queued",
                     "processing",
@@ -2320,6 +2360,7 @@
                   "enum": [
                     "detected",
                     "upload_requested",
+                    "upload_failed",
                     "uploaded",
                     "queued",
                     "processing",
@@ -2418,7 +2459,7 @@
     {
       "name": "list_run_files",
       "title": "List Run Files",
-      "description": "List files associated with a run (raw uploads and processed artifacts) with their status, category, and size. Paginated — runs can have thousands of files. Filter by status to gather fileIds for request_run_upload (e.g. status=['detected']). Use get_file for full per-file detail including metadata and S3 location.",
+      "description": "List files associated with a run (raw uploads and processed artifacts) with their status, category, and size. Paginated — runs can have thousands of files. Filter by status to gather fileIds for request_run_upload (e.g. status=['detected', 'upload_failed']). An upload_failed file is one the watcher gave up on; its errorMessage and uploadFailureReason say why. Use get_file for full per-file detail including metadata and S3 location.",
       "group": "runs",
       "scope": "runs:read",
       "annotations": {
@@ -2444,6 +2485,7 @@
               "enum": [
                 "detected",
                 "upload_requested",
+                "upload_failed",
                 "uploaded",
                 "queued",
                 "processing",
@@ -2506,6 +2548,7 @@
                   "enum": [
                     "detected",
                     "upload_requested",
+                    "upload_failed",
                     "uploaded",
                     "queued",
                     "processing",
@@ -2529,6 +2572,22 @@
                   "type": [
                     "string",
                     "null"
+                  ]
+                },
+                "uploadFailureReason": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "folder_missing",
+                        "file_missing",
+                        "upload_error",
+                        "unsafe_path"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
                   ]
                 },
                 "createdAt": {
@@ -2573,6 +2632,7 @@
                 "sizeBytes",
                 "contentType",
                 "errorMessage",
+                "uploadFailureReason",
                 "createdAt",
                 "uploadedAt",
                 "processedAt",
@@ -3644,7 +3704,7 @@
     {
       "name": "request_run_upload",
       "title": "Request Run Upload",
-      "description": "Queue specific detected files for watcher upload (max 100). Requires an instrument whose watcher is online or restarting; a request made during a restart waits until the watcher is back. Offline, connecting, pending and retired instruments are refused. Idempotent for files already in upload_requested.",
+      "description": "Queue specific detected or upload_failed files for watcher upload (max 100). Requires an instrument whose watcher is online or restarting; a request made during a restart waits until the watcher is back. Offline, connecting, pending and retired instruments are refused. Idempotent for files already in upload_requested. An upload_failed file's errorMessage says why the last request failed (often a folder renamed on the PC); requesting it again before that is fixed fails the same way.",
       "group": "runs",
       "scope": "runs:upload",
       "annotations": {
@@ -3745,7 +3805,7 @@
     {
       "name": "request_run_upload_all",
       "title": "Request Run Upload All",
-      "description": "Queue every detected file on a run for watcher upload. Requires an instrument whose watcher is online or restarting; a request made during a restart waits until the watcher is back. Offline, connecting, pending and retired instruments are refused.",
+      "description": "Queue every detected and upload_failed file on a run for watcher upload. Requires an instrument whose watcher is online or restarting; a request made during a restart waits until the watcher is back. Offline, connecting, pending and retired instruments are refused.",
       "group": "runs",
       "scope": "runs:upload",
       "annotations": {
@@ -4748,6 +4808,7 @@
             "enum": [
               "detected",
               "upload_requested",
+              "upload_failed",
               "uploaded",
               "queued",
               "processing",
@@ -4766,6 +4827,52 @@
             "type": [
               "string",
               "null"
+            ]
+          },
+          "uploadFailureReason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "folder_missing",
+                  "file_missing",
+                  "upload_error",
+                  "unsafe_path"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "uploadFailedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "uploadRequestedBy": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "autoUploadExpectedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              },
+              {
+                "type": "null"
+              }
             ]
           },
           "detectedAt": {
@@ -4886,6 +4993,10 @@
           "status",
           "metadata",
           "errorMessage",
+          "uploadFailureReason",
+          "uploadFailedAt",
+          "uploadRequestedBy",
+          "autoUploadExpectedAt",
           "detectedAt",
           "uploadRequestedAt",
           "uploadedAt",
@@ -5859,7 +5970,8 @@
                 "update_started",
                 "update_succeeded",
                 "update_failed",
-                "upload_requests_cancelled"
+                "upload_requests_cancelled",
+                "uploads_failed"
               ]
             }
           },
@@ -5921,7 +6033,8 @@
                     "update_started",
                     "update_succeeded",
                     "update_failed",
-                    "upload_requests_cancelled"
+                    "upload_requests_cancelled",
+                    "uploads_failed"
                   ]
                 },
                 "message": {
@@ -6967,7 +7080,7 @@
     {
       "name": "get_system_status",
       "title": "Get System Status",
-      "description": "Get a dashboard-level overview: per-instrument run counts, whether new files can reach Data Hub (`connection`: online, restarting, connecting, or offline, with a reason when offline), and pending upload counts.",
+      "description": "Get a dashboard-level overview: per-instrument run counts, whether new files can reach Data Hub (`connection`: online, restarting, connecting, or offline, with a reason when offline), pending upload counts, and how many runs need someone to act (upload failed, failed, or stalled).",
       "group": "discovery",
       "scope": "instruments:read",
       "annotations": {
@@ -7023,6 +7136,39 @@
                   "type": "integer",
                   "minimum": -9007199254740991,
                   "maximum": 9007199254740991
+                },
+                "runsNeedingAttention": {
+                  "type": "object",
+                  "properties": {
+                    "uploadFailed": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "failed": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "stalled": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "uploadFailed",
+                    "failed",
+                    "stalled",
+                    "total"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Runs whose status needs someone to act: upload_failed, failed, or stalled. Find them with search_runs and that status."
                 },
                 "connection": {
                   "type": "object",
@@ -7080,6 +7226,7 @@
                 "runCount",
                 "lastRunAt",
                 "filesPendingUpload",
+                "runsNeedingAttention",
                 "connection",
                 "watcherStatus"
               ],

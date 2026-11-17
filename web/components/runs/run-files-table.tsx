@@ -38,6 +38,7 @@ import type { RunFileRow } from "@/lib/api/instrument-runs";
 import { formatDateTime } from "@/lib/date";
 import type { InstrumentType } from "@/lib/db/schema";
 import { preloader } from "@/lib/preload";
+import { isRequestableFileStatus } from "@/lib/runs/file-buckets";
 import { canReprocessFile } from "@/lib/runs/reprocessable-statuses";
 import { filePreviewKind } from "@/lib/runs/run-file-types";
 import { cn, formatBytes } from "@/lib/utils";
@@ -497,7 +498,7 @@ export function EditableRunFilesTable({
             const ref = refsByFileId.get(file.id) ?? null;
             const isSelected = ref ? meta.isSelected(ref.id) : false;
             const canDoUploadDismiss =
-              !isDismissed && file.status === "detected";
+              !isDismissed && isRequestableFileStatus(file.status);
             const canDoReprocess = canReprocessFile(file, instrumentType);
 
             // Reveal classes: hide per-row actions while a bulk selection is

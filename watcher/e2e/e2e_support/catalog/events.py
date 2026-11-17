@@ -182,28 +182,24 @@ TRANSITIONS: tuple[Transition, ...] = (
     ),
     covered(
         MACHINE,
-        "event.queued_file_missing->emitted",
-        "An `error` event of kind `queued_file_missing` is stored for a queued file that is "
-        "not on disk, with its `file_id` and expected path.",
-    ),
-    covered(
-        MACHINE,
         "event.upload_request_cancelled->emitted",
-        "An `error` event of kind `upload_request_cancelled` is stored when the watcher "
-        "gives up on a queued file, with `file_id`, `attempts` and `reason`.",
+        "On a server without the upload-failures route, an `error` event of kind "
+        "`upload_request_cancelled` is stored when the watcher gives up on a queued file, "
+        "with `file_id`, `attempts` and `reason`.",
     ),
     covered(
         MACHINE,
         "event.upload_retries_exhausted->emitted",
-        "An `error` event of kind `upload_retries_exhausted` is stored when a pending "
-        "upload fails its third retry, one retry per watcher start, with `relative_path`, "
-        "`run_id` and `attempts`.",
+        "On a server without the upload-failures route, an `error` event of kind "
+        "`upload_retries_exhausted` is stored when a pending upload fails its third retry, "
+        "one retry per watcher start, with `relative_path`, `run_id` and `attempts`.",
     ),
     covered(
         MACHINE,
         "event.pending_upload_missing->emitted",
-        "An `error` event of kind `pending_upload_missing` is stored for a pending upload "
-        "whose file is gone, with `relative_path` and `run_id`.",
+        "On a server without the upload-failures route, an `error` event of kind "
+        "`pending_upload_missing` is stored for a pending upload whose file is gone, with "
+        "`relative_path` and `run_id`.",
     ),
     covered(
         MACHINE,
@@ -235,6 +231,13 @@ TRANSITIONS: tuple[Transition, ...] = (
         "event.upload_requests_cancelled->recorded",
         "The server stores an event of kind `upload_requests_cancelled`, with the reason "
         "and the count, whenever it reverts an instrument's queued uploads.",
+    ),
+    covered(
+        MACHINE,
+        "event.uploads_failed->recorded",
+        "The server stores one `uploads_failed` event per run and reason when the watcher "
+        "reports files it gave up on, with `run_id`, `reason`, `folder` and `failed_count`, "
+        "and none for a report it skips because it already has it.",
     ),
     excluded(
         MACHINE,

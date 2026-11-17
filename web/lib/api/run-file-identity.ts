@@ -25,6 +25,9 @@ export interface IncomingRunFile {
   filename: string;
   relativePath: string;
   sizeBytes: number | null;
+  // The watcher said it will upload the file itself (auto mode, 1.4.5+).
+  // Absent means no.
+  willUpload?: boolean;
 }
 
 export interface StoredRunFile {
@@ -48,6 +51,14 @@ export interface ReportedFile {
   filename: string;
   relative_path: string;
   size_bytes?: number;
+  will_upload?: boolean;
+}
+
+// The auto-upload mark for a new row: set only when the watcher said it will
+// upload the file. A watcher before 1.4.5 never says so, and a report-only
+// file (reported but deliberately not uploaded) says false.
+function autoUploadMark(willUpload: boolean, now: Date): Date | null {
+  return willUpload ? now : null;
 }
 
 export type RunFileResolution =
@@ -261,6 +272,7 @@ function toIncoming(file: ReportedFile): IncomingRunFile {
     filename: file.filename,
     sizeBytes: file.size_bytes ?? null,
     fileCreatedAt: file.file_created_at ? new Date(file.file_created_at) : null,
+    willUpload: file.will_upload === true,
   };
 }
 
@@ -454,6 +466,7 @@ async function insertResolved(
         status: "detected" as const,
         detectedAt: now,
         fileCreatedAt: file.fileCreatedAt,
+        autoUploadExpectedAt: autoUploadMark(file.willUpload === true, now),
       },
     ];
   });
@@ -570,6 +583,7 @@ export async function recordDetectedFiles(
           fileCreatedAt: file.file_created_at
             ? new Date(file.file_created_at)
             : null,
+          autoUploadExpectedAt: autoUploadMark(file.will_upload === true, now),
         }))
       )
       .onConflictDoNothing()

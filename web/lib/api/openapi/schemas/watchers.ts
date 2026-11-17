@@ -2,11 +2,63 @@ import { z } from "zod";
 import { watcherConfigSettingsSchema } from "@/lib/api/watcher-config/settings";
 import {
   isoDateTime,
+  uploadFailureReasonSchema,
   uploadModeSchema,
   watcherEventInputTypeSchema,
   watcherEventTypeSchema,
   watcherStatusSchema,
 } from "./common";
+
+// The most files one POST /watchers/:id/upload-failures can report. A watcher
+// sends more in several requests, keeping each run in one request when it can.
+export const MAX_UPLOAD_FAILURES_PER_REQUEST = 1000;
+
+const uploadFailureItem = z
+  .object({
+    file_id: z.number().int().positive().optional().openapi({
+      description:
+        "A requested file's ID, from the upload queue. Send it with `requested_at`.",
+    }),
+    requested_at: isoDateTime.optional().openapi({
+      description:
+        "The `upload_requested_at` the upload queue gave for the file. A file requested again since then is skipped.",
+    }),
+    run_id: z.string().min(1).optional().openapi({
+      description:
+        "With `relative_path`: names a file the watcher was uploading on its own (auto mode), whose ID it doesn't know.",
+    }),
+    relative_path: z.string().min(1).optional(),
+    reason: uploadFailureReasonSchema.openapi({
+      description:
+        "`folder_missing`: the file's folder is gone from the instrument PC. `file_missing`: the folder is there but the file isn't. `upload_error`: the upload kept failing. `unsafe_path`: the path points outside the watch folder.",
+    }),
+    detail: z.string().max(1000).optional().openapi({
+      description: "The last error, for `upload_error`.",
+    }),
+  })
+  .refine(
+    (item) =>
+      (item.file_id !== undefined && item.requested_at !== undefined) ||
+      (item.run_id !== undefined && item.relative_path !== undefined),
+    {
+      message:
+        "each file needs file_id with requested_at, or run_id with relative_path",
+    }
+  );
+
+export const uploadFailuresBody = z.object({
+  files: z.array(uploadFailureItem).min(1).max(MAX_UPLOAD_FAILURES_PER_REQUEST),
+});
+
+export const uploadFailuresResponse = z.object({
+  failed: z.number().int().openapi({
+    description: "Files moved to `upload_failed`.",
+  }),
+  skipped: z.number().int().openapi({
+    description:
+      "Files left as they were: not this watcher's, no longer waiting (already failed, uploaded, dismissed or requested again), or in a deleted run. Reporting the same files twice is safe.",
+  }),
+});
 
 export const registerWatcherBody = z.object({
   instrument_id: z.string().min(1),
@@ -171,6 +223,10 @@ export const watcherUploadQueueResponse = z.object({
       relative_path: z.string(),
       filename: z.string(),
       size_bytes: z.number().nullable(),
+      upload_requested_at: isoDateTime.openapi({
+        description:
+          "When the current request was made. Send it back as `requested_at` when reporting a failure to POST /watchers/{watcherId}/upload-failures, so a failure from an earlier request doesn't fail a newer one.",
+      }),
     })
   ),
 });

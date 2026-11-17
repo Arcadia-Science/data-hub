@@ -6,13 +6,15 @@ import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
 import { createFileBody, readJsonBody } from "@/lib/api/openapi";
 import { readRunIdParam } from "@/lib/api/run-id-param";
 import { touchRuns } from "@/lib/api/touch-runs";
+import { UPLOAD_ARRIVED_RESET } from "@/lib/api/upload-state";
 import { db } from "@/lib/db";
 import { files } from "@/lib/db/schema";
+import { PRE_UPLOAD_FILE_STATUSES } from "@/lib/runs/file-buckets";
 
 // Statuses where a row is "pre-S3" — safe for the Lambda path to overwrite
 // when adopting a watcher-created row. Anything beyond uploaded is left
 // untouched so Lambda retries don't regress in-progress / completed work.
-const PRE_UPLOAD_STATUSES = new Set(["detected", "upload_requested"]);
+const PRE_UPLOAD_STATUSES = new Set<string>(PRE_UPLOAD_FILE_STATUSES);
 
 interface RouteContext {
   params: Promise<{ instrumentId: string; runId: string }>;
@@ -104,6 +106,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
           // this the insert vs. reconcile branches would diverge for
           // Lambda-classified processed files.
           category,
+          ...UPLOAD_ARRIVED_RESET,
           status: "uploaded",
           uploadedAt: now,
         })

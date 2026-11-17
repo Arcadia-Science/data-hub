@@ -1,6 +1,6 @@
 "use client";
 
-import { BellOff, Settings } from "lucide-react";
+import { BellOff, CloudAlert, Settings } from "lucide-react";
 import Link from "next/link";
 import { type MouseEvent, type ReactNode, useMemo } from "react";
 import { useNotifications } from "@/components/notifications/notifications-provider";
@@ -144,6 +144,15 @@ export function NotificationBellContent({
                   }
                   onNavigate?.();
                 };
+                if (entry.kind === "upload_failed") {
+                  return (
+                    <UploadFailedNotificationRow
+                      key={entry.id}
+                      notification={entry.notification}
+                      onActivate={activate}
+                    />
+                  );
+                }
                 if (entry.kind === "feedback") {
                   return (
                     <AnchorlessNotificationRow
@@ -308,6 +317,52 @@ function CommentNotificationRow({
             suppressHydrationWarning
           >
             {formatRelativeTime(n.createdAt)}
+          </p>
+        </div>
+      </Link>
+    </NotificationRowShell>
+  );
+}
+
+// Files the viewer requested couldn't upload. No person caused it, so a red
+// icon stands where the avatar goes. Opens the run, whose banner explains it.
+function UploadFailedNotificationRow({
+  notification: n,
+  onActivate,
+}: {
+  notification: NotificationItem & {
+    instrumentDisplayName: string;
+    instrumentId: string;
+    runDisplayId: string;
+  };
+  onActivate: () => void;
+}) {
+  const href = notificationHref({ ...n, commentId: null });
+  return (
+    <NotificationRowShell isUnread={n.readAt === null}>
+      <Link
+        className="flex items-start gap-3 px-4 py-3 outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+        href={href}
+        onClick={onActivate}
+      >
+        <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-destructive/10 text-destructive">
+          <CloudAlert aria-hidden className="size-3.5" />
+        </span>
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <p className="text-sm leading-snug">
+            <span className="font-medium">Upload failed in</span>{" "}
+            <span className="font-medium text-primary">{n.runDisplayId}</span>
+          </p>
+          {n.body ? (
+            <p className="line-clamp-2 text-muted-foreground text-sm">
+              {n.body}
+            </p>
+          ) : null}
+          <p
+            className="text-muted-foreground/80 text-xs"
+            suppressHydrationWarning
+          >
+            {n.instrumentDisplayName} · {formatRelativeTime(n.createdAt)}
           </p>
         </div>
       </Link>

@@ -67,6 +67,8 @@ export {
   createWatcherConfigRevisionBody,
   heartbeatBody,
   registerWatcherBody,
+  uploadFailuresBody,
+  uploadFailuresResponse,
   watcherChecksumResponse,
   watcherConfigBody,
   watcherConfigPreviewBody,

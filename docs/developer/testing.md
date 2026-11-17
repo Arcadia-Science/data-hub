@@ -611,16 +611,15 @@ the `watcher-e2e-linux-artifacts` artifact, for a failed or a cancelled run.
 ### Why it isn't in pull-request CI
 
 Every test starts a real watcher and some wait for a restart or an update, so the suite is
-much slower than the rest. It runs where a regression would otherwise reach lab PCs: on
-every push to `production`, by hand with `workflow_dispatch` on any branch, and as a
-required job of the release workflow before a wheel is published. Pull requests get the
-catalog check, which is fast. See [CI and deployment](ci-and-deployment.md#watcher-end-to-end-tests-watcher-e2eyml).
+much slower than the rest. It runs where a regression would otherwise reach lab PCs: as a
+required job of the release workflow before a wheel is published, and by hand with
+`workflow_dispatch` on any branch. Pull requests get the catalog check, which is fast.
+See [CI and deployment](ci-and-deployment.md#watcher-end-to-end-tests-watcher-e2eyml).
 
 ## In CI
 
 `python-test.yml` runs `make py-test` (unit + integration together, one
 Postgres 17 service container). `typescript-test.yml` runs `make fe-test-unit`
 then `make fe-test-integration` as separate steps. `watcher-e2e.yml` runs
-`make py-test-e2e`, on pushes to `production`, on demand, and before a watcher
-release is published. See [CI and deployment](ci-and-deployment.md) for the full
-workflow list.
+`make py-test-e2e` before a watcher release is published, and on demand. See
+[CI and deployment](ci-and-deployment.md) for the full workflow list.

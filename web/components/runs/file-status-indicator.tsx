@@ -15,7 +15,10 @@ export function FileStatusIndicator({ file }: { file: RunFileRow }) {
   const timeZone = useViewerTimeZone();
   const key = getFileStatusKey(file);
   const { label, Icon, className, spin } = FILE_STATUS_CONFIG[key];
-  const showErrorTooltip = key === "failed" && !!file.errorMessage;
+  // A failed file carries why processing failed; an upload_failed file carries
+  // why the watcher gave up on it.
+  const showErrorTooltip =
+    (key === "failed" || key === "upload_failed") && !!file.errorMessage;
   let stalledTooltip: string | null = null;
   if (key === "stalled") {
     // Absolute, not relative: polling stops for stalled rows, so an "N minutes

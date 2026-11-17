@@ -65,6 +65,9 @@ export const watcherEventTypeEnum = pgEnum("watcher_event_type", [
   // The server cancelled requested uploads because their run was deleted.
   // Only the server writes this type, the watcher never sends it.
   "upload_requests_cancelled",
+  // The watcher reported files it gave up on, and the server marked them
+  // `upload_failed`: one event per run and reason. Only the server writes it.
+  "uploads_failed",
 ]);
 
 export const uploadModeEnum = pgEnum("upload_mode", ["auto", "manual"]);
@@ -96,11 +99,28 @@ export const fileCategoryEnum = pgEnum("file_category", ["raw", "processed"]);
 export const fileStatusEnum = pgEnum("file_status", [
   "detected",
   "upload_requested",
+  // The watcher gave up on the file: it isn't on the instrument PC, its upload
+  // kept failing, or its path is outside the watch folder. The reason is in
+  // `upload_failure_reason`. Requesting the file again moves it back to
+  // `upload_requested`.
+  "upload_failed",
   "uploaded",
   "queued",
   "processing",
   "completed",
   "failed",
+]);
+
+// Why the watcher gave up on a file (`files.status = 'upload_failed'`).
+export const uploadFailureReasonEnum = pgEnum("upload_failure_reason", [
+  // The file's folder is no longer on the instrument PC (renamed or moved).
+  "folder_missing",
+  // The folder is there but the file isn't.
+  "file_missing",
+  // The upload failed every time the watcher tried.
+  "upload_error",
+  // The path points outside the watch folder.
+  "unsafe_path",
 ]);
 
 export const archiveJobStatusEnum = pgEnum("archive_job_status", [
@@ -785,6 +805,8 @@ export const files = pgTable(
     // Distinguishes raw uploads from Lambda-generated artifacts.
     category: fileCategoryEnum("category").notNull().default("raw"),
     // detected → upload_requested → uploaded → processing → completed | failed
+    // A file the watcher gives up on goes to `upload_failed` instead of
+    // `uploaded`, and a new request moves it back to `upload_requested`.
     // Reprocessing goes through `queued`: a reprocess request marks the file
     // `queued`, and the dispatcher in `lib/api/file-reprocessing.ts` moves it
     // to `processing` once fewer than the concurrency limit are in flight.
@@ -793,8 +815,18 @@ export const files = pgTable(
     // from this file. Stored as a flat object; multi-valued properties use
     // JSON arrays.
     metadata: jsonb("metadata").notNull().default({}),
-    // Human-readable error description if status = 'failed'. NULL otherwise.
+    // Human-readable error: why processing failed (status = 'failed') or why
+    // the watcher gave up on the upload (status = 'upload_failed'). NULL
+    // otherwise.
     errorMessage: text("error_message"),
+    // Why the watcher gave up on the file. Set exactly when status =
+    // 'upload_failed' (the `files_upload_failure_matches_status` check).
+    uploadFailureReason: uploadFailureReasonEnum("upload_failure_reason"),
+    // When the server marked the file `upload_failed`.
+    uploadFailedAt: timestamp("upload_failed_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
     // When the watcher first detected this file on the local filesystem. NULL
     // for Lambda-created files.
     detectedAt: timestamp("detected_at", {
@@ -804,6 +836,20 @@ export const files = pgTable(
     // When a user requested upload of this file via the web UI. NULL for
     // auto-mode and Lambda-created files.
     uploadRequestedAt: timestamp("upload_requested_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
+    // Who made the current upload request: the signed-in user, the owner of
+    // the personal access token, or the MCP user. Set and cleared together
+    // with `upload_requested_at`, and used to tell that person if it fails.
+    uploadRequestedBy: text("upload_requested_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    // Set when a watcher reports the file and says it will upload it itself
+    // (auto mode, watcher 1.4.5 and later). Such a file reads "Waiting to
+    // upload" rather than "Not uploaded". Cleared when the file uploads or
+    // fails, and by every path that cancels upload requests.
+    autoUploadExpectedAt: timestamp("auto_upload_expected_at", {
       withTimezone: true,
       mode: "date",
     }),
@@ -900,6 +946,29 @@ export const files = pgTable(
         sql`${file.uploadRequestedAt} is not null and ${file.uploadedAt} is null and ${file.deletedAt} is null`
       ),
     index("idx_files_metadata_gin").using("gin", file.metadata),
+    // Files a watcher said it will upload. Few rows at any time, so the
+    // manual-mode heartbeat that clears the mark (`clearAutoUploadMarks`)
+    // stays cheap on instruments with many files.
+    index("idx_files_auto_upload_expected")
+      .on(file.instrumentRunId)
+      .where(sql`${file.autoUploadExpectedAt} is not null`),
+    // The upload-failure columns are set exactly when the file is
+    // `upload_failed`. The status is compared as text so the migration that
+    // adds the enum value can add this check in the same transaction.
+    check(
+      "files_upload_failure_matches_status",
+      sql`(${file.status}::text = 'upload_failed') = (${file.uploadFailureReason} is not null and ${file.uploadFailedAt} is not null)`
+    ),
+    // Only a file that isn't uploaded yet can be waiting for an auto upload.
+    check(
+      "files_auto_upload_mark_before_upload",
+      sql`${file.autoUploadExpectedAt} is null or ${file.status}::text in ('detected', 'upload_requested')`
+    ),
+    // A requester belongs to a request.
+    check(
+      "files_upload_requester_has_request",
+      sql`${file.uploadRequestedBy} is null or ${file.uploadRequestedAt} is not null`
+    ),
     // Trigram GIN index backing the case-insensitive `ilike '%…%'` filename
     // match used by global search and the per-run files table. Scoped to
     // active rows since both callers filter out soft-deleted files. Requires
@@ -1069,6 +1138,7 @@ export const notificationTypeEnum = pgEnum("notification_type", [
   "generic",
   "feedback_submitted",
   "feedback_updated",
+  "upload_failed",
 ]);
 
 // One row per user holding the global notification toggles. Created on
@@ -1129,6 +1199,14 @@ export const notificationPreferences = pgTable("notification_preferences", {
     .notNull()
     .default(false),
   slackFeedbackUpdatedEnabled: boolean("slack_feedback_updated_enabled")
+    .notNull()
+    .default(false),
+  // Files the user requested couldn't upload (the watcher gave up on them).
+  // In-app defaults on. Slack defaults off like the other Slack toggles until
+  // the user connects Slack; migration 0068 turned it on for users who had
+  // already connected.
+  uploadFailedEnabled: boolean("upload_failed_enabled").notNull().default(true),
+  slackUploadFailedEnabled: boolean("slack_upload_failed_enabled")
     .notNull()
     .default(false),
   updatedAt: timestamp("updated_at", {
@@ -1195,7 +1273,8 @@ export const notifications = pgTable(
     // hard-deleted runs don't leave orphan rows in the popover. (Runs are
     // soft-deleted in practice, but the FK protects against accidental
     // hard delete in tests / future cleanups.) NULL for anchor-less types:
-    // `generic`, `feedback_submitted`, and `feedback_updated`.
+    // `generic`, `feedback_submitted`, and `feedback_updated`. Set for
+    // `upload_failed`: the run whose files couldn't upload.
     runId: uuid("run_id").references(() => instrumentRuns.id, {
       onDelete: "cascade",
     }),
@@ -1207,9 +1286,9 @@ export const notifications = pgTable(
     commentId: uuid("comment_id").references(() => runComments.id, {
       onDelete: "cascade",
     }),
-    // Caller-supplied message text for `generic` and feedback rows; NULL
-    // for every other type, whose copy is derived from type + actor at
-    // render time.
+    // Caller-supplied message text for `generic` and feedback rows, and the
+    // count and reason for `upload_failed`; NULL for every other type, whose
+    // copy is derived from type + actor at render time.
     body: text("body"),
     // The user whose action produced the notification. `set null` so a
     // deleted user doesn't take the recipient's history with them.

@@ -102,7 +102,7 @@ export default async function UserRunsPage({ params, searchParams }: Props) {
         </Suspense>
       </section>
 
-      <section className="flex flex-col gap-3">
+      <section className="flex scroll-mt-6 flex-col gap-3" id="runs">
         <h2 className="font-medium text-lg tracking-tight">
           Recent instrument runs
         </h2>
@@ -156,7 +156,13 @@ async function UserRunsStatsSection({
   const commentsLabel = isSelf
     ? undefined
     : `Comments on ${possessive(profile.displayName)} runs`;
-  return <MyRunsStatsCards commentsLabel={commentsLabel} stats={stats} />;
+  return (
+    <MyRunsStatsCards
+      commentsLabel={commentsLabel}
+      stats={stats}
+      userId={profile.userId}
+    />
+  );
 }
 
 async function UserRunsSection({
