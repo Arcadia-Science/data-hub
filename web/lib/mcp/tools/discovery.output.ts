@@ -118,6 +118,16 @@ export const instrumentSummarySchema = z.object({
   runCount: z.number().int(),
   lastRunAt: isoDateTime.nullable(),
   filesPendingUpload: z.number().int(),
+  runsNeedingAttention: z
+    .object({
+      uploadFailed: z.number().int(),
+      failed: z.number().int(),
+      stalled: z.number().int(),
+      total: z.number().int(),
+    })
+    .describe(
+      "Runs whose status needs someone to act: upload_failed, failed, or stalled. Find them with search_runs and that status."
+    ),
   connection: instrumentConnectionSchema,
   watcherStatus: z
     .enum(["online", "offline", "no_watcher"])

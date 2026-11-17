@@ -55,6 +55,10 @@ export const runSortSearchParams = {
     .withOptions({ clearOnDefault: true }),
 };
 
+// `date_from` for "no lower bound" on a list that shows a narrower window by
+// default: the dashboard lists today's runs unless the URL says otherwise.
+export const ALL_TIME_DATE_FROM = "all";
+
 // All dashboard filter/pagination state lives in the URL via nuqs. This makes
 // filter combinations shareable via link and keeps the server component in
 // page.tsx the single source of truth for data fetching.

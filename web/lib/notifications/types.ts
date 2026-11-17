@@ -33,5 +33,6 @@ export interface NotificationItem {
     | "comment_participated"
     | "generic"
     | "feedback_submitted"
-    | "feedback_updated";
+    | "feedback_updated"
+    | "upload_failed";
 }

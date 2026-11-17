@@ -39,9 +39,9 @@ export interface UploadFailureItem {
   run_id?: string;
 }
 
-// One group of files that failed together: same run, same reason. PR 3's
-// notification goes to each requester in it.
-export interface UploadFailureGroup {
+// One group of files that failed together: same run, same reason. Each
+// requester in it gets one notification (`notifyUploadFailed`).
+export interface FailedUploadsByRun {
   failedCount: number;
   folder: string | null;
   instrumentRunId: string;
@@ -53,7 +53,7 @@ export interface UploadFailureGroup {
 
 export interface UploadFailuresResult {
   failed: number;
-  groups: UploadFailureGroup[];
+  groups: FailedUploadsByRun[];
   skipped: number;
 }
 
@@ -269,10 +269,10 @@ function toTarget(
 
 // One group per run and reason. The folder is kept when every file in the
 // group sits in the same one, which is the usual case (a renamed run folder).
-function groupTargets(targets: Target[]): UploadFailureGroup[] {
+function groupTargets(targets: Target[]): FailedUploadsByRun[] {
   const groups = new Map<
     string,
-    UploadFailureGroup & {
+    FailedUploadsByRun & {
       folders: Set<string | null>;
       requesters: Set<string>;
     }

@@ -1,12 +1,12 @@
 ---
 title: Configure notifications
-description: Choose in-app and Slack notifications for new runs, comments, service messages, and feedback, including per-instrument subscriptions and personal Slack direct messages.
+description: Choose in-app and Slack notifications for new runs, comments, failed uploads, service messages, and feedback, including per-instrument subscriptions and personal Slack direct messages.
 contentType: How-to
 ---
 
 <Audience>Everyone</Audience>
 
-Data Hub can notify you in the app and in Slack when new runs arrive, when someone comments on a run you care about, when a script sends you a message, and when feedback you sent is closed. Open **Settings → Notifications** while signed in. Everything on that page is a personal choice that affects only you.
+Data Hub can notify you in the app and in Slack when new runs arrive, when someone comments on a run you care about, when files you requested couldn’t upload, when a script sends you a message, and when feedback you sent is closed. Open **Settings → Notifications** while signed in. Everything on that page is a personal choice that affects only you.
 
 ![Settings Notifications page with in-app preferences and the notification bell](/images/notifications.webp)
 
@@ -21,6 +21,7 @@ In-app and Slack preferences are independent: you can turn on either channel for
 | **Mute all instrument notifications** | Suppresses new-run notifications for every instrument. Per-instrument choices are preserved and resume when you unmute. |
 | **Comments on runs you ran** | Notify when someone comments on a run you are attributed to. |
 | **Replies to your comments** | Notify when someone comments on a run you previously commented on. |
+| **Uploads that failed** | Notify when the watcher gives up on files you requested, for example because their folder is no longer on the instrument PC. You get one notification per run and reason. See [When an upload fails](/docs/browse-runs#upload-failed). |
 | **Service notifications** | Show messages that integrations and scripts send you through the API. |
 | **Updates on your feedback** | Notify when a [feedback report](/docs/send-feedback) you sent is resolved or declined. |
 | **New feedback** | Admins only. Notify when someone sends feedback about Data Hub. |
@@ -35,6 +36,7 @@ The bell icon in the app lists recent notifications:
 
 - New runs are grouped by day and instrument, and each group expands to show its runs.
 - Clicking a comment notification opens the run and scrolls to that comment.
+- A failed-upload notification says how many files couldn’t upload and why, and opens the run.
 - Messages sent by a script through an API token show the token’s name with a key icon.
 
 ![Notification list opened from the bell, with new runs grouped by day and instrument](/images/notification-bell.webp)
@@ -46,6 +48,7 @@ Connect your Slack account on the same settings page to receive matching events 
 - New instrument runs (respects your instrument subscriptions and mute)
 - Comments on runs you ran
 - Replies to your comments
+- Uploads that failed
 - Service notifications
 - Updates on your feedback
 - New feedback (admins only)

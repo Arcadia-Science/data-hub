@@ -27,6 +27,86 @@ export const UPLOAD_FAILURE_SUMMARY: Record<UploadFailureReason, string> = {
   unsafe_path: "path outside the watch folder",
 };
 
+// The notification text for files of one run that failed for one reason:
+// "129 files couldn't upload: folder no longer on the instrument PC."
+export function uploadFailedNotificationText(
+  failedCount: number,
+  reason: UploadFailureReason
+): string {
+  const files = failedCount === 1 ? "1 file" : `${failedCount} files`;
+  return `${files} couldn't upload: ${UPLOAD_FAILURE_SUMMARY[reason]}.`;
+}
+
+// Files of one run that failed for the same reason in the same folder, as the
+// run page's banner shows them: one block each.
+export interface UploadFailureGroup {
+  fileIds: number[];
+  folder: string | null;
+  // The latest time the watcher gave up on one of them.
+  lastFailedAt: Date | null;
+  // The reason, as one sentence for the whole group.
+  message: string;
+  reason: UploadFailureReason;
+}
+
+// Groups a run's `upload_failed` files by reason and folder, largest group
+// first. A group whose files all carry the same message shows it (for
+// `upload_error` that includes the last error); otherwise the group gets the
+// reason's general message.
+export function groupUploadFailures(
+  rows: readonly {
+    errorMessage: string | null;
+    id: number;
+    relativePath: string | null;
+    uploadFailedAt: Date | null;
+    uploadFailureReason: UploadFailureReason | null;
+  }[]
+): UploadFailureGroup[] {
+  const groups = new Map<
+    string,
+    UploadFailureGroup & { messages: Set<string | null> }
+  >();
+  for (const row of rows) {
+    if (!row.uploadFailureReason) {
+      continue;
+    }
+    const folder = folderOf(row.relativePath);
+    const key = `${row.uploadFailureReason}\u0000${folder ?? ""}`;
+    let group = groups.get(key);
+    if (!group) {
+      group = {
+        fileIds: [],
+        folder,
+        lastFailedAt: null,
+        message: "",
+        messages: new Set(),
+        reason: row.uploadFailureReason,
+      };
+      groups.set(key, group);
+    }
+    group.fileIds.push(row.id);
+    group.messages.add(row.errorMessage);
+    if (
+      row.uploadFailedAt &&
+      (!group.lastFailedAt || row.uploadFailedAt > group.lastFailedAt)
+    ) {
+      group.lastFailedAt = row.uploadFailedAt;
+    }
+  }
+  return [...groups.values()]
+    .map(({ messages, ...group }) => {
+      const [only] = messages;
+      return {
+        ...group,
+        message:
+          messages.size === 1 && only
+            ? only
+            : uploadFailureMessage(group.reason, group.folder, null),
+      };
+    })
+    .sort((a, b) => b.fileIds.length - a.fileIds.length);
+}
+
 // The full explanation for one file, stored in its `error_message`. `folder`
 // is the file's folder (see `folderOf`), and `detail` is the watcher's last
 // error for `upload_error`.

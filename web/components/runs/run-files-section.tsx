@@ -40,6 +40,7 @@ import {
   REPROCESS_REQUEST_CONCURRENCY,
   settleWithConcurrency,
 } from "@/lib/runs/settle-with-concurrency";
+import { dismissFiles, requestFileUploads } from "@/lib/runs/upload-requests";
 import { runDetailSearchParams } from "@/lib/search-params";
 import { FileBulkActionBar } from "./file-bulk-action-bar";
 import {
@@ -489,17 +490,10 @@ function BulkActionBarHost({
       return;
     }
     track(ids, async () => {
-      const res = await fetch(
-        `/api/v1/instruments/${instrumentId}/runs/${encodeURIComponent(runId)}/request-upload`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ file_ids: ids }),
-        }
-      );
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        toast.error(body?.error?.message ?? "Failed to request uploads");
+      // Batched: a selection can span pages and exceed one request's limit.
+      const result = await requestFileUploads(instrumentId, runId, ids);
+      if (!result.ok) {
+        toast.error(result.message);
         // The badge was read at page load, so a refusal means the page is out
         // of date: refresh it so the buttons and the line match the server.
         router.refresh();
@@ -517,13 +511,7 @@ function BulkActionBarHost({
       return;
     }
     track(ids, async () => {
-      const results = await Promise.allSettled(
-        ids.map((fid) => fetch(`/api/v1/files/${fid}`, { method: "DELETE" }))
-      );
-      const failed = results.filter(
-        (r) =>
-          r.status === "rejected" || (r.status === "fulfilled" && !r.value.ok)
-      ).length;
+      const { failed } = await dismissFiles(ids);
       if (failed > 0) {
         toast.error(`${failed} file(s) failed to dismiss`);
       } else {

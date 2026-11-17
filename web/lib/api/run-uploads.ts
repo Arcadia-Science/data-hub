@@ -21,8 +21,8 @@ import {
   REQUESTABLE_FILE_STATUSES,
 } from "@/lib/runs/file-buckets";
 import { getRunUploadAvailability } from "@/lib/runs/upload-availability";
-
-export const MAX_UPLOAD_FILE_IDS = 100;
+// Shared with the client, which sends larger requests in batches of this size.
+import { MAX_UPLOAD_FILE_IDS } from "@/lib/runs/upload-requests";
 
 // The person to tell if a request fails: the signed-in user, or the person who
 // created the token that made the request. Null when no one is recorded (a

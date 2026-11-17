@@ -1,6 +1,7 @@
-import type { NextRequest } from "next/server";
+import { after, type NextRequest } from "next/server";
 import { authorizeToken } from "@/lib/api/auth";
 import { apiError, NOT_FOUND, VALIDATION_ERROR } from "@/lib/api/errors";
+import { notifyUploadFailed } from "@/lib/api/notifications";
 import { readJsonBody, uploadFailuresBody } from "@/lib/api/openapi";
 import { recordUploadFailures } from "@/lib/api/upload-failures";
 import { isValidUUID } from "@/lib/api/validators";
@@ -53,6 +54,19 @@ export async function POST(
     { id: watcher.id, instrumentId: watcher.instrumentId },
     body.files
   );
+
+  // Tell the people who requested the files, after the response. Only files
+  // this call moved count, so a retried report notifies nobody twice.
+  if (result.groups.length > 0) {
+    const origin = new URL(request.url).origin;
+    after(() =>
+      notifyUploadFailed({
+        groups: result.groups,
+        instrumentId: watcher.instrumentId,
+        origin,
+      })
+    );
+  }
 
   return Response.json({ failed: result.failed, skipped: result.skipped });
 }

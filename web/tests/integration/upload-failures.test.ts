@@ -1,5 +1,6 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { getInstrumentSummaries } from "@/lib/api/dashboard";
 import {
   uploadFailuresResponse,
   watcherUploadQueueResponse,
@@ -8,6 +9,7 @@ import {
   files,
   instrumentRuns,
   instruments,
+  notifications,
   watcherEvents,
 } from "@/lib/db/schema";
 import {
@@ -525,6 +527,113 @@ describe("T3 and T4: clearing the mark", () => {
     expect((await fileRow(marked.ids["b.nd2"])).autoUploadExpectedAt).toBe(
       null
     );
+  });
+});
+
+describe("after a failure is recorded", () => {
+  async function requesterNotifications(runId: string) {
+    const [run] = await getTestDb()
+      .select({ id: instrumentRuns.id })
+      .from(instrumentRuns)
+      .where(
+        and(
+          eq(instrumentRuns.instrumentId, instrumentId),
+          eq(instrumentRuns.runId, runId)
+        )
+      );
+    return getTestDb()
+      .select()
+      .from(notifications)
+      .where(
+        and(
+          eq(notifications.userId, userId),
+          eq(notifications.runId, run.id),
+          eq(notifications.type, "upload_failed")
+        )
+      );
+  }
+
+  // The route notifies after it responds, so wait for the row.
+  async function waitForNotification(runId: string) {
+    const deadline = Date.now() + 3000;
+    while (Date.now() < deadline) {
+      if ((await requesterNotifications(runId)).length > 0) {
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    throw new Error("Timed out waiting for the upload_failed notification");
+  }
+
+  it("notifies the requester once per run and reason, and nobody for an auto-mode file", async () => {
+    const requested = await reportRun(["a.nd2", "b.nd2"]);
+    await requestUpload(requested.runId, Object.values(requested.ids));
+    const auto = await reportRun(["c.nd2"], { willUpload: true });
+    const body = {
+      files: [
+        ...(await queue())
+          .filter((f) => f.run_id === requested.runId)
+          .map((f) => ({
+            file_id: f.id,
+            requested_at: f.upload_requested_at,
+            reason: "folder_missing",
+          })),
+        {
+          run_id: auto.runId,
+          relative_path: `${auto.runId}/c.nd2`,
+          reason: "upload_error",
+        },
+      ],
+    };
+    expect(await (await reportFailures(body)).json()).toEqual({
+      failed: 3,
+      skipped: 0,
+    });
+
+    await waitForNotification(requested.runId);
+    const rows = await requesterNotifications(requested.runId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].body).toBe(
+      "2 files couldn't upload: folder no longer on the instrument PC."
+    );
+    // Both groups are notified in one insert, so the auto-mode run's row
+    // would be here by now.
+    expect(await requesterNotifications(auto.runId)).toHaveLength(0);
+
+    // A retried report moves nothing, so it notifies nobody.
+    expect(await (await reportFailures(body)).json()).toEqual({
+      failed: 0,
+      skipped: 3,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(await requesterNotifications(requested.runId)).toHaveLength(1);
+  });
+
+  it("counts the run among its instrument's runs needing attention", async () => {
+    const attention = async () =>
+      (await getInstrumentSummaries()).find((row) => row.id === instrumentId)
+        ?.runsNeedingAttention;
+    const before = await attention();
+
+    const { runId, ids } = await reportRun(["a.nd2"]);
+    await requestUpload(runId, [ids["a.nd2"]]);
+    const [item] = (await queue()).filter((f) => f.run_id === runId);
+    await reportFailures({
+      files: [
+        {
+          file_id: item.id,
+          requested_at: item.upload_requested_at,
+          reason: "file_missing",
+        },
+      ],
+    });
+
+    expect(await attention()).toEqual({
+      failed: before?.failed,
+      stalled: before?.stalled,
+      uploadFailed: (before?.uploadFailed ?? 0) + 1,
+      total: (before?.total ?? 0) + 1,
+    });
   });
 });
 

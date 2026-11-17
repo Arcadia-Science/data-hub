@@ -4,6 +4,7 @@ import { DeleteRunDialog } from "@/components/runs/delete-run-dialog";
 import { RestoreRunButton } from "@/components/runs/restore-run-button";
 import { RunDetail, type RunDetailProps } from "@/components/runs/run-detail";
 import { RunOfflineNotice } from "@/components/runs/run-offline-notice";
+import { UploadFailedNotice } from "@/components/runs/upload-failed-notice";
 import { canCancelQueued } from "@/lib/runs/cancel-queued";
 
 type RunDetailLayoutProps = Pick<
@@ -83,6 +84,13 @@ export function RunDetailLayout({
             not worth a warning. */}
         {isDeleted ? null : (
           <RunOfflineNotice waitingFileCount={fileStats.pending} />
+        )}
+        {isDeleted ? null : (
+          <UploadFailedNotice
+            groups={fileStats.uploadFailureGroups}
+            instrumentId={instrumentId}
+            runId={runId}
+          />
         )}
         <RunDetail.Files
           files={files}

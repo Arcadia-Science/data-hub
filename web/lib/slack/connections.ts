@@ -86,6 +86,7 @@ async function setAllSlackPrefs(
       slackGenericEnabled: enabled,
       slackFeedbackSubmittedEnabled: enabled,
       slackFeedbackUpdatedEnabled: enabled,
+      slackUploadFailedEnabled: enabled,
     })
     .onConflictDoUpdate({
       target: notificationPreferences.userId,
@@ -96,6 +97,7 @@ async function setAllSlackPrefs(
         slackGenericEnabled: enabled,
         slackFeedbackSubmittedEnabled: enabled,
         slackFeedbackUpdatedEnabled: enabled,
+        slackUploadFailedEnabled: enabled,
         updatedAt: new Date(),
       },
     });

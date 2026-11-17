@@ -12,7 +12,7 @@ After instruments are uploading, the web app is where you find runs and act on t
 
 The sidebar and the home page are the two starting points for daily work.
 
-**Home** lists recent runs across instruments, most recent first, with counts for today and this week at the top. Filter by date range, who ran it, and instrument-specific metadata when it’s available, then page through results. Below the runs, Home shows up to four of today’s comments; use the date picker to see comments from a different range.
+**Home** lists recent runs across instruments, most recent first, with counts for today and this week at the top. The **Runs needing attention** card beside them counts runs whose upload failed, whose processing failed, or whose processing stalled, of any age. When it isn’t zero, choose it to list those runs. Filter by date range, who ran it, and instrument-specific metadata when it’s available, then page through results. Below the runs, Home shows up to four of today’s comments; use the date picker to see comments from a different range.
 
 ![Home dashboard with instrument status and recent runs](/images/home.webp)
 
@@ -20,7 +20,7 @@ The sidebar and the home page are the two starting points for daily work.
 
 ![Plate reader instrument page with the runs table and column filters](/images/plate-reader-runs-table.webp)
 
-**My runs** lists runs you’ve claimed, so you can return to your own work without re-filtering the full dashboard.
+**My runs** lists runs you’ve claimed, so you can return to your own work without re-filtering the full dashboard. Its **Runs needing attention** card counts only your runs.
 
 ![My runs page listing runs attributed to the signed-in user](/images/my-runs.webp)
 
@@ -33,7 +33,7 @@ The sidebar and the home page are the two starting points for daily work.
 Home and the instrument pages share the same four controls:
 
 - **Search runs**: filters the list by run name as you type
-- **Date range**: presets from Today through Last 4 weeks, plus a custom range
+- **Date range**: presets from Today through Last 4 weeks, plus a custom range. Home shows today’s runs until you pick another range, and **All time** shows every run
 - **Add filter**: filter by run status, or turn on **Show deleted runs**
 - **Column headers**: sort by **Run Started**, **Last Updated**, size, who ran it, or any instrument-specific column
 
@@ -272,7 +272,9 @@ The watcher gives up on a file when it can’t send it. The file then reads **Up
 
 For a requested file, the watcher checks three times, about a minute apart, before it gives up. On an instrument that uploads automatically, it gives up as soon as an upload fails, and it tries again the next time it starts.
 
-Once the cause is fixed on the PC, choose **Upload** on the file, or **Upload all**, to try again. If the file is gone for good, choose **Dismiss**. The run reads **Upload failed** until every such file is uploaded or dismissed, and the watcher’s activity shows one “Couldn’t upload” entry per run and reason.
+A red notice above the **Files** section lists the files that couldn’t upload, one block per reason and folder. Each block says why and when the watcher gave up. Once the cause is fixed on the PC, choose **Upload again** in the block, or **Upload** on a single file, to try again. If the files are gone for good, choose **Dismiss these files**. The run reads **Upload failed** until every such file is uploaded or dismissed, and the watcher’s activity shows one “Couldn’t upload” entry per run and reason.
+
+Whoever requested the files gets one notification per run and reason, in the app and, if they connected Slack, as a direct message. See [Configure notifications](/docs/configure-notifications).
 
 Marking files **Upload failed** needs watcher 1.4.5 or later. An older watcher puts the file back to **Not uploaded** instead, without a reason; see [Roll out watcher releases](/docs/watcher-releases#what-each-version-adds).
 

@@ -1138,6 +1138,7 @@ export const notificationTypeEnum = pgEnum("notification_type", [
   "generic",
   "feedback_submitted",
   "feedback_updated",
+  "upload_failed",
 ]);
 
 // One row per user holding the global notification toggles. Created on
@@ -1198,6 +1199,14 @@ export const notificationPreferences = pgTable("notification_preferences", {
     .notNull()
     .default(false),
   slackFeedbackUpdatedEnabled: boolean("slack_feedback_updated_enabled")
+    .notNull()
+    .default(false),
+  // Files the user requested couldn't upload (the watcher gave up on them).
+  // In-app defaults on. Slack defaults off like the other Slack toggles until
+  // the user connects Slack; migration 0068 turned it on for users who had
+  // already connected.
+  uploadFailedEnabled: boolean("upload_failed_enabled").notNull().default(true),
+  slackUploadFailedEnabled: boolean("slack_upload_failed_enabled")
     .notNull()
     .default(false),
   updatedAt: timestamp("updated_at", {
@@ -1264,7 +1273,8 @@ export const notifications = pgTable(
     // hard-deleted runs don't leave orphan rows in the popover. (Runs are
     // soft-deleted in practice, but the FK protects against accidental
     // hard delete in tests / future cleanups.) NULL for anchor-less types:
-    // `generic`, `feedback_submitted`, and `feedback_updated`.
+    // `generic`, `feedback_submitted`, and `feedback_updated`. Set for
+    // `upload_failed`: the run whose files couldn't upload.
     runId: uuid("run_id").references(() => instrumentRuns.id, {
       onDelete: "cascade",
     }),
@@ -1276,9 +1286,9 @@ export const notifications = pgTable(
     commentId: uuid("comment_id").references(() => runComments.id, {
       onDelete: "cascade",
     }),
-    // Caller-supplied message text for `generic` and feedback rows; NULL
-    // for every other type, whose copy is derived from type + actor at
-    // render time.
+    // Caller-supplied message text for `generic` and feedback rows, and the
+    // count and reason for `upload_failed`; NULL for every other type, whose
+    // copy is derived from type + actor at render time.
     body: text("body"),
     // The user whose action produced the notification. `set null` so a
     // deleted user doesn't take the recipient's history with them.

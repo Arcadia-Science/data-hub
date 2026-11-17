@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { ReactNode } from "react";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -8,12 +9,18 @@ import type {
   TopAttributor,
 } from "@/lib/api/dashboard";
 import { firstName } from "@/lib/display-name";
+import { runsNeedingAttentionHref } from "@/lib/runs/attention-href";
+import {
+  NEEDS_ATTENTION_RUN_STATUSES,
+  RUN_STATUS_META,
+  type RunsNeedingAttention,
+} from "@/lib/runs/run-status";
 import { cn, formatBytes } from "@/lib/utils";
 
 const DASHBOARD_STAT_LABELS = [
   "Runs today",
   "Runs this week",
-  "Pending uploads",
+  "Runs needing attention",
   "Most runs this week",
 ] as const;
 
@@ -21,7 +28,7 @@ const MY_RUNS_STAT_LABELS = [
   "Runs today",
   "Runs this week",
   "Comments on your runs",
-  "Pending uploads",
+  "Runs needing attention",
 ] as const;
 
 const numberFormatter = new Intl.NumberFormat("en-US");
@@ -35,14 +42,23 @@ function StatCard({
   value,
   subline,
   valueClassName,
+  href,
 }: {
   label: string;
   value: ReactNode;
   subline: ReactNode;
   valueClassName?: string;
+  // Makes the whole card a link, for a card that counts things to look at.
+  href?: string;
 }) {
-  return (
-    <Card className="gap-2 py-4" size="sm">
+  const card = (
+    <Card
+      className={cn(
+        "gap-2 py-4",
+        href && "h-full transition-colors group-hover:bg-muted/50"
+      )}
+      size="sm"
+    >
       <div className="px-4">
         <p className="font-medium text-muted-foreground text-xs">{label}</p>
         <p
@@ -58,6 +74,57 @@ function StatCard({
         <p className="mt-1.5 text-muted-foreground text-xs">{subline}</p>
       </div>
     </Card>
+  );
+  if (!href) {
+    return card;
+  }
+  return (
+    <Link
+      className="group rounded-xl outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+      href={href}
+    >
+      {card}
+    </Link>
+  );
+}
+
+const ATTENTION_COUNT_FIELD = {
+  upload_failed: "uploadFailed",
+  failed: "failed",
+  stalled: "stalled",
+} as const satisfies Record<
+  (typeof NEEDS_ATTENTION_RUN_STATUSES)[number],
+  keyof RunsNeedingAttention
+>;
+
+// "Runs needing attention": failed uploads, failed processing and stalled
+// processing, each a run status someone has to act on. Links to the runs list
+// filtered to those statuses while there are any.
+function RunsNeedingAttentionCard({
+  counts,
+  href,
+  label,
+}: {
+  counts: RunsNeedingAttention;
+  href: string;
+  label: string;
+}) {
+  const parts = NEEDS_ATTENTION_RUN_STATUSES.flatMap((status) => {
+    const count = counts[ATTENTION_COUNT_FIELD[status]];
+    return count > 0
+      ? [
+          `${formatNumber(count)} ${RUN_STATUS_META[status].label.toLowerCase()}`,
+        ]
+      : [];
+  });
+  return (
+    <StatCard
+      href={counts.total > 0 ? href : undefined}
+      label={label}
+      subline={parts.length > 0 ? parts.join(" · ") : "Nothing needs attention"}
+      value={formatNumber(counts.total)}
+      valueClassName={counts.total > 0 ? "text-destructive" : undefined}
+    />
   );
 }
 
@@ -110,11 +177,7 @@ export function DashboardStatsCards({
   stats: DashboardStats;
   topAttributor: TopAttributor | null;
 }) {
-  const { runsToday, pendingUploads, runsThisWeek } = stats;
-
-  // Highlight pending uploads in red once a backlog forms — a non-zero queue
-  // is a routine signal of attention, not an error.
-  const pendingHasBacklog = pendingUploads.count > 0;
+  const { runsToday, runsNeedingAttention, runsThisWeek } = stats;
 
   return (
     <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
@@ -138,15 +201,10 @@ export function DashboardStatsCards({
         }
         value={formatNumber(runsThisWeek.total)}
       />
-      <StatCard
+      <RunsNeedingAttentionCard
+        counts={runsNeedingAttention}
+        href={runsNeedingAttentionHref()}
         label={DASHBOARD_STAT_LABELS[2]}
-        subline={
-          pendingUploads.count > 0
-            ? `${formatBytes(pendingUploads.totalBytes)} queued`
-            : "Upload queue is clear"
-        }
-        value={formatNumber(pendingUploads.count)}
-        valueClassName={pendingHasBacklog ? "text-destructive" : undefined}
       />
       <StatCard
         label={DASHBOARD_STAT_LABELS[3]}
@@ -181,13 +239,15 @@ export function MyRunsStatsCards({
   // Only the comments card is possessive; the page passes the third-person form
   // ("Comments on Nadia's runs") when viewing another member.
   commentsLabel = MY_RUNS_STAT_LABELS[2],
+  userId,
 }: {
   stats: MyRunsStats;
   commentsLabel?: string;
+  // Whose runs these are, for the "Runs needing attention" link.
+  userId: string;
 }) {
-  const { runsToday, runsThisWeek, commentsThisWeek, pendingUploads } = stats;
-
-  const pendingHasBacklog = pendingUploads.count > 0;
+  const { runsToday, runsThisWeek, commentsThisWeek, runsNeedingAttention } =
+    stats;
 
   return (
     <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
@@ -216,15 +276,10 @@ export function MyRunsStatsCards({
         subline={commentsThisWeek.count > 0 ? "this week" : "None this week"}
         value={formatNumber(commentsThisWeek.count)}
       />
-      <StatCard
+      <RunsNeedingAttentionCard
+        counts={runsNeedingAttention}
+        href={runsNeedingAttentionHref(userId)}
         label={MY_RUNS_STAT_LABELS[3]}
-        subline={
-          pendingUploads.count > 0
-            ? `${formatBytes(pendingUploads.totalBytes)} queued`
-            : "Upload queue is clear"
-        }
-        value={formatNumber(pendingUploads.count)}
-        valueClassName={pendingHasBacklog ? "text-destructive" : undefined}
       />
     </div>
   );

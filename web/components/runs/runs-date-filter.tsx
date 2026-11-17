@@ -206,6 +206,7 @@ export function RunsDateFilter({
   onChange,
   align = "end",
   defaultPreset,
+  allTimeFrom,
 }: {
   value: DateRange;
   onChange: (next: DateRange) => void;
@@ -217,6 +218,11 @@ export function RunsDateFilter({
    * the filter would not actually show all runs.
    */
   defaultPreset?: PresetId;
+  /**
+   * With `defaultPreset`, the `from` value that means "no lower bound". When
+   * set, the popover offers "All time" and writes this value for it.
+   */
+  allTimeFrom?: string;
 }) {
   const tz = useViewerTimeZone();
   const [open, setOpen] = useState(false);
@@ -225,17 +231,23 @@ export function RunsDateFilter({
   // preset the user last clicked so the popover highlight matches intent.
   const [pinnedPreset, setPinnedPreset] = useState<PresetId | null>(null);
 
-  const isEmpty = value.from === null && value.to === null;
+  const isAllTimeValue =
+    allTimeFrom !== undefined && value.from === allTimeFrom;
+  // The range as dates, with the "all time" value read as no bounds.
+  const range: DateRange = isAllTimeValue ? { from: null, to: null } : value;
+  const isEmpty = range.from === null && range.to === null;
   const pinMatches =
     pinnedPreset !== null &&
     rangesEqual(value, rangeForPreset(pinnedPreset, tz));
-  const resolved = resolveActivePreset(value, tz);
+  const resolved = resolveActivePreset(range, tz);
   const activePreset = pinMatches
     ? pinnedPreset
-    : (resolved ?? (isEmpty && defaultPreset ? defaultPreset : null));
-  const label = resolveLabel(value, activePreset, tz, defaultPreset);
-  const isCustom =
-    activePreset === null && (value.from !== null || value.to !== null);
+    : (resolved ??
+      (isEmpty && defaultPreset && !isAllTimeValue ? defaultPreset : null));
+  const label = isAllTimeValue
+    ? "All time"
+    : resolveLabel(range, activePreset, tz, defaultPreset);
+  const isCustom = activePreset === null && !isEmpty;
 
   function openChange(next: boolean) {
     setOpen(next);
@@ -251,9 +263,9 @@ export function RunsDateFilter({
     setOpen(false);
   }
 
-  function clearRange() {
+  function selectAllTime() {
     setPinnedPreset(null);
-    onChange({ from: null, to: null });
+    onChange({ from: allTimeFrom ?? null, to: null });
     setOpen(false);
   }
 
@@ -292,14 +304,14 @@ export function RunsDateFilter({
           <PresetList
             activePreset={activePreset}
             isCustom={isCustom}
-            onClear={clearRange}
+            onClear={selectAllTime}
             onOpenCustom={() => setView("custom")}
             onSelectPreset={applyPreset}
-            showAllTime={!defaultPreset}
+            showAllTime={!defaultPreset || allTimeFrom !== undefined}
           />
         ) : (
           <CalendarRangeView
-            initial={value}
+            initial={range}
             onApply={applyCustom}
             onCancel={() => setView("presets")}
           />
