@@ -2084,7 +2084,7 @@
       "patch": {
         "operationId": "updateInstrument",
         "summary": "Update an instrument",
-        "description": "Requires scope `instruments:write`.",
+        "description": "Requires scope `instruments:write`. A browser session must belong to an admin. A token that registered a watcher gets 403, even for its own instrument.",
         "tags": [
           "Instruments"
         ],
@@ -2818,7 +2818,7 @@
       "post": {
         "operationId": "createInstrumentRun",
         "summary": "Create an instrument run",
-        "description": "Requires scope `runs:create`. PAT only; browser sessions are rejected. Returns 200 with the existing run when it already exists. Returns 409 (`details.reason: run_deleted`) when the run exists and was deleted and the body has `source: \"watcher\"`, an `acquired_at`, or a non-empty `detected_files`. The request then attaches no files and changes nothing. A body with only `run_id` and `source: \"lambda\"` still gets 200.",
+        "description": "Requires scope `runs:create`. PAT only; browser sessions are rejected. Returns 200 with the existing run when it already exists. Returns 409 (`details.reason: run_deleted`) when the run exists and was deleted and the body has `source: \"watcher\"`, an `acquired_at`, or a non-empty `detected_files`. The request then attaches no files and changes nothing. A body with only `run_id` and `source: \"lambda\"` still gets 200. A token that registered a watcher may act only on instruments whose active watcher it registered, and gets 403 for any other.",
         "tags": [
           "Runs"
         ],
@@ -3079,7 +3079,7 @@
       "patch": {
         "operationId": "updateInstrumentRun",
         "summary": "Update a run",
-        "description": "Requires scope `runs:update`. PAT only; browser sessions are rejected. Returns 409 (`details.reason: run_deleted`) when the run was deleted. Restore it first.",
+        "description": "Requires scope `runs:update`. PAT only; browser sessions are rejected. Returns 409 (`details.reason: run_deleted`) when the run was deleted. Restore it first. A token that registered a watcher may act only on instruments whose active watcher it registered, and gets 403 for any other.",
         "tags": [
           "Runs"
         ],
@@ -3227,7 +3227,7 @@
       "delete": {
         "operationId": "deleteInstrumentRun",
         "summary": "Soft-delete a run",
-        "description": "Requires scope `runs:delete`. Also cancels the uploads that were requested for the run's files: they go back to `detected` and leave the watcher's upload queue. Restoring the run doesn't bring the requests back.",
+        "description": "Requires scope `runs:delete`. Also cancels the uploads that were requested for the run's files: they go back to `detected` and leave the watcher's upload queue. Restoring the run doesn't bring the requests back. A token that registered a watcher may act only on instruments whose active watcher it registered, and gets 403 for any other.",
         "tags": [
           "Runs"
         ],
@@ -3361,7 +3361,7 @@
       "post": {
         "operationId": "restoreInstrumentRun",
         "summary": "Restore a run",
-        "description": "Requires scope `runs:delete`. Doesn't bring back the upload requests that deleting the run cancelled. Request the uploads again.",
+        "description": "Requires scope `runs:delete`. Doesn't bring back the upload requests that deleting the run cancelled. Request the uploads again. A token that registered a watcher may act only on instruments whose active watcher it registered, and gets 403 for any other.",
         "tags": [
           "Runs"
         ],
@@ -3489,7 +3489,7 @@
       "post": {
         "operationId": "reprocessInstrumentRun",
         "summary": "Reprocess a run",
-        "description": "Requires scope `runs:reprocess`. Queues every `uploaded`, `failed`, `completed`, or stalled `processing` raw file on the run for reprocessing. Each file starts as soon as a processing slot is free (at most 10 raw files process at once by default), and a file that does not start right away waits as `queued`. `files_queued` counts every file accepted, whether it started or is waiting. Processed artifacts are skipped. The instrument must have a Lambda processor.",
+        "description": "Requires scope `runs:reprocess`. Queues every `uploaded`, `failed`, `completed`, or stalled `processing` raw file on the run for reprocessing. Each file starts as soon as a processing slot is free (at most 10 raw files process at once by default), and a file that does not start right away waits as `queued`. `files_queued` counts every file accepted, whether it started or is waiting. Processed artifacts are skipped. The instrument must have a Lambda processor. A token that registered a watcher may act only on instruments whose active watcher it registered, and gets 403 for any other.",
         "tags": [
           "Runs"
         ],
@@ -3608,7 +3608,7 @@
       "post": {
         "operationId": "cancelQueuedInstrumentRunFiles",
         "summary": "Cancel a run's queued files",
-        "description": "Requires scope `runs:reprocess`. Takes every `queued` file of the run out of the reprocessing queue. Each one becomes `failed` with a message that says the reprocess was cancelled, and can be reprocessed again. Files that have already started are not affected. Works on a soft-deleted run too. `files_cancelled` is 0 when no file was queued.",
+        "description": "Requires scope `runs:reprocess`. Takes every `queued` file of the run out of the reprocessing queue. Each one becomes `failed` with a message that says the reprocess was cancelled, and can be reprocessed again. Files that have already started are not affected. Works on a soft-deleted run too. `files_cancelled` is 0 when no file was queued. A token that registered a watcher may act only on instruments whose active watcher it registered, and gets 403 for any other.",
         "tags": [
           "Runs"
         ],
@@ -4066,7 +4066,7 @@
       "post": {
         "operationId": "requestRunUpload",
         "summary": "Queue selected files for upload",
-        "description": "Requires scope `runs:upload`.",
+        "description": "Requires scope `runs:upload`. A token that registered a watcher may act only on instruments whose active watcher it registered, and gets 403 for any other.",
         "tags": [
           "Runs"
         ],
@@ -4235,7 +4235,7 @@
       "post": {
         "operationId": "requestRunUploadAll",
         "summary": "Queue all files for upload",
-        "description": "Requires scope `runs:upload`.",
+        "description": "Requires scope `runs:upload`. A token that registered a watcher may act only on instruments whose active watcher it registered, and gets 403 for any other.",
         "tags": [
           "Runs"
         ],
@@ -4350,7 +4350,7 @@
       "post": {
         "operationId": "requestRunUploadUrl",
         "summary": "Request a presigned upload URL",
-        "description": "Requires scope `runs:upload`. PAT only; browser sessions are rejected. Watchers at 1.1.0 or newer send `relative_path` and `X-Data-Hub-Watcher-Version`. A file whose name is already used by a different folder is stored as `<stem>~<folder hash>.<ext>`, and the returned `s3_key` uses that stored name. Older watchers are looked up by filename only. Watchers at 1.2.0 or newer receive a multipart upload for files of 100 MB or more. Older watchers are refused when the file is over 5 GB. Returns 409 (`details.reason: run_deleted`) when the run was deleted.",
+        "description": "Requires scope `runs:upload`. PAT only; browser sessions are rejected. Watchers at 1.1.0 or newer send `relative_path` and `X-Data-Hub-Watcher-Version`. A file whose name is already used by a different folder is stored as `<stem>~<folder hash>.<ext>`, and the returned `s3_key` uses that stored name. Older watchers are looked up by filename only. Watchers at 1.2.0 or newer receive a multipart upload for files of 100 MB or more. Older watchers are refused when the file is over 5 GB. Returns 409 (`details.reason: run_deleted`) when the run was deleted. A token that registered a watcher may act only on instruments whose active watcher it registered, and gets 403 for any other.",
         "tags": [
           "Runs"
         ],
@@ -4589,7 +4589,7 @@
       "post": {
         "operationId": "createRunComment",
         "summary": "Create a run comment",
-        "description": "Requires scope `runs:comment`.",
+        "description": "Requires scope `runs:comment`. A token that registered a watcher may act only on instruments whose active watcher it registered, and gets 403 for any other.",
         "tags": [
           "Runs"
         ],
@@ -4707,7 +4707,7 @@
       "patch": {
         "operationId": "updateRunComment",
         "summary": "Update a run comment",
-        "description": "Requires scope `runs:comment`.",
+        "description": "Requires scope `runs:comment`. A token that registered a watcher may act only on instruments whose active watcher it registered, and gets 403 for any other.",
         "tags": [
           "Runs"
         ],
@@ -4833,7 +4833,7 @@
       "delete": {
         "operationId": "deleteRunComment",
         "summary": "Delete a run comment",
-        "description": "Requires scope `runs:comment`.",
+        "description": "Requires scope `runs:comment`. A token that registered a watcher may act only on instruments whose active watcher it registered, and gets 403 for any other.",
         "tags": [
           "Runs"
         ],
@@ -5065,7 +5065,7 @@
       "post": {
         "operationId": "createRunNotebookLink",
         "summary": "Add a lab notebook link to a run",
-        "description": "Requires scope `runs:link`. Returns 409 when the run is deleted, already links to the same page (`details.link_id` names that link), or has the most links allowed.",
+        "description": "Requires scope `runs:link`. Returns 409 when the run is deleted, already links to the same page (`details.link_id` names that link), or has the most links allowed. A token that registered a watcher may act only on instruments whose active watcher it registered, and gets 403 for any other.",
         "tags": [
           "Runs"
         ],
@@ -5191,7 +5191,7 @@
       "patch": {
         "operationId": "updateRunNotebookLink",
         "summary": "Edit a lab notebook link",
-        "description": "Requires scope `runs:link`. Anyone with the scope can edit any link.",
+        "description": "Requires scope `runs:link`. Anyone with the scope can edit any link. A token that registered a watcher may act only on instruments whose active watcher it registered, and gets 403 for any other.",
         "tags": [
           "Runs"
         ],
@@ -5322,7 +5322,7 @@
       "delete": {
         "operationId": "deleteRunNotebookLink",
         "summary": "Remove a lab notebook link",
-        "description": "Requires scope `runs:link`. The link is deleted for good. Removing it again returns 404.",
+        "description": "Requires scope `runs:link`. The link is deleted for good. Removing it again returns 404. A token that registered a watcher may act only on instruments whose active watcher it registered, and gets 403 for any other.",
         "tags": [
           "Runs"
         ],
@@ -5447,7 +5447,7 @@
       "post": {
         "operationId": "bulkAddRunNotebookLink",
         "summary": "Add a lab notebook link to many runs",
-        "description": "Requires scope `runs:link`. Reports an outcome for each run instead of failing the whole request.",
+        "description": "Requires scope `runs:link`. Reports an outcome for each run instead of failing the whole request. A token that registered a watcher may act only on instruments whose active watcher it registered, and gets 403 for any other.",
         "tags": [
           "Runs"
         ],
@@ -5661,7 +5661,7 @@
       "post": {
         "operationId": "bulkRemoveRunNotebookLinks",
         "summary": "Remove lab notebook links from many runs",
-        "description": "Requires scope `runs:link`. Reports an outcome for each run instead of failing the whole request.",
+        "description": "Requires scope `runs:link`. Reports an outcome for each run instead of failing the whole request. A token that registered a watcher may act only on instruments whose active watcher it registered, and gets 403 for any other.",
         "tags": [
           "Runs"
         ],
@@ -5855,7 +5855,7 @@
       "post": {
         "operationId": "createRunFile",
         "summary": "Create a run file record",
-        "description": "Requires scope `files:create`. PAT only; browser sessions are rejected.",
+        "description": "Requires scope `files:create`. PAT only; browser sessions are rejected. A token that registered a watcher may act only on instruments whose active watcher it registered, and gets 403 for any other.",
         "tags": [
           "Files"
         ],
@@ -6005,7 +6005,7 @@
       "patch": {
         "operationId": "updateFile",
         "summary": "Update a file",
-        "description": "Requires scope `files:update`. PAT only; browser sessions are rejected. A token that registered a watcher may update only the files of an instrument whose active watcher it registered, and gets 403 for any other file.",
+        "description": "Requires scope `files:update`. PAT only; browser sessions are rejected. A token that registered a watcher may act only on instruments whose active watcher it registered, and gets 403 for any other.",
         "tags": [
           "Files"
         ],
@@ -6131,7 +6131,7 @@
       "delete": {
         "operationId": "dismissFile",
         "summary": "Dismiss a file",
-        "description": "Requires scope `files:delete`.",
+        "description": "Requires scope `files:delete`. A token that registered a watcher may act only on instruments whose active watcher it registered, and gets 403 for any other.",
         "tags": [
           "Files"
         ],
@@ -6335,7 +6335,7 @@
       "post": {
         "operationId": "signMultipartPartUrls",
         "summary": "Sign URLs for multipart upload parts",
-        "description": "Requires scope `runs:upload`. PAT only. Returns a few presigned UploadPart URLs. Fetch the next batch when these expire.",
+        "description": "Requires scope `runs:upload`. PAT only. Returns a few presigned UploadPart URLs. Fetch the next batch when these expire. A token that registered a watcher may act only on instruments whose active watcher it registered, and gets 403 for any other.",
         "tags": [
           "Files"
         ],
@@ -6478,7 +6478,7 @@
       "post": {
         "operationId": "completeMultipartUpload",
         "summary": "Finish a multipart upload",
-        "description": "Requires scope `runs:upload`. PAT only. Sends the part list and the whole-file CRC64NVME checksum to S3, then marks the file uploaded.",
+        "description": "Requires scope `runs:upload`. PAT only. Sends the part list and the whole-file CRC64NVME checksum to S3, then marks the file uploaded. A token that registered a watcher may act only on instruments whose active watcher it registered, and gets 403 for any other.",
         "tags": [
           "Files"
         ],
@@ -6627,7 +6627,7 @@
       "delete": {
         "operationId": "abortMultipartUpload",
         "summary": "Cancel a multipart upload",
-        "description": "Requires scope `runs:upload`. PAT only. Cancels the in-progress S3 upload and clears it from the file.",
+        "description": "Requires scope `runs:upload`. PAT only. Cancels the in-progress S3 upload and clears it from the file. A token that registered a watcher may act only on instruments whose active watcher it registered, and gets 403 for any other.",
         "tags": [
           "Files"
         ],
@@ -6748,7 +6748,7 @@
       "post": {
         "operationId": "reprocessFile",
         "summary": "Reprocess a file",
-        "description": "Requires scope `files:reprocess`. Raw files only. Eligible statuses: `uploaded`, `failed`, `completed`, or stalled `processing` (file must have an S3 location). The file's instrument must have a Lambda processor. The file is queued first and starts as soon as a processing slot is free. Returns `processing` when the file started right away. Returns `queued` when it did not, for example because 10 raw files are already processing (the default limit across Data Hub). A file that is already `queued` returns `409`.",
+        "description": "Requires scope `files:reprocess`. Raw files only. Eligible statuses: `uploaded`, `failed`, `completed`, or stalled `processing` (file must have an S3 location). The file's instrument must have a Lambda processor. The file is queued first and starts as soon as a processing slot is free. Returns `processing` when the file started right away. Returns `queued` when it did not, for example because 10 raw files are already processing (the default limit across Data Hub). A file that is already `queued` returns `409`. A token that registered a watcher may act only on instruments whose active watcher it registered, and gets 403 for any other.",
         "tags": [
           "Files"
         ],
@@ -9128,7 +9128,7 @@
       "patch": {
         "operationId": "updateArchiveJob",
         "summary": "Update an archive job",
-        "description": "Requires scope `archive-jobs:write`. PAT only; browser sessions are rejected.",
+        "description": "Requires scope `archive-jobs:write`. PAT only; browser sessions are rejected. A token that registered a watcher may act only on instruments whose active watcher it registered, and gets 403 for any other.",
         "tags": [
           "Archive"
         ],
@@ -9257,7 +9257,7 @@
       "post": {
         "operationId": "dispatchNotifications",
         "summary": "Send a notification to users",
-        "description": "Requires scope `notifications:create`. PAT only; browser sessions are rejected. Posts a free-text `generic` notification to each recipient, optionally anchored to a run. Delivery is per-recipient preference: in-app bell and/or Slack DM. Exact repeats of an unread message are skipped, so retries are safe.",
+        "description": "Requires scope `notifications:create`. PAT only; browser sessions are rejected. Posts a free-text `generic` notification to each recipient, optionally anchored to a run. Delivery is per-recipient preference: in-app bell and/or Slack DM. Exact repeats of an unread message are skipped, so retries are safe. A token that registered a watcher may act only on instruments whose active watcher it registered, and gets 403 for any other.",
         "tags": [
           "Notifications"
         ],

@@ -76,7 +76,7 @@ Because a token isn’t a person, three things need a signed-in person instead: 
 
 The routes that the watcher and the Lambda call work the other way round. They accept only tokens and return `401 Unauthorized` to a browser session, so a signed-in member can’t act as a watcher. These routes cover watcher registration and heartbeats, upload links, file updates, run creation and updates, and instrument creation.
 
-A token that registered a watcher can update only the files of instruments whose current watcher it registered, and gets `403 Forbidden` for any other file. A token whose watchers were all deregistered can't update any file until it registers a watcher again. The Lambda's token registered no watcher, so it can update files on every instrument.
+A token that registered a watcher can change only instruments whose current watcher it registered. It gets `403 Forbidden` if it tries to change another instrument's runs, uploads, files, comments, notebook links or download archives, or to send a notification about another instrument's run. It can't rename, retype, retire or confirm any instrument, its own included, because the watcher never does. A token whose watchers were all deregistered can't change anything until it registers a watcher again. The Lambda's token registered no watcher, so it works on every instrument. These limits cover changes only: a watcher's token can still read whatever its scopes allow.
 
 Tokens keep working when the admin who created them leaves. Revoke a departing person’s tokens yourself; see [When someone leaves](/docs/manage-tokens#when-someone-leaves).
 

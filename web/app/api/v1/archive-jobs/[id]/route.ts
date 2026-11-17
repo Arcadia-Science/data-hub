@@ -4,6 +4,7 @@ import { authorizeToken } from "@/lib/api/auth";
 import { apiError, NOT_FOUND, VALIDATION_ERROR } from "@/lib/api/errors";
 import { patchArchiveJobBody, readJsonBody } from "@/lib/api/openapi";
 import { isValidUUID } from "@/lib/api/validators";
+import { enforceWatcherTokenArchiveJob } from "@/lib/api/watchers";
 import { db } from "@/lib/db";
 import { archiveJobs } from "@/lib/db/schema";
 
@@ -19,7 +20,10 @@ interface RouteContext {
 // Browser sessions carry `*` and must not flip job status or rewrite
 // `archive_bucket` / `archive_key`.
 //
-// Note: any PAT with `archive-jobs:write` can still update a job
+// A token that registered a watcher may update only its own instrument's
+// jobs.
+//
+// Note: any other PAT with `archive-jobs:write` can still update a job
 // (including writing arbitrary `archive_bucket`/`archive_key`). The UI
 // does not trust this row's `status` for download readiness — it polls
 // `/download-archive`, which short-circuits on an S3 HEAD against the
@@ -38,6 +42,11 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
   const { id } = await params;
   if (!isValidUUID(id)) {
     return apiError(400, VALIDATION_ERROR, "Invalid job ID format");
+  }
+
+  const denied = await enforceWatcherTokenArchiveJob(authResult, id);
+  if (denied) {
+    return denied;
   }
 
   const body = await readJsonBody(request, patchArchiveJobBody);

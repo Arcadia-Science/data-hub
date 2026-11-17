@@ -16,6 +16,7 @@ import {
   updateNotebookLink,
 } from "@/lib/api/run-notebook-links";
 import { isValidUUID } from "@/lib/api/validators";
+import { enforceWatcherTokenInstrument } from "@/lib/api/watchers";
 import { blankLabelToNull } from "@/lib/notebook-links/url";
 
 interface RouteContext {
@@ -45,6 +46,10 @@ async function preflight(
   }
 
   const { instrumentId, runId: runIdParam, linkId } = await params;
+  const denied = await enforceWatcherTokenInstrument(authResult, instrumentId);
+  if (denied) {
+    return { kind: "error", response: denied };
+  }
   const runId = readRunIdParam(request.headers, runIdParam);
   const run = await lookupRunByNaturalKey(instrumentId, runId);
   if (!run) {

@@ -17,7 +17,11 @@ import {
   UPLOAD_ARRIVED_RESET,
   UPLOAD_REQUEST_CANCELLED_RESET,
 } from "@/lib/api/upload-state";
-import { enforceWatcherTokenInstrument } from "@/lib/api/watchers";
+import {
+  enforceWatcherTokenFile,
+  enforceWatcherTokenInstrument,
+  NOT_THIS_FILE,
+} from "@/lib/api/watchers";
 import { db } from "@/lib/db";
 import { files, instrumentRuns } from "@/lib/db/schema";
 import { getS3RawDataBucket } from "@/lib/s3";
@@ -126,7 +130,8 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
   // about another instrument's file.
   const denied = await enforceWatcherTokenInstrument(
     authResult,
-    parentRun.instrumentId
+    parentRun.instrumentId,
+    NOT_THIS_FILE
   );
   if (denied) {
     return denied;
@@ -305,6 +310,9 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
 // Soft-delete for dismissing individual detected/upload_requested files from
 // the UI. Files that have already been uploaded to S3 (status "uploaded" or
 // later) cannot be dismissed here — use the run-level DELETE instead.
+//
+// A token that registered a watcher may dismiss only its own instrument's
+// files, like PATCH above.
 // ---------------------------------------------------------------------------
 
 export async function DELETE(request: NextRequest, { params }: RouteContext) {
@@ -317,6 +325,11 @@ export async function DELETE(request: NextRequest, { params }: RouteContext) {
   const numericId = Number.parseInt(fileId, 10);
   if (Number.isNaN(numericId)) {
     return apiError(400, VALIDATION_ERROR, "Invalid file ID");
+  }
+
+  const denied = await enforceWatcherTokenFile(authResult, numericId);
+  if (denied) {
+    return denied;
   }
 
   const result = await dismissFile(numericId);

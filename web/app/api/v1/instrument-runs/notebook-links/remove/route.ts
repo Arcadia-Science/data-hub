@@ -5,6 +5,7 @@ import { apiErrorFromResult } from "@/lib/api/errors";
 import { bulkRemoveNotebookLinksBody, readJsonBody } from "@/lib/api/openapi";
 import { bulkRemoveResultToWire } from "@/lib/api/run-notebook-link-wire";
 import { bulkRemoveNotebookLinks } from "@/lib/api/run-notebook-links";
+import { enforceWatcherTokenInstrument } from "@/lib/api/watchers";
 
 // ---------------------------------------------------------------------------
 // POST /api/v1/instrument-runs/notebook-links/remove
@@ -23,6 +24,16 @@ export async function POST(request: NextRequest) {
   const payload = await readJsonBody(request, bulkRemoveNotebookLinksBody);
   if (payload instanceof Response) {
     return payload;
+  }
+
+  // A watcher's token may change only its own instrument's runs, so one
+  // run on another instrument refuses the whole request.
+  const denied = await enforceWatcherTokenInstrument(
+    authResult,
+    payload.runs.map((run) => run.instrument_id)
+  );
+  if (denied) {
+    return denied;
   }
 
   const result = await bulkRemoveNotebookLinks({

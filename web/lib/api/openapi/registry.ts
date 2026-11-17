@@ -81,3 +81,8 @@ export function errorResponses(): Record<
 }
 
 export const bearerSecurity = [{ bearerAuth: [] as string[] }];
+
+// Appended to the description of every write route that names an
+// instrument, run, file or archive job. See `enforceWatcherTokenInstrument`.
+export const WATCHER_TOKEN_OWN_INSTRUMENT =
+  "A token that registered a watcher may act only on instruments whose active watcher it registered, and gets 403 for any other.";

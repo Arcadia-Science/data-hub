@@ -19,7 +19,7 @@ import {
   actorColumns,
   resolveActor,
 } from "@/lib/api/actor";
-import type { AuthResult, TokenAuthResult } from "@/lib/api/auth";
+import type { AuthResult } from "@/lib/api/auth";
 import {
   apiError,
   FORBIDDEN,
@@ -32,7 +32,9 @@ import { UPLOAD_REQUEST_CANCELLED_RESET } from "@/lib/api/upload-state";
 import {
   decideWatcherBinding,
   isBoundToOtherToken,
-  tokenMayChangeInstrumentFiles,
+  type RegisteredWatcher,
+  tokenMayActOnInstrument,
+  tokenMayEditInstruments,
 } from "@/lib/api/watcher-binding";
 import {
   type ConfigRevisionStatus,
@@ -48,6 +50,7 @@ import {
 } from "@/lib/api/watcher-status";
 import { type DbExecutor, db } from "@/lib/db";
 import {
+  archiveJobs,
   files,
   instrumentRuns,
   instruments,
@@ -206,32 +209,136 @@ export async function enforceWatcherBinding(
   return apiError(403, FORBIDDEN, "Token is not authorized for this watcher");
 }
 
-/**
- * Returns null when this token may change a file on `instrumentId`, or a 403
- * the handler should return. A watcher's token is limited to its own
- * instrument's files, and every other token, such as the Lambda's, is not
- * limited. See `tokenMayChangeInstrumentFiles` for the rule.
- */
-export async function enforceWatcherTokenInstrument(
-  authResult: TokenAuthResult,
-  instrumentId: string
-): Promise<Response | null> {
-  const registeredWatchers = await db
+// Every watcher this token registered, deregistered ones included.
+function watchersRegisteredBy(tokenId: string): Promise<RegisteredWatcher[]> {
+  return db
     .select({
       deletedAt: watchers.deletedAt,
       instrumentId: watchers.instrumentId,
     })
     .from(watchers)
-    .where(eq(watchers.registeredByToken, authResult.tokenId));
+    .where(eq(watchers.registeredByToken, tokenId));
+}
 
-  if (tokenMayChangeInstrumentFiles(registeredWatchers, instrumentId)) {
+const NOT_THIS_INSTRUMENT = "Token is not authorized for this instrument";
+// Also used by `PATCH /files/:id`, which already has the file's run in hand.
+export const NOT_THIS_FILE =
+  "Token is not authorized for this file's instrument";
+
+/**
+ * Returns null when this caller may write to every instrument in
+ * `instrumentIds`, or a 403 the handler should return. A watcher's token may
+ * write only to its own instrument. Sessions and every other token, such as
+ * the Lambda's, are not limited. See `tokenMayActOnInstrument` for the rule.
+ */
+export async function enforceWatcherTokenInstrument(
+  authResult: AuthResult,
+  instrumentIds: string | readonly string[],
+  message = NOT_THIS_INSTRUMENT
+): Promise<Response | null> {
+  if (authResult.authMethod !== "token") {
     return null;
   }
-  return apiError(
-    403,
-    FORBIDDEN,
-    "Token is not authorized for this file's instrument"
+  const registered = await watchersRegisteredBy(authResult.tokenId);
+  const ids =
+    typeof instrumentIds === "string" ? [instrumentIds] : instrumentIds;
+  if (ids.every((id) => tokenMayActOnInstrument(registered, id))) {
+    return null;
+  }
+  return apiError(403, FORBIDDEN, message);
+}
+
+// Shared by the checks that must look up which instrument a file or job
+// belongs to. The lookup runs only for a token that registered a watcher, and
+// a row it can't find passes, so the handler returns its own 404.
+async function enforceWatcherTokenLookup(
+  authResult: AuthResult,
+  findInstrumentId: () => Promise<string | null>,
+  message: string
+): Promise<Response | null> {
+  if (authResult.authMethod !== "token") {
+    return null;
+  }
+  const registered = await watchersRegisteredBy(authResult.tokenId);
+  if (registered.length === 0) {
+    return null;
+  }
+  const instrumentId = await findInstrumentId();
+  if (
+    instrumentId === null ||
+    tokenMayActOnInstrument(registered, instrumentId)
+  ) {
+    return null;
+  }
+  return apiError(403, FORBIDDEN, message);
+}
+
+/**
+ * `enforceWatcherTokenInstrument` for a route with a file ID in its path. It
+ * finds the file's instrument through its run, soft-deleted rows included, so
+ * a refused token learns nothing more about another instrument's file.
+ */
+export function enforceWatcherTokenFile(
+  authResult: AuthResult,
+  fileId: number
+): Promise<Response | null> {
+  return enforceWatcherTokenLookup(
+    authResult,
+    async () => {
+      const [row] = await db
+        .select({ instrumentId: instrumentRuns.instrumentId })
+        .from(files)
+        .innerJoin(instrumentRuns, eq(instrumentRuns.id, files.instrumentRunId))
+        .where(eq(files.id, fileId))
+        .limit(1);
+      return row?.instrumentId ?? null;
+    },
+    NOT_THIS_FILE
   );
+}
+
+/**
+ * `enforceWatcherTokenInstrument` for `PATCH /archive-jobs/:id`. It finds the
+ * job's instrument through the job's run.
+ */
+export function enforceWatcherTokenArchiveJob(
+  authResult: AuthResult,
+  jobId: string
+): Promise<Response | null> {
+  return enforceWatcherTokenLookup(
+    authResult,
+    async () => {
+      const [row] = await db
+        .select({ instrumentId: instrumentRuns.instrumentId })
+        .from(archiveJobs)
+        .innerJoin(
+          instrumentRuns,
+          eq(instrumentRuns.id, archiveJobs.instrumentRunId)
+        )
+        .where(eq(archiveJobs.id, jobId))
+        .limit(1);
+      return row?.instrumentId ?? null;
+    },
+    NOT_THIS_INSTRUMENT
+  );
+}
+
+/**
+ * Returns a 403 when a token that ever registered a watcher tries to rename,
+ * retype, retire or confirm an instrument, and null otherwise. Sessions are
+ * not limited here. See `tokenMayEditInstruments` for the rule.
+ */
+export async function refuseWatcherTokenInstrumentEdit(
+  authResult: AuthResult
+): Promise<Response | null> {
+  if (authResult.authMethod !== "token") {
+    return null;
+  }
+  const registered = await watchersRegisteredBy(authResult.tokenId);
+  if (tokenMayEditInstruments(registered)) {
+    return null;
+  }
+  return apiError(403, FORBIDDEN, "A watcher's token can't change instruments");
 }
 
 /**

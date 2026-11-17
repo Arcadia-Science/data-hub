@@ -11,6 +11,7 @@ import {
   addNotebookLink,
   listNotebookLinksForRun,
 } from "@/lib/api/run-notebook-links";
+import { enforceWatcherTokenInstrument } from "@/lib/api/watchers";
 import { blankLabelToNull } from "@/lib/notebook-links/url";
 
 interface RouteContext {
@@ -63,6 +64,10 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   }
 
   const { instrumentId, runId: runIdParam } = await params;
+  const denied = await enforceWatcherTokenInstrument(authResult, instrumentId);
+  if (denied) {
+    return denied;
+  }
   const runId = readRunIdParam(request.headers, runIdParam);
   const run = await lookupRunByNaturalKey(instrumentId, runId);
   if (!run) {

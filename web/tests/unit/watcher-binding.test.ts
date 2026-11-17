@@ -3,7 +3,8 @@ import type { AuthResult } from "@/lib/api/auth";
 import {
   decideWatcherBinding,
   isBoundToOtherToken,
-  tokenMayChangeInstrumentFiles,
+  tokenMayActOnInstrument,
+  tokenMayEditInstruments,
 } from "@/lib/api/watcher-binding";
 
 // Pure decision coverage for watcher↔PAT binding. Imports the DB-free
@@ -72,42 +73,38 @@ describe("isBoundToOtherToken", () => {
   });
 });
 
-describe("tokenMayChangeInstrumentFiles", () => {
+describe("tokenMayActOnInstrument", () => {
   const active = (instrumentId: string) => ({ deletedAt: null, instrumentId });
   const deregistered = (instrumentId: string) => ({
     deletedAt: new Date("2026-11-01T00:00:00Z"),
     instrumentId,
   });
 
-  it("lets a token that registered no watcher change any instrument's files", () => {
-    expect(tokenMayChangeInstrumentFiles([], "instr-a")).toBe(true);
+  it("lets a token that registered no watcher write to any instrument", () => {
+    expect(tokenMayActOnInstrument([], "instr-a")).toBe(true);
   });
 
-  it("lets a watcher's token change its own instrument's files", () => {
-    expect(tokenMayChangeInstrumentFiles([active("instr-a")], "instr-a")).toBe(
-      true
-    );
+  it("lets a watcher's token write to its own instrument", () => {
+    expect(tokenMayActOnInstrument([active("instr-a")], "instr-a")).toBe(true);
   });
 
-  it("refuses a watcher's token on another instrument's files", () => {
-    expect(tokenMayChangeInstrumentFiles([active("instr-a")], "instr-b")).toBe(
-      false
-    );
+  it("refuses a watcher's token on another instrument", () => {
+    expect(tokenMayActOnInstrument([active("instr-a")], "instr-b")).toBe(false);
   });
 
-  it("lets one token change the files of each instrument it watches", () => {
+  it("lets one token write to each instrument it watches", () => {
     const watchers = [active("instr-a"), active("instr-b")];
-    expect(tokenMayChangeInstrumentFiles(watchers, "instr-a")).toBe(true);
-    expect(tokenMayChangeInstrumentFiles(watchers, "instr-b")).toBe(true);
-    expect(tokenMayChangeInstrumentFiles(watchers, "instr-c")).toBe(false);
+    expect(tokenMayActOnInstrument(watchers, "instr-a")).toBe(true);
+    expect(tokenMayActOnInstrument(watchers, "instr-b")).toBe(true);
+    expect(tokenMayActOnInstrument(watchers, "instr-c")).toBe(false);
   });
 
   it("refuses a token whose watcher on that instrument was deregistered", () => {
+    expect(tokenMayActOnInstrument([deregistered("instr-a")], "instr-a")).toBe(
+      false
+    );
     expect(
-      tokenMayChangeInstrumentFiles([deregistered("instr-a")], "instr-a")
-    ).toBe(false);
-    expect(
-      tokenMayChangeInstrumentFiles(
+      tokenMayActOnInstrument(
         [deregistered("instr-a"), active("instr-b")],
         "instr-a"
       )
@@ -116,10 +113,33 @@ describe("tokenMayChangeInstrumentFiles", () => {
 
   it("allows a token that registered the instrument's watcher again", () => {
     expect(
-      tokenMayChangeInstrumentFiles(
+      tokenMayActOnInstrument(
         [deregistered("instr-a"), active("instr-a")],
         "instr-a"
       )
     ).toBe(true);
+  });
+});
+
+describe("tokenMayEditInstruments", () => {
+  it("lets a token that registered no watcher edit instruments", () => {
+    expect(tokenMayEditInstruments([])).toBe(true);
+  });
+
+  it("refuses a watcher's token, even for its own instrument", () => {
+    expect(
+      tokenMayEditInstruments([{ deletedAt: null, instrumentId: "instr-a" }])
+    ).toBe(false);
+  });
+
+  it("refuses a token whose watchers were all deregistered", () => {
+    expect(
+      tokenMayEditInstruments([
+        {
+          deletedAt: new Date("2026-11-01T00:00:00Z"),
+          instrumentId: "instr-a",
+        },
+      ])
+    ).toBe(false);
   });
 });

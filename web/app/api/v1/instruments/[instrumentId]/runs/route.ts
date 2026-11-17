@@ -22,6 +22,7 @@ import {
   parseRunStatusParam,
 } from "@/lib/api/validators";
 import { watcherClientFrom } from "@/lib/api/watcher-compat";
+import { enforceWatcherTokenInstrument } from "@/lib/api/watchers";
 import { db } from "@/lib/db";
 import { instrumentRuns, instruments, watchers } from "@/lib/db/schema";
 import { sendSlackMessage } from "@/lib/slack";
@@ -44,7 +45,8 @@ interface RouteContext {
 // 409 and changes nothing. The Lambda's { run_id, source } call still gets 200.
 //
 // PAT-only: the dashboard never creates runs. Session `*` would let any
-// member insert fake runs (and fire Slack / in-app notifications).
+// member insert fake runs (and fire Slack / in-app notifications). A token
+// that registered a watcher may create runs only on its own instrument.
 // ---------------------------------------------------------------------------
 
 export async function POST(request: NextRequest, { params }: RouteContext) {
@@ -54,6 +56,10 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   }
 
   const { instrumentId } = await params;
+  const denied = await enforceWatcherTokenInstrument(authResult, instrumentId);
+  if (denied) {
+    return denied;
+  }
 
   const [instrument] = await db
     .select({ id: instruments.id, displayName: instruments.displayName })
