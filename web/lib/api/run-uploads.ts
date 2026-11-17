@@ -8,6 +8,7 @@ import {
   type InstrumentBadgeState,
   instrumentBadgeState,
 } from "@/lib/instruments/connection";
+import { PRE_UPLOAD_FILE_STATUSES } from "@/lib/runs/file-buckets";
 import { getRunUploadAvailability } from "@/lib/runs/upload-availability";
 
 export const MAX_UPLOAD_FILE_IDS = 100;
@@ -259,7 +260,7 @@ export async function requestRunUploads(input: {
         message: `File ${fid} has been deleted`,
       };
     }
-    if (f.status !== "detected" && f.status !== "upload_requested") {
+    if (!PRE_UPLOAD_FILE_STATUSES.includes(f.status)) {
       return {
         ok: false,
         status: 400,

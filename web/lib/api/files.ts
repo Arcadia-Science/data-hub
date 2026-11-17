@@ -2,6 +2,7 @@ import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { touchRuns } from "@/lib/api/touch-runs";
 import { db } from "@/lib/db";
 import { files, instrumentRuns } from "@/lib/db/schema";
+import { PRE_UPLOAD_FILE_STATUSES } from "@/lib/runs/file-buckets";
 
 export type FileRow = typeof files.$inferSelect;
 
@@ -172,12 +173,12 @@ export async function dismissFile(fileId: number): Promise<DismissFileResult> {
     };
   }
 
-  if (file.status !== "detected" && file.status !== "upload_requested") {
+  if (!PRE_UPLOAD_FILE_STATUSES.includes(file.status)) {
     return {
       ok: false,
       status: 409,
       code: "CONFLICT",
-      message: `Cannot dismiss a file in '${file.status}' status — only 'detected' or 'upload_requested' files can be dismissed`,
+      message: `Cannot dismiss a file in '${file.status}' status — only ${PRE_UPLOAD_FILE_STATUSES.map((s) => `'${s}'`).join(" or ")} files can be dismissed`,
     };
   }
 
@@ -192,7 +193,7 @@ export async function dismissFile(fileId: number): Promise<DismissFileResult> {
       and(
         eq(files.id, fileId),
         isNull(files.deletedAt),
-        inArray(files.status, ["detected", "upload_requested"])
+        inArray(files.status, [...PRE_UPLOAD_FILE_STATUSES])
       )
     )
     .returning({ id: files.id });
