@@ -59,7 +59,7 @@ export async function upsertSlackConnection(
       },
     });
 
-  // On (re)connect, opt the user in to all three Slack notification types.
+  // On (re)connect, opt the user in to every Slack notification type.
   await setAllSlackPrefs(userId, true);
 }
 
@@ -87,6 +87,7 @@ async function setAllSlackPrefs(
       slackFeedbackSubmittedEnabled: enabled,
       slackFeedbackUpdatedEnabled: enabled,
       slackUploadFailedEnabled: enabled,
+      slackInstrumentOfflineEnabled: enabled,
     })
     .onConflictDoUpdate({
       target: notificationPreferences.userId,
@@ -98,6 +99,7 @@ async function setAllSlackPrefs(
         slackFeedbackSubmittedEnabled: enabled,
         slackFeedbackUpdatedEnabled: enabled,
         slackUploadFailedEnabled: enabled,
+        slackInstrumentOfflineEnabled: enabled,
         updatedAt: new Date(),
       },
     });

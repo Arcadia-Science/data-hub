@@ -484,6 +484,13 @@
       "when": 1794880205209,
       "tag": "0068_upload_failed_notifications",
       "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1794958287635,
+      "tag": "0069_instrument_offline_notifications",
+      "breakpoints": true
     }
   ]
 }

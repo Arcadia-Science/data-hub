@@ -43,7 +43,7 @@ The badge beside an instrument’s name, in the instruments table, on Home, and 
 | **Online** | The watcher is watching and its last heartbeat is less than 5 minutes old. | New files upload automatically, or when someone requests them if the instrument is in manual upload mode. |
 | **Offline** | Anything else: the instrument has no watcher, or its watcher was deregistered; the watcher is silent, stopped by someone, or can’t find its watch folder. | New files won’t appear right now. A notice on the instrument page says why. |
 
-Only the watcher’s own state decides **Online**, **Restarting**, **Connecting**, and **Offline**. A pending change to the watcher’s settings never changes the badge. An instrument that is **Offline** shows a notice with the reason; see [Check that new files will arrive](/docs/browse-runs#check-files-will-arrive).
+Only the watcher’s own state decides **Online**, **Restarting**, **Connecting**, and **Offline**. A pending change to the watcher’s settings never changes the badge. An instrument that is **Offline** shows a notice with the reason; see [Check that new files will arrive](/docs/browse-runs#check-files-will-arrive). If it stays **Offline** for 30 minutes, people who subscribe to it are notified; see [When an instrument goes offline](/docs/configure-notifications#instrument-offline).
 
 ### Watcher [#watcher]
 

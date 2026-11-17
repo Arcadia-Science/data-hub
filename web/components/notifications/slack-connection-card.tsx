@@ -116,6 +116,7 @@ const slackPreferencesSchema = z.object({
   slackFeedbackUpdatedEnabled: z.boolean(),
   slackFeedbackSubmittedEnabled: z.boolean().optional(),
   slackUploadFailedEnabled: z.boolean(),
+  slackInstrumentOfflineEnabled: z.boolean(),
 });
 
 export type SlackPreferences = z.infer<typeof slackPreferencesSchema>;
@@ -153,6 +154,7 @@ function Connected({
           slack_generic_enabled: value.slackGenericEnabled,
           slack_feedback_updated_enabled: value.slackFeedbackUpdatedEnabled,
           slack_upload_failed_enabled: value.slackUploadFailedEnabled,
+          slack_instrument_offline_enabled: value.slackInstrumentOfflineEnabled,
           ...(value.slackFeedbackSubmittedEnabled === undefined
             ? {}
             : {
@@ -231,6 +233,29 @@ function Connected({
                     </FieldContent>
                     <Switch
                       aria-label="Send new run notifications via Slack DM"
+                      checked={field.state.value}
+                      id={field.name}
+                      name={field.name}
+                      onCheckedChange={field.handleChange}
+                    />
+                  </Field>
+                )}
+              </form.Field>
+
+              <form.Field name="slackInstrumentOfflineEnabled">
+                {(field) => (
+                  <Field orientation="horizontal">
+                    <FieldContent>
+                      <FieldLabel htmlFor={field.name}>
+                        Instruments that go offline
+                      </FieldLabel>
+                      <FieldDescription>
+                        DM me when a subscribed instrument has been offline for
+                        30 minutes, and when it&apos;s back online.
+                      </FieldDescription>
+                    </FieldContent>
+                    <Switch
+                      aria-label="Instruments that go offline, via Slack DM"
                       checked={field.state.value}
                       id={field.name}
                       name={field.name}

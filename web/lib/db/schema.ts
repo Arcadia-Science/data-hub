@@ -1130,7 +1130,10 @@ export const archiveJobs = pgTable(
 // rules so the popover doesn't show the same comment twice. `generic` rows
 // are free-text messages posted by integrations via the dispatch endpoint.
 // `feedback_submitted` and `feedback_updated` are also anchor-less (`runId`
-// NULL). Their `feedbackId` is the Linear issue id.
+// NULL). Their `feedbackId` is the Linear issue id. `instrument_offline` and
+// `instrument_back_online` go to an instrument's subscribers when its badge has
+// been Offline for 30 minutes, and when it's Online again. They carry
+// `instrumentId` instead of a run.
 export const notificationTypeEnum = pgEnum("notification_type", [
   "run_created",
   "comment_attributed",
@@ -1139,6 +1142,8 @@ export const notificationTypeEnum = pgEnum("notification_type", [
   "feedback_submitted",
   "feedback_updated",
   "upload_failed",
+  "instrument_offline",
+  "instrument_back_online",
 ]);
 
 // One row per user holding the global notification toggles. Created on
@@ -1150,10 +1155,10 @@ export const notificationPreferences = pgTable("notification_preferences", {
   userId: text("user_id")
     .primaryKey()
     .references(() => users.id, { onDelete: "cascade" }),
-  // In-app delivery: master mute for run notifications. When true, suppresses
-  // every per-instrument run notification in the bell regardless of the user's
-  // `instrument_notification_subscriptions` rows. Comment notifications are
-  // governed independently by the two booleans below.
+  // In-app delivery: mute for new-run notifications. When true, suppresses
+  // every `run_created` notification in the bell regardless of the user's
+  // `instrument_notification_subscriptions` rows. It doesn't touch offline
+  // alerts, Slack, or comment notifications, which have their own toggles.
   runsAllMuted: boolean("runs_all_muted").notNull().default(false),
   // Receive an in-app notification when someone comments on a run the user is
   // attributed to (via `run_attributions`).
@@ -1209,6 +1214,16 @@ export const notificationPreferences = pgTable("notification_preferences", {
   slackUploadFailedEnabled: boolean("slack_upload_failed_enabled")
     .notNull()
     .default(false),
+  // An instrument the user subscribes to has been Offline for 30 minutes, or
+  // is back Online after that. One pair covers both messages. In-app defaults
+  // on. Slack defaults off until the user connects Slack; migration 0069
+  // turned it on for users who had already connected.
+  instrumentOfflineEnabled: boolean("instrument_offline_enabled")
+    .notNull()
+    .default(true),
+  slackInstrumentOfflineEnabled: boolean("slack_instrument_offline_enabled")
+    .notNull()
+    .default(false),
   updatedAt: timestamp("updated_at", {
     withTimezone: true,
     mode: "date",
@@ -1218,9 +1233,11 @@ export const notificationPreferences = pgTable("notification_preferences", {
     .$onUpdate(() => new Date()),
 });
 
-// Per-(user, instrument) opt-in for `run_created` notifications. Absence of
-// a row is treated as "unsubscribed"; the row is kept around even when
-// disabled so toggling off doesn't lose the user's prior interest history.
+// Per-(user, instrument) opt-in: subscribers hear about the instrument's new
+// runs (`run_created`) and its outages (`instrument_offline`,
+// `instrument_back_online`). Absence of a row is treated as "unsubscribed"; the
+// row is kept around even when disabled so toggling off doesn't lose the
+// user's prior interest history.
 export const instrumentNotificationSubscriptions = pgTable(
   "instrument_notification_subscriptions",
   {
@@ -1253,6 +1270,27 @@ export const instrumentNotificationSubscriptions = pgTable(
   ]
 );
 
+// The offline-alert job's memory of each instrument's current outage, since
+// the badge itself is derived on every read and never stored. No row: the
+// instrument isn't Offline, or the job hasn't seen it yet. A row without
+// `alertedAt`: the job first saw it Offline at `offlineSince` and is waiting
+// out 30 minutes. A row with `alertedAt`: subscribers were told, and the job
+// tells them again when the badge is Online. `stepOfflineAlert` in
+// `lib/instruments/offline-alerts.ts` holds the rules.
+export const instrumentOfflineAlerts = pgTable("instrument_offline_alerts", {
+  instrumentId: text("instrument_id")
+    .primaryKey()
+    .references(() => instruments.id, { onDelete: "cascade" }),
+  offlineSince: timestamp("offline_since", {
+    withTimezone: true,
+    mode: "date",
+  }).notNull(),
+  alertedAt: timestamp("alerted_at", {
+    withTimezone: true,
+    mode: "date",
+  }),
+});
+
 // Delivered in-app notifications, one row per (recipient, event). Read
 // state lives on the row via `readAt` so unread counts are a single
 // indexed query — the `idx_notifications_user_id_unread` partial index
@@ -1273,9 +1311,15 @@ export const notifications = pgTable(
     // hard-deleted runs don't leave orphan rows in the popover. (Runs are
     // soft-deleted in practice, but the FK protects against accidental
     // hard delete in tests / future cleanups.) NULL for anchor-less types:
-    // `generic`, `feedback_submitted`, and `feedback_updated`. Set for
-    // `upload_failed`: the run whose files couldn't upload.
+    // `generic`, `feedback_submitted`, `feedback_updated`, and the two
+    // instrument types. Set for `upload_failed`: the run whose files couldn't
+    // upload.
     runId: uuid("run_id").references(() => instrumentRuns.id, {
+      onDelete: "cascade",
+    }),
+    // The instrument for `instrument_offline` and `instrument_back_online`.
+    // NULL for every other type, which reach their instrument through the run.
+    instrumentId: text("instrument_id").references(() => instruments.id, {
       onDelete: "cascade",
     }),
     // Linear issue id for feedback notifications. Not a foreign key: the
@@ -1286,9 +1330,10 @@ export const notifications = pgTable(
     commentId: uuid("comment_id").references(() => runComments.id, {
       onDelete: "cascade",
     }),
-    // Caller-supplied message text for `generic` and feedback rows, and the
-    // count and reason for `upload_failed`; NULL for every other type, whose
-    // copy is derived from type + actor at render time.
+    // Caller-supplied message text for `generic` and feedback rows, the
+    // count and reason for `upload_failed`, and the sentence for the two
+    // instrument types; NULL for every other type, whose copy is derived from
+    // type + actor at render time.
     body: text("body"),
     // The user whose action produced the notification. `set null` so a
     // deleted user doesn't take the recipient's history with them.
