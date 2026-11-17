@@ -138,9 +138,7 @@ describe("buildUploadFailedBlocks", () => {
   );
 
   it("escapes the instrument name and run ID", () => {
-    expect(text.text).toContain(
-      `*Upload failed on ${ESCAPED_HOSTILE}*`
-    );
+    expect(text.text).toContain(`*Upload failed on ${ESCAPED_HOSTILE}*`);
     expect(text.text).toContain("Run `run`&lt;!channel&gt;`: 2 files");
   });
 
