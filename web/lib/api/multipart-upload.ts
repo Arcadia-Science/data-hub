@@ -1,6 +1,7 @@
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { apiError, CONFLICT, NOT_FOUND } from "@/lib/api/errors";
 import { touchRuns } from "@/lib/api/touch-runs";
+import { UPLOAD_ARRIVED_RESET } from "@/lib/api/upload-state";
 import { db } from "@/lib/db";
 import { files, instrumentRuns } from "@/lib/db/schema";
 import {
@@ -230,6 +231,7 @@ async function markUploaded(file: MultipartFileContext): Promise<boolean> {
   const updated = await db
     .update(files)
     .set({
+      ...UPLOAD_ARRIVED_RESET,
       status: "uploaded",
       uploadedAt: new Date(),
       s3Bucket: file.bucket,

@@ -28,6 +28,7 @@ import {
 } from "@/lib/api/errors";
 import { getInstrumentConnectionState } from "@/lib/api/instrument-watchers";
 import { touchRuns } from "@/lib/api/touch-runs";
+import { UPLOAD_REQUEST_CANCELLED_RESET } from "@/lib/api/upload-state";
 import {
   decideWatcherBinding,
   isBoundToOtherToken,
@@ -205,6 +206,43 @@ export async function enforceWatcherBinding(
 }
 
 /**
+ * Clears the auto-upload mark on an instrument's files while its watcher runs
+ * in manual mode. A manual watcher uploads only what someone requests, so a
+ * `detected` file it once said it would upload reads "Not uploaded" again.
+ * Called on every manual-mode heartbeat, so a switch made from Data Hub or on
+ * the PC is caught within a minute. The partial index on marked rows keeps it
+ * cheap when nothing is marked. Returns how many files lost the mark.
+ */
+export async function clearAutoUploadMarks(
+  instrumentId: string,
+  executor: DbExecutor = db
+): Promise<number> {
+  const cleared = await executor
+    .update(files)
+    .set({ autoUploadExpectedAt: null })
+    .where(
+      and(
+        isNotNull(files.autoUploadExpectedAt),
+        inArray(
+          files.instrumentRunId,
+          db
+            .select({ id: instrumentRuns.id })
+            .from(instrumentRuns)
+            .where(eq(instrumentRuns.instrumentId, instrumentId))
+        )
+      )
+    )
+    .returning({ instrumentRunId: files.instrumentRunId });
+  if (cleared.length > 0) {
+    await touchRuns(
+      cleared.map((row) => row.instrumentRunId),
+      executor
+    );
+  }
+  return cleared.length;
+}
+
+/**
  * Reverts an instrument's pending upload requests back to `detected`,
  * clearing `upload_requested_at` so they drop out of the upload queue.
  *
@@ -213,34 +251,50 @@ export async function enforceWatcherBinding(
  * new one and the watcher would otherwise re-error on each heartbeat poll.
  * It is also called when a run is deleted, with `runUuid` set to that run's
  * internal ID so that only the run's own requests are reverted.
- * Returns the reverted file ids (for event reporting).
+ *
+ * It also clears the auto-upload mark on the same files: the watcher that said
+ * it would upload them can no longer be counted on, so they read "Not
+ * uploaded" rather than "Waiting to upload". If that watcher uploads them
+ * anyway, they simply move on to `uploaded`.
+ *
+ * Returns the reverted request ids (for event reporting). Files that only lost
+ * their mark aren't counted: no request was cancelled.
  */
 export async function revertPendingUploadRequests(
   instrumentId: string,
   executor: DbExecutor = db,
   runUuid?: string
 ): Promise<number[]> {
+  const scope = and(
+    inArray(
+      files.instrumentRunId,
+      db
+        .select({ id: instrumentRuns.id })
+        .from(instrumentRuns)
+        .where(eq(instrumentRuns.instrumentId, instrumentId))
+    ),
+    runUuid === undefined ? undefined : eq(files.instrumentRunId, runUuid),
+    isNull(files.uploadedAt),
+    isNull(files.deletedAt)
+  );
   const reverted = await executor
     .update(files)
-    .set({ status: "detected", uploadRequestedAt: null })
+    .set({ ...UPLOAD_REQUEST_CANCELLED_RESET, status: "detected" })
+    .where(and(scope, eq(files.status, "upload_requested")))
+    .returning({ id: files.id, instrumentRunId: files.instrumentRunId });
+  const unmarked = await executor
+    .update(files)
+    .set({ autoUploadExpectedAt: null })
     .where(
       and(
-        inArray(
-          files.instrumentRunId,
-          db
-            .select({ id: instrumentRuns.id })
-            .from(instrumentRuns)
-            .where(eq(instrumentRuns.instrumentId, instrumentId))
-        ),
-        runUuid === undefined ? undefined : eq(files.instrumentRunId, runUuid),
-        eq(files.status, "upload_requested"),
-        isNull(files.uploadedAt),
-        isNull(files.deletedAt)
+        scope,
+        eq(files.status, "detected"),
+        isNotNull(files.autoUploadExpectedAt)
       )
     )
-    .returning({ id: files.id, instrumentRunId: files.instrumentRunId });
+    .returning({ instrumentRunId: files.instrumentRunId });
   await touchRuns(
-    reverted.map((row) => row.instrumentRunId),
+    [...reverted, ...unmarked].map((row) => row.instrumentRunId),
     executor
   );
   return reverted.map((row) => row.id);

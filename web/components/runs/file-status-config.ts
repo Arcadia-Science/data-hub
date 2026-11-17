@@ -4,7 +4,9 @@ import {
   CircleCheck,
   Clock,
   Cloud,
+  CloudAlert,
   CloudUpload,
+  HardDrive,
   Hourglass,
   LoaderCircle,
   Trash2,
@@ -13,7 +15,9 @@ import {
 import type { RunFileRow } from "@/lib/api/instrument-runs";
 
 export type FileStatusDisplayKey =
-  | "pending"
+  | "not_uploaded"
+  | "waiting_upload"
+  | "upload_failed"
   | "uploading"
   | "uploaded"
   | "queued"
@@ -39,8 +43,13 @@ interface FileStatusConfigEntry {
 
 // `stalledProcessing` is required, not optional: a plain `files` row would
 // otherwise compile here and silently label a stalled file "Processing".
+// `autoUploadExpectedAt` is required for the same reason: without it a file
+// the watcher is about to upload would read "Not uploaded".
 export function getFileStatusKey(
-  file: Pick<RunFileRow, "deletedAt" | "stalledProcessing" | "status">
+  file: Pick<
+    RunFileRow,
+    "autoUploadExpectedAt" | "deletedAt" | "stalledProcessing" | "status"
+  >
 ): FileStatusDisplayKey {
   if (file.deletedAt !== null) {
     return "dismissed";
@@ -50,9 +59,13 @@ export function getFileStatusKey(
   }
   switch (file.status) {
     case "detected":
-      return "pending";
+      return file.autoUploadExpectedAt === null
+        ? "not_uploaded"
+        : "waiting_upload";
     case "upload_requested":
       return "uploading";
+    case "upload_failed":
+      return "upload_failed";
     case "uploaded":
       return "uploaded";
     case "queued":
@@ -65,7 +78,7 @@ export function getFileStatusKey(
       return "failed";
     default: {
       // A new file status without a case here would otherwise read as
-      // "pending" and hide where the file really is.
+      // "Not uploaded" and hide where the file really is.
       const unhandled: never = file.status;
       return unhandled;
     }
@@ -76,11 +89,23 @@ export const FILE_STATUS_CONFIG: Record<
   FileStatusDisplayKey,
   FileStatusConfigEntry
 > = {
-  pending: {
+  not_uploaded: {
+    label: "Not uploaded",
+    description: "only on the instrument PC, request to upload",
+    Icon: HardDrive,
+    className: "text-muted-foreground",
+  },
+  waiting_upload: {
     label: "Waiting to upload",
-    description: "found, not yet uploaded",
+    description: "the watcher uploads it on its own",
     Icon: Clock,
     className: "text-muted-foreground",
+  },
+  upload_failed: {
+    label: "Upload failed",
+    description: "the watcher gave up, can request again",
+    Icon: CloudAlert,
+    className: "text-destructive",
   },
   uploaded: {
     label: "Uploaded",
@@ -141,7 +166,7 @@ export const FILE_STATUS_LEGEND_SECTIONS: {
   {
     key: "waiting",
     title: "Waiting",
-    statuses: ["pending", "uploaded", "queued"],
+    statuses: ["not_uploaded", "waiting_upload", "uploaded", "queued"],
   },
   {
     key: "in_motion",
@@ -151,7 +176,7 @@ export const FILE_STATUS_LEGEND_SECTIONS: {
   {
     key: "done",
     title: "Done",
-    statuses: ["completed", "failed"],
+    statuses: ["completed", "failed", "upload_failed"],
   },
   {
     key: "removed",

@@ -3,7 +3,7 @@ import { authorize } from "@/lib/api/auth";
 import { apiErrorFromResult } from "@/lib/api/errors";
 import { readJsonBody, requestUploadBody } from "@/lib/api/openapi";
 import { readRunIdParam } from "@/lib/api/run-id-param";
-import { requestRunUploads } from "@/lib/api/run-uploads";
+import { requestRunUploads, uploadRequesterId } from "@/lib/api/run-uploads";
 
 interface RouteContext {
   params: Promise<{ instrumentId: string; runId: string }>;
@@ -34,7 +34,12 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   // Filtering here would silently drop bad entries and queue the rest.
   const fileIds = body.file_ids;
 
-  const result = await requestRunUploads({ instrumentId, runId, fileIds });
+  const result = await requestRunUploads({
+    instrumentId,
+    runId,
+    fileIds,
+    requestedBy: await uploadRequesterId(authResult),
+  });
 
   if (!result.ok) {
     return apiErrorFromResult(result);

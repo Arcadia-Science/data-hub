@@ -4,6 +4,8 @@ import {
   CircleDashed,
   CircleX,
   Clock,
+  CloudAlert,
+  HardDrive,
   Hourglass,
   LoaderCircle,
   type LucideIcon,
@@ -13,9 +15,16 @@ import {
 // Order is the single source of truth for status priority, shared by the icon
 // and the exclusive SQL predicates in `buildRunListQuery`. Highest first.
 //
-// `stalled` sits directly under `failed` because both need an operator to act.
-// A run that also has files waiting to upload would otherwise read as
-// "pending" and hide the stall, and the pending files resolve on their own.
+// `failed`, `stalled` and `upload_failed` come first because each needs
+// someone to act. A run that also has files waiting to upload would otherwise
+// read as waiting and hide the problem, and waiting files resolve on their own.
+//
+// `waiting_upload` (requested, or an auto-mode watcher will upload it) is work
+// in motion, so it sits above the processing states. `not_uploaded` (nothing
+// will upload the file until someone asks) is a resting state, so it sits
+// below them: a run whose requested files are processing reads "Processing",
+// and one whose requested files are done reads "Not uploaded" while other
+// files are still only on the instrument PC.
 //
 // `queued` sits between `uploaded` and `processing`: queued files are waiting
 // for a free processing slot, so a run with both queued and processing files
@@ -23,15 +32,48 @@ import {
 export const RUN_STATUS_VALUES = [
   "failed",
   "stalled",
-  "pending",
+  "upload_failed",
+  "waiting_upload",
   "uploaded",
   "queued",
   "processing",
+  "not_uploaded",
   "completed",
   "empty",
 ] as const;
 
 export type RunStatus = (typeof RUN_STATUS_VALUES)[number];
+
+// `pending` was one status for every file not yet in S3. It is still accepted
+// as a status filter (REST, MCP, saved links) and means both statuses that
+// replaced it. No run reports it.
+export const DEPRECATED_PENDING_RUN_STATUS = "pending";
+export const PENDING_RUN_STATUS_ALIAS: readonly RunStatus[] = [
+  "waiting_upload",
+  "not_uploaded",
+];
+
+// Expands the deprecated `pending` filter value; every other value passes
+// through. Callers drop values that aren't run statuses.
+export function expandRunStatusAlias(value: string): string[] {
+  return value === DEPRECATED_PENDING_RUN_STATUS
+    ? [...PENDING_RUN_STATUS_ALIAS]
+    : [value];
+}
+
+// A status filter as callers send it (possibly with `pending`), as the run
+// statuses it matches, without repeats.
+export function expandRunStatusFilters(values: readonly string[]): RunStatus[] {
+  const statuses = new Set<RunStatus>();
+  for (const value of values) {
+    for (const status of expandRunStatusAlias(value)) {
+      if ((RUN_STATUS_VALUES as readonly string[]).includes(status)) {
+        statuses.add(status as RunStatus);
+      }
+    }
+  }
+  return [...statuses];
+}
 
 export interface RunStatusMeta {
   colorClassName: string;
@@ -54,9 +96,17 @@ export const RUN_STATUS_META: Record<RunStatus, RunStatusMeta> = {
     Icon: TriangleAlert,
     colorClassName: "text-amber-600 dark:text-amber-500",
   },
-  pending: {
-    label: "Pending upload",
-    description: "Files are waiting on the instrument PC to be uploaded",
+  upload_failed: {
+    label: "Upload failed",
+    description:
+      "The watcher couldn't upload some files, for example because they're no longer on the instrument PC",
+    Icon: CloudAlert,
+    colorClassName: "text-destructive",
+  },
+  waiting_upload: {
+    label: "Waiting to upload",
+    description:
+      "Files are on their way from the instrument PC: someone requested them, or the watcher uploads them on its own",
     Icon: Clock,
     colorClassName: "text-amber-500",
   },
@@ -80,6 +130,13 @@ export const RUN_STATUS_META: Record<RunStatus, RunStatusMeta> = {
     colorClassName: "text-sky-500",
     spin: true,
   },
+  not_uploaded: {
+    label: "Not uploaded",
+    description:
+      "Some files are only on the instrument PC, and nothing will upload them until someone requests them",
+    Icon: HardDrive,
+    colorClassName: "text-muted-foreground",
+  },
   completed: {
     label: "Completed",
     description: "All files processed successfully",
@@ -102,13 +159,18 @@ export const RUN_STATUS_OPTIONS = RUN_STATUS_VALUES.map((value) => ({
 export interface RunStatusCounts {
   filesCompleted: number;
   filesFailed: number;
-  filesPendingUpload: number;
+  // Not in S3, and nothing will upload them until someone requests them.
+  filesNotUploaded: number;
   // Only files still inside the stall window. `processing` rows past it are
   // counted in `filesStalled` instead, so the two buckets stay exclusive.
   filesProcessing: number;
   filesQueued: number;
   filesStalled: number;
   filesUploaded: number;
+  // The watcher gave up on them.
+  filesUploadFailed: number;
+  // Requested, or an auto-mode watcher said it will upload them.
+  filesWaitingUpload: number;
 }
 
 // The run statuses that come from a run's raw files, in priority order. `empty`
@@ -125,10 +187,12 @@ export const RUN_FILE_BUCKETS = RUN_STATUS_VALUES.filter(
 const COUNT_FIELD_BY_BUCKET = {
   failed: "filesFailed",
   stalled: "filesStalled",
-  pending: "filesPendingUpload",
+  upload_failed: "filesUploadFailed",
+  waiting_upload: "filesWaitingUpload",
   uploaded: "filesUploaded",
   queued: "filesQueued",
   processing: "filesProcessing",
+  not_uploaded: "filesNotUploaded",
   completed: "filesCompleted",
 } as const satisfies Record<RunFileBucket, keyof RunStatusCounts>;
 

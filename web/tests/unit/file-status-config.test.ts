@@ -11,9 +11,14 @@ type FileStatus = (typeof fileStatusEnum.enumValues)[number];
 
 function key(
   status: FileStatus,
-  overrides: { deletedAt?: Date | null; stalledProcessing?: boolean } = {}
+  overrides: {
+    autoUploadExpectedAt?: Date | null;
+    deletedAt?: Date | null;
+    stalledProcessing?: boolean;
+  } = {}
 ): FileStatusDisplayKey {
   return getFileStatusKey({
+    autoUploadExpectedAt: null,
     deletedAt: null,
     stalledProcessing: false,
     status,
@@ -24,8 +29,9 @@ function key(
 describe("getFileStatusKey", () => {
   it("gives every file status its own display key", () => {
     const expected: Record<FileStatus, FileStatusDisplayKey> = {
-      detected: "pending",
+      detected: "not_uploaded",
       upload_requested: "uploading",
+      upload_failed: "upload_failed",
       uploaded: "uploaded",
       queued: "queued",
       processing: "processing",
@@ -46,8 +52,18 @@ describe("getFileStatusKey", () => {
     expect(FILE_STATUS_CONFIG[key("queued")].label).toBe("Queued");
   });
 
-  it("labels a detected file Waiting to upload", () => {
-    expect(FILE_STATUS_CONFIG[key("detected")].label).toBe("Waiting to upload");
+  it("labels a detected file Not uploaded unless the watcher will upload it", () => {
+    expect(FILE_STATUS_CONFIG[key("detected")].label).toBe("Not uploaded");
+    expect(
+      FILE_STATUS_CONFIG[key("detected", { autoUploadExpectedAt: new Date() })]
+        .label
+    ).toBe("Waiting to upload");
+  });
+
+  it("labels a file the watcher gave up on Upload failed", () => {
+    expect(FILE_STATUS_CONFIG[key("upload_failed")].label).toBe(
+      "Upload failed"
+    );
   });
 
   it("lets a stalled processing file read as stalled", () => {

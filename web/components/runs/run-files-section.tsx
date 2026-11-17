@@ -84,7 +84,9 @@ const FILES_CATEGORY_OPTIONS: FilesFilterOption<FilesCategoryFilter>[] = [
 // "Processing" is in-flight work only; files past the stall cutoff answer to
 // "Stalled" instead, matching what the status column labels them.
 const FILES_STATUS_OPTIONS: FilesFilterOption<FilesLifecycleFilter>[] = [
-  { value: "pending", label: "Waiting to upload" },
+  { value: "not_uploaded", label: "Not uploaded" },
+  { value: "waiting_upload", label: "Waiting to upload" },
+  { value: "upload_failed", label: "Upload failed" },
   { value: "uploaded", label: "Uploaded" },
   { value: "queued", label: "Queued" },
   { value: "processing", label: "Processing" },
@@ -213,12 +215,17 @@ function RunFilesSectionContent({
       : (pagination.page - 1) * pagination.per_page + 1;
   const to = Math.min(pagination.page * pagination.per_page, pagination.total);
 
-  // The files Upload all queues: every `detected` file of the run, not only
-  // the page on screen. A deleted run is read-only and can't queue uploads.
-  const uploadAllCount = isDeleted ? 0 : stats.detected;
+  // The files Upload all queues: every `detected` or `upload_failed` file of
+  // the run, not only the page on screen. A deleted run is read-only and can't
+  // queue uploads.
+  const uploadAllCount = isDeleted ? 0 : stats.detected + stats.uploadFailed;
   // The rows of this page that Upload all covers, so they show a spinner.
   const uploadAllPageIds = files
-    .filter((file) => file.status === "detected" && file.deletedAt === null)
+    .filter(
+      (file) =>
+        (file.status === "detected" || file.status === "upload_failed") &&
+        file.deletedAt === null
+    )
     .map((file) => file.id);
 
   return (
@@ -437,6 +444,9 @@ function RunFilesSectionContent({
           </span>
           <span>
             {stats.pending} waiting on the instrument PC &middot;{" "}
+            {stats.uploadFailed > 0
+              ? `${stats.uploadFailed} couldn't upload · `
+              : ""}
             {stats.uploaded} uploaded
           </span>
         </div>

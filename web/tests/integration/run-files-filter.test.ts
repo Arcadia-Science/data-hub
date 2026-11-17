@@ -151,20 +151,22 @@ describe("Run files status filter", () => {
 
   // Sort-by-status ranks rows by the label the status column shows, so
   // Processing comes before Queued, Queued before Stalled, and Stalled before
-  // Uploaded. A detected file reads "Waiting to upload", which sorts last.
+  // Uploaded. A detected file nobody requested reads "Not uploaded", which
+  // sorts right after Failed.
   it("sorts Queued between Processing and Stalled", async () => {
     const names = await filenamesFor(undefined, "status");
-    expect(names.slice(0, 4)).toEqual([
+    expect(names.slice(0, 5)).toEqual([
       "d-completed.csv",
       "g-failed.csv",
+      "e-detected.csv",
       "a-in-flight.csv",
       "h-queued.csv",
     ]);
     // The two stalled files share a rank, and the sort has no tiebreaker.
-    expect(new Set(names.slice(4, 6))).toEqual(
+    expect(new Set(names.slice(5, 7))).toEqual(
       new Set(["b-stalled.csv", "c-stalled-null-start.csv"])
     );
-    expect(names.slice(6)).toEqual(["f-uploaded.csv", "e-detected.csv"]);
+    expect(names.slice(7)).toEqual(["f-uploaded.csv"]);
   });
 
   it("counts in-flight and stalled files separately in the run stats", async () => {

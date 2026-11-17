@@ -48,6 +48,9 @@ export async function GET(
       relative_path: files.relativePath,
       filename: files.filename,
       size_bytes: files.sizeBytes,
+      // The watcher echoes this when it reports a failure, so the server can
+      // tell a failure of this request from one of an earlier request.
+      upload_requested_at: files.uploadRequestedAt,
     })
     .from(files)
     .innerJoin(instrumentRuns, eq(files.instrumentRunId, instrumentRuns.id))

@@ -4,7 +4,9 @@ import {
   type FileStatus,
   IN_S3_FILE_STATUSES,
   PRE_UPLOAD_FILE_STATUSES,
+  REQUESTABLE_FILE_STATUSES,
   RUN_BUCKET_BY_FILE_STATUS,
+  runBucketForFile,
   runBucketSources,
   UPLOAD_STAGE_BY_FILE_STATUS,
 } from "@/lib/runs/file-buckets";
@@ -27,7 +29,9 @@ describe("RUN_BUCKET_BY_FILE_STATUS", () => {
     for (const bucket of RUN_FILE_BUCKETS) {
       const sources = runBucketSources(bucket);
       expect(
-        sources.statuses.length + sources.processing.length,
+        sources.statuses.length +
+          sources.processing.length +
+          sources.detected.length,
         `no file status counts toward '${bucket}'`
       ).toBeGreaterThan(0);
     }
@@ -35,41 +39,68 @@ describe("RUN_BUCKET_BY_FILE_STATUS", () => {
 
   it("counts each file status in exactly one run status", () => {
     const seen = new Map<string, string>();
+    const note = (key: string, bucket: string) => {
+      expect(seen.has(key), `'${key}' counts twice`).toBe(false);
+      seen.set(key, bucket);
+    };
     for (const bucket of RUN_FILE_BUCKETS) {
       const sources = runBucketSources(bucket);
       for (const status of sources.statuses) {
-        expect(seen.has(status), `'${status}' counts twice`).toBe(false);
-        seen.set(status, bucket);
+        note(status, bucket);
       }
       for (const half of sources.processing) {
-        const key = `processing:${half}`;
-        expect(seen.has(key), `'${key}' counts twice`).toBe(false);
-        seen.set(key, bucket);
+        note(`processing:${half}`, bucket);
+      }
+      for (const half of sources.detected) {
+        note(`detected:${half}`, bucket);
       }
     }
-    const expected = ALL_STATUSES.flatMap((status) =>
-      status === "processing"
-        ? ["processing:inFlight", "processing:stalled"]
-        : [status]
-    );
+    const expected = ALL_STATUSES.flatMap((status) => {
+      if (status === "processing") {
+        return ["processing:inFlight", "processing:stalled"];
+      }
+      if (status === "detected") {
+        return ["detected:autoUploadExpected", "detected:otherwise"];
+      }
+      return [status];
+    });
     expect([...seen.keys()].sort()).toEqual(expected.sort());
   });
 
-  it("splits processing into two different run statuses", () => {
+  it("splits processing and detected into two different run statuses each", () => {
     const { inFlight, stalled } = RUN_BUCKET_BY_FILE_STATUS.processing;
     expect(inFlight).not.toBe(stalled);
+    const { autoUploadExpected, otherwise } =
+      RUN_BUCKET_BY_FILE_STATUS.detected;
+    expect(autoUploadExpected).not.toBe(otherwise);
   });
 
-  it("keeps today's mapping", () => {
-    expect(runBucketSources("pending")).toEqual({
+  it("maps the upload states", () => {
+    expect(runBucketSources("waiting_upload")).toEqual({
+      detected: ["autoUploadExpected"],
       processing: [],
-      statuses: ["detected", "upload_requested"],
+      statuses: ["upload_requested"],
     });
+    expect(runBucketSources("not_uploaded")).toEqual({
+      detected: ["otherwise"],
+      processing: [],
+      statuses: [],
+    });
+    expect(runBucketSources("upload_failed")).toEqual({
+      detected: [],
+      processing: [],
+      statuses: ["upload_failed"],
+    });
+  });
+
+  it("keeps the processing states", () => {
     expect(runBucketSources("processing")).toEqual({
+      detected: [],
       processing: ["inFlight"],
       statuses: [],
     });
     expect(runBucketSources("stalled")).toEqual({
+      detected: [],
       processing: ["stalled"],
       statuses: [],
     });
@@ -80,9 +111,48 @@ describe("RUN_BUCKET_BY_FILE_STATUS", () => {
       "failed",
     ] as const) {
       expect(runBucketSources(bucket)).toEqual({
+        detected: [],
         processing: [],
         statuses: [bucket],
       });
+    }
+  });
+});
+
+describe("runBucketForFile", () => {
+  const row = (
+    status: FileStatus,
+    extra: { autoUploadExpectedAt?: Date | null; stalledProcessing?: boolean }
+  ) => ({
+    autoUploadExpectedAt: null,
+    stalledProcessing: false,
+    status,
+    ...extra,
+  });
+
+  it("agrees with runBucketSources for every file state", () => {
+    for (const bucket of RUN_FILE_BUCKETS) {
+      const sources = runBucketSources(bucket);
+      for (const status of sources.statuses) {
+        expect(runBucketForFile(row(status, {}))).toBe(bucket);
+      }
+      for (const half of sources.processing) {
+        expect(
+          runBucketForFile(
+            row("processing", { stalledProcessing: half === "stalled" })
+          )
+        ).toBe(bucket);
+      }
+      for (const half of sources.detected) {
+        expect(
+          runBucketForFile(
+            row("detected", {
+              autoUploadExpectedAt:
+                half === "autoUploadExpected" ? new Date() : null,
+            })
+          )
+        ).toBe(bucket);
+      }
     }
   });
 });
@@ -113,9 +183,14 @@ describe("upload stages", () => {
     ).toEqual([...ALL_STATUSES].sort());
   });
 
-  it("keeps today's split", () => {
+  it("keeps upload_failed files with those still on the instrument PC", () => {
+    expect([...REQUESTABLE_FILE_STATUSES].sort()).toEqual([
+      "detected",
+      "upload_failed",
+    ]);
     expect([...PRE_UPLOAD_FILE_STATUSES].sort()).toEqual([
       "detected",
+      "upload_failed",
       "upload_requested",
     ]);
   });

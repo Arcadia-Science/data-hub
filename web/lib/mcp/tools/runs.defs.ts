@@ -3,7 +3,10 @@ import { mcpMetadataFilterInputSchema } from "@/lib/api/run-metadata-filters";
 import { fileStatusEnum } from "@/lib/db/schema";
 import type { McpToolDef } from "@/lib/mcp/catalog/types";
 import { runReportToolUiMeta } from "@/lib/mcp/ui-apps";
-import { RUN_STATUS_VALUES } from "@/lib/runs/run-status";
+import {
+  DEPRECATED_PENDING_RUN_STATUS,
+  RUN_STATUS_VALUES,
+} from "@/lib/runs/run-status";
 import {
   addRunCommentOutputSchema,
   cancelQueuedFilesOutputSchema,
@@ -99,10 +102,10 @@ export const searchRunsTool = {
         "true: only runs with at least one lab notebook link. false: only runs with none."
       ),
     status: z
-      .array(z.enum(RUN_STATUS_VALUES))
+      .array(z.enum([...RUN_STATUS_VALUES, DEPRECATED_PENDING_RUN_STATUS]))
       .optional()
       .describe(
-        "Filter by derived run status (OR'd together). Status is derived from a run's raw file states, priority-exclusive: failed (any file failed), stalled (a file has been in processing past the stall window and can be reprocessed), pending (files awaiting upload), uploaded, queued (reprocessing files waiting for a free processing slot), processing (in flight), completed (all done), empty (no files)."
+        "Filter by derived run status (OR'd together). Status is derived from a run's raw file states, priority-exclusive: failed (any file failed processing), stalled (a file has been in processing past the stall window and can be reprocessed), upload_failed (the watcher gave up on a file, for example because it's no longer on the instrument PC), waiting_upload (files requested, or ones the watcher uploads on its own), uploaded, queued (reprocessing files waiting for a free processing slot), processing (in flight), not_uploaded (files only on the instrument PC that nobody requested), completed (all done), empty (no files). The deprecated pending means waiting_upload or not_uploaded."
       ),
   },
   annotations: { readOnlyHint: true },
@@ -151,7 +154,7 @@ export const listRunFilesTool = {
   scope: "runs:read",
   title: "List Run Files",
   description:
-    "List files associated with a run (raw uploads and processed artifacts) with their status, category, and size. Paginated — runs can have thousands of files. Filter by status to gather fileIds for request_run_upload (e.g. status=['detected']). Use get_file for full per-file detail including metadata and S3 location.",
+    "List files associated with a run (raw uploads and processed artifacts) with their status, category, and size. Paginated — runs can have thousands of files. Filter by status to gather fileIds for request_run_upload (e.g. status=['detected', 'upload_failed']). An upload_failed file is one the watcher gave up on; its errorMessage and uploadFailureReason say why. Use get_file for full per-file detail including metadata and S3 location.",
   outputSchema: listRunFilesOutputSchema,
   inputSchema: {
     instrumentId: z.string().describe("Instrument identifier"),
@@ -401,7 +404,7 @@ export const requestRunUploadTool = {
   scope: "runs:upload",
   title: "Request Run Upload",
   description:
-    "Queue specific detected files for watcher upload (max 100). Requires an instrument whose watcher is online or restarting; a request made during a restart waits until the watcher is back. Offline, connecting, pending and retired instruments are refused. Idempotent for files already in upload_requested.",
+    "Queue specific detected or upload_failed files for watcher upload (max 100). Requires an instrument whose watcher is online or restarting; a request made during a restart waits until the watcher is back. Offline, connecting, pending and retired instruments are refused. Idempotent for files already in upload_requested. An upload_failed file's errorMessage says why the last request failed (often a folder renamed on the PC); requesting it again before that is fixed fails the same way.",
   inputSchema: {
     instrumentId: z.string().describe("Instrument identifier"),
     runId: z.string().describe("Run identifier within the instrument"),
@@ -425,7 +428,7 @@ export const requestRunUploadAllTool = {
   scope: "runs:upload",
   title: "Request Run Upload All",
   description:
-    "Queue every detected file on a run for watcher upload. Requires an instrument whose watcher is online or restarting; a request made during a restart waits until the watcher is back. Offline, connecting, pending and retired instruments are refused.",
+    "Queue every detected and upload_failed file on a run for watcher upload. Requires an instrument whose watcher is online or restarting; a request made during a restart waits until the watcher is back. Offline, connecting, pending and retired instruments are refused.",
   inputSchema: {
     instrumentId: z.string().describe("Instrument identifier"),
     runId: z.string().describe("Run identifier within the instrument"),

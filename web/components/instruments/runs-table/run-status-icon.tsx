@@ -17,11 +17,13 @@ export type RunStatusRow = Pick<
   | "file_count"
   | "files_completed"
   | "files_failed"
-  | "files_pending_upload"
+  | "files_not_uploaded"
   | "files_processing"
   | "files_queued"
   | "files_stalled"
+  | "files_upload_failed"
   | "files_uploaded"
+  | "files_waiting_upload"
 >;
 
 function plural(count: number, noun: string): string {
@@ -32,11 +34,13 @@ export function RunStatusIcon({ run }: { run: RunStatusRow }) {
   const status = deriveRunStatus({
     filesCompleted: run.files_completed,
     filesFailed: run.files_failed,
-    filesPendingUpload: run.files_pending_upload,
+    filesNotUploaded: run.files_not_uploaded,
     filesProcessing: run.files_processing,
     filesQueued: run.files_queued,
     filesStalled: run.files_stalled,
+    filesUploadFailed: run.files_upload_failed,
     filesUploaded: run.files_uploaded,
+    filesWaitingUpload: run.files_waiting_upload,
   });
   const { Icon, colorClassName, label, spin } = RUN_STATUS_META[status];
 
@@ -55,9 +59,14 @@ export function RunStatusIcon({ run }: { run: RunStatusRow }) {
       `${plural(run.files_stalled, "file")} stalled in processing — can be reprocessed`
     );
   }
-  if (run.files_pending_upload > 0) {
+  if (run.files_upload_failed > 0) {
     lines.push(
-      `${run.files_pending_upload} of ${plural(run.file_count, "file")} pending upload`
+      `${plural(run.files_upload_failed, "file")} couldn't upload — see the run page`
+    );
+  }
+  if (run.files_waiting_upload > 0) {
+    lines.push(
+      `${run.files_waiting_upload} of ${plural(run.file_count, "file")} waiting to upload`
     );
   }
   if (run.files_uploaded > 0) {
@@ -68,6 +77,11 @@ export function RunStatusIcon({ run }: { run: RunStatusRow }) {
   }
   if (run.files_processing > 0) {
     lines.push(`${plural(run.files_processing, "file")} processing`);
+  }
+  if (run.files_not_uploaded > 0) {
+    lines.push(
+      `${run.files_not_uploaded} of ${plural(run.file_count, "file")} only on the instrument PC`
+    );
   }
   if (run.files_completed > 0) {
     lines.push(`${plural(run.files_completed, "file")} processed successfully`);

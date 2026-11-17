@@ -10,9 +10,10 @@ import { isProcessableInstrumentType } from "@/lib/instruments/processable-types
 // Predicates that decide which bulk actions are available for a given run. All predicates read only the aggregate counts already exposed
 // on RunRow so they're cheap and can be called on every selection change.
 //
-// - Upload:    at least one file still waiting to be uploaded.
-// - Download:  at least one file has made it to S3 (i.e. is not `detected`
-//              or `upload_requested`).
+// - Upload:    at least one file only on the instrument PC that nothing will
+//              upload on its own: not uploaded, or the upload failed.
+// - Download:  at least one file has made it to S3 (i.e. is not waiting, not
+//              uploaded, or upload failed).
 // - Reprocess: instrument_type has a Lambda processor and at least one raw
 //              file is in `uploaded`, `completed`, `failed`, or stalled.
 //              Queued files are already waiting, so they do not count.
@@ -21,14 +22,17 @@ import { isProcessableInstrumentType } from "@/lib/instruments/processable-types
 // ---------------------------------------------------------------------------
 
 export function canUploadRun(row: RunRow): boolean {
-  return row.deleted_at === null && row.files_pending_upload > 0;
+  return (
+    row.deleted_at === null &&
+    row.files_not_uploaded + row.files_upload_failed > 0
+  );
 }
 
 export function canDownloadRun(row: RunRow): boolean {
+  const notInS3 =
+    row.files_not_uploaded + row.files_waiting_upload + row.files_upload_failed;
   return (
-    row.deleted_at === null &&
-    row.file_count > 0 &&
-    row.files_pending_upload < row.file_count
+    row.deleted_at === null && row.file_count > 0 && notInS3 < row.file_count
   );
 }
 
