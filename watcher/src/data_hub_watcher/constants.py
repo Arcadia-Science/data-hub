@@ -76,6 +76,10 @@ HEARTBEAT_INTERVAL_SECONDS = 60
 # the server's database (a restore to an older point, say) never stop a watcher for good.
 # The server's `WATCHER_DEREGISTERED` in `web/lib/api/errors.ts` must say the same.
 WATCHER_DEREGISTERED_ERROR_CODE = "WATCHER_DEREGISTERED"
+# The `code` of a JSON 404 from a Data Hub route, such as one for a watcher ID the server has
+# no row for. A 404 without it is an HTML page from Next.js for a route this server doesn't
+# have. `NOT_FOUND` in `web/lib/api/errors.ts` must say the same.
+NOT_FOUND_ERROR_CODE = "NOT_FOUND"
 # A deregistered watcher can't report anything again: the server answers every heartbeat with
 # that 404. One such reply could come from a bad deploy, so the watcher stops only after this
 # many heartbeats in a row get it. That is about 3 minutes at the production interval. Any
@@ -276,6 +280,16 @@ MAX_QUEUE_FILE_ATTEMPTS = 3
 # How many watcher starts retry an auto-mode upload that never finished.
 # After that the file waits for someone to request it from the run page.
 MAX_PENDING_UPLOAD_ATTEMPTS = 3
+# Why the watcher gave up on a file, as `POST /watchers/:id/upload-failures` takes it
+# (watcher 1.4.5). Data Hub marks the file `upload_failed` with the reason. The server's
+# `upload_failure_reason` enum must have the same values.
+UPLOAD_FAILURE_FOLDER_MISSING = "folder_missing"
+UPLOAD_FAILURE_FILE_MISSING = "file_missing"
+UPLOAD_FAILURE_UPLOAD_ERROR = "upload_error"
+UPLOAD_FAILURE_UNSAFE_PATH = "unsafe_path"
+# The most files that endpoint takes in one request, and the longest `detail` it takes.
+MAX_UPLOAD_FAILURES_PER_REQUEST = 1000
+UPLOAD_FAILURE_DETAIL_MAX_LENGTH = 1000
 # A run report that fails with a connection error or a 5xx is retried until it
 # succeeds, so a single-file run isn't stranded until the next restart. The
 # delay doubles from the base, then stays at the cap.

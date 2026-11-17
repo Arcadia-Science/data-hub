@@ -1005,7 +1005,8 @@ def test_changing_the_watch_folder_drops_pending_uploads_and_reverts_the_queue(
         proxy.fault("status", path=r"/upload-queue$", method="GET", status=503),
     ):
         write_file(watch_dir / "RUN1" / "a.csv", 300)
-        detected = server.wait_for_file(instrument_id, "RUN1", "RUN1/a.csv", status="detected")
+        # The refused upload is reported at once, so the file is `upload_failed` (watcher 1.4.5).
+        detected = server.wait_for_file(instrument_id, "RUN1", "RUN1/a.csv", status="upload_failed")
         wait_until(
             lambda: _pending_upload_paths(pc) == ["RUN1/a.csv"],
             15,
@@ -1068,8 +1069,6 @@ def test_changing_the_watch_folder_drops_pending_uploads_and_reverts_the_queue(
     "config.folder_change->queue_drained_when_push_fails",
     "config.folder_change->pending_uploads_cleared",
     "event.config_sync_failed->emitted",
-    "event.queued_file_missing->emitted",
-    "event.upload_request_cancelled->emitted",
 )
 def test_a_folder_change_whose_push_fails_still_drains_the_queue_through_the_poll(
     watcher: WatcherFactory,
@@ -1093,7 +1092,8 @@ def test_a_folder_change_whose_push_fails_still_drains_the_queue_through_the_pol
         proxy.fault("status", path=r"/upload-queue$", method="GET", status=503),
     ):
         write_file(watch_dir / "RUN1" / "a.csv", 300)
-        detected = server.wait_for_file(instrument_id, "RUN1", "RUN1/a.csv", status="detected")
+        # The refused upload is reported at once, so the file is `upload_failed` (watcher 1.4.5).
+        detected = server.wait_for_file(instrument_id, "RUN1", "RUN1/a.csv", status="upload_failed")
         wait_until(
             lambda: _pending_upload_paths(pc) == ["RUN1/a.csv"],
             15,
@@ -1122,23 +1122,28 @@ def test_a_folder_change_whose_push_fails_still_drains_the_queue_through_the_pol
         assert str(watch_dir) in (server.watcher(pc.watcher_id).config_yaml or "")
 
     # With the queue readable again, the poll finds the file missing from the new folder, and
-    # after three polls cancels the request, which sends the file back to `detected`.
-    reverted = server.wait_for_file(
-        instrument_id, "RUN1", "RUN1/a.csv", status="detected", timeout=60
+    # after three polls reports it. The run's folder isn't in the new folder either.
+    failed = server.wait_for_file(
+        instrument_id, "RUN1", "RUN1/a.csv", status="upload_failed", timeout=60
     )
-    assert reverted.upload_requested_at is None
-    missing = server.wait_for_events(pc.watcher_id, event_type="error", kind="queued_file_missing")
-    assert {e.details["file_id"] for e in missing} == {detected.id}
-    [cancelled] = server.wait_for_events(
-        pc.watcher_id, event_type="error", kind="upload_request_cancelled"
-    )
-    assert cancelled.details["file_id"] == detected.id
-    # The queue was drained by the poll's cancel, not by a revert that came with a push.
+    assert failed.upload_failure_reason == "folder_missing"
+    assert failed.upload_requested_at is None
+    # The first event is the refused upload's, from before the folder changed.
+    events = server.wait_for_events(pc.watcher_id, event_type="uploads_failed", count=2)
+    assert [(e.details["run_id"], e.details["reason"]) for e in events] == [
+        ("RUN1", "upload_error"),
+        ("RUN1", "folder_missing"),
+    ]
+    assert server.events(pc.watcher_id, kind="queued_file_missing") == []
+    assert server.events(pc.watcher_id, kind="upload_request_cancelled") == []
+    # The queue was drained by the poll's report, not by a revert that came with a push.
     assert server.events(pc.watcher_id, kind="upload_requests_cancelled") == []
     assert server.upload_queue(pc.watcher_id) == []
 
 
-@pytest.mark.covers("config.scope_widened->report_only_scan")
+@pytest.mark.covers(
+    "config.scope_widened->report_only_scan", "upload.report->marks_the_files_it_will_upload"
+)
 def test_a_wider_scope_reports_old_files_without_uploading_them(
     watcher: WatcherFactory,
     server: ServerView,
@@ -1169,6 +1174,8 @@ def test_a_wider_scope_reports_old_files_without_uploading_them(
     stored = server.file(instrument_id, "RUN1", "RUN1/old.txt")
     assert stored is not None and stored.status == "detected"
     assert not server.object_exists(instrument_id, "RUN1", "old.txt")
+    # The watcher didn't say it would upload it, so the server doesn't show it as waiting.
+    assert stored.auto_upload_expected_at is None
 
     # It waits for someone to ask for it.
     assert admin.request_upload(instrument_id, "RUN1", [old_row.id]).status_code == 200
@@ -1228,7 +1235,8 @@ def test_a_rebuild_in_the_same_folder_keeps_the_pending_uploads(
     # An upload fails because no URL can be had, and stays pending.
     with proxy.fault("status", path=r"/request-upload-url$", method="POST", status=503):
         data = write_file(watch_dir / "RUN1" / "a.csv", 300)
-        server.wait_for_file(instrument_id, "RUN1", "RUN1/a.csv", status="detected")
+        # The refused upload is reported at once, so the file is `upload_failed` (watcher 1.4.5).
+        server.wait_for_file(instrument_id, "RUN1", "RUN1/a.csv", status="upload_failed")
         wait_until(
             lambda: _pending_upload_paths(pc) == ["RUN1/a.csv"],
             15,

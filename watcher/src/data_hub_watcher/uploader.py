@@ -17,6 +17,7 @@ import time
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
+from enum import Enum
 from functools import partial
 from pathlib import Path
 from typing import Any, Generic, TypeVar, cast
@@ -24,11 +25,15 @@ from typing import Any, Generic, TypeVar, cast
 import requests as http_requests
 from requests.adapters import HTTPAdapter
 
-from data_hub_watcher.api_client import ApiError, DataHubClient, is_run_deleted
+from data_hub_watcher.api_client import ApiError, DataHubClient, UploadFailure, is_run_deleted
 from data_hub_watcher.constants import (
     MAX_PENDING_UPLOAD_ATTEMPTS,
     MAX_QUEUE_FILE_ATTEMPTS,
     RUN_DELETED_REASON,
+    UPLOAD_FAILURE_FILE_MISSING,
+    UPLOAD_FAILURE_FOLDER_MISSING,
+    UPLOAD_FAILURE_UNSAFE_PATH,
+    UPLOAD_FAILURE_UPLOAD_ERROR,
     UPLOAD_POLL_INTERVAL_SECONDS,
     UPLOAD_RETRY_BASE_DELAY,
     UPLOAD_RETRY_MAX,
@@ -110,6 +115,14 @@ def _exists(path: Path) -> bool:
     """Whether *path* is still there. One that can't be looked at counts as there."""
     try:
         return path.exists()
+    except OSError:
+        return True
+
+
+def _is_dir(path: Path) -> bool:
+    """Whether *path* is still a folder. One that can't be looked at counts as there."""
+    try:
+        return path.is_dir()
     except OSError:
         return True
 
@@ -501,6 +514,11 @@ def _redact_signed_urls(text: str) -> str:
     return _SIGNED_QUERY.sub("?<redacted>", text)
 
 
+def _error_text(exc: BaseException) -> str:
+    """*exc* as text for a give-up report, without the query string of a signed URL."""
+    return _redact_signed_urls(str(exc)) or type(exc).__name__
+
+
 def s3_error_details(exc: BaseException) -> dict[str, str]:
     """Pull S3's error code and message out of an HTTP error body."""
     details = {"error": _redact_signed_urls(str(exc))}
@@ -522,25 +540,94 @@ def s3_error_details(exc: BaseException) -> dict[str, str]:
 class _QueueAttempt:
     """Per-file bookkeeping for upload-queue retries.
 
-    ``count`` is the number of consecutive queue polls that have failed
-    to upload the file (missing on disk or upload error); ``reason`` is the
-    most recent failure cause, surfaced in the give-up event.
+    ``count`` is the number of queue polls that have failed to upload the
+    file (missing on disk or upload error), up to ``MAX_QUEUE_FILE_ATTEMPTS``.
+    A record at the cap is used up: the watcher has given up on the file
+    and its report hasn't gone through yet. ``reason`` is the most recent
+    failure cause, one of the ``UPLOAD_FAILURE_*`` reasons, and ``detail``
+    the error of an upload that failed. ``requested_at`` is the request the
+    attempts were about (`UploadQueueFile.upload_requested_at`), so a record
+    is dropped when the file is requested again.
     """
 
     count: int
     reason: str
+    detail: str | None = None
+    requested_at: str | None = None
 
 
-class _LastRefusal(threading.local):
-    """The run Data Hub last refused an upload of as deleted, on each thread.
+class _LastFailure(threading.local):
+    """What the last upload on each thread ran into, for the caller that counts attempts.
 
-    A failed upload returns only ``False``. `_process_queued_file` reads this after the
-    call, so that this refusal is not an attempt while any other failure is, even one for
-    a run that is in the set of deleted runs: a file someone requested is asked for
-    whatever the set says.
+    A failed upload returns only ``False``. The callers clear this before the call and read
+    it after. ``refused_run_id`` is the run Data Hub refused the upload of as deleted, which
+    is not an attempt while any other failure is, even one for a run that is in the set of
+    deleted runs: a file someone requested is asked for whatever the set says. ``error`` is
+    the error of an upload that failed, for the give-up report.
     """
 
-    run_id: str | None = None
+    refused_run_id: str | None = None
+    error: str | None = None
+
+    def clear(self) -> None:
+        self.refused_run_id = None
+        self.error = None
+
+
+@dataclass(frozen=True)
+class _FallbackEvent:
+    """The error event an auto-mode give-up sends when the server can't take the report."""
+
+    kind: str
+    message: str
+    details: dict[str, object]
+
+
+@dataclass
+class _GiveUp:
+    """A file the uploader stopped trying to upload, until Data Hub has been told.
+
+    `Uploader._settle` reports it with `DataHubClient.report_upload_failures`, and Data Hub
+    marks the file `upload_failed`. ``queued`` is the queue entry of a file someone
+    requested, and ``None`` for an auto-mode file. An auto-mode file's ``pending_uploads``
+    row goes once Data Hub has the report when ``drop_row`` is set, and ``fallback_event``
+    is what a server without the endpoint gets instead.
+    """
+
+    failure: UploadFailure
+    queued: UploadQueueFile | None = None
+    drop_row: bool = False
+    fallback_event: _FallbackEvent | None = None
+
+
+class _Answer(Enum):
+    """What came of reporting give-ups."""
+
+    # Data Hub has them, and marked or skipped each file.
+    ACCEPTED = "accepted"
+    # The server has no upload-failures endpoint, so each one goes the way it went before.
+    FALLBACK = "fallback"
+    # The report failed, or a stop kept it from being sent. They are kept for the next poll.
+    NOT_SENT = "not_sent"
+
+
+class _Folders:
+    """Whether each folder of a batch of missing files is still there, looked at once.
+
+    A run whose folder was renamed has every file missing, so one look at the folder
+    answers for all of them.
+    """
+
+    def __init__(self) -> None:
+        self._there: dict[Path, bool] = {}
+
+    def missing_reason(self, path: Path) -> str:
+        """Why the file at *path* is missing: its folder is gone, or only the file is."""
+        folder = path.parent
+        there = self._there.get(folder)
+        if there is None:
+            there = self._there[folder] = _is_dir(folder)
+        return UPLOAD_FAILURE_FILE_MISSING if there else UPLOAD_FAILURE_FOLDER_MISSING
 
 
 @dataclass(frozen=True)
@@ -670,8 +757,8 @@ class Uploader:
         # Added to by any upload thread and read by all of them, and by the run
         # detector's thread too; the set has its own lock.
         self._deleted_runs = deleted_runs if deleted_runs is not None else DeletedRuns()
-        # Set by `_note_run_deleted` on the thread that was refused.
-        self._last_refusal = _LastRefusal()
+        # Set on the thread whose upload was refused or failed.
+        self._last_failure = _LastFailure()
         # Track consecutive upload-queue poll failures so the watcher
         # surfaces a ``kind=upload_queue_poll_failed`` event on the
         # 1st failure and every 10th repeat. The unthrottled case
@@ -681,13 +768,21 @@ class Uploader:
         # not under any explicit lock.
         self._consecutive_queue_poll_failures = 0
         # Per-file upload-queue attempt bookkeeping, keyed by server file id.
-        # Bounds retries before giving up (see ``_process_queued_file``) and
-        # doubles as the emit-once throttle for the missing-file error. Pruned
-        # each poll, and a successful cancel also removes the file's record, so
-        # a re-requested id starts fresh. ``poll_upload_queue`` replaces the
-        # dict before it starts the file tasks and returns only after they
-        # finish, and each task touches only its own file id.
+        # Bounds retries before giving up (see ``_check_queued_files`` and
+        # ``_upload_queued_file``) and doubles as the log-once throttle for the
+        # missing-file error. A used-up record stays until Data Hub has the
+        # give-up report. Pruned each poll, and a report that went through
+        # removes the file's record too, so a re-requested id starts fresh.
+        # ``poll_upload_queue`` replaces the dict before it starts the file
+        # tasks and returns only after they finish, and each task touches only
+        # its own file id.
         self._queue_attempts: dict[int, _QueueAttempt] = {}
+        # Auto-mode give-ups whose report hasn't gone through, keyed like their
+        # ``pending_uploads`` row. The batch that gave up reports them at once;
+        # each upload poll sends again the ones that failed. Several threads
+        # give up and report, so it has its own lock.
+        self._unsent: dict[str, _GiveUp] = {}
+        self._unsent_lock = threading.Lock()
         # The ids in the queue the last poll saw, so an unchanged queue is not
         # logged at INFO on every poll. Used by `poll_upload_queue` alone.
         self._logged_queue_ids: set[int] = set()
@@ -771,6 +866,10 @@ class Uploader:
         one whose upload raises an unexpected error: the first such error is raised
         once every file has had its turn.
 
+        A file whose upload failed, or raised, keeps its row too, so later starts
+        retry it, and is reported to Data Hub as an ``upload_error`` once every
+        file has had its turn (see `_upload_failed`), in one report for the batch.
+
         When ``upload_parallelism > 1`` the per-file
         :meth:`_upload_single` calls run on short-lived daemon threads
         (see :func:`_run_workers`), and their PUTs share the
@@ -793,6 +892,7 @@ class Uploader:
         errors: list[Exception] = []
 
         def upload(info: FileInfo) -> None:
+            self._last_failure.clear()
             try:
                 done = self._upload_pending(info.path, run_id)
             except CantReadYet as exc:
@@ -804,9 +904,12 @@ class Uploader:
                 # it instead, and raise it once the batch is done, so the caller
                 # still reports it. This file keeps its ``pending_uploads`` row.
                 errors.append(exc)
+                self._upload_failed(info.path, run_id, _error_text(exc))
                 return
             if done:
                 uploaded.append(info.path)
+            else:
+                self._upload_failed(info.path, run_id, self._last_failure.error)
 
         # With one worker, or one file, this is a plain loop on this thread.
         # A stop starts no further file. The files that did not start, and
@@ -821,6 +924,7 @@ class Uploader:
             halted=self._stop_requested,
             on_interrupt=self._request_stop,
         )
+        self._report_unsent()
         succeeded = len(uploaded)
 
         if succeeded == len(files):
@@ -937,9 +1041,10 @@ class Uploader:
         if not waiting:
             return
         logger.debug("Retrying %d file(s) that couldn't be read yet", len(waiting))
-        self._for_each(waiting, self._retry_waiting)
+        self._for_each(waiting, partial(self._retry_waiting, folders=_Folders()))
+        self._report_unsent()
 
-    def _retry_waiting(self, waiting: _WaitingFile) -> None:
+    def _retry_waiting(self, waiting: _WaitingFile, *, folders: _Folders) -> None:
         """Try one waiting file: the open and the hash come before any request."""
         path = waiting.path
         key = relative_key(path, self._watch_dir)
@@ -948,25 +1053,31 @@ class Uploader:
                 # Not the file that is missing. It keeps waiting, and its row stays.
                 return
             self._stop_waiting(waiting)
-            self._drop_missing_pending(key, waiting.run_id, path)
+            self._give_up_missing_pending(key, waiting.run_id, path, folders)
             return
         # `_upload_single_unlocked` opens the file and, for a file that was found
         # unreadable before, hashes it before it asks the server for an upload URL.
         # A file that is still locked, even partway through, costs no request.
+        self._last_failure.clear()
         try:
-            self._upload_pending(path, waiting.run_id)
+            uploaded = self._upload_pending(path, waiting.run_id)
+            error = self._last_failure.error
         except CantReadYet as exc:
             self._report_cant_read(path, waiting.run_id, exc)
             return
-        except Exception:
+        except Exception as exc:
             logger.exception("Retrying upload of %s failed", key)
+            uploaded, error = False, _error_text(exc)
         if self._stop_requested():
             # A stop cut the upload off, so the file was not uploaded. Keep it waiting.
             return
         # The file can be read now, so it isn't waiting any more. An upload that
-        # failed for another reason was reported or logged when it failed, and
-        # its row stays for the next start's retry, as for any failed upload.
+        # failed for another reason was logged when it failed, is reported to Data
+        # Hub here, and its row stays for the next start's retry, as for any
+        # failed upload.
         self._stop_waiting(waiting)
+        if not uploaded:
+            self._upload_failed(path, waiting.run_id, error)
 
     def _folder_is_gone(self) -> bool:
         """Whether a file that can't be found is not missing, because of the folder or a stop.
@@ -984,16 +1095,108 @@ class Uploader:
             return True
         return self._watch_folder_unavailable is not None and self._watch_folder_unavailable()
 
-    def _drop_missing_pending(self, relative_path: str, run_id: str, path: Path) -> None:
-        """Give up on a pending upload whose file is no longer on disk."""
+    def _give_up_missing_pending(
+        self, relative_path: str, run_id: str, path: Path, folders: _Folders
+    ) -> None:
+        """Give up on a pending upload whose file is no longer on disk.
+
+        Its row goes once Data Hub has the report (or the fallback ran), which the
+        caller's batch sends. A report that fails is sent again on the next upload
+        poll, and the row stays until then, or for the next start if the watcher
+        stops first, which looks for the file again.
+        """
         logger.warning("Dropping pending upload for missing file: %s", relative_path)
-        self._state_db.clear_pending_upload(relative_path)
-        self._reporter.report_error(
-            "pending_upload_missing",
-            f"Stopped retrying {path.name}: the file is no longer on disk",
-            relative_path=relative_path,
-            run_id=run_id,
+        self._give_up_auto(
+            relative_path,
+            run_id,
+            folders.missing_reason(path),
+            drop_row=True,
+            fallback_event=_FallbackEvent(
+                "pending_upload_missing",
+                f"Stopped retrying {path.name}: the file is no longer on disk",
+                {"relative_path": relative_path, "run_id": run_id},
+            ),
         )
+
+    def _upload_failed(self, path: Path, run_id: str, error: str | None) -> None:
+        """Give up on an auto-mode upload that failed while the watcher runs, as ``upload_error``.
+
+        Data Hub marks the file failed now, instead of showing it as waiting until the next
+        start retries it. The file's ``pending_uploads`` row stays, so later starts still
+        retry it, and a success there marks it uploaded. The caller's batch sends the report.
+
+        A file that is gone by now, such as one deleted between its run report and its
+        upload, is given up on as missing instead (`_give_up_missing_pending`), so Data Hub
+        gets the reason right, and its row goes once Data Hub has the report.
+
+        Not a failure: a run Data Hub refused as deleted, an upload that failed because its
+        folder went away, or a stop (which `_folder_is_gone` answers too). None of those is
+        reported.
+        """
+        if run_id in self._deleted_runs or self._folder_is_gone():
+            return
+        key = relative_key(path, self._watch_dir)
+        if not _is_file(path):
+            self._give_up_missing_pending(key, run_id, path, _Folders())
+            return
+        self._give_up_auto(key, run_id, UPLOAD_FAILURE_UPLOAD_ERROR, detail=error)
+
+    def _give_up_auto(
+        self,
+        relative_path: str,
+        run_id: str,
+        reason: str,
+        *,
+        detail: str | None = None,
+        drop_row: bool = False,
+        fallback_event: _FallbackEvent | None = None,
+    ) -> None:
+        """Add an auto-mode give-up to the ones `_report_unsent` sends."""
+        give_up = _GiveUp(
+            UploadFailure(run_id=run_id, reason=reason, relative_path=relative_path, detail=detail),
+            drop_row=drop_row,
+            fallback_event=fallback_event,
+        )
+        self._keep_unsent(give_up, newer=True)
+
+    def _keep_unsent(self, give_up: _GiveUp, *, newer: bool) -> None:
+        """Keep *give_up* for the next report, unless the one kept for its file wins.
+
+        A give-up that drops the file's row wins over one that doesn't, so the row still
+        goes once Data Hub has the report. Between two that are alike in that, the newer
+        one wins: a new give-up (*newer*) over the one kept, and the one kept over a
+        give-up put back after its report failed.
+        """
+        key = give_up.failure.relative_path or ""
+        with self._unsent_lock:
+            kept = self._unsent.get(key)
+            if (
+                kept is None
+                or (give_up.drop_row and not kept.drop_row)
+                or (newer and give_up.drop_row == kept.drop_row)
+            ):
+                self._unsent[key] = give_up
+
+    def _take_unsent(self) -> list[_GiveUp]:
+        """Take the auto-mode give-ups not reported yet, for one report.
+
+        A missing file that is back on disk since is left out. Its row stays, and the next
+        start retries the upload.
+        """
+        with self._unsent_lock:
+            unsent = list(self._unsent.values())
+            self._unsent.clear()
+        missing = (UPLOAD_FAILURE_FILE_MISSING, UPLOAD_FAILURE_FOLDER_MISSING)
+        return [
+            give_up
+            for give_up in unsent
+            if give_up.failure.reason not in missing
+            or not _is_file(self._watch_dir / (give_up.failure.relative_path or ""))
+        ]
+
+    def _report_unsent(self) -> None:
+        """Report the auto-mode give-ups not reported yet, in one report, and act on the answer."""
+        self._settle(self._take_unsent())
 
     def retry_pending_uploads(self) -> None:
         """Retry auto-mode uploads that an earlier watcher process never finished.
@@ -1005,11 +1208,21 @@ class Uploader:
         ``MAX_PENDING_UPLOAD_ATTEMPTS``. A file that can't be read yet is not
         an attempt: it joins the waiting collection instead. Files run up to
         ``upload_parallelism`` at a time, and the method returns once all of
-        them are done.
-        """
-        self._for_each(self._state_db.pending_uploads(), self._retry_pending)
+        them are done and the files it gave up on are reported to Data Hub, in
+        one report.
 
-    def _retry_pending(self, pending: PendingUploadRecord) -> None:
+        A failed attempt is reported as an ``upload_error`` and keeps its row.
+        The last one, and a file that is gone, are reported too, and their row
+        goes only once Data Hub has the report. A report that fails is sent
+        again on the next upload poll; if the watcher stops first, the row is
+        still there and the next start tries the file again.
+        """
+        self._for_each(
+            self._state_db.pending_uploads(), partial(self._retry_pending, folders=_Folders())
+        )
+        self._report_unsent()
+
+    def _retry_pending(self, pending: PendingUploadRecord, *, folders: _Folders) -> None:
         """Retry one pending upload and record the outcome."""
         # The path came from our own state DB, so it is not re-checked
         # for traversal the way server-supplied queue paths are.
@@ -1018,20 +1231,22 @@ class Uploader:
             if self._folder_is_gone():
                 # Not the file that is missing: the row stays for the next start.
                 return
-            self._drop_missing_pending(pending.relative_path, pending.run_id, path)
+            self._give_up_missing_pending(pending.relative_path, pending.run_id, path, folders)
             return
+        self._last_failure.clear()
         try:
             uploaded = self._upload_pending(path, pending.run_id)
+            error = self._last_failure.error
         except CantReadYet as exc:
             # Not a failed attempt: a file that an instrument keeps open would
             # use them all up within a few starts.
             self._wait_for_file(path, pending.run_id, exc)
             return
-        except Exception:
+        except Exception as exc:
             # Count it as a failed attempt. Otherwise the same file fails
             # first on every start and the files after it are never retried.
             logger.exception("Retrying upload of %s failed", pending.relative_path)
-            uploaded = False
+            uploaded, error = False, _error_text(exc)
         if uploaded:
             return
         if self._stop_requested() or pending.run_id in self._deleted_runs:
@@ -1044,19 +1259,38 @@ class Uploader:
         if self._folder_is_gone():
             # Neither is one that failed because its folder went away.
             return
+        if not _is_file(path):
+            # The file went away during the upload: it is missing, not failing.
+            self._give_up_missing_pending(pending.relative_path, pending.run_id, path, folders)
+            return
         attempts = self._state_db.bump_pending_upload_attempts(pending.relative_path)
         if attempts < MAX_PENDING_UPLOAD_ATTEMPTS:
+            # The row stays for the next start. Data Hub marks the file failed meanwhile.
+            self._give_up_auto(
+                pending.relative_path, pending.run_id, UPLOAD_FAILURE_UPLOAD_ERROR, detail=error
+            )
             return
-        self._state_db.clear_pending_upload(pending.relative_path)
-        self._reporter.report_error(
-            "upload_retries_exhausted",
-            (
-                f"Gave up uploading {path.name} after {attempts} watcher starts; "
-                "request it from the run page to try again"
+        logger.warning(
+            "Gave up uploading %s after %d watcher starts", pending.relative_path, attempts
+        )
+        self._give_up_auto(
+            pending.relative_path,
+            pending.run_id,
+            UPLOAD_FAILURE_UPLOAD_ERROR,
+            detail=error,
+            drop_row=True,
+            fallback_event=_FallbackEvent(
+                "upload_retries_exhausted",
+                (
+                    f"Gave up uploading {path.name} after {attempts} watcher starts; "
+                    "request it from the run page to try again"
+                ),
+                {
+                    "relative_path": pending.relative_path,
+                    "run_id": pending.run_id,
+                    "attempts": attempts,
+                },
             ),
-            relative_path=pending.relative_path,
-            run_id=pending.run_id,
-            attempts=attempts,
         )
 
     # ------------------------------------------------------------------
@@ -1121,11 +1355,20 @@ class Uploader:
         )
 
     def poll_upload_queue(self) -> None:
-        """Fetch the upload queue and process each file.
+        """Fetch the upload queue and process each file, in two phases.
 
         Driven by the ``UploadQueueWorker`` loop on its own thread,
         decoupled from the heartbeat so a slow upload can't starve the
         liveness signal.
+
+        The first phase only looks at the files, which is quick
+        (`_check_queued_files`): a path outside the watch folder is given up on
+        at once, and a missing file counts an attempt. The files it gave up on,
+        with the auto-mode give-ups whose report failed before, are reported to
+        Data Hub in one report before any upload starts, so they don't wait
+        behind an upload that takes hours. The second phase uploads the files
+        that are there (`_upload_queued_file`), and reports the ones whose
+        uploads failed for the last time once all of them are done.
         """
         try:
             queue = self._client.get_upload_queue(self._watcher_id)
@@ -1158,11 +1401,15 @@ class Uploader:
         self._consecutive_queue_poll_failures = 0
 
         # Prune attempt records for files no longer pending (uploaded,
-        # cancelled, or dismissed) so the dict tracks only the live queue
-        # and a re-requested id starts a fresh attempt window.
-        current_ids = {qf.id for qf in queue.files}
+        # failed, cancelled, or dismissed) so the dict tracks only the live
+        # queue and a re-requested id starts a fresh attempt window. A file
+        # that is still listed, but for a later request than the one its
+        # record counted, starts fresh too.
+        requested_at = {qf.id: qf.upload_requested_at for qf in queue.files}
         self._queue_attempts = {
-            fid: rec for fid, rec in self._queue_attempts.items() if fid in current_ids
+            fid: rec
+            for fid, rec in self._queue_attempts.items()
+            if fid in requested_at and rec.requested_at == requested_at[fid]
         }
         # The same for the files reported as unreadable: one that is neither
         # queued nor waiting has left for good, so if it is requested again while
@@ -1175,71 +1422,103 @@ class Uploader:
         # A request for a file that stays locked brings the same queue back on
         # every poll, so say so at INFO only when the queue is not the one the
         # last poll saw.
+        current_ids = set(requested_at)
         queue_changed = current_ids != self._logged_queue_ids
         self._logged_queue_ids = current_ids
 
-        if not queue.files:
-            return
-
-        logger.log(
-            logging.INFO if queue_changed else logging.DEBUG,
-            "Upload queue has %d file(s)",
-            len(queue.files),
-        )
+        if queue.files:
+            logger.log(
+                logging.INFO if queue_changed else logging.DEBUG,
+                "Upload queue has %d file(s)",
+                len(queue.files),
+            )
         if self._stop_requested():
-            logger.info("Stop requested; deferring %d queued file(s)", len(queue.files))
+            if queue.files:
+                logger.info("Stop requested; deferring %d queued file(s)", len(queue.files))
+            return
+        present, give_ups = self._check_queued_files(queue.files)
+        self._settle(give_ups + self._take_unsent())
+        if not present:
             return
         # Files run up to ``upload_parallelism`` at a time, and a file that
         # starts after a stop is skipped, so the worker's ``stop()`` can join
         # promptly instead of draining the whole queue; the remaining files
         # are picked up on the next start's poll. This returns only after
         # every file task has finished, so the next poll never overlaps them.
-        self._for_each(queue.files, self._process_queued_file)
+        failed_uploads: list[_GiveUp] = []
+        failed_uploads_lock = threading.Lock()
+
+        def upload(queued: tuple[UploadQueueFile, Path]) -> None:
+            give_up = self._upload_queued_file(*queued)
+            if give_up is not None:
+                with failed_uploads_lock:
+                    failed_uploads.append(give_up)
+
+        self._for_each(present, upload)
+        self._settle(failed_uploads)
 
     def _queued_key(self, qf: UploadQueueFile) -> str | None:
         """The key a queued file has in `_cant_read_reported`, or ``None`` for an unsafe path."""
         local_path = _resolve_within(self._watch_dir, qf.relative_path or qf.filename)
         return None if local_path is None else relative_key(local_path, self._watch_dir)
 
-    def _process_queued_file(self, qf: UploadQueueFile) -> None:
-        """Attempt one queued file, bounding retries across polls.
+    def _check_queued_files(
+        self, files: Sequence[UploadQueueFile]
+    ) -> tuple[list[tuple[UploadQueueFile, Path]], list[_GiveUp]]:
+        """The first phase of a poll: find the files that are there, and give up on others.
 
-        Queue polling repeats on the worker's cadence, so a file that
-        can't be uploaded -- missing on disk after a watch-directory change, or a
-        persistent upload error -- would otherwise re-error forever. We cap
-        attempts at ``MAX_QUEUE_FILE_ATTEMPTS`` and then cancel the request
-        server-side (revert to ``detected``) so it leaves the queue. The
-        "Queued file missing" error is emitted only on the first miss; the
-        upload path emits its own per-attempt events via ``_upload_single``.
+        Returns the files to upload, with their paths, and the give-ups to report.
 
-        A file that is on disk but can't be read yet (an instrument holds it
-        open) is not an attempt. It is reported once, stays queued, and is
-        tried again on every poll, with no limit.
+        A path that escapes the watch folder is given up on at once, as ``unsafe_path``: a
+        poll after this one resolves it the same way. A file that isn't there counts an
+        attempt, and is given up on at the ``MAX_QUEUE_FILE_ATTEMPTS``th, as
+        ``folder_missing`` when its folder is gone too and ``file_missing`` when only the
+        file is. Each folder is looked at once per poll (`_Folders`). The "not found" error
+        is logged only on the first miss.
 
-        A request from the web is always asked of the server, even for a run in the
-        set of deleted runs. The server cancels the requests of a run when it is
-        deleted and refuses new ones, so a queue that lists a file of such a run
-        means the run was restored since, and the request is the user's way of saying
-        so. The upload goes out as any other (see `_upload_single`), and when the
-        server answers the run leaves the set. A refusal because the run was deleted
-        again is not an attempt, and says nothing when the run is in the set already. It
-        needs the queue to have been fetched just before the delete, and the server has
-        cancelled the request since, so the file leaves the queue.
+        A file whose record is used up (its give-up report hasn't gone through) is looked
+        at again first: one that is missing, or unsafe, is given up on again, and one that
+        is there is uploaded, and given up on again only if that upload fails.
+
+        While the watch folder itself is gone or not answering, a missing file is not:
+        nothing is counted, and the request stays queued for the next poll. The folder
+        is asked about once per poll, at the first file that isn't there.
         """
-        attempt = self._queue_attempts.get(qf.id)
-        attempt_count = attempt.count if attempt else 0
+        folders = _Folders()
+        watch_folder_gone: bool | None = None
+        present: list[tuple[UploadQueueFile, Path]] = []
+        give_ups: list[_GiveUp] = []
+        for qf in files:
+            if self._stop_requested():
+                # The rest wait for the next poll or runtime, as they would for an upload.
+                break
+            raw_relative = qf.relative_path or qf.filename
+            local_path = _resolve_within(self._watch_dir, raw_relative)
+            if local_path is None:
+                give_ups.append(self._give_up_unsafe_path(qf, raw_relative))
+                continue
+            if _exists(local_path):
+                present.append((qf, local_path))
+                continue
+            if watch_folder_gone is None:
+                watch_folder_gone = self._folder_is_gone()
+            if watch_folder_gone:
+                # Not the file that is missing. The request stays queued, and the next
+                # poll (or the next runtime) tries it again. No error, no attempt.
+                continue
+            give_up = self._count_missing(qf, local_path, folders)
+            if give_up is not None:
+                give_ups.append(give_up)
+        return present, give_ups
 
-        # Already exhausted: a prior poll's cancel may have failed, so keep
-        # retrying the cancel until the file drops out of the queue.
-        if attempt_count >= MAX_QUEUE_FILE_ATTEMPTS:
-            self._cancel_queued_file(qf, attempt.reason if attempt else "unknown")
-            return
+    def _give_up_unsafe_path(self, qf: UploadQueueFile, raw_relative: str) -> _GiveUp:
+        """Give up on a queued file whose path escapes the watch directory.
 
-        raw_relative = qf.relative_path or qf.filename
-        local_path = _resolve_within(self._watch_dir, raw_relative)
-        if local_path is None:
-            # Path escapes the watch directory (traversal or absolute).
-            # Cancel rather than retry -- a re-poll resolves identically.
+        Defense in depth: such a path is traversal or absolute, and is never read. The
+        error and its event go out the first time only, not again while the give-up
+        waits for its report to go through.
+        """
+        if qf.id not in self._queue_attempts:
             logger.error(
                 "Rejected queued file with unsafe path: %r (file_id=%s)",
                 raw_relative,
@@ -1257,77 +1536,212 @@ class Uploader:
                 )
             )
             self._bump_errors()
-            self._cancel_queued_file(qf, "unsafe_path")
-            return
+        return self._give_up_queued(qf, UPLOAD_FAILURE_UNSAFE_PATH)
 
-        refused = False
-        if _exists(local_path):
-            self._last_refusal.run_id = None
-            try:
-                ok = self._upload_single(local_path, qf.run_id, requested=True)
-            except CantReadYet as exc:
-                # Not a failed attempt, so it never counts toward the cap. The
-                # request stays queued and the next poll tries the file again,
-                # for as long as it can't be read.
-                self._report_cant_read(local_path, qf.run_id, exc, file_id=qf.id)
-                return
-            refused = self._last_refusal.run_id == qf.run_id
-            reason = "upload_failed"
+    def _count_missing(
+        self, qf: UploadQueueFile, local_path: Path, folders: _Folders
+    ) -> _GiveUp | None:
+        """Count an attempt for a queued file that isn't there. Returns the give-up at the last."""
+        attempt = self._queue_attempts.get(qf.id)
+        count = attempt.count if attempt else 0
+        if count == 0:
+            # Log the error once per request; later misses are debug-only until the
+            # give-up.
+            logger.error("Queued file not found locally: %s", local_path)
+            self._bump_errors()
         else:
-            if self._folder_is_gone():
-                # Not the file that is missing. The request stays queued, and the next
-                # poll (or the next runtime) tries it again. No error, no attempt.
-                return
-            ok = False
-            reason = "missing"
-            # Throttle: surface the visible "missing" error only on the
-            # first miss for this file; later misses are debug-only until
-            # the give-up threshold cancels the request.
-            if attempt_count == 0:
-                logger.error("Queued file not found locally: %s", local_path)
-                self._reporter.queue_event(
-                    WatcherEvent(
-                        event_type=EventType.ERROR,
-                        message=f"Queued file missing: {qf.filename}",
-                        details={
-                            "kind": "queued_file_missing",
-                            "file_id": qf.id,
-                            "expected_path": str(local_path),
-                        },
-                    )
-                )
-                self._bump_errors()
-            else:
-                logger.debug("Queued file still missing (already reported): %s", local_path)
+            logger.debug("Queued file still missing (already reported): %s", local_path)
+        count += 1
+        if count < MAX_QUEUE_FILE_ATTEMPTS:
+            self._queue_attempts[qf.id] = _QueueAttempt(
+                count=count,
+                reason=UPLOAD_FAILURE_FILE_MISSING,
+                requested_at=qf.upload_requested_at,
+            )
+            return None
+        return self._give_up_queued(qf, folders.missing_reason(local_path))
 
+    def _upload_queued_file(self, qf: UploadQueueFile, local_path: Path) -> _GiveUp | None:
+        """The second phase of a poll for one file: upload it, and count a failure.
+
+        Returns the give-up when the failure is the ``MAX_QUEUE_FILE_ATTEMPTS``th, as an
+        ``upload_error`` with the upload's last error. Queue polling repeats on the
+        worker's cadence, so a file that keeps failing would otherwise fail forever. The
+        upload path queues its own per-attempt events via ``_upload_single``.
+
+        A file that is on disk but can't be read yet (an instrument holds it
+        open) is not an attempt. It is reported once, stays queued, and is
+        tried again on every poll, with no limit.
+
+        A request from the web is always asked of the server, even for a run in the
+        set of deleted runs. The server cancels the requests of a run when it is
+        deleted and refuses new ones, so a queue that lists a file of such a run
+        means the run was restored since, and the request is the user's way of saying
+        so. The upload goes out as any other (see `_upload_single`), and when the
+        server answers the run leaves the set. A refusal because the run was deleted
+        again is not an attempt, and says nothing when the run is in the set already. It
+        needs the queue to have been fetched just before the delete, and the server has
+        cancelled the request since, so the file leaves the queue.
+        """
+        self._last_failure.clear()
+        try:
+            ok = self._upload_single(local_path, qf.run_id, requested=True)
+        except CantReadYet as exc:
+            # Not a failed attempt, so it never counts toward the cap. The
+            # request stays queued and the next poll tries the file again,
+            # for as long as it can't be read.
+            self._report_cant_read(local_path, qf.run_id, exc, file_id=qf.id)
+            return None
         if ok:
             self._queue_attempts.pop(qf.id, None)
-            return
-        if self._stop_requested() or refused:
+            return None
+        if self._stop_requested() or self._last_failure.refused_run_id == qf.run_id:
             # A stop, or a config rebuild, cut the upload off. That isn't a
-            # failed attempt, so it can't use up the last one and cancel the
+            # failed attempt, so it can't use up the last one and give up on the
             # request: the file stays queued for the next poll or runtime. Nor is
             # an upload that Data Hub refused just now because the run was deleted.
-            return
+            return None
         if self._folder_is_gone():
             # An upload that failed because its folder went away isn't the file's
             # failure either.
-            return
+            return None
+        error = self._last_failure.error
+        attempt = self._queue_attempts.get(qf.id)
+        count = (attempt.count if attempt else 0) + 1
+        if count < MAX_QUEUE_FILE_ATTEMPTS:
+            self._queue_attempts[qf.id] = _QueueAttempt(
+                count=count,
+                reason=UPLOAD_FAILURE_UPLOAD_ERROR,
+                detail=error,
+                requested_at=qf.upload_requested_at,
+            )
+            return None
+        return self._give_up_queued(qf, UPLOAD_FAILURE_UPLOAD_ERROR, error)
 
-        attempt_count += 1
-        self._queue_attempts[qf.id] = _QueueAttempt(count=attempt_count, reason=reason)
-        if attempt_count >= MAX_QUEUE_FILE_ATTEMPTS:
+    def _give_up_queued(
+        self, qf: UploadQueueFile, reason: str, detail: str | None = None
+    ) -> _GiveUp:
+        """Use up *qf*'s record and return its give-up, which echoes the request it was about.
+
+        The record stays used up until Data Hub has the report (`_settle`), so a poll
+        whose report fails leaves the next poll to look at the file again.
+        """
+        self._queue_attempts[qf.id] = _QueueAttempt(
+            count=MAX_QUEUE_FILE_ATTEMPTS,
+            reason=reason,
+            detail=detail,
+            requested_at=qf.upload_requested_at,
+        )
+        return _GiveUp(
+            UploadFailure(
+                run_id=qf.run_id,
+                reason=reason,
+                file_id=qf.id,
+                requested_at=qf.upload_requested_at,
+                detail=detail,
+            ),
+            queued=qf,
+        )
+
+    # ------------------------------------------------------------------
+    # Reporting give-ups
+    # ------------------------------------------------------------------
+
+    def _settle(self, give_ups: list[_GiveUp]) -> None:
+        """Report *give_ups* to Data Hub in one call, then act on its answer for each.
+
+        When Data Hub has them, a requested file's record is removed, so a file requested
+        again starts over with ``MAX_QUEUE_FILE_ATTEMPTS`` attempts, and an auto-mode file's
+        ``pending_uploads`` row goes if the give-up drops it. Data Hub writes the event for
+        the run, so the watcher sends none.
+
+        A server older than watcher 1.4.5 has no endpoint for them. A requested file's
+        request is then cancelled on its own, as before (`_cancel_queued_file`), and an
+        auto-mode file's row goes with its old event.
+
+        A report that fails, or isn't sent because of a stop, keeps everything: a
+        requested file's record stays used up, so the next poll looks at the file again,
+        and an auto-mode give-up is sent again on the next poll. A stop loses the
+        auto-mode ones, but the rows they would drop stay for the next start.
+        """
+        if not give_ups:
+            return
+        answer = self._report_give_ups(give_ups)
+        for give_up in give_ups:
+            if give_up.queued is not None:
+                self._settle_queued(give_up.queued, give_up.failure.reason, answer)
+            else:
+                self._settle_auto(give_up, answer)
+
+    def _report_give_ups(self, give_ups: list[_GiveUp]) -> _Answer:
+        """Send the give-ups to Data Hub. Returns what came of it."""
+        if self._stop_requested():
+            # A stop must not wait for a request. Nothing is lost that isn't lost anyway
+            # when the process ends.
+            return _Answer.NOT_SENT
+        try:
+            counts = self._client.report_upload_failures(
+                self._watcher_id, [give_up.failure for give_up in give_ups]
+            )
+        except Exception as exc:
+            # An `ApiError`, or an answer the client couldn't read. Either way nothing is
+            # known to have gone through, and the give-ups must not be lost.
+            logger.warning(
+                "Failed to report %d file(s) the watcher gave up on: %s; trying again on the "
+                "next poll",
+                len(give_ups),
+                exc.message if isinstance(exc, ApiError) else exc,
+            )
+            self._bump_errors()
+            return _Answer.NOT_SENT
+        if counts is None:
+            logger.info(
+                "Data Hub can't take reports of files the watcher gave up on (it is older than "
+                "watcher 1.4.5), so each one is handled on its own"
+            )
+            return _Answer.FALLBACK
+        logger.info(
+            "Reported %d file(s) the watcher gave up on: Data Hub marked %s as failed and "
+            "skipped %s",
+            len(give_ups),
+            counts.failed,
+            counts.skipped,
+        )
+        return _Answer.ACCEPTED
+
+    def _settle_queued(self, qf: UploadQueueFile, reason: str, answer: _Answer) -> None:
+        if answer is _Answer.ACCEPTED:
+            self._queue_attempts.pop(qf.id, None)
+            logger.warning(
+                "Gave up on queued file %s (file_id=%s, reason=%s); Data Hub marked it failed",
+                qf.filename,
+                qf.id,
+                reason,
+            )
+        elif answer is _Answer.FALLBACK:
             self._cancel_queued_file(qf, reason)
 
+    def _settle_auto(self, give_up: _GiveUp, answer: _Answer) -> None:
+        if answer is _Answer.NOT_SENT:
+            # A later give-up for the same file may have come in meanwhile.
+            self._keep_unsent(give_up, newer=False)
+            return
+        if give_up.drop_row:
+            self._state_db.clear_pending_upload(give_up.failure.relative_path or "")
+        if answer is _Answer.FALLBACK and give_up.fallback_event is not None:
+            event = give_up.fallback_event
+            self._reporter.report_error(event.kind, event.message, **event.details)
+
     def _cancel_queued_file(self, qf: UploadQueueFile, reason: str) -> None:
-        """Cancel a persistently-failing queued file's upload request.
+        """Cancel a given-up queued file's upload request, on a server older than 1.4.5.
 
         Reverts the file to ``detected`` server-side so it leaves the upload
         queue. On API failure the attempt record is left in place so the next
-        poll retries the cancel; the give-up event fires only on a successful
-        cancel, so a retried cancel doesn't re-flood the log. After a successful
-        cancel the record is removed, so a file requested again right away starts
-        over with ``MAX_QUEUE_FILE_ATTEMPTS`` attempts.
+        poll looks at the file again and retries the cancel; the give-up event
+        fires only on a successful cancel, so a retried cancel doesn't re-flood
+        the log. After a successful cancel the record is removed, so a file
+        requested again right away starts over with ``MAX_QUEUE_FILE_ATTEMPTS``
+        attempts.
         """
         try:
             self._client.cancel_upload_request(qf.id)
@@ -1462,6 +1876,7 @@ class Uploader:
         details = s3_error_details(exc)
         details["s3_key"] = s3_key
         logger.error("Upload failed for %s: %s", filename, details["error"])
+        self._last_failure.error = details["error"]
         self._reporter.queue_event(
             WatcherEvent(
                 event_type=EventType.UPLOAD_FAILED,
@@ -1481,7 +1896,7 @@ class Uploader:
         file. The detector's reports and updates stop for the run as well, because they
         share the set.
         """
-        self._last_refusal.run_id = run_id
+        self._last_failure.refused_run_id = run_id
         if not self._deleted_runs.add(run_id):
             logger.debug("Run %s was already known to be deleted on Data Hub", run_id)
             return
@@ -1524,6 +1939,7 @@ class Uploader:
             self._note_run_deleted(run_id, exc)
             return
         logger.error("Failed to get presigned URL for %s: %s", path.name, exc.message)
+        self._last_failure.error = f"Upload URL request failed: {exc.message}"
         self._bump_errors()
         self._reporter.queue_event(
             WatcherEvent(
@@ -1559,6 +1975,7 @@ class Uploader:
         # Treat as an upload failure so the file is retried
         # rather than silently dropped.
         logger.error("Failed to hash %s: %s", path.name, exc)
+        self._last_failure.error = f"Hashing failed: {exc}"
         self._bump_errors()
         self._reporter.queue_event(
             WatcherEvent(
@@ -1987,7 +2404,7 @@ class Uploader:
         run too. *requested* is for a file someone asked to have uploaded from the web.
         It is always asked of the server, because the run may have been restored, and the
         server's answer settles the run (`_note_run_accepted`, `_note_run_deleted`). Its
-        caller tells a refusal from another failure with `_last_refusal`.
+        caller tells a refusal from another failure with `_last_failure`.
         """
         if not requested and self._skips_deleted_run(path, run_id):
             return False
@@ -2170,6 +2587,7 @@ class Uploader:
                 )
             except ApiError as exc:
                 logger.error("PATCH /files/%d failed: %s", file_id, exc.message)
+                self._last_failure.error = f"Upload notification failed: {exc.message}"
                 self._bump_errors()
                 self._reporter.queue_event(
                     WatcherEvent(

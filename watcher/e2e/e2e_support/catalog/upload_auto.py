@@ -152,16 +152,40 @@ TRANSITIONS: tuple[Transition, ...] = (
     ),
     covered(
         MACHINE,
+        "upload.failed->marked_upload_failed",
+        "An auto-mode upload that fails while the watcher runs marks the file `upload_failed` "
+        "at once, with reason `upload_error` and the error, and keeps its `pending_uploads` "
+        "row, so the next start tries it again.",
+    ),
+    covered(
+        MACHINE,
         "upload.pending->attempts_exhausted",
         "A pending upload whose retry fails at three starts in a row (the start that left it "
-        "pending doesn't count) is dropped with an `upload_retries_exhausted` event "
-        "(`attempts` 3), and can still be requested from the run page.",
+        "pending doesn't count) is dropped once the server has the report, stays "
+        "`upload_failed`, sends no `upload_retries_exhausted` event, and can still be "
+        "requested from the run page.",
     ),
     covered(
         MACHINE,
         "upload.pending->file_missing",
-        "A pending upload whose file is gone at start is dropped with a "
+        "A pending upload whose file is gone at start is marked `upload_failed` with reason "
+        "`file_missing`, and its row is dropped once the server has the report, with no "
         "`pending_upload_missing` event.",
+    ),
+    covered(
+        MACHINE,
+        "upload.pending->dropped_with_an_event_on_an_old_server",
+        "Against a server without the upload-failures route (an HTML 404), a pending upload "
+        "that is exhausted, or whose file is gone, is dropped with the "
+        "`upload_retries_exhausted` or `pending_upload_missing` event, as before watcher "
+        "1.4.5, and the file stays `detected`.",
+    ),
+    covered(
+        MACHINE,
+        "upload.report->marks_the_files_it_will_upload",
+        "An auto-mode run report marks the files the watcher is about to upload, so the "
+        "server shows them as waiting to upload. A file reported without upload after a "
+        "wider scope is not marked.",
     ),
     covered(
         MACHINE,

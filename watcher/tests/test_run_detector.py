@@ -1129,6 +1129,60 @@ class TestRunReportRetries:
             assert client.report_run.call_count == expected_calls
 
 
+class TestWillUpload:
+    """A run report says which files this watcher is about to upload (watcher 1.4.5).
+
+    Data Hub shows those files as waiting to upload, and every other file of the run as not
+    uploaded. A file reported without upload after a config change widened the patterns, and
+    every file in manual mode, would otherwise read as waiting forever.
+    """
+
+    @staticmethod
+    def _detector(tmp_path: Path, *, auto: bool) -> tuple[RunDetector, MagicMock]:
+        client = MagicMock()
+        client.report_run.return_value = SimpleNamespace(id="run")
+        detector = _make_detector(r"^(R\d)_", tmp_path, client=client)
+        if auto:
+            detector._upload_cb = MagicMock(side_effect=lambda run_id, files: len(files))
+        return detector, client
+
+    @staticmethod
+    def _file(tmp_path: Path, name: str) -> Path:
+        path = tmp_path / name
+        path.write_text(name)
+        return path
+
+    def test_auto_mode_says_so_for_each_file_it_uploads(self, tmp_path: Path) -> None:
+        detector, client = self._detector(tmp_path, auto=True)
+
+        detector.on_stable_file(self._file(tmp_path, "R1_a.csv"))
+        detector.on_stable_file(self._file(tmp_path, "R1_b.csv"))
+
+        [created] = client.report_run.call_args.args[1]["detected_files"]
+        [updated] = client.update_run.call_args.args[2]["detected_files"]
+        assert (created["filename"], created["will_upload"]) == ("R1_a.csv", True)
+        assert (updated["filename"], updated["will_upload"]) == ("R1_b.csv", True)
+
+    def test_a_file_reported_without_upload_says_nothing(self, tmp_path: Path) -> None:
+        detector, client = self._detector(tmp_path, auto=True)
+
+        detector.on_stable_file(self._file(tmp_path, "R1_old.csv"), upload=False)
+        detector.on_stable_file(self._file(tmp_path, "R1_new.csv"))
+
+        [old] = client.report_run.call_args.args[1]["detected_files"]
+        [new] = client.update_run.call_args.args[2]["detected_files"]
+        assert "will_upload" not in old
+        assert new["will_upload"] is True
+
+    def test_manual_mode_says_nothing(self, tmp_path: Path) -> None:
+        detector, client = self._detector(tmp_path, auto=False)
+
+        detector.on_stable_file(self._file(tmp_path, "R1_a.csv"))
+
+        [sent] = client.report_run.call_args.args[1]["detected_files"]
+        assert "will_upload" not in sent
+
+
 class TestRelativeKey:
     """The state DB key of a file: the one definition the detector, uploader and monitor share."""
 

@@ -1,7 +1,10 @@
-"""The server's upload queue: manual mode, "Request upload", cancellation and reverts.
+"""The server's upload queue: manual mode, "Request upload", give-ups and reverts.
 
-Code: ``uploader.py`` (``poll_upload_queue``, ``_process_queued_file``,
-``_cancel_queued_file``), ``constants.py`` (``MAX_QUEUE_FILE_ATTEMPTS``); server side
+Code: ``uploader.py`` (``poll_upload_queue``, ``_check_queued_files``,
+``_upload_queued_file``, ``_settle``, ``_cancel_queued_file``), ``api_client.py``
+(``report_upload_failures``), ``constants.py`` (``MAX_QUEUE_FILE_ATTEMPTS``); server side
+``app/api/v1/watchers/[watcherId]/upload-failures`` and ``lib/api/upload-failures.ts`` (the
+give-ups),
 ``lib/api/run-uploads.ts`` (request-upload), ``app/api/v1/watchers/[watcherId]/upload-queue``,
 ``app/api/v1/files/[fileId]`` (the transition table), ``lib/api/watchers.ts`` (the reverts)
 and ``app/api/cron/upload-queue-sweep``.
@@ -86,20 +89,42 @@ TRANSITIONS: tuple[Transition, ...] = (
     covered(
         MACHINE,
         "queue.file->missing_reported_once",
-        "A queued file that is not on disk queues one `queued_file_missing` event, on the "
-        "first poll, and none on later polls.",
+        "A queued file that is not on disk counts one error, on the first poll, queues no "
+        "event, and is reported to Data Hub in one `POST /upload-failures`.",
     ),
     covered(
         MACHINE,
-        "queue.file->cancelled_after_three_polls",
-        "A queued file still missing after three polls is set back to `detected` by the "
-        "watcher, which queues `upload_request_cancelled` (reason `missing`).",
+        "queue.file->upload_failed_after_three_polls",
+        "A queued file still missing after three polls is marked `upload_failed` with reason "
+        "`file_missing` (its folder is still there) and leaves the queue. The server writes "
+        "the `uploads_failed` event, and the watcher sends no `upload_request_cancelled`.",
     ),
     covered(
         MACHINE,
-        "queue.upload_failing->cancelled_after_three_polls",
-        "A queued file whose upload keeps failing is cancelled the same way after three "
-        "polls, with reason `upload_failed`.",
+        "queue.folder_missing->one_report_for_the_run",
+        "The requested files of a run whose folder was renamed on the PC are all marked "
+        "`upload_failed` with reason `folder_missing` after three polls, in one report, before "
+        "a slow upload of another file in the same poll finishes, and the server writes one "
+        "`uploads_failed` event for the run.",
+    ),
+    covered(
+        MACHINE,
+        "queue.upload_failing->upload_failed_after_three_polls",
+        "A queued file whose upload keeps failing is marked `upload_failed` the same way after "
+        "three polls, with reason `upload_error` and the last error in its message.",
+    ),
+    covered(
+        MACHINE,
+        "queue.report_failed->sent_again",
+        "A give-up report that the server fails (a 503) is sent again on the next poll, after "
+        "the watcher looks at the file again, and the file is then marked `upload_failed`.",
+    ),
+    covered(
+        MACHINE,
+        "queue.old_server->cancelled_after_three_polls",
+        "Against a server without the upload-failures route (an HTML 404), a queued file still "
+        "missing after three polls is set back to `detected` by the watcher's own "
+        "`PATCH /files/:id`, with `upload_request_cancelled`, as before watcher 1.4.5.",
     ),
     covered(
         MACHINE,
@@ -112,23 +137,24 @@ TRANSITIONS: tuple[Transition, ...] = (
     ),
     covered(
         MACHINE,
-        "queue.cancelled->requested_again",
-        "A cancelled file can be requested again after a poll that no longer lists it, and "
-        "gets a fresh set of three attempts.",
+        "queue.upload_failed->requested_again",
+        "A file marked `upload_failed` can be requested again after a poll that no longer "
+        "lists it, and gets a fresh set of three attempts.",
     ),
     covered(
         MACHINE,
-        "queue.cancelled->requested_before_next_poll",
-        "A file that is requested again straight after its cancellation, before any poll "
-        "has gone by without it, also gets a fresh set of three attempts: the watcher tries to "
-        "upload it. It forgets the three failed attempts once the cancellation succeeds.",
+        "queue.upload_failed->requested_before_next_poll",
+        "A file that is requested again straight after it was marked `upload_failed`, before "
+        "any poll has gone by without it, also gets a fresh set of three attempts: the watcher "
+        "tries to upload it. It forgets the three failed attempts once the server has the "
+        "report.",
     ),
     covered(
         MACHINE,
         "queue.unsafe_path->rejected",
         "A queue entry whose relative path leaves the watch folder is not read: the watcher "
         "queues `unsafe_upload_path`, counts an error (the only one, with the queue not held), "
-        "and cancels the request at once.",
+        "and has the file marked `upload_failed` with reason `unsafe_path` at once.",
     ),
     # --- the server takes files out of the queue -------------------------------------------
     covered(

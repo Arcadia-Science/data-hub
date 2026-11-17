@@ -127,8 +127,11 @@ class RunRow:
 class FileRow:
     """One row of ``files``, with its run's name and whether the run is deleted.
 
-    ``status`` is ``detected``, ``upload_requested``, ``uploaded``, ... ``s3_key`` is set
-    once the file is uploaded, as ``<instrument>/<run>/<filename>``.
+    ``status`` is ``detected``, ``upload_requested``, ``upload_failed``, ``uploaded``, ...
+    ``s3_key`` is set once the file is uploaded, as ``<instrument>/<run>/<filename>``.
+    ``upload_failure_reason`` and ``upload_failed_at`` are set while the file is
+    ``upload_failed``, and ``auto_upload_expected_at`` while an auto-mode watcher has said it
+    will upload the file (watcher 1.4.5).
     """
 
     id: int
@@ -145,6 +148,9 @@ class FileRow:
     deleted_at: datetime | None
     run_deleted_at: datetime | None
     error_message: str | None
+    upload_failure_reason: str | None = None
+    upload_failed_at: datetime | None = None
+    auto_upload_expected_at: datetime | None = None
 
 
 _WATCHER_COLUMNS = """id::text, instrument_id, status::text, status_reason, config_revision,
@@ -153,7 +159,8 @@ _WATCHER_COLUMNS = """id::text, instrument_id, status::text, status_reason, conf
 
 _FILE_SELECT = """SELECT f.id, r.instrument_id, r.run_id, f.relative_path, f.filename,
         f.status::text, f.size_bytes, f.s3_bucket, f.s3_key, f.upload_requested_at,
-        f.uploaded_at, f.deleted_at, r.deleted_at, f.error_message
+        f.uploaded_at, f.deleted_at, r.deleted_at, f.error_message,
+        f.upload_failure_reason::text, f.upload_failed_at, f.auto_upload_expected_at
     FROM files f JOIN instrument_runs r ON r.id = f.instrument_run_id"""
 
 
