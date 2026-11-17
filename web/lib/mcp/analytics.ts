@@ -2,6 +2,7 @@ import type { AuthInfo, McpServer } from "@modelcontextprotocol/server";
 import {
   type AnalyticsEvents,
   durationBucket,
+  type SurfaceEvent,
   searchResultBucket,
   trackEvent,
 } from "@/lib/analytics/track";
@@ -30,18 +31,35 @@ type CallerEventName =
   | "mcp_resource_read"
   | "mcp_tool_call";
 
+interface Caller {
+  // Looks up the client label. Call it inside the event loader so the lookup
+  // runs after the response.
+  client: () => Promise<string>;
+  userId: string;
+}
+
+// Calls without a signed-in user, such as over the in-memory transport,
+// have no caller.
+function callerFrom(ctx: unknown): Caller | undefined {
+  const authInfo = authInfoFrom(ctx);
+  const userId = mcpUserId(authInfo);
+  if (!userId) {
+    return;
+  }
+  return { userId, client: () => mcpClientLabel(authInfo) };
+}
+
 /**
  * Records an event with the caller's user ID and client label. Calls without
- * a signed-in user, such as over the in-memory transport, record nothing.
+ * a signed-in user record nothing.
  */
 function trackForCaller<N extends CallerEventName>(
   name: N,
   ctx: unknown,
   props: Omit<AnalyticsEvents[N], "user_id" | "client">
 ): void {
-  const authInfo = authInfoFrom(ctx);
-  const userId = mcpUserId(authInfo);
-  if (!userId) {
+  const caller = callerFrom(ctx);
+  if (!caller) {
     return;
   }
   trackEvent(
@@ -49,10 +67,45 @@ function trackForCaller<N extends CallerEventName>(
     async () =>
       ({
         ...props,
-        user_id: userId,
-        client: await mcpClientLabel(authInfo),
+        user_id: caller.userId,
+        client: await caller.client(),
       }) as AnalyticsEvents[N]
   );
+}
+
+async function mcpSurface(
+  caller: Caller
+): Promise<Extract<SurfaceEvent, { surface: "mcp" }>> {
+  return {
+    surface: "mcp",
+    user_id: caller.userId,
+    client: await caller.client(),
+  };
+}
+
+/**
+ * Records `archive_downloaded` with `surface: "mcp"`. Call it only when the
+ * tool hands out a download link, not while the archive is still building,
+ * so a client that polls until `ready` counts once.
+ */
+export function trackArchiveDownload(ctx: unknown): void {
+  const caller = callerFrom(ctx);
+  if (!caller) {
+    return;
+  }
+  trackEvent("archive_downloaded", () => mcpSurface(caller));
+}
+
+/** Records `file_downloaded` with `surface: "mcp"` and the file's category. */
+export function trackFileDownload(ctx: unknown, category: string): void {
+  const caller = callerFrom(ctx);
+  if (!caller) {
+    return;
+  }
+  trackEvent("file_downloaded", async () => ({
+    ...(await mcpSurface(caller)),
+    category,
+  }));
 }
 
 /**
