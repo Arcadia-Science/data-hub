@@ -465,6 +465,12 @@ class RunDetector:
             "filename": info.filename,
             "size_bytes": info.size_bytes,
         }
+        # Tells Data Hub this watcher is about to upload the file (watcher 1.4.5), so the
+        # run shows it as waiting to upload rather than not uploaded. Only in auto mode,
+        # and not for a file reported without upload after a config change. Older servers
+        # ignore the field.
+        if self._upload_cb is not None and info.upload:
+            payload["will_upload"] = True
         if info.file_created_at:
             payload["file_created_at"] = datetime.fromtimestamp(
                 info.file_created_at, tz=timezone.utc

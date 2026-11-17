@@ -149,7 +149,7 @@ def test_a_new_file_is_reported_as_a_run_once_it_is_stable(
     assert row.size_bytes == len(content)
     # Manual mode reports the file and leaves it on the PC.
     assert not server.object_exists(instrument_id, "RUN001", "plate.csv")
-    assert server.run_status(instrument_id, "RUN001") == "pending"
+    assert server.run_status(instrument_id, "RUN001") == "not_uploaded"
 
     reported = server.wait_for_event(pc.watcher_id, event_type="run_reported")
     assert reported.message == "Run RUN001 reported"

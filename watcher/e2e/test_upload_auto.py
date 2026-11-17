@@ -19,6 +19,7 @@ The queue (manual mode, "Request upload") has its own file, ``test_upload_queue.
 
 from __future__ import annotations
 import hashlib
+import json
 import re
 from collections.abc import Callable
 from pathlib import Path
@@ -384,12 +385,12 @@ def test_single_put_that_fails_three_times_leaves_the_file_pending(
     assert "503" in failed.details["error"]
     assert len(whole_file_puts(proxy)) == 3
 
-    # The file is still known to the server but never arrived, and the watcher will try it
-    # again at the next start.
-    row = server.file(instrument_id, RUN, SMALL_PATH)
-    assert row is not None and row.status == "detected" and row.s3_key is None
+    # The file never arrived. The watcher reported it, so the server marks it failed, and the
+    # watcher will try it again at the next start.
+    row = server.wait_for_file(instrument_id, RUN, SMALL_PATH, status="upload_failed")
+    assert row.upload_failure_reason == "upload_error" and row.s3_key is None
+    assert "503" in (row.error_message or "")
     assert not server.object_exists(instrument_id, RUN, "small.csv")
-    assert server.run_status(instrument_id, RUN) == "pending"
     assert pending(pc) == [(SMALL_PATH, RUN, 0)]
     assert recorded_uploads(pc) == []
     wait_until(
@@ -400,8 +401,10 @@ def test_single_put_that_fails_three_times_leaves_the_file_pending(
     )
 
 
-@pytest.mark.covers("upload.presign->failed", "event.upload_failed->emitted")
-def test_failed_upload_url_request_leaves_the_file_detected(
+@pytest.mark.covers(
+    "upload.presign->failed", "upload.failed->marked_upload_failed", "event.upload_failed->emitted"
+)
+def test_failed_upload_url_request_marks_the_file_upload_failed_and_keeps_it_pending(
     watcher: WatcherFactory,
     server: ServerView,
     proxy: FaultProxy,
@@ -417,9 +420,22 @@ def test_failed_upload_url_request_leaves_the_file_detected(
 
     assert failed.message == "Presigned URL request failed: small.csv"
     assert "error" in failed.details
-    row = server.file(instrument_id, RUN, SMALL_PATH)
-    assert row is not None and row.status == "detected"
+    # Reported at once, with the error, and not only after three starts.
+    row = server.wait_for_file(instrument_id, RUN, SMALL_PATH, status="upload_failed")
+    assert row.upload_failure_reason == "upload_error"
+    assert "Upload URL request failed" in (row.error_message or "")
+    assert row.auto_upload_expected_at is None
+    [report] = calls(proxy, "POST", "/upload-failures")
+    assert report.body is not None
+    [item] = json.loads(report.body)["files"]
+    assert item == {
+        "run_id": RUN,
+        "relative_path": SMALL_PATH,
+        "reason": "upload_error",
+        "detail": item["detail"],
+    }
     assert s3_puts(proxy) == []
+    # The row stays, so the next start tries the file again.
     assert pending(pc) == [(SMALL_PATH, RUN, 0)]
 
 
@@ -445,19 +461,20 @@ def test_failed_notification_leaves_the_file_pending_and_the_next_start_uploads_
         pc.watcher_id, event_type="upload_failed", message_contains="Upload notification failed"
     )
 
-    # The bytes are in the stand-in, but the server was never told, so the row is still
-    # `detected`, and the watcher didn't record the file as done.
+    # The bytes are in the stand-in, but the server was never told, so the watcher reported
+    # the file as failed, and didn't record it as done.
     assert failed.details["s3_key"] == f"{instrument_id}/{RUN}/small.csv"
     assert server.read_object(instrument_id, RUN, "small.csv") == content
-    row = server.file(instrument_id, RUN, SMALL_PATH)
-    assert row is not None and row.status == "detected"
+    row = server.wait_for_file(instrument_id, RUN, SMALL_PATH, status="upload_failed")
+    assert row.upload_failure_reason == "upload_error"
     assert recorded_uploads(pc) == []
     assert pending(pc) == [(SMALL_PATH, RUN, 0)]
 
     # The next start tries the file again from the start: a new PUT, and this time the
-    # server is told.
+    # server is told, which takes the file out of `upload_failed`.
     pc.restart()
-    server.wait_for_uploaded(instrument_id, RUN, SMALL_PATH, content=content)
+    uploaded = server.wait_for_uploaded(instrument_id, RUN, SMALL_PATH, content=content)
+    assert uploaded.upload_failure_reason is None
     wait_for_pending(pc, [])
     assert recorded_uploads(pc) == [SMALL_PATH]
     assert len(whole_file_puts(proxy)) == 2
@@ -640,8 +657,8 @@ def test_a_part_that_fails_for_good_aborts_the_upload_on_the_server(
     assert not staged.exists()
     assert not server.object_exists(instrument_id, RUN, "large.csv")
     assert calls(proxy, "POST", "/multipart-upload/complete") == []
-    again = server.file(instrument_id, RUN, LARGE_PATH)
-    assert again is not None and again.status == "detected"
+    again = server.wait_for_file(instrument_id, RUN, LARGE_PATH, status="upload_failed")
+    assert again.upload_failure_reason == "upload_error"
     assert pending(pc) == [(LARGE_PATH, RUN, 0)]
 
 
@@ -739,8 +756,8 @@ def test_second_checksum_rejection_aborts_the_upload_and_reports_the_failure(
     assert [r.upstream_status for r in completes] == [400, 400]
     assert len(calls(proxy, "POST", "/request-upload-url")) == 2
     assert len(calls(proxy, "DELETE", "/multipart-upload")) == 2
-    row = server.file(instrument_id, RUN, LARGE_PATH)
-    assert row is not None and row.status == "detected"
+    row = server.wait_for_file(instrument_id, RUN, LARGE_PATH, status="upload_failed")
+    assert row.upload_failure_reason == "upload_error"
     assert multipart_upload_id(server, row.id) is None
     assert not server.object_exists(instrument_id, RUN, "large.csv")
     assert pending(pc) == [(LARGE_PATH, RUN, 0)]
@@ -836,8 +853,8 @@ def test_killed_mid_upload_keeps_the_pending_row_and_the_next_start_finishes_the
 
 @pytest.mark.covers(
     "upload.pending->attempts_exhausted",
-    "event.upload_retries_exhausted->emitted",
     "event.upload_failed->emitted",
+    "event.uploads_failed->recorded",
 )
 def test_pending_upload_is_dropped_after_three_failed_starts_and_can_still_be_requested(
     watcher: WatcherFactory,
@@ -855,24 +872,25 @@ def test_pending_upload_is_dropped_after_three_failed_starts_and_can_still_be_re
 
     content = write_run(watch_dir, RUN, {"small.csv": SMALL})["small.csv"]
     server.wait_for_event(pc.watcher_id, event_type="upload_failed")
+    row = server.wait_for_file(instrument_id, RUN, SMALL_PATH, status="upload_failed")
     assert pending(pc) == [(SMALL_PATH, RUN, 0)]
 
-    # Every later start retries the file once and counts one attempt.
+    # Every later start retries the file once and counts one attempt. The file stays failed:
+    # the server skips the reports it already has.
     for attempts in (1, 2):
         pc.restart()
         wait_for_pending(pc, [(SMALL_PATH, RUN, attempts)])
     pc.restart()
-    exhausted = server.wait_for_event(
-        pc.watcher_id, event_type="error", kind="upload_retries_exhausted"
-    )
-
-    assert exhausted.details["attempts"] == 3
-    assert exhausted.details["relative_path"] == SMALL_PATH
-    assert exhausted.details["run_id"] == RUN
-    assert "request it from the run page" in exhausted.message
+    # The third failed start drops the row once the server has the report.
     wait_for_pending(pc, [])
-    row = server.file(instrument_id, RUN, SMALL_PATH)
-    assert row is not None and row.status == "detected"
+
+    assert server.events(pc.watcher_id, kind="upload_retries_exhausted") == []
+    still = server.file(instrument_id, RUN, SMALL_PATH)
+    assert still is not None and still.status == "upload_failed"
+    assert still.upload_failure_reason == "upload_error"
+    # One event for the run and the reason: the later reports changed nothing.
+    [failed] = server.events(pc.watcher_id, event_type="uploads_failed")
+    assert (failed.details["run_id"], failed.details["reason"]) == (RUN, "upload_error")
     # Four starts, four refused requests: the three retries stopped there, none was a fifth.
     assert fault.hits == 4
 
@@ -883,12 +901,8 @@ def test_pending_upload_is_dropped_after_three_failed_starts_and_can_still_be_re
     server.wait_for_uploaded(instrument_id, RUN, SMALL_PATH, content=content)
 
 
-@pytest.mark.covers(
-    "upload.pending->file_missing",
-    "event.pending_upload_missing->emitted",
-    "event.stable_callback_failed->emitted",
-)
-def test_pending_upload_for_a_file_that_vanished_is_dropped_at_the_next_start(
+@pytest.mark.covers("upload.pending->file_missing", "event.stable_callback_failed->emitted")
+def test_a_file_that_vanished_before_its_upload_is_marked_upload_failed_and_dropped(
     watcher: WatcherFactory,
     server: ServerView,
     proxy: FaultProxy,
@@ -910,23 +924,104 @@ def test_pending_upload_for_a_file_that_vanished_is_dropped_at_the_next_start(
         pc.watcher_id, event_type="error", kind="stable_callback_failed"
     )
     assert callback.details["path"].endswith("small.csv")
-    row = server.file(instrument_id, RUN, SMALL_PATH)
-    assert row is not None and row.status == "detected"
-    assert pending(pc) == [(SMALL_PATH, RUN, 0)]
+    # The watcher reported the file as missing, with its folder still there, and dropped its
+    # row once the server had the report, without waiting for a restart.
+    row = server.wait_for_file(instrument_id, RUN, SMALL_PATH, status="upload_failed")
+    assert row.upload_failure_reason == "file_missing"
+    wait_for_pending(pc, [])
+    assert server.events(pc.watcher_id, kind="pending_upload_missing") == []
     assert s3_puts(proxy) == []
 
-    # At the next start the watcher finds nothing to retry and says so.
+    # A restart finds nothing to retry.
     pc.restart()
+    server.wait_for_watcher_status(pc.watcher_id, "watching")
+    assert pending(pc) == []
+    assert len(calls(proxy, "POST", "/upload-failures")) == 1
+
+
+@pytest.mark.covers(
+    "upload.pending->dropped_with_an_event_on_an_old_server",
+    "event.upload_retries_exhausted->emitted",
+    "event.pending_upload_missing->emitted",
+)
+def test_against_an_older_server_pending_uploads_are_dropped_with_their_events_as_before(
+    watcher: WatcherFactory,
+    server: ServerView,
+    proxy: FaultProxy,
+    instrument_id: str,
+    watch_dir: Path,
+) -> None:
+    pc = watcher()
+    # A server older than watcher 1.4.5 has no upload-failures route: Next.js answers with a
+    # 404 that has no JSON error in it, as this fault does.
+    proxy.add_fault("status", path=r"/upload-failures$", method="POST", status=404)
+    # A file that is gone before its upload starts: its run report is held in the proxy, and
+    # the file is deleted while it waits.
+    proxy.add_fault("delay", path=POST_RUN, method="POST", delay_seconds=3, count=1)
+    start_watching(pc, server)
+
+    write_run(watch_dir, RUN, {"gone.csv": SMALL})
+    wait_for_request(proxy, "POST", f"/instruments/{instrument_id}/runs")
+    (watch_dir / RUN / "gone.csv").unlink()
+
     missing = server.wait_for_event(
         pc.watcher_id, event_type="error", kind="pending_upload_missing"
     )
-    assert missing.details["relative_path"] == SMALL_PATH
+    assert missing.details["relative_path"] == f"{RUN}/gone.csv"
     assert missing.details["run_id"] == RUN
     wait_for_pending(pc, [])
-    # It's only a dropped retry: the server keeps the file as detected.
-    still = server.file(instrument_id, RUN, SMALL_PATH)
-    assert still is not None and still.status == "detected"
-    assert s3_puts(proxy) == []
+
+    # A file in another run whose upload always fails.
+    proxy.add_fault("status", path=PRESIGN, method="POST", status=503)
+    write_run(watch_dir, "RUN002", {"small.csv": SMALL})
+    server.wait_for_event(pc.watcher_id, event_type="upload_failed")
+    failing = "RUN002/small.csv"
+    wait_for_pending(pc, [(failing, "RUN002", 0)])
+    for attempts in (1, 2):
+        pc.restart()
+        wait_for_pending(pc, [(failing, "RUN002", attempts)])
+    pc.restart()
+    exhausted = server.wait_for_event(
+        pc.watcher_id, event_type="error", kind="upload_retries_exhausted"
+    )
+    assert exhausted.details["attempts"] == 3
+    assert exhausted.details["relative_path"] == failing
+    assert exhausted.details["run_id"] == "RUN002"
+    assert "request it from the run page" in exhausted.message
+    wait_for_pending(pc, [])
+    # The server knew nothing of either give-up, so both files are still `detected`.
+    gone = server.file(instrument_id, RUN, f"{RUN}/gone.csv")
+    small = server.file(instrument_id, "RUN002", failing)
+    assert gone is not None and gone.status == "detected"
+    assert small is not None and small.status == "detected"
+
+
+@pytest.mark.covers("upload.report->marks_the_files_it_will_upload")
+def test_an_auto_mode_report_marks_the_files_the_watcher_will_upload(
+    watcher: WatcherFactory,
+    server: ServerView,
+    proxy: FaultProxy,
+    instrument_id: str,
+    watch_dir: Path,
+) -> None:
+    pc = watcher()
+    # The upload waits in the proxy, so the file stays `detected` while the test looks at it.
+    proxy.add_fault("delay", path=PRESIGN, method="POST", delay_seconds=4, count=1)
+    start_watching(pc, server)
+
+    content = write_run(watch_dir, RUN, {"small.csv": SMALL})["small.csv"]
+    wait_for_request(proxy, "POST", "/request-upload-url")
+    [report] = calls(proxy, "POST", f"/instruments/{instrument_id}/runs")
+    assert report.body is not None
+    [sent] = json.loads(report.body)["detected_files"]
+    assert sent["will_upload"] is True
+    waiting = server.file(instrument_id, RUN, SMALL_PATH)
+    assert waiting is not None and waiting.status == "detected"
+    assert waiting.auto_upload_expected_at is not None
+
+    # Uploading clears the mark.
+    uploaded = server.wait_for_uploaded(instrument_id, RUN, SMALL_PATH, content=content)
+    assert uploaded.auto_upload_expected_at is None
 
 
 @pytest.mark.platforms("cli")

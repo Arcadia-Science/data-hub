@@ -152,9 +152,9 @@ TRANSITIONS: tuple[Transition, ...] = (
         "The server reverts the queued uploads of a folder change only in the push of the "
         "new config.yaml. When that push fails (`config_sync_failed`), the queue is not "
         "reverted by it: the new runtime's queue poll finds the queued files missing from "
-        "the new folder, reports `queued_file_missing`, and cancels each after three polls "
-        "(`upload_request_cancelled`), which sends it back to `detected`. So the queue "
-        "still drains without anyone's help, a few polls later.",
+        "the new folder and, after three polls, reports them, so the server marks each "
+        "`upload_failed` with reason `folder_missing` (the run's folder isn't in the new "
+        "watch folder). So the queue still drains without anyone's help, a few polls later.",
     ),
     covered(
         MACHINE,

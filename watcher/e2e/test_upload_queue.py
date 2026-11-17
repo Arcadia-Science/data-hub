@@ -5,6 +5,8 @@ A manual-mode watcher reports files and leaves them ``detected``. An admin asks 
 them with ``request-upload`` (the "Request upload" button), the files become
 ``upload_requested``, and the watcher finds them on its next poll of
 ``GET /watchers/<id>/upload-queue`` and uploads them. An auto-mode watcher polls the same queue.
+A file the watcher gives up on is reported with ``POST /watchers/<id>/upload-failures``, and the
+server marks it ``upload_failed`` (watcher 1.4.5).
 
 Most scenarios start by *holding* the queue: a 503 on the watcher's queue poll, so a requested
 file stays queued while the test looks at it, and releasing the hold lets the next poll take it.
@@ -14,6 +16,7 @@ keep the three-poll scenarios short.
 """
 
 from __future__ import annotations
+import json
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import NamedTuple
@@ -104,22 +107,12 @@ def manual_watcher(
     return pc
 
 
-def last_file_patch(proxy: FaultProxy, file_id: int) -> int:
-    """The position in the proxy's log of the newest ``PATCH /files/<id>`` the watcher sent,
-    which is the request that cancels a queued file."""
-    return max(
-        i
-        for i, r in enumerate(proxy.requests)
-        if r.method == "PATCH" and _route(r).endswith(f"/files/{file_id}")
-    )
-
-
 def wait_for_good_poll_after(proxy: FaultProxy, mark: int, *, timeout: float = 20) -> None:
     """Wait until the watcher has read the queue, and the server has answered, in a poll that
     came after request number ``mark`` of the proxy's log (``len(proxy.requests)`` then).
 
     The watcher forgets what it knows about a queued file when a poll no longer lists it, so this
-    is how a scenario knows that an earlier cancellation has been forgotten.
+    is how a scenario knows that an earlier give-up has been forgotten.
     """
 
     def polled() -> bool:
@@ -160,6 +153,8 @@ def statuses(server: ServerView, instrument_id: str, run_id: str) -> dict[str, s
 def wait_for_cancellation(
     server: ServerView, pc: WatcherDriver, *, count: int = 1, timeout: float = 30
 ) -> list[dict[str, object]]:
+    """The ``upload_request_cancelled`` events, which only a server without the upload-failures
+    route gets from a 1.4.5 watcher."""
     events = server.wait_for_events(
         pc.watcher_id,
         event_type="error",
@@ -187,7 +182,7 @@ def test_manual_mode_reports_files_and_uploads_nothing(
 
     files = detect_run(server, instrument_id, watch_dir, RUN, {"a.csv": SMALL, "b.csv": LARGE})
     assert {n: f.row.status for n, f in files.items()} == {"a.csv": "detected", "b.csv": "detected"}
-    assert server.run_status(instrument_id, RUN) == "pending"
+    assert server.run_status(instrument_id, RUN) == "not_uploaded"
     reported = server.wait_for_event(pc.watcher_id, event_type="run_reported")
     assert reported.details["run_id"] == RUN
 
@@ -253,7 +248,8 @@ def test_requested_files_are_queued_and_the_next_poll_uploads_them(
     )
     assert statuses(server, instrument_id, RUN)["c.csv"] == "detected"
     assert not server.object_exists(instrument_id, RUN, "c.csv")
-    assert server.run_status(instrument_id, RUN) == "pending"  # c is still waiting
+    # c is still only on the PC, which ranks below the uploaded files.
+    assert server.run_status(instrument_id, RUN) == "uploaded"
     uploaded = {
         e.details["s3_key"]: e.details["part_count"]
         for e in server.wait_for_events(pc.watcher_id, event_type="file_uploaded", count=2)
@@ -399,7 +395,9 @@ def test_auto_mode_watcher_uploads_a_file_requested_after_its_own_attempt_gave_u
 
     content = write_run(watch_dir, RUN, {"a.csv": SMALL})["a.csv"]
     server.wait_for_event(pc.watcher_id, event_type="upload_failed")
-    row = server.wait_for_file(instrument_id, RUN, f"{RUN}/a.csv", status="detected")
+    # The watcher reported the failure at once, so the file is marked failed (watcher 1.4.5).
+    row = server.wait_for_file(instrument_id, RUN, f"{RUN}/a.csv", status="upload_failed")
+    assert row.upload_failure_reason == "upload_error"
     assert pending(pc) == [(f"{RUN}/a.csv", RUN, 0)]
 
     # The automatic upload failed. Asking for the file from the run page queues it, and the
@@ -548,6 +546,41 @@ def test_failed_queue_polls_are_reported_on_the_first_failure_and_every_tenth(
     assert [e.details["consecutive_failures"] for e in events] == [1, 10, 1]
 
 
+def report_positions(proxy: FaultProxy, *, answered: bool = True) -> list[int]:
+    """Where the watcher's ``POST /upload-failures`` requests are in the proxy's log. Only the
+    ones the server answered with a 200, unless ``answered`` is false."""
+    return [
+        i
+        for i, r in enumerate(proxy.requests)
+        if r.method == "POST"
+        and _route(r).endswith("/upload-failures")
+        and (not answered or r.upstream_status == 200)
+    ]
+
+
+def reported_files(proxy: FaultProxy, position: int) -> list[dict[str, object]]:
+    """The items of the give-up report at ``position`` in the proxy's log."""
+    body = proxy.requests[position].body
+    assert body is not None
+    return list(json.loads(body)["files"])
+
+
+def good_polls_between(proxy: FaultProxy, start: int, end: int) -> int:
+    """How many queue polls the server answered between two positions of the proxy's log."""
+    return sum(
+        1
+        for r in proxy.requests[start:end]
+        if r.method == "GET" and _route(r).endswith("/upload-queue") and r.fault_mode is None
+    )
+
+
+def file_patches(proxy: FaultProxy, file_id: int) -> list[RecordedRequest]:
+    """The ``PATCH /files/<id>`` requests: an older watcher's cancel, or "uploaded" after a PUT."""
+    return [
+        r for r in proxy.requests if r.method == "PATCH" and _route(r).endswith(f"/files/{file_id}")
+    ]
+
+
 # ---------------------------------------------------------------------------
 # The watcher gives up on a file
 # ---------------------------------------------------------------------------
@@ -555,12 +588,11 @@ def test_failed_queue_polls_are_reported_on_the_first_failure_and_every_tenth(
 
 @pytest.mark.covers(
     "queue.file->missing_reported_once",
-    "queue.file->cancelled_after_three_polls",
-    "queue.cancelled->requested_again",
-    "event.queued_file_missing->emitted",
-    "event.upload_request_cancelled->emitted",
+    "queue.file->upload_failed_after_three_polls",
+    "queue.upload_failed->requested_again",
+    "event.uploads_failed->recorded",
 )
-def test_queued_file_that_is_missing_is_reported_once_and_cancelled_after_three_polls(
+def test_queued_file_that_is_missing_is_marked_upload_failed_after_three_polls(
     watcher: WatcherFactory,
     server: ServerView,
     proxy: FaultProxy,
@@ -580,58 +612,113 @@ def test_queued_file_that_is_missing_is_reported_once_and_cancelled_after_three_
     # missed. Polls that are still refused are left out of the count below.
     mark = len(proxy.requests)
     proxy.remove_fault(hold)
-    [cancelled] = wait_for_cancellation(server, pc)
+    row = server.wait_for_file(instrument_id, RUN, f"{RUN}/a.csv", status="upload_failed")
 
-    assert cancelled["file_id"] == a.row.id
-    assert cancelled["attempts"] == 3
-    assert cancelled["reason"] == "missing"
-    # The file is back to `detected` and out of the queue, and the cancel came on the third
-    # poll that listed it: three polls got through before the request that cancelled it.
-    row = server.file(instrument_id, RUN, f"{RUN}/a.csv")
-    assert row is not None and row.status == "detected" and row.upload_requested_at is None
+    # Its folder is there, so only the file is missing. It is out of the queue.
+    assert row.upload_failure_reason == "file_missing"
+    assert row.upload_failed_at is not None and row.upload_requested_at is None
     assert queue_ids(server, pc) == set()
-    log = proxy.requests
-    cancel_at = next(
-        i
-        for i, r in enumerate(log)
-        if r.method == "PATCH" and _route(r).endswith(f"/files/{a.row.id}")
-    )
-    good_polls = [
-        r
-        for r in log[mark:cancel_at]
-        if r.method == "GET" and _route(r).endswith("/upload-queue") and r.fault_mode is None
-    ]
-    assert len(good_polls) == 3
-
-    # "Missing" was reported once, on the first of those polls, and not on the other two.
-    [missing] = server.events(pc.watcher_id, event_type="error", kind="queued_file_missing")
-    assert missing.details["file_id"] == a.row.id
-    assert str(missing.details["expected_path"]).endswith("a.csv")
-    assert missing.message == "Queued file missing: a.csv"
+    # One report, sent on the third poll that listed the file, which echoes the request.
+    [report_at] = report_positions(proxy)
+    [item] = reported_files(proxy, report_at)
+    assert (item["file_id"], item["reason"]) == (a.row.id, "file_missing")
+    assert isinstance(item["requested_at"], str)
+    assert good_polls_between(proxy, mark, report_at) == 3
+    # The watcher cancelled nothing itself, and sent none of the events older watchers sent.
+    assert file_patches(proxy, a.row.id) == []
+    assert server.events(pc.watcher_id, kind="queued_file_missing") == []
+    assert server.events(pc.watcher_id, kind="upload_request_cancelled") == []
+    # The server wrote one event for the run and the reason.
+    [failed] = server.wait_for_events(pc.watcher_id, event_type="uploads_failed")
+    assert failed.details["run_id"] == RUN
+    assert failed.details["reason"] == "file_missing"
+    assert failed.details["failed_count"] == 1
     assert s3_puts(proxy) == []
 
-    # A cancelled file can be requested again and starts over with three attempts: it is
-    # reported missing again, and gives up again only after three more polls. This request
-    # waits for a poll that the server answered after the cancellation. A request that comes
-    # sooner is another scenario, tested below.
-    wait_for_good_poll_after(proxy, cancel_at)
+    # A file marked `upload_failed` can be requested again and starts over with three
+    # attempts: it is given up on again only after three more polls. This request waits for a
+    # poll that the server answered after the report. A request that comes sooner is another
+    # scenario, tested below.
+    wait_for_good_poll_after(proxy, report_at)
+    again_from = len(proxy.requests)
     admin.request_upload(instrument_id, RUN, [a.row.id]).raise_for_status()
-    wait_for_cancellation(server, pc, count=2)
-    assert len(server.events(pc.watcher_id, event_type="error", kind="queued_file_missing")) == 2
-    again = server.file(instrument_id, RUN, f"{RUN}/a.csv")
-    assert again is not None and again.status == "detected"
+    wait_until(
+        lambda: len(report_positions(proxy)) == 2,
+        30,
+        lambda: server.dump(pc.watcher_id, instrument_id),
+        what="the second report",
+    )
+    second_at = report_positions(proxy)[1]
+    assert good_polls_between(proxy, again_from, second_at) >= 3
+    again = server.wait_for_file(instrument_id, RUN, f"{RUN}/a.csv", status="upload_failed")
+    assert again.upload_failure_reason == "file_missing"
+    assert len(server.wait_for_events(pc.watcher_id, event_type="uploads_failed", count=2)) == 2
 
     # With the file back on disk the third request, made after a poll that the server answered
-    # after the second cancellation, uploads it.
+    # after the second report, uploads it.
     write_file(path, a.content)
-    wait_for_good_poll_after(proxy, last_file_patch(proxy, a.row.id))
+    wait_for_good_poll_after(proxy, second_at)
     admin.request_upload(instrument_id, RUN, [a.row.id]).raise_for_status()
-    server.wait_for_uploaded(instrument_id, RUN, f"{RUN}/a.csv", content=a.content)
-    assert len(server.events(pc.watcher_id, event_type="error", kind="queued_file_missing")) == 2
+    uploaded = server.wait_for_uploaded(instrument_id, RUN, f"{RUN}/a.csv", content=a.content)
+    assert uploaded.upload_failure_reason is None
 
 
-@pytest.mark.covers("queue.cancelled->requested_before_next_poll")
-def test_a_file_requested_again_right_after_its_cancellation_gets_its_attempts_back(
+@pytest.mark.covers("queue.folder_missing->one_report_for_the_run")
+def test_a_renamed_run_folder_is_reported_in_one_report_before_a_slow_upload_finishes(
+    watcher: WatcherFactory,
+    server: ServerView,
+    proxy: FaultProxy,
+    admin: Admin,
+    instrument_id: str,
+    watch_dir: Path,
+) -> None:
+    pc = manual_watcher(watcher, server)
+    names = ("a.csv", "b.csv", "c.csv")
+    detected = detect_run(server, instrument_id, watch_dir, RUN, dict.fromkeys(names, SMALL))
+    other = detect_run(server, instrument_id, watch_dir, "RUN002", {"big.csv": SMALL})["big.csv"]
+    # Someone renames the run's folder on the PC after the files were reported.
+    (watch_dir / RUN).rename(watch_dir / f"{RUN}-renamed")
+    # The other run's file is refused on the first two polls, so every poll lists it, and its
+    # upload on the third poll, the one that gives up on the renamed run, is slow.
+    refused = proxy.add_fault("status", path=PRESIGN, method="POST", status=503, count=2)
+    slow = proxy.add_fault("delay", path=r"^/api/local-s3/", method="PUT", delay_seconds=8, count=1)
+
+    hold = hold_queue(proxy)
+    admin.request_upload(
+        instrument_id, RUN, [d.row.id for d in detected.values()]
+    ).raise_for_status()
+    admin.request_upload(instrument_id, "RUN002", [other.row.id]).raise_for_status()
+    proxy.remove_fault(hold)
+
+    rows = [
+        server.wait_for_file(instrument_id, RUN, f"{RUN}/{name}", status="upload_failed")
+        for name in names
+    ]
+    assert {row.upload_failure_reason for row in rows} == {"folder_missing"}
+    # All three in one report, which went out before the slow upload's PUT did.
+    [report_at] = report_positions(proxy)
+    assert {item["file_id"] for item in reported_files(proxy, report_at)} == {
+        d.row.id for d in detected.values()
+    }
+    [put] = [
+        i
+        for i, r in enumerate(proxy.requests)
+        if r.method == "PUT" and r.path.startswith("/api/local-s3/")
+    ]
+    assert report_at < put
+    # One event for the run, with the folder that is gone.
+    [failed] = server.wait_for_events(pc.watcher_id, event_type="uploads_failed")
+    assert failed.details["run_id"] == RUN
+    assert failed.details["reason"] == "folder_missing"
+    assert failed.details["failed_count"] == 3
+    assert failed.details["folder"] == RUN
+
+    server.wait_for_uploaded(instrument_id, "RUN002", "RUN002/big.csv", content=other.content)
+    assert (refused.hits, slow.hits) == (2, 1)
+
+
+@pytest.mark.covers("queue.upload_failed->requested_before_next_poll")
+def test_a_file_requested_again_right_after_it_was_marked_upload_failed_gets_its_attempts_back(
     watcher: WatcherFactory,
     server: ServerView,
     proxy: FaultProxy,
@@ -645,13 +732,12 @@ def test_a_file_requested_again_right_after_its_cancellation_gets_its_attempts_b
     refusal = proxy.add_fault("status", path=PRESIGN, method="POST", status=503)
     admin.request_upload(instrument_id, RUN, [a.row.id]).raise_for_status()
     proxy.wait_for_request(
-        lambda r: r.method == "PATCH" and _route(r).endswith(f"/files/{a.row.id}"), timeout=30
+        lambda r: r.method == "POST" and _route(r).endswith("/upload-failures"), timeout=30
     )
-    # The cancellation is on its way to the server. The next poll is a second away, so the queue
-    # is held at once: no poll can forget the cancellation before the file is requested again.
+    # The report is on its way to the server. The next poll is a second away, so the queue is
+    # held at once: no poll can forget the give-up before the file is requested again.
     hold = hold_queue(proxy)
-    wait_for_cancellation(server, pc)
-    server.wait_for_file(instrument_id, RUN, f"{RUN}/a.csv", status="detected")
+    server.wait_for_file(instrument_id, RUN, f"{RUN}/a.csv", status="upload_failed")
 
     # The cause is gone, and the file is requested again while the queue is still held.
     proxy.remove_fault(refusal)
@@ -661,7 +747,7 @@ def test_a_file_requested_again_right_after_its_cancellation_gets_its_attempts_b
     proxy.remove_fault(hold)
 
     # The first poll that gets through lists the file, and the watcher does something with it:
-    # it asks for an upload URL (an attempt), or it cancels the request again.
+    # it asks for an upload URL (an attempt), or it reports the file again.
     def attempts() -> list[RecordedRequest]:
         return [
             r
@@ -669,34 +755,28 @@ def test_a_file_requested_again_right_after_its_cancellation_gets_its_attempts_b
             if r.method == "POST" and _route(r).endswith("/request-upload-url")
         ]
 
-    def patches() -> list[RecordedRequest]:
-        # The request that cancels a file, or the one that marks it uploaded after its PUT.
-        return [
-            r
-            for r in proxy.requests[mark:]
-            if r.method == "PATCH" and _route(r).endswith(f"/files/{a.row.id}")
-        ]
+    def reports() -> list[int]:
+        return [i for i in report_positions(proxy, answered=False) if i >= mark]
 
     wait_until(
-        lambda: attempts() or patches(),
+        lambda: attempts() or reports(),
         30,
         lambda: server.dump(pc.watcher_id, instrument_id),
-        what="the watcher to attempt the file or cancel it again",
+        what="the watcher to attempt the file or report it again",
     )
 
     # A request is a new request, with three attempts of its own: the watcher forgot the
-    # three failed attempts when it cancelled the file, so it tries the file, which uploads
-    # now that nothing refuses it.
-    assert attempts(), "the file was cancelled again without an attempt being made"
+    # three failed attempts once the server had its report, so it tries the file, which
+    # uploads now that nothing refuses it.
+    assert attempts(), "the file was reported again without an attempt being made"
     server.wait_for_uploaded(instrument_id, RUN, f"{RUN}/a.csv", content=a.content, timeout=15)
 
 
 @pytest.mark.covers(
-    "queue.upload_failing->cancelled_after_three_polls",
-    "event.upload_request_cancelled->emitted",
+    "queue.upload_failing->upload_failed_after_three_polls",
     "event.upload_failed->emitted",
 )
-def test_queued_file_whose_upload_keeps_failing_is_cancelled_after_three_polls(
+def test_queued_file_whose_upload_keeps_failing_is_marked_upload_failed_after_three_polls(
     watcher: WatcherFactory,
     server: ServerView,
     proxy: FaultProxy,
@@ -711,18 +791,83 @@ def test_queued_file_whose_upload_keeps_failing_is_cancelled_after_three_polls(
     proxy.add_fault("status", path=PRESIGN, method="POST", status=503)
 
     admin.request_upload(instrument_id, RUN, [a.row.id]).raise_for_status()
+    row = server.wait_for_file(instrument_id, RUN, f"{RUN}/a.csv", status="upload_failed")
+
+    assert row.upload_failure_reason == "upload_error"
+    # The server's message carries the last error the watcher saw.
+    assert "Upload URL request failed" in (row.error_message or "")
+    [report_at] = report_positions(proxy)
+    [item] = reported_files(proxy, report_at)
+    assert (item["file_id"], item["reason"]) == (a.row.id, "upload_error")
+    assert str(item["detail"]).startswith("Upload URL request failed")
+    # Three polls, three failed attempts, and then the watcher stopped asking. The report is
+    # sent at once, and the events with the next heartbeat.
+    assert len(calls(proxy, "POST", "/request-upload-url")) == 3
+    failed = server.wait_for_events(pc.watcher_id, event_type="upload_failed", count=3)
+    assert [e.message for e in failed] == ["Presigned URL request failed: a.csv"] * 3
+    assert file_patches(proxy, a.row.id) == []
+    assert s3_puts(proxy) == []
+
+
+@pytest.mark.covers("queue.report_failed->sent_again")
+def test_a_report_the_server_fails_is_sent_again_on_the_next_poll(
+    watcher: WatcherFactory,
+    server: ServerView,
+    proxy: FaultProxy,
+    admin: Admin,
+    instrument_id: str,
+    watch_dir: Path,
+) -> None:
+    pc = manual_watcher(watcher, server)
+    a = detect_run(server, instrument_id, watch_dir, RUN, {"a.csv": SMALL})["a.csv"]
+    (watch_dir / RUN / "a.csv").unlink()
+    refused = proxy.add_fault(
+        "status", path=r"/upload-failures$", method="POST", status=503, count=1
+    )
+
+    admin.request_upload(instrument_id, RUN, [a.row.id]).raise_for_status()
+    row = server.wait_for_file(instrument_id, RUN, f"{RUN}/a.csv", status="upload_failed")
+
+    assert row.upload_failure_reason == "file_missing"
+    # The first report was refused; the next poll looked at the file again and sent it again.
+    sent = report_positions(proxy, answered=False)
+    assert refused.hits == 1 and len(sent) == 2
+    assert good_polls_between(proxy, sent[0], sent[1]) == 1
+    assert reported_files(proxy, sent[0]) == reported_files(proxy, sent[1])
+    assert len(server.wait_for_events(pc.watcher_id, event_type="uploads_failed")) == 1
+
+
+@pytest.mark.covers(
+    "queue.old_server->cancelled_after_three_polls",
+    "event.upload_request_cancelled->emitted",
+)
+def test_against_an_older_server_a_missing_file_is_cancelled_as_before(
+    watcher: WatcherFactory,
+    server: ServerView,
+    proxy: FaultProxy,
+    admin: Admin,
+    instrument_id: str,
+    watch_dir: Path,
+) -> None:
+    pc = manual_watcher(watcher, server)
+    a = detect_run(server, instrument_id, watch_dir, RUN, {"a.csv": SMALL})["a.csv"]
+    (watch_dir / RUN / "a.csv").unlink()
+    # A server older than watcher 1.4.5 has no such route: Next.js answers with a 404 that has
+    # no JSON error in it, as this fault does.
+    proxy.add_fault("status", path=r"/upload-failures$", method="POST", status=404)
+
+    admin.request_upload(instrument_id, RUN, [a.row.id]).raise_for_status()
     [cancelled] = wait_for_cancellation(server, pc)
 
     assert cancelled["file_id"] == a.row.id
     assert cancelled["attempts"] == 3
-    assert cancelled["reason"] == "upload_failed"
+    assert cancelled["reason"] == "file_missing"
     row = server.file(instrument_id, RUN, f"{RUN}/a.csv")
     assert row is not None and row.status == "detected" and row.upload_requested_at is None
-    # Three polls, three failed attempts, and then the watcher stopped asking.
-    assert len(calls(proxy, "POST", "/request-upload-url")) == 3
-    failed = server.events(pc.watcher_id, event_type="upload_failed")
-    assert [e.message for e in failed] == ["Presigned URL request failed: a.csv"] * 3
-    assert s3_puts(proxy) == []
+    # The watcher asked once, and then cancelled the file with its own PATCH.
+    assert len(report_positions(proxy, answered=False)) == 1
+    assert len(file_patches(proxy, a.row.id)) == 1
+    assert server.events(pc.watcher_id, event_type="uploads_failed") == []
 
 
 @pytest.mark.platforms("cli")
@@ -748,17 +893,15 @@ def test_a_requested_file_that_cannot_be_read_yet_stays_requested_and_uploads_on
     assert waiting.details["will_retry"] is True
     assert waiting.details["file_id"] == a.row.id
 
-    # More polls than the three that cancel a request whose upload keeps failing (one a second
-    # here). The file can't be read, which is not a failed attempt: it stays requested, the
-    # server is asked for nothing, and there is no cancellation and no second event.
+    # More polls than the three that give up on a file whose upload keeps failing (one a
+    # second here). The file can't be read, which is not a failed attempt: it stays requested,
+    # the server is asked for nothing, and there is no report and no second event.
     stays_true(
         lambda: (
             statuses(server, instrument_id, RUN)["a.csv"] == "upload_requested"
             and queue_ids(server, pc) == {a.row.id}
             and not calls(proxy, "POST", PRESIGN)
-            and not server.events(
-                pc.watcher_id, event_type="error", kind="upload_request_cancelled"
-            )
+            and not report_positions(proxy, answered=False)
             and len(server.events(pc.watcher_id, event_type="upload_failed")) == 1
         ),
         6,
@@ -771,12 +914,8 @@ def test_a_requested_file_that_cannot_be_read_yet_stays_requested_and_uploads_on
     assert len(server.events(pc.watcher_id, event_type="upload_failed")) == 1
 
 
-@pytest.mark.covers(
-    "queue.unsafe_path->rejected",
-    "event.unsafe_upload_path->emitted",
-    "event.upload_request_cancelled->emitted",
-)
-def test_queue_entry_with_a_path_outside_the_watch_folder_is_rejected_and_cancelled(
+@pytest.mark.covers("queue.unsafe_path->rejected", "event.unsafe_upload_path->emitted")
+def test_queue_entry_with_a_path_outside_the_watch_folder_is_rejected_and_marked_failed(
     watcher: WatcherFactory,
     server: ServerView,
     proxy: FaultProxy,
@@ -803,11 +942,11 @@ def test_queue_entry_with_a_path_outside_the_watch_folder_is_rejected_and_cancel
     unsafe = server.wait_for_event(pc.watcher_id, event_type="error", kind="unsafe_upload_path")
     assert unsafe.details["file_id"] == a.row.id
     assert unsafe.details["relative_path"] == "../outside.csv"
-    # The request is cancelled at once, not after three tries.
-    [cancelled] = wait_for_cancellation(server, pc)
-    assert cancelled["file_id"] == a.row.id and cancelled["reason"] == "unsafe_path"
-    row = server.file(instrument_id, RUN, "../outside.csv")
-    assert row is not None and row.status == "detected" and row.upload_requested_at is None
+    # The file is marked failed at once, not after three tries.
+    row = server.wait_for_file(instrument_id, RUN, "../outside.csv", status="upload_failed")
+    assert row.upload_failure_reason == "unsafe_path" and row.upload_requested_at is None
+    [report_at] = report_positions(proxy)
+    assert [item["reason"] for item in reported_files(proxy, report_at)] == ["unsafe_path"]
     assert len(server.events(pc.watcher_id, event_type="error", kind="unsafe_upload_path")) == 1
 
     # The file outside the watch folder was never read or uploaded.

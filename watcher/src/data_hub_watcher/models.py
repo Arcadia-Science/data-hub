@@ -415,12 +415,30 @@ class UploadQueueFile(BaseModel):
     relative_path: str | None = None
     filename: str
     size_bytes: int | None = None
+    # When the upload was requested, as the server sent it. A give-up report echoes it, so
+    # the server can tell a give-up about this request from one about a later request for
+    # the same file. Kept as text so it goes back exactly as it came. Servers older than
+    # watcher 1.4.5 don't send it.
+    upload_requested_at: str | None = None
 
 
 class UploadQueueResponse(BaseModel):
     model_config = _API_MODEL_CONFIG
 
     files: list[UploadQueueFile]
+
+
+class UploadFailuresResponse(BaseModel):
+    """What `POST /watchers/{id}/upload-failures` returns.
+
+    `failed` files were marked `upload_failed`. `skipped` ones were left as they were,
+    because the request they were about has changed, or they had failed or uploaded already.
+    """
+
+    model_config = _API_MODEL_CONFIG
+
+    failed: int = 0
+    skipped: int = 0
 
 
 class FileResponse(BaseModel):

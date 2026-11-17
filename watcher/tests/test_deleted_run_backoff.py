@@ -20,7 +20,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from data_hub_watcher import run_detector
-from data_hub_watcher.api_client import ApiError, is_run_deleted
+from data_hub_watcher.api_client import ApiError, UploadFailure, is_run_deleted
 from data_hub_watcher.constants import (
     MAX_PENDING_UPLOAD_ATTEMPTS,
     MAX_QUEUE_FILE_ATTEMPTS,
@@ -617,6 +617,12 @@ def _upload_that_waits_for_the_file(
     return result[0]
 
 
+def _reports(up: Uploader) -> list[list[UploadFailure]]:
+    """The give-ups of each `report_upload_failures` call, in order."""
+    client = cast(MagicMock, up._client)
+    return [list(c.args[1]) for c in client.report_upload_failures.call_args_list]
+
+
 class TestAnUploadRequestedForARunInTheSet:
     """A queue that lists a file of a run in the set means the run was restored since.
 
@@ -644,7 +650,7 @@ class TestAnUploadRequestedForARunInTheSet:
         assert up._counters.errors == 0
         assert [e.event_type for e in _events(up)] == [EventType.FILE_UPLOADED]
         assert up._queue_attempts == {}
-        cast(MagicMock, up._client).cancel_upload_request.assert_not_called()
+        cast(MagicMock, up._client).report_upload_failures.assert_not_called()
 
     def test_the_run_leaves_the_set_when_the_server_accepts_the_request(
         self, uploads_dir: Path, state_db: StateDB
@@ -743,7 +749,7 @@ class TestAnUploadRequestedForARunInTheSet:
         assert _request_url_mock(up).call_count == polls
         assert RUN in up._deleted_runs
         assert up._queue_attempts == {}
-        cast(MagicMock, up._client).cancel_upload_request.assert_not_called()
+        cast(MagicMock, up._client).report_upload_failures.assert_not_called()
         # Reported once, by the call that added the run, or not at all when it was in the set.
         assert len(_events(up)) == (0 if already_in_the_set else 1)
         assert up._counters.errors == (0 if already_in_the_set else 1)
@@ -761,7 +767,8 @@ class TestAnUploadRequestedForARunInTheSet:
 
         # Asked on every poll, and given up on after the usual number of attempts.
         assert _request_url_mock(up).call_count == MAX_QUEUE_FILE_ATTEMPTS
-        cast(MagicMock, up._client).cancel_upload_request.assert_called_once_with(1)
+        [[failure]] = _reports(up)
+        assert (failure.file_id, failure.reason) == (1, "upload_error")
         assert RUN in up._deleted_runs
 
     def test_a_file_that_is_missing_is_still_an_attempt(
@@ -774,11 +781,11 @@ class TestAnUploadRequestedForARunInTheSet:
         for _ in range(MAX_QUEUE_FILE_ATTEMPTS):
             up.poll_upload_queue()
 
-        # Reported missing once, then cancelled, as for any run. No request was sent.
-        missing = [e for e in _events(up) if e.details.get("kind") == "queued_file_missing"]
-        assert len(missing) == 1
+        # Counted as missing once, then given up on, as for any run. No upload URL was asked.
+        assert up._counters.errors == 1
         _request_url_mock(up).assert_not_called()
-        cast(MagicMock, up._client).cancel_upload_request.assert_called_once_with(1)
+        [[failure]] = _reports(up)
+        assert (failure.file_id, failure.reason) == (1, "file_missing")
 
     def test_a_thread_that_waited_for_the_file_sends_no_request_after_a_refusal(
         self, uploads_dir: Path, state_db: StateDB

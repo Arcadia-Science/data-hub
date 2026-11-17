@@ -2,6 +2,8 @@ from __future__ import annotations
 import logging
 import os
 import time
+from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, TypeGuard
 from urllib.parse import quote, urlsplit
@@ -9,7 +11,10 @@ from urllib.parse import quote, urlsplit
 import requests
 
 from data_hub_watcher.constants import (
+    MAX_UPLOAD_FAILURES_PER_REQUEST,
+    NOT_FOUND_ERROR_CODE,
     RUN_DELETED_REASON,
+    UPLOAD_FAILURE_DETAIL_MAX_LENGTH,
     WATCHER_DEREGISTERED_ERROR_CODE,
     WATCHER_VERSION,
     WATCHER_VERSION_HEADER,
@@ -29,6 +34,7 @@ from data_hub_watcher.models import (
     RegisterWatcherResponse,
     RunDetailResponse,
     RunResponse,
+    UploadFailuresResponse,
     UploadQueueResponse,
     WatcherResponse,
     WatcherUpdateInfoResponse,
@@ -93,6 +99,79 @@ def is_run_deleted(exc: BaseException) -> TypeGuard[ApiError]:
         return False
     details = exc.detail.details
     return details is not None and details.get("reason") == RUN_DELETED_REASON
+
+
+def is_route_missing(exc: ApiError) -> bool:
+    """True for a 404 that says the server has no such route, not that a record is missing.
+
+    Data Hub's routes answer a missing record (a watcher ID it has no row for, say) with a JSON
+    404 whose code is `NOT_FOUND`. A server that doesn't have the route at all answers with
+    Next.js's HTML 404 page, which has no JSON `error` (`detail` is `None`).
+    """
+    return exc.status_code == 404 and (
+        exc.detail is None or exc.detail.code != NOT_FOUND_ERROR_CODE
+    )
+
+
+@dataclass(frozen=True)
+class UploadFailure:
+    """One file the watcher gave up on, for `report_upload_failures`.
+
+    A file someone requested has its server ID, *file_id*, and *requested_at*, the
+    `upload_requested_at` the upload queue listed it with. An auto-mode file is named by
+    *relative_path*, because the watcher doesn't know its server ID. *run_id* is sent only for
+    an auto-mode file, but every item has it, so the items of one run go in one request.
+    *detail* is the last error of an `upload_error`.
+    """
+
+    run_id: str
+    reason: str
+    file_id: int | None = None
+    requested_at: str | None = None
+    relative_path: str | None = None
+    detail: str | None = None
+
+    def payload(self) -> dict[str, Any]:
+        """The item as the endpoint takes it."""
+        item: dict[str, Any]
+        if self.file_id is not None:
+            item = {"file_id": self.file_id}
+            if self.requested_at is not None:
+                item["requested_at"] = self.requested_at
+        else:
+            item = {"run_id": self.run_id, "relative_path": self.relative_path}
+        item["reason"] = self.reason
+        if self.detail:
+            item["detail"] = self.detail[:UPLOAD_FAILURE_DETAIL_MAX_LENGTH]
+        return item
+
+
+def chunk_upload_failures(
+    failures: Sequence[UploadFailure], limit: int = MAX_UPLOAD_FAILURES_PER_REQUEST
+) -> list[list[UploadFailure]]:
+    """Split *failures* into requests of at most *limit* items.
+
+    Data Hub writes one event and sends one notification per run and reason in each request,
+    so a run's items stay together. They are split only when the run alone has more than
+    *limit*, and then the run's last, smaller piece can share a request with other runs.
+    Runs keep the order they first appear in.
+    """
+    runs: dict[str, list[UploadFailure]] = {}
+    for failure in failures:
+        runs.setdefault(failure.run_id, []).append(failure)
+    chunks: list[list[UploadFailure]] = []
+    current: list[UploadFailure] = []
+    for items in runs.values():
+        if current and len(current) + len(items) > limit:
+            chunks.append(current)
+            current = []
+        while len(items) > limit:
+            chunks.append(items[:limit])
+            items = items[limit:]
+        current.extend(items)
+    if current:
+        chunks.append(current)
+    return chunks
 
 
 DEFAULT_TIMEOUT: tuple[float, float] = (5, 30)  # (connect, read) seconds
@@ -401,6 +480,36 @@ class DataHubClient:
         resp = self._request("GET", f"/watchers/{watcher_id}/upload-queue")
         return UploadQueueResponse.model_validate(resp.json())
 
+    def report_upload_failures(
+        self, watcher_id: str, failures: Sequence[UploadFailure]
+    ) -> UploadFailuresResponse | None:
+        """Tell Data Hub which files the watcher gave up on, so it marks them `upload_failed`.
+
+        Sent in requests of up to `MAX_UPLOAD_FAILURES_PER_REQUEST` files, each run's files
+        in one request where they fit (`chunk_upload_failures`), and the counts of every
+        request are added up. Returns `None` when the server has no such endpoint
+        (`is_route_missing`): it is older than watcher 1.4.5, and the caller falls back to
+        cancelling each request on its own. Any other error is raised at the first request
+        that fails. The server skips a file it has already marked, so sending again the
+        requests that went through before it is safe.
+        """
+        failed = skipped = 0
+        for chunk in chunk_upload_failures(failures):
+            try:
+                resp = self._request(
+                    "POST",
+                    f"/watchers/{watcher_id}/upload-failures",
+                    json={"files": [failure.payload() for failure in chunk]},
+                )
+            except ApiError as exc:
+                if is_route_missing(exc):
+                    return None
+                raise
+            counts = UploadFailuresResponse.model_validate(resp.json())
+            failed += counts.failed
+            skipped += counts.skipped
+        return UploadFailuresResponse(failed=failed, skipped=skipped)
+
     def request_upload_url(
         self,
         instrument_id: str,
@@ -490,11 +599,12 @@ class DataHubClient:
     def cancel_upload_request(self, file_id: int) -> FileResponse:
         """Revert a queued file to ``detected`` so it leaves the upload queue.
 
-        Called after the watcher gives up on a queued file (missing on disk
-        or persistently failing to upload) so the server stops serving it in
-        the upload queue and the watcher stops re-erroring on it every
-        heartbeat poll. The file stays a re-requestable detection
-        rather than being deleted, so an operator can queue it again later.
+        The fallback for a server older than watcher 1.4.5, which has no
+        `report_upload_failures` endpoint. Called after the watcher gives up on
+        a queued file (missing on disk or persistently failing to upload) so
+        the server stops serving it in the upload queue. The file stays a
+        re-requestable detection rather than being deleted, so an operator can
+        queue it again later.
         """
         resp = self._request("PATCH", f"/files/{file_id}", json={"status": "detected"})
         return FileResponse.model_validate(resp.json())

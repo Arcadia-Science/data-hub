@@ -62,18 +62,28 @@ a database migration. Known ``kind`` values, with their per-kind
 * ``update_check_failed`` -- ``GET /watchers/:id/update-check`` failed.
   Emitted only after 3 consecutive failures so we don't alert on a
   single hourly blip. ``details = {"kind", "error", "consecutive_failures"}``.
-* ``queued_file_missing`` -- an upload-queue file was not found on disk
-  at its resolved path. Emitted once per file id (throttled across
-  polls). ``details = {"kind", "file_id", "expected_path"}``.
+* ``unsafe_upload_path`` -- an upload-queue file's path escapes the watch
+  folder, so it is never read and the watcher gives up on it at once.
+  ``details = {"kind", "file_id", "relative_path"}``.
+* ``queued_file_missing`` -- not sent from watcher 1.4.5. Older watchers
+  sent it when an upload-queue file was not found on disk at its resolved
+  path, once per file id. ``details = {"kind", "file_id", "expected_path"}``.
 * ``upload_request_cancelled`` -- the watcher gave up on a queued file
   after ``MAX_QUEUE_FILE_ATTEMPTS`` failed polls (missing or upload error)
   and reverted it to ``detected`` server-side so it leaves the queue.
-  ``details = {"kind", "file_id", "attempts", "reason"}``.
+  From 1.4.5 only on a server without ``POST /watchers/:id/upload-failures``;
+  a newer server marks the file ``upload_failed`` and writes its own
+  ``uploads_failed`` event for the run. ``reason`` is one of the
+  ``UPLOAD_FAILURE_*`` reasons from 1.4.5 (``missing``, ``upload_failed`` or
+  ``unsafe_path`` before). ``details = {"kind", "file_id", "attempts", "reason"}``.
 * ``upload_retries_exhausted`` -- an auto-mode upload still failed after
   ``MAX_PENDING_UPLOAD_ATTEMPTS`` watcher starts, so it is no longer
-  retried. ``details = {"kind", "relative_path", "run_id", "attempts"}``.
+  retried. From 1.4.5 only on a server without the upload-failures
+  endpoint, as for ``upload_request_cancelled``.
+  ``details = {"kind", "relative_path", "run_id", "attempts"}``.
 * ``pending_upload_missing`` -- an auto-mode upload waiting for a retry
-  was no longer on disk at startup, so the retry was dropped.
+  was no longer on disk, so the retry was dropped. From 1.4.5 only on a
+  server without the upload-failures endpoint.
   ``details = {"kind", "relative_path", "run_id"}``.
 * ``watch_directory_unavailable`` -- the watch folder was missing or
   unreadable, so the watcher entered its waiting state (heartbeats only).

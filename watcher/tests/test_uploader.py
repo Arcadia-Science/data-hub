@@ -23,7 +23,8 @@ import pytest
 import requests
 from requests.adapters import HTTPAdapter
 
-from data_hub_watcher.api_client import ApiError
+from data_hub_watcher import uploader as uploader_module
+from data_hub_watcher.api_client import ApiError, UploadFailure
 from data_hub_watcher.constants import (
     MAX_PENDING_UPLOAD_ATTEMPTS,
     MAX_QUEUE_FILE_ATTEMPTS,
@@ -49,6 +50,7 @@ from data_hub_watcher.uploader import (
     _DaemonCalls,
     _exists,
     _FileSlice,
+    _GiveUp,
     _guess_content_type,
     _is_file,
     _PartUrls,
@@ -636,33 +638,44 @@ class TestPollUploadQueueCounterLocking:
         assert uploader._counters.errors == 1
 
 
-class TestPollUploadQueueAttemptCap:
-    """A persistently-failing queued file is bounded, then cancelled.
+def _queued(
+    file_id: int,
+    relative_path: str,
+    *,
+    run_id: str = "RUN-X",
+    requested_at: str | None = "2026-11-16T10:00:00.123Z",
+) -> UploadQueueFile:
+    return UploadQueueFile(
+        id=file_id,
+        instrument_id="test-instrument",
+        run_id=run_id,
+        filename=Path(relative_path).name,
+        relative_path=relative_path,
+        upload_requested_at=requested_at,
+    )
 
-    Manual-mode polling runs every heartbeat, so a stale queue entry (e.g.
-    one left pointing at the old root after the watch directory changed, or
-    a file that keeps failing to upload) would otherwise re-error forever.
-    The watcher surfaces the visible error once, retries up to
-    ``MAX_QUEUE_FILE_ATTEMPTS`` polls, then cancels the request server-side
-    so it leaves the queue.
+
+def _reports(client: MagicMock) -> list[list[UploadFailure]]:
+    """The give-ups of each `report_upload_failures` call, in order."""
+    return [list(c.args[1]) for c in client.report_upload_failures.call_args_list]
+
+
+class TestPollUploadQueueAttemptCap:
+    """A persistently-failing queued file is bounded, then reported to Data Hub (1.4.5).
+
+    Manual-mode polling runs every minute, so a stale queue entry (e.g. one left pointing at
+    the old root after the watch directory changed, or a file that keeps failing to upload)
+    would otherwise re-error forever. The watcher logs the missing file once, retries up to
+    ``MAX_QUEUE_FILE_ATTEMPTS`` polls, then reports the file, and Data Hub marks it
+    ``upload_failed`` and writes the event itself.
     """
 
     @staticmethod
-    def _ghost_queue() -> UploadQueueResponse:
+    def _ghost_queue(requested_at: str | None = "2026-11-16T10:00:00.123Z") -> UploadQueueResponse:
         """A one-file queue pointing at a path that doesn't exist on disk."""
-        return UploadQueueResponse(
-            files=[
-                UploadQueueFile(
-                    id=1,
-                    instrument_id="test-instrument",
-                    run_id="RUN-X",
-                    filename="ghost.csv",
-                    relative_path="ghost.csv",
-                )
-            ]
-        )
+        return UploadQueueResponse(files=[_queued(1, "ghost.csv", requested_at=requested_at)])
 
-    def test_missing_file_errors_once_then_cancels(
+    def test_missing_file_logs_once_then_is_reported(
         self,
         uploader: Uploader,
         mock_client: MagicMock,
@@ -673,19 +686,75 @@ class TestPollUploadQueueAttemptCap:
             uploader.poll_upload_queue()
 
         reporter_mock = cast(MagicMock, uploader._reporter)
-
-        # Visible "missing" error and the error counter fire exactly once
-        # across all polls (throttled), not once per heartbeat.
-        assert reporter_mock.queue_event.call_count == 1
+        # The error counter fires once across all polls, and no event is sent: Data Hub
+        # writes the event for the run when it takes the report.
+        reporter_mock.queue_event.assert_not_called()
+        reporter_mock.report_error.assert_not_called()
         assert uploader._counters.errors == 1
 
-        # On the final poll the watcher gives up and cancels server-side.
-        mock_client.cancel_upload_request.assert_called_once_with(1)
-        reporter_mock.report_error.assert_called_once()
-        assert reporter_mock.report_error.call_args.args[0] == "upload_request_cancelled"
-        assert reporter_mock.report_error.call_args.kwargs["reason"] == "missing"
+        # On the final poll the watcher gives up and reports it, echoing the request.
+        assert _reports(mock_client) == [
+            [
+                UploadFailure(
+                    run_id="RUN-X",
+                    reason="file_missing",
+                    file_id=1,
+                    requested_at="2026-11-16T10:00:00.123Z",
+                )
+            ]
+        ]
+        assert mock_client.report_upload_failures.call_args.args[0] == "watcher-123"
+        mock_client.cancel_upload_request.assert_not_called()
+        assert 1 not in uploader._queue_attempts
 
-    def test_upload_failure_cancels_after_threshold(
+    def test_a_file_whose_folder_is_gone_is_reported_as_folder_missing(
+        self, uploader: Uploader, mock_client: MagicMock, tmp_path: Path
+    ) -> None:
+        (tmp_path / "RUN-B").mkdir()
+        mock_client.get_upload_queue.return_value = UploadQueueResponse(
+            files=[
+                _queued(1, "RUN-A/a.csv", run_id="RUN-A"),
+                _queued(2, "RUN-B/b.csv", run_id="RUN-B"),
+            ]
+        )
+
+        for _ in range(MAX_QUEUE_FILE_ATTEMPTS):
+            uploader.poll_upload_queue()
+
+        # RUN-A's folder was renamed, so the folder is what is missing. RUN-B's is there.
+        [report] = _reports(mock_client)
+        assert {(f.file_id, f.reason) for f in report} == {
+            (1, "folder_missing"),
+            (2, "file_missing"),
+        }
+
+    def test_each_folder_is_looked_at_once_per_poll(
+        self,
+        uploader: Uploader,
+        mock_client: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        mock_client.get_upload_queue.return_value = UploadQueueResponse(
+            files=[_queued(i, f"RUN-A/f{i}.csv", run_id="RUN-A") for i in range(1, 6)]
+        )
+        looked_at: list[Path] = []
+        is_dir = uploader_module._is_dir
+
+        def counting_is_dir(path: Path) -> bool:
+            looked_at.append(path)
+            return is_dir(path)
+
+        monkeypatch.setattr(uploader_module, "_is_dir", counting_is_dir)
+
+        for _ in range(MAX_QUEUE_FILE_ATTEMPTS):
+            uploader.poll_upload_queue()
+
+        # Five files in a folder that is gone: one look, on the poll that gave up.
+        assert looked_at == [(uploader._watch_dir / "RUN-A").resolve()]
+        [report] = _reports(mock_client)
+        assert [f.reason for f in report] == ["folder_missing"] * 5
+
+    def test_upload_failure_is_reported_with_the_last_error_after_threshold(
         self,
         uploader: Uploader,
         mock_client: MagicMock,
@@ -693,26 +762,27 @@ class TestPollUploadQueueAttemptCap:
     ) -> None:
         (tmp_path / "data.csv").write_text("x")
         mock_client.get_upload_queue.return_value = UploadQueueResponse(
-            files=[
-                UploadQueueFile(
-                    id=2,
-                    instrument_id="test-instrument",
+            files=[_queued(2, "data.csv", run_id="RUN-Y")]
+        )
+        mock_client.request_upload_url.side_effect = ApiError("down", status_code=503)
+
+        # The file exists but every upload attempt fails -> the cap applies to
+        # upload failures too, not just missing files.
+        for _ in range(MAX_QUEUE_FILE_ATTEMPTS):
+            uploader.poll_upload_queue()
+
+        assert _reports(mock_client) == [
+            [
+                UploadFailure(
                     run_id="RUN-Y",
-                    filename="data.csv",
-                    relative_path="data.csv",
+                    reason="upload_error",
+                    file_id=2,
+                    requested_at="2026-11-16T10:00:00.123Z",
+                    detail="Upload URL request failed: down",
                 )
             ]
-        )
-
-        # The file exists but every upload attempt fails -> cap applies to
-        # upload failures too, not just missing files.
-        with patch.object(uploader, "_upload_single", return_value=False):
-            for _ in range(MAX_QUEUE_FILE_ATTEMPTS):
-                uploader.poll_upload_queue()
-
-        reporter_mock = cast(MagicMock, uploader._reporter)
-        mock_client.cancel_upload_request.assert_called_once_with(2)
-        assert reporter_mock.report_error.call_args.kwargs["reason"] == "upload_failed"
+        ]
+        mock_client.cancel_upload_request.assert_not_called()
 
     def test_upload_cut_off_by_a_stop_is_not_an_attempt(
         self,
@@ -724,34 +794,28 @@ class TestPollUploadQueueAttemptCap:
         stop = threading.Event()
         up = _make_uploader(mock_client, state_db, tmp_path, parallelism=1, stop_event=stop)
         mock_client.get_upload_queue.return_value = UploadQueueResponse(
-            files=[
-                UploadQueueFile(
-                    id=2,
-                    instrument_id="test-instrument",
-                    run_id="RUN-Y",
-                    filename="data.csv",
-                    relative_path="data.csv",
-                )
-            ]
+            files=[_queued(2, "data.csv", run_id="RUN-Y")]
         )
         with patch.object(up, "_upload_single", return_value=False):
             for _ in range(MAX_QUEUE_FILE_ATTEMPTS - 1):
                 up.poll_upload_queue()
+        assert up._queue_attempts[2].count == MAX_QUEUE_FILE_ATTEMPTS - 1
 
-        def cut_off(path: Path, run_id: str) -> bool:
+        def cut_off(path: Path, run_id: str, *, requested: bool = False) -> bool:
             # A config rebuild stops the uploader while this file uploads.
             stop.set()
             return False
 
-        with patch.object(up, "_upload_single", side_effect=cut_off):
+        with patch.object(up, "_upload_single", side_effect=cut_off) as upload:
             up.poll_upload_queue()
 
-        # The last attempt isn't used up, so the request isn't cancelled and
-        # the file stays in the server's queue for the next runtime.
-        mock_client.cancel_upload_request.assert_not_called()
+        # The last attempt isn't used up, so the file isn't given up on and stays in the
+        # server's queue for the next runtime.
+        upload.assert_called_once()
+        mock_client.report_upload_failures.assert_not_called()
         assert up._queue_attempts[2].count == MAX_QUEUE_FILE_ATTEMPTS - 1
 
-    def test_successful_upload_prunes_without_cancel(
+    def test_successful_upload_prunes_without_a_report(
         self,
         uploader: Uploader,
         mock_client: MagicMock,
@@ -759,22 +823,17 @@ class TestPollUploadQueueAttemptCap:
     ) -> None:
         (tmp_path / "data.csv").write_text("x")
         mock_client.get_upload_queue.return_value = UploadQueueResponse(
-            files=[
-                UploadQueueFile(
-                    id=3,
-                    instrument_id="test-instrument",
-                    run_id="RUN-Z",
-                    filename="data.csv",
-                    relative_path="data.csv",
-                )
-            ]
+            files=[_queued(3, "data.csv", run_id="RUN-Z")]
+        )
+        uploader._queue_attempts[3] = _QueueAttempt(
+            count=2, reason="upload_error", requested_at="2026-11-16T10:00:00.123Z"
         )
 
         with patch.object(uploader, "_upload_single", return_value=True):
             uploader.poll_upload_queue()
 
         assert 3 not in uploader._queue_attempts
-        mock_client.cancel_upload_request.assert_not_called()
+        mock_client.report_upload_failures.assert_not_called()
 
     def test_requeued_id_rearms_after_leaving_queue(
         self,
@@ -782,66 +841,167 @@ class TestPollUploadQueueAttemptCap:
         mock_client: MagicMock,
     ) -> None:
         mock_client.get_upload_queue.return_value = self._ghost_queue()
-        reporter_mock = cast(MagicMock, uploader._reporter)
 
-        # Two misses (stay under the threshold): error fires once, count grows.
+        # Two misses (stay under the threshold): the error is counted once, the count grows.
         uploader.poll_upload_queue()
         uploader.poll_upload_queue()
         assert uploader._queue_attempts[1].count == 2
-        assert reporter_mock.queue_event.call_count == 1
+        assert uploader._counters.errors == 1
 
         # File leaves the queue -> its attempt record is pruned.
         mock_client.get_upload_queue.return_value = UploadQueueResponse(files=[])
         uploader.poll_upload_queue()
         assert 1 not in uploader._queue_attempts
 
-        # It comes back (re-requested): the throttle re-arms and fires again.
+        # It comes back (re-requested): the throttle re-arms and counts again.
         mock_client.get_upload_queue.return_value = self._ghost_queue()
         uploader.poll_upload_queue()
-        assert reporter_mock.queue_event.call_count == 2
+        assert uploader._counters.errors == 2
 
-    def test_a_file_requested_again_right_after_its_cancellation_gets_three_fresh_attempts(
+    def test_a_new_request_for_a_file_still_listed_starts_fresh_attempts(
         self,
         uploader: Uploader,
         mock_client: MagicMock,
     ) -> None:
-        """A file requested again after its cancel gets three fresh attempts.
+        mock_client.get_upload_queue.return_value = self._ghost_queue("2026-11-16T10:00:00Z")
+        uploader.poll_upload_queue()
+        uploader.poll_upload_queue()
+        assert uploader._queue_attempts[1].count == 2
 
-        The queue keeps listing the file, which models a re-request before any
-        poll goes by without it. The successful cancel removed the file's
-        attempt record, so the first poll after the re-request is a new first
-        attempt, not an immediate cancel from the old record.
+        # The request was cancelled and made again between two polls, so the queue never
+        # went without the file. The attempts counted were about the old request.
+        mock_client.get_upload_queue.return_value = self._ghost_queue("2026-11-16T11:00:00Z")
+        uploader.poll_upload_queue()
+
+        assert uploader._queue_attempts[1].count == 1
+        assert uploader._queue_attempts[1].requested_at == "2026-11-16T11:00:00Z"
+        mock_client.report_upload_failures.assert_not_called()
+
+    def test_a_file_requested_again_right_after_its_report_gets_three_fresh_attempts(
+        self,
+        uploader: Uploader,
+        mock_client: MagicMock,
+    ) -> None:
+        """A file requested again after its report gets three fresh attempts.
+
+        The queue keeps listing the file, which models a re-request before any poll goes by
+        without it. The report that went through removed the file's attempt record, so the
+        first poll after the re-request is a new first attempt, not an immediate give-up
+        from the old record.
         """
         mock_client.get_upload_queue.return_value = self._ghost_queue()
-        reporter_mock = cast(MagicMock, uploader._reporter)
 
-        # The first give-up: three misses, then the cancel succeeds.
+        # The first give-up: three misses, then the report goes through.
         for _ in range(MAX_QUEUE_FILE_ATTEMPTS):
             uploader.poll_upload_queue()
-        mock_client.cancel_upload_request.assert_called_once_with(1)
+        assert mock_client.report_upload_failures.call_count == 1
         assert 1 not in uploader._queue_attempts
-        assert reporter_mock.queue_event.call_count == 1
+        assert uploader._counters.errors == 1
 
-        # Requested again while the queue still lists it. This poll is a new
-        # first attempt: it reports the missing file again and is not cancelled.
+        # Requested again while the queue still lists it. This poll is a new first
+        # attempt: it counts the missing file again and is not reported.
         uploader.poll_upload_queue()
         assert uploader._queue_attempts[1].count == 1
-        assert mock_client.cancel_upload_request.call_count == 1
-        assert reporter_mock.queue_event.call_count == 2
-        assert reporter_mock.report_error.call_count == 1
+        assert mock_client.report_upload_failures.call_count == 1
+        assert uploader._counters.errors == 2
 
-        # Two more misses complete the three fresh attempts, and the second cancel follows.
+        # Two more misses complete the three fresh attempts, and the second report follows.
         for _ in range(MAX_QUEUE_FILE_ATTEMPTS - 1):
             uploader.poll_upload_queue()
-        assert mock_client.cancel_upload_request.call_count == 2
-        assert reporter_mock.report_error.call_count == 2
+        assert mock_client.report_upload_failures.call_count == 2
         assert 1 not in uploader._queue_attempts
 
-    def test_cancel_failure_is_retried_next_poll(
+    def test_a_failed_report_is_sent_again_on_the_next_poll(
         self,
         uploader: Uploader,
         mock_client: MagicMock,
     ) -> None:
+        mock_client.get_upload_queue.return_value = self._ghost_queue()
+        mock_client.report_upload_failures.side_effect = ApiError("boom", status_code=500)
+
+        for _ in range(MAX_QUEUE_FILE_ATTEMPTS):
+            uploader.poll_upload_queue()
+
+        # Reported once on the threshold poll and it failed, so the record stays used up.
+        assert mock_client.report_upload_failures.call_count == 1
+        assert uploader._queue_attempts[1].count == MAX_QUEUE_FILE_ATTEMPTS
+        assert uploader._counters.errors == 2
+
+        # The next poll looks at the file again, finds it still missing, and sends the
+        # report again at once, without counting another miss.
+        mock_client.report_upload_failures.side_effect = None
+        uploader.poll_upload_queue()
+        assert mock_client.report_upload_failures.call_count == 2
+        assert [f.reason for f in _reports(mock_client)[1]] == ["file_missing"]
+        assert 1 not in uploader._queue_attempts
+        assert uploader._counters.errors == 2
+        mock_client.cancel_upload_request.assert_not_called()
+
+    def test_a_file_that_came_back_after_a_failed_report_is_uploaded(
+        self,
+        uploader: Uploader,
+        mock_client: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        mock_client.get_upload_queue.return_value = self._ghost_queue()
+        mock_client.report_upload_failures.side_effect = ApiError("boom", status_code=503)
+        for _ in range(MAX_QUEUE_FILE_ATTEMPTS):
+            uploader.poll_upload_queue()
+        (tmp_path / "ghost.csv").write_text("x")
+
+        with patch.object(uploader, "_upload_single", return_value=True) as upload:
+            uploader.poll_upload_queue()
+
+        upload.assert_called_once_with(tmp_path / "ghost.csv", "RUN-X", requested=True)
+        assert mock_client.report_upload_failures.call_count == 1
+        assert 1 not in uploader._queue_attempts
+
+    def test_a_used_up_file_whose_upload_fails_again_is_reported_again_at_once(
+        self,
+        uploader: Uploader,
+        mock_client: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        (tmp_path / "data.csv").write_text("x")
+        mock_client.get_upload_queue.return_value = UploadQueueResponse(
+            files=[_queued(2, "data.csv", run_id="RUN-Y")]
+        )
+        mock_client.report_upload_failures.side_effect = ApiError("boom", status_code=503)
+        with patch.object(uploader, "_upload_single", return_value=False):
+            for _ in range(MAX_QUEUE_FILE_ATTEMPTS):
+                uploader.poll_upload_queue()
+            mock_client.report_upload_failures.side_effect = None
+            uploader.poll_upload_queue()
+
+        # Tried once more, failed, and reported again on that poll.
+        assert mock_client.report_upload_failures.call_count == 2
+        assert 2 not in uploader._queue_attempts
+
+    def test_without_the_endpoint_each_request_is_cancelled_as_before(
+        self,
+        uploader: Uploader,
+        mock_client: MagicMock,
+    ) -> None:
+        # The client says the server is older than 1.4.5.
+        mock_client.report_upload_failures.return_value = None
+        mock_client.get_upload_queue.return_value = self._ghost_queue()
+
+        for _ in range(MAX_QUEUE_FILE_ATTEMPTS):
+            uploader.poll_upload_queue()
+
+        mock_client.cancel_upload_request.assert_called_once_with(1)
+        report_error = cast(MagicMock, uploader._reporter).report_error
+        report_error.assert_called_once()
+        assert report_error.call_args.args[0] == "upload_request_cancelled"
+        assert report_error.call_args.kwargs["reason"] == "file_missing"
+        assert 1 not in uploader._queue_attempts
+
+    def test_without_the_endpoint_a_failed_cancel_is_retried_next_poll(
+        self,
+        uploader: Uploader,
+        mock_client: MagicMock,
+    ) -> None:
+        mock_client.report_upload_failures.return_value = None
         mock_client.get_upload_queue.return_value = self._ghost_queue()
         mock_client.cancel_upload_request.side_effect = ApiError("boom", status_code=500)
 
@@ -854,9 +1014,186 @@ class TestPollUploadQueueAttemptCap:
         assert uploader._queue_attempts[1].count == MAX_QUEUE_FILE_ATTEMPTS
         cast(MagicMock, uploader._reporter).report_error.assert_not_called()
 
-        # The next poll retries the cancel rather than re-erroring on upload.
+        # The next poll gives up again: it asks the server, and cancels again.
         uploader.poll_upload_queue()
+        assert mock_client.report_upload_failures.call_count == 2
         assert mock_client.cancel_upload_request.call_count == 2
+
+    def test_a_watcher_the_server_does_not_know_keeps_its_give_ups(
+        self,
+        uploader: Uploader,
+        mock_client: MagicMock,
+    ) -> None:
+        # A JSON 404 `NOT_FOUND` is raised by the client, and is not a missing endpoint.
+        mock_client.report_upload_failures.side_effect = ApiError(
+            "Watcher not found",
+            status_code=404,
+            detail=ApiErrorDetail(code="NOT_FOUND", message="Watcher not found"),
+        )
+        mock_client.get_upload_queue.return_value = self._ghost_queue()
+
+        for _ in range(MAX_QUEUE_FILE_ATTEMPTS):
+            uploader.poll_upload_queue()
+
+        mock_client.cancel_upload_request.assert_not_called()
+        assert uploader._queue_attempts[1].count == MAX_QUEUE_FILE_ATTEMPTS
+
+
+class TestTwoPhasePoll:
+    """A poll looks at every queued file before it uploads any (1.4.5).
+
+    A poll returns only after its uploads finish, which for a large file can take hours. The
+    files it can already give up on, missing ones and unsafe paths, are reported first, so they
+    don't wait behind the uploads.
+    """
+
+    def test_missing_files_are_reported_before_a_slow_upload_finishes(
+        self, uploader: Uploader, mock_client: MagicMock, tmp_path: Path
+    ) -> None:
+        (tmp_path / "big.raw").write_text("x")
+        mock_client.get_upload_queue.return_value = UploadQueueResponse(
+            files=[_queued(1, "big.raw"), _queued(2, "gone.csv")]
+        )
+        uploader._queue_attempts[2] = _QueueAttempt(
+            count=MAX_QUEUE_FILE_ATTEMPTS - 1,
+            reason="file_missing",
+            requested_at="2026-11-16T10:00:00.123Z",
+        )
+        reports_while_uploading: list[int] = []
+
+        def slow_upload(path: Path, run_id: str, *, requested: bool = False) -> bool:
+            reports_while_uploading.append(mock_client.report_upload_failures.call_count)
+            return True
+
+        with patch.object(uploader, "_upload_single", side_effect=slow_upload):
+            uploader.poll_upload_queue()
+
+        # The missing file was reported before the upload started, not after it ended.
+        assert reports_while_uploading == [1]
+        assert [[f.file_id for f in r] for r in _reports(mock_client)] == [[2]]
+
+    def test_an_unsafe_path_is_reported_at_once_and_never_read(
+        self, uploader: Uploader, mock_client: MagicMock, tmp_path: Path
+    ) -> None:
+        (tmp_path.parent / "escape.txt").write_text("secret")
+        mock_client.get_upload_queue.return_value = UploadQueueResponse(
+            files=[_queued(99, "../escape.txt", run_id="RUN-EVIL")]
+        )
+
+        with patch.object(uploader, "_upload_single") as upload:
+            uploader.poll_upload_queue()
+
+        upload.assert_not_called()
+        assert [[(f.file_id, f.reason) for f in r] for r in _reports(mock_client)] == [
+            [(99, "unsafe_path")]
+        ]
+
+    def test_failed_uploads_are_reported_together_once_every_upload_is_done(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path
+    ) -> None:
+        for name in ("a.csv", "b.csv", "c.csv"):
+            (tmp_path / name).write_text("x")
+        mock_client.get_upload_queue.return_value = UploadQueueResponse(
+            files=[_queued(i, name) for i, name in enumerate(("a.csv", "b.csv", "c.csv"), 1)]
+        )
+        up = _make_uploader(mock_client, state_db, tmp_path, parallelism=3)
+        for file_id in (1, 2, 3):
+            up._queue_attempts[file_id] = _QueueAttempt(
+                count=MAX_QUEUE_FILE_ATTEMPTS - 1,
+                reason="upload_error",
+                requested_at="2026-11-16T10:00:00.123Z",
+            )
+        barrier = threading.Barrier(3, timeout=3)
+
+        def fails(path: Path, run_id: str, *, requested: bool = False) -> bool:
+            barrier.wait()
+            return False
+
+        with patch.object(up, "_upload_single", side_effect=fails):
+            up.poll_upload_queue()
+
+        [report] = _reports(mock_client)
+        assert sorted(f.file_id or 0 for f in report) == [1, 2, 3]
+        assert {f.reason for f in report} == {"upload_error"}
+        assert up._queue_attempts == {}
+
+    def test_auto_mode_give_ups_that_were_not_sent_go_with_the_first_report(
+        self, uploader: Uploader, mock_client: MagicMock, state_db: StateDB
+    ) -> None:
+        state_db.record_report(
+            "RUN-1", [], new_run=False, pending_relative_paths=["RUN-1/gone.csv"]
+        )
+        mock_client.report_upload_failures.side_effect = ApiError("down", status_code=503)
+        uploader.retry_pending_uploads()
+        assert len(uploader._unsent) == 1
+
+        mock_client.report_upload_failures.side_effect = None
+        mock_client.get_upload_queue.return_value = UploadQueueResponse(
+            files=[_queued(1, "ghost.csv")]
+        )
+        uploader._queue_attempts[1] = _QueueAttempt(
+            count=MAX_QUEUE_FILE_ATTEMPTS - 1,
+            reason="file_missing",
+            requested_at="2026-11-16T10:00:00.123Z",
+        )
+        uploader.poll_upload_queue()
+
+        # One report for the queued file and the auto-mode one, and the row goes.
+        assert [len(r) for r in _reports(mock_client)] == [1, 2]
+        assert {f.relative_path or f.file_id for f in _reports(mock_client)[1]} == {
+            "RUN-1/gone.csv",
+            1,
+        }
+        assert uploader._unsent == {}
+        assert state_db.pending_uploads() == []
+
+    def test_an_empty_queue_still_sends_auto_mode_give_ups_again(
+        self, uploader: Uploader, mock_client: MagicMock, state_db: StateDB
+    ) -> None:
+        state_db.record_report(
+            "RUN-1", [], new_run=False, pending_relative_paths=["RUN-1/gone.csv"]
+        )
+        mock_client.report_upload_failures.side_effect = ApiError("down", status_code=503)
+        uploader.retry_pending_uploads()
+
+        mock_client.report_upload_failures.side_effect = None
+        mock_client.get_upload_queue.return_value = UploadQueueResponse(files=[])
+        uploader.poll_upload_queue()
+
+        assert mock_client.report_upload_failures.call_count == 2
+        assert state_db.pending_uploads() == []
+
+    def test_a_stop_sends_no_report(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path
+    ) -> None:
+        stop = threading.Event()
+        up = _make_uploader(mock_client, state_db, tmp_path, parallelism=1, stop_event=stop)
+        (tmp_path / "data.csv").write_text("x")
+        mock_client.get_upload_queue.return_value = UploadQueueResponse(
+            files=[_queued(1, "data.csv"), _queued(2, "ghost.csv")]
+        )
+        up._queue_attempts[2] = _QueueAttempt(
+            count=MAX_QUEUE_FILE_ATTEMPTS - 1,
+            reason="file_missing",
+            requested_at="2026-11-16T10:00:00.123Z",
+        )
+
+        def stops_during_the_folder_look(path: Path) -> bool:
+            # The stop comes after the file was given up on, before the report is sent.
+            stop.set()
+            return True
+
+        with (
+            patch.object(uploader_module, "_is_dir", side_effect=stops_during_the_folder_look),
+            patch.object(up, "_upload_single") as upload,
+        ):
+            up.poll_upload_queue()
+
+        # Nothing is sent and nothing starts. The record stays used up, so a poll of the
+        # next runtime would send it, if the process lived on.
+        mock_client.report_upload_failures.assert_not_called()
+        upload.assert_not_called()
+        assert up._queue_attempts[2].count == MAX_QUEUE_FILE_ATTEMPTS
 
 
 class TestUploadQueuePathTraversal:
@@ -865,7 +1202,7 @@ class TestUploadQueuePathTraversal:
     Defense-in-depth: even if a malicious or buggy server sends
     a ``relative_path`` with ``..`` segments or an absolute path, the watcher
     must never read (and upload) a file from outside its watch directory. The
-    request is cancelled immediately rather than retried, since a re-poll
+    file is given up on at once rather than retried, since a re-poll
     would resolve to the same unsafe path.
     """
 
@@ -878,7 +1215,7 @@ class TestUploadQueuePathTraversal:
             "/etc/passwd",
         ],
     )
-    def test_unsafe_path_is_refused_and_cancelled(
+    def test_unsafe_path_is_refused_and_reported(
         self,
         uploader: Uploader,
         mock_client: MagicMock,
@@ -905,14 +1242,36 @@ class TestUploadQueuePathTraversal:
         with patch.object(uploader, "_upload_single") as mock_upload:
             uploader.poll_upload_queue()
 
-        # Never read/uploaded, and the request is cancelled on the first poll.
+        # Never read/uploaded, and given up on in the first poll.
         mock_upload.assert_not_called()
-        mock_client.cancel_upload_request.assert_called_once_with(99)
+        assert _reports(mock_client) == [
+            [UploadFailure(run_id="RUN-EVIL", reason="unsafe_path", file_id=99)]
+        ]
+        mock_client.cancel_upload_request.assert_not_called()
         assert uploader._counters.errors == 1
 
         reporter_mock = cast(MagicMock, uploader._reporter)
         event = reporter_mock.queue_event.call_args.args[0]
         assert event.details["kind"] == "unsafe_upload_path"
+
+    def test_an_unsafe_path_is_reported_again_after_a_failed_report_without_a_new_error(
+        self,
+        uploader: Uploader,
+        mock_client: MagicMock,
+    ) -> None:
+        mock_client.get_upload_queue.return_value = UploadQueueResponse(
+            files=[_queued(99, "../escape.txt", run_id="RUN-EVIL")]
+        )
+        mock_client.report_upload_failures.side_effect = ApiError("down", status_code=503)
+        uploader.poll_upload_queue()
+        mock_client.report_upload_failures.side_effect = None
+
+        uploader.poll_upload_queue()
+
+        assert mock_client.report_upload_failures.call_count == 2
+        # One `unsafe_upload_path` event, and one error for it plus one for the failed report.
+        assert cast(MagicMock, uploader._reporter).queue_event.call_count == 1
+        assert uploader._counters.errors == 2
 
     def test_safe_nested_relative_path_is_allowed(
         self,
@@ -940,7 +1299,7 @@ class TestUploadQueuePathTraversal:
             uploader.poll_upload_queue()
 
         mock_upload.assert_called_once()
-        mock_client.cancel_upload_request.assert_not_called()
+        mock_client.report_upload_failures.assert_not_called()
 
 
 class TestUploaderStopEvent:
@@ -1027,7 +1386,7 @@ class TestUploaderStopEvent:
             ]
         )
 
-        with patch.object(Uploader, "_process_queued_file") as mock_process:
+        with patch.object(Uploader, "_upload_queued_file") as mock_process:
             up.poll_upload_queue()
 
         mock_process.assert_not_called()
@@ -1549,19 +1908,23 @@ class TestPendingUploads:
             "RUN-1", [], new_run=False, pending_relative_paths=["RUN-1/data.csv"]
         )
 
-        with patch.object(uploader, "_upload_single", return_value=False):
-            for _ in range(MAX_PENDING_UPLOAD_ATTEMPTS):
-                uploader.retry_pending_uploads()
+        mock_client = cast(MagicMock, uploader._client)
+        mock_client.request_upload_url.side_effect = ApiError("down", status_code=503)
 
+        for _ in range(MAX_PENDING_UPLOAD_ATTEMPTS):
+            uploader.retry_pending_uploads()
+
+        # Each failed start is reported at once, and the last one drops the row once Data
+        # Hub has the report. Data Hub writes the event, so the watcher sends none.
+        failure = UploadFailure(
+            run_id="RUN-1",
+            reason="upload_error",
+            relative_path="RUN-1/data.csv",
+            detail="Upload URL request failed: down",
+        )
+        assert _reports(mock_client) == [[failure]] * MAX_PENDING_UPLOAD_ATTEMPTS
         assert state_db.pending_uploads() == []
-        report_error = cast(MagicMock, uploader._reporter).report_error
-        report_error.assert_called_once()
-        assert report_error.call_args.args[0] == "upload_retries_exhausted"
-        assert report_error.call_args.kwargs == {
-            "relative_path": "RUN-1/data.csv",
-            "run_id": "RUN-1",
-            "attempts": MAX_PENDING_UPLOAD_ATTEMPTS,
-        }
+        cast(MagicMock, uploader._reporter).report_error.assert_not_called()
 
     def test_retry_counts_an_unexpected_error_and_moves_on(
         self, uploader: Uploader, state_db: StateDB, run_dir: Path
@@ -1590,7 +1953,9 @@ class TestPendingUploads:
         [pending] = state_db.pending_uploads()
         assert (pending.relative_path, pending.attempts) == ("RUN-1/broken.csv", 1)
 
-    def test_retry_drops_a_file_that_is_gone(self, uploader: Uploader, state_db: StateDB) -> None:
+    def test_retry_drops_a_file_that_is_gone(
+        self, uploader: Uploader, state_db: StateDB, run_dir: Path
+    ) -> None:
         state_db.record_report(
             "RUN-1", [], new_run=False, pending_relative_paths=["RUN-1/deleted.csv"]
         )
@@ -1600,13 +1965,30 @@ class TestPendingUploads:
 
         upload.assert_not_called()
         assert state_db.pending_uploads() == []
-        report_error = cast(MagicMock, uploader._reporter).report_error
-        report_error.assert_called_once()
-        assert report_error.call_args.args[0] == "pending_upload_missing"
-        assert report_error.call_args.kwargs == {
-            "relative_path": "RUN-1/deleted.csv",
-            "run_id": "RUN-1",
-        }
+        assert _reports(cast(MagicMock, uploader._client)) == [
+            [
+                UploadFailure(
+                    run_id="RUN-1", reason="file_missing", relative_path="RUN-1/deleted.csv"
+                )
+            ]
+        ]
+        cast(MagicMock, uploader._reporter).report_error.assert_not_called()
+
+    def test_retry_of_a_file_whose_folder_is_gone_reports_the_folder(
+        self, uploader: Uploader, state_db: StateDB
+    ) -> None:
+        state_db.record_report(
+            "RUN-9", [], new_run=False, pending_relative_paths=["RUN-9/a.csv", "RUN-9/b.csv"]
+        )
+
+        uploader.retry_pending_uploads()
+
+        [report] = _reports(cast(MagicMock, uploader._client))
+        assert [(f.relative_path, f.reason) for f in report] == [
+            ("RUN-9/a.csv", "folder_missing"),
+            ("RUN-9/b.csv", "folder_missing"),
+        ]
+        assert state_db.pending_uploads() == []
 
     def test_retry_interrupted_by_shutdown_is_not_an_attempt(
         self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path, run_dir: Path
@@ -1636,6 +2018,356 @@ class TestPendingUploads:
 
         [pending] = state_db.pending_uploads()
         assert pending.attempts == 0
+
+
+class TestAutoModeGiveUps:
+    """Auto-mode files the uploader gives up on are reported to Data Hub (watcher 1.4.5).
+
+    An upload that fails while the watcher runs is reported at once as ``upload_error``, and
+    its ``pending_uploads`` row stays, so later starts still retry it. The last failed start
+    and a file that is gone are reported too, and their row goes only once Data Hub has the
+    report. A server older than 1.4.5 has no endpoint for the report: the row then goes with
+    the event older watchers sent.
+    """
+
+    @pytest.fixture()
+    def run_dir(self, tmp_path: Path) -> Path:
+        run_dir = tmp_path / "RUN-1"
+        run_dir.mkdir()
+        return run_dir
+
+    @staticmethod
+    def _pending(state_db: StateDB, *names: str) -> None:
+        state_db.record_report(
+            "RUN-1", [], new_run=False, pending_relative_paths=[f"RUN-1/{n}" for n in names]
+        )
+
+    @staticmethod
+    def _rows(state_db: StateDB) -> list[tuple[str, int]]:
+        return [(p.relative_path, p.attempts) for p in state_db.pending_uploads()]
+
+    @staticmethod
+    def _uploads_all_but(mock_client: MagicMock, *failing: str) -> None:
+        """Upload-URL requests fail for the *failing* file names and work for the others."""
+
+        def request(instrument_id: str, run_id: str, name: str, **kwargs: object) -> object:
+            if name in failing:
+                raise ApiError("down", status_code=503)
+            return _single_presigned(name)
+
+        mock_client.request_upload_url.side_effect = request
+
+    def test_an_upload_that_fails_while_the_watcher_runs_is_reported_at_once(
+        self, uploader: Uploader, mock_client: MagicMock, state_db: StateDB, run_dir: Path
+    ) -> None:
+        for name in ("ok.csv", "bad.csv"):
+            (run_dir / name).write_text(name)
+        self._pending(state_db, "ok.csv", "bad.csv")
+        self._uploads_all_but(mock_client, "bad.csv")
+
+        with patch.object(Uploader, "_put_to_presigned_url"):
+            uploaded = uploader.upload_files(
+                "RUN-1", [_file_info(run_dir / "ok.csv"), _file_info(run_dir / "bad.csv")]
+            )
+
+        assert uploaded == 1
+        assert _reports(mock_client) == [
+            [
+                UploadFailure(
+                    run_id="RUN-1",
+                    reason="upload_error",
+                    relative_path="RUN-1/bad.csv",
+                    detail="Upload URL request failed: down",
+                )
+            ]
+        ]
+        # The row stays, untouched, so the next start retries the file.
+        assert self._rows(state_db) == [("RUN-1/bad.csv", 0)]
+        cast(MagicMock, uploader._reporter).report_error.assert_not_called()
+
+    def test_the_failures_of_one_batch_go_in_one_report(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path, run_dir: Path
+    ) -> None:
+        up = _make_uploader(mock_client, state_db, tmp_path, parallelism=3)
+        names = ("a.csv", "b.csv", "c.csv")
+        for name in names:
+            (run_dir / name).write_text(name)
+        self._pending(state_db, *names)
+        self._uploads_all_but(mock_client, *names)
+
+        up.upload_files("RUN-1", [_file_info(run_dir / n) for n in names])
+
+        [report] = _reports(mock_client)
+        assert sorted(f.relative_path or "" for f in report) == [f"RUN-1/{n}" for n in names]
+
+    def test_an_upload_that_raises_is_reported_with_its_error(
+        self, uploader: Uploader, mock_client: MagicMock, state_db: StateDB, run_dir: Path
+    ) -> None:
+        (run_dir / "a.csv").write_text("x")
+        self._pending(state_db, "a.csv")
+
+        with (
+            patch.object(uploader, "_upload_single", side_effect=ValueError("bad response")),
+            pytest.raises(ValueError),
+        ):
+            uploader.upload_files("RUN-1", [_file_info(run_dir / "a.csv")])
+
+        [[failure]] = _reports(mock_client)
+        assert (failure.reason, failure.detail) == ("upload_error", "bad response")
+
+    def test_a_file_gone_before_its_upload_is_reported_missing_and_its_row_goes(
+        self, uploader: Uploader, mock_client: MagicMock, state_db: StateDB, run_dir: Path
+    ) -> None:
+        # Deleted between its run report and its upload, so the upload raises.
+        self._pending(state_db, "gone.csv")
+        info = FileInfo(path=run_dir / "gone.csv", filename="gone.csv", size_bytes=1)
+
+        with pytest.raises(FileNotFoundError):
+            uploader.upload_files("RUN-1", [info])
+
+        assert _reports(mock_client) == [
+            [UploadFailure(run_id="RUN-1", reason="file_missing", relative_path="RUN-1/gone.csv")]
+        ]
+        assert state_db.pending_uploads() == []
+
+    def test_a_file_gone_during_a_start_up_retry_is_reported_missing_without_an_attempt(
+        self, uploader: Uploader, mock_client: MagicMock, state_db: StateDB, run_dir: Path
+    ) -> None:
+        path = run_dir / "a.csv"
+        path.write_text("x")
+        self._pending(state_db, "a.csv")
+
+        def vanishes(file: Path, run_id: str) -> bool:
+            file.unlink()
+            return False
+
+        with patch.object(uploader, "_upload_single", side_effect=vanishes):
+            uploader.retry_pending_uploads()
+
+        assert [[f.reason for f in r] for r in _reports(mock_client)] == [["file_missing"]]
+        assert state_db.pending_uploads() == []
+
+    def test_a_run_refused_as_deleted_is_not_reported(
+        self, uploader: Uploader, mock_client: MagicMock, state_db: StateDB, run_dir: Path
+    ) -> None:
+        (run_dir / "a.csv").write_text("x")
+        self._pending(state_db, "a.csv")
+        uploader._deleted_runs.add("RUN-1")
+
+        assert uploader.upload_files("RUN-1", [_file_info(run_dir / "a.csv")]) == 0
+
+        mock_client.report_upload_failures.assert_not_called()
+
+    def test_an_upload_cut_off_by_a_stop_is_not_reported(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path, run_dir: Path
+    ) -> None:
+        stop = threading.Event()
+        up = _make_uploader(mock_client, state_db, tmp_path, parallelism=1, stop_event=stop)
+        (run_dir / "a.csv").write_text("x")
+        self._pending(state_db, "a.csv")
+
+        def cut_off(path: Path, run_id: str) -> bool:
+            stop.set()
+            return False
+
+        with patch.object(up, "_upload_single", side_effect=cut_off):
+            up.upload_files("RUN-1", [_file_info(run_dir / "a.csv")])
+
+        mock_client.report_upload_failures.assert_not_called()
+        assert up._unsent == {}
+
+    def test_an_upload_that_failed_because_the_folder_went_away_is_not_reported(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path, run_dir: Path
+    ) -> None:
+        up = Uploader(
+            client=mock_client,
+            state_db=state_db,
+            event_reporter=MagicMock(spec=EventReporter),
+            counters=WatcherCounters(),
+            instrument_id="test-instrument",
+            watcher_id="watcher-123",
+            watch_directory=tmp_path,
+            watch_folder_unavailable=lambda: True,
+        )
+        (run_dir / "a.csv").write_text("x")
+        self._pending(state_db, "a.csv")
+
+        with patch.object(up, "_upload_single", return_value=False):
+            up.upload_files("RUN-1", [_file_info(run_dir / "a.csv")])
+
+        mock_client.report_upload_failures.assert_not_called()
+
+    def test_a_failed_start_that_is_not_the_last_is_reported_and_keeps_its_row(
+        self, uploader: Uploader, mock_client: MagicMock, state_db: StateDB, run_dir: Path
+    ) -> None:
+        (run_dir / "a.csv").write_text("x")
+        self._pending(state_db, "a.csv")
+
+        with patch.object(uploader, "_upload_single", return_value=False):
+            uploader.retry_pending_uploads()
+
+        assert _reports(mock_client) == [
+            [UploadFailure(run_id="RUN-1", reason="upload_error", relative_path="RUN-1/a.csv")]
+        ]
+        assert self._rows(state_db) == [("RUN-1/a.csv", 1)]
+
+    def test_the_row_of_the_last_failed_start_stays_until_the_report_goes_through(
+        self, uploader: Uploader, mock_client: MagicMock, state_db: StateDB, run_dir: Path
+    ) -> None:
+        (run_dir / "a.csv").write_text("x")
+        self._pending(state_db, "a.csv")
+        for _ in range(MAX_PENDING_UPLOAD_ATTEMPTS - 1):
+            state_db.bump_pending_upload_attempts("RUN-1/a.csv")
+        mock_client.report_upload_failures.side_effect = ApiError("down", status_code=503)
+
+        with patch.object(uploader, "_upload_single", return_value=False):
+            uploader.retry_pending_uploads()
+
+        assert self._rows(state_db) == [("RUN-1/a.csv", MAX_PENDING_UPLOAD_ATTEMPTS)]
+        assert list(uploader._unsent) == ["RUN-1/a.csv"]
+
+        # The next poll sends it again, and the row goes once Data Hub has it.
+        mock_client.report_upload_failures.side_effect = None
+        mock_client.get_upload_queue.return_value = UploadQueueResponse(files=[])
+        uploader.poll_upload_queue()
+
+        assert mock_client.report_upload_failures.call_count == 2
+        assert state_db.pending_uploads() == []
+        assert uploader._unsent == {}
+        cast(MagicMock, uploader._reporter).report_error.assert_not_called()
+
+    def test_the_row_of_a_missing_file_stays_until_the_report_goes_through(
+        self, uploader: Uploader, mock_client: MagicMock, state_db: StateDB, run_dir: Path
+    ) -> None:
+        self._pending(state_db, "gone.csv")
+        mock_client.report_upload_failures.side_effect = ApiError("down", status_code=503)
+
+        uploader.retry_pending_uploads()
+
+        assert self._rows(state_db) == [("RUN-1/gone.csv", 0)]
+        assert uploader._counters.errors == 1
+
+        mock_client.report_upload_failures.side_effect = None
+        mock_client.get_upload_queue.return_value = UploadQueueResponse(files=[])
+        uploader.poll_upload_queue()
+
+        assert state_db.pending_uploads() == []
+
+    def test_an_answer_the_client_cannot_read_keeps_the_give_up(
+        self, uploader: Uploader, mock_client: MagicMock, state_db: StateDB, run_dir: Path
+    ) -> None:
+        self._pending(state_db, "gone.csv")
+        mock_client.report_upload_failures.side_effect = ValueError("not JSON")
+
+        uploader.retry_pending_uploads()
+
+        assert list(uploader._unsent) == ["RUN-1/gone.csv"]
+        assert self._rows(state_db) == [("RUN-1/gone.csv", 0)]
+        assert uploader._counters.errors == 1
+
+    def test_a_missing_file_that_is_back_before_its_report_is_sent_again_is_left_out(
+        self, uploader: Uploader, mock_client: MagicMock, state_db: StateDB, run_dir: Path
+    ) -> None:
+        self._pending(state_db, "gone.csv")
+        mock_client.report_upload_failures.side_effect = ApiError("down", status_code=503)
+        uploader.retry_pending_uploads()
+        (run_dir / "gone.csv").write_text("back")
+
+        mock_client.report_upload_failures.side_effect = None
+        mock_client.get_upload_queue.return_value = UploadQueueResponse(files=[])
+        uploader.poll_upload_queue()
+
+        # Not reported, and the row stays, so the next start uploads the file.
+        assert mock_client.report_upload_failures.call_count == 1
+        assert self._rows(state_db) == [("RUN-1/gone.csv", 0)]
+        assert uploader._unsent == {}
+
+    def test_without_the_endpoint_the_last_failed_start_drops_its_row_with_its_event(
+        self, uploader: Uploader, mock_client: MagicMock, state_db: StateDB, run_dir: Path
+    ) -> None:
+        (run_dir / "a.csv").write_text("x")
+        self._pending(state_db, "a.csv")
+        mock_client.report_upload_failures.return_value = None
+
+        with patch.object(uploader, "_upload_single", return_value=False):
+            for _ in range(MAX_PENDING_UPLOAD_ATTEMPTS):
+                uploader.retry_pending_uploads()
+
+        assert state_db.pending_uploads() == []
+        report_error = cast(MagicMock, uploader._reporter).report_error
+        report_error.assert_called_once()
+        assert report_error.call_args.args[0] == "upload_retries_exhausted"
+        assert report_error.call_args.kwargs == {
+            "relative_path": "RUN-1/a.csv",
+            "run_id": "RUN-1",
+            "attempts": MAX_PENDING_UPLOAD_ATTEMPTS,
+        }
+
+    def test_without_the_endpoint_a_missing_file_drops_its_row_with_its_event(
+        self, uploader: Uploader, mock_client: MagicMock, state_db: StateDB, run_dir: Path
+    ) -> None:
+        self._pending(state_db, "gone.csv")
+        mock_client.report_upload_failures.return_value = None
+
+        uploader.retry_pending_uploads()
+
+        assert state_db.pending_uploads() == []
+        report_error = cast(MagicMock, uploader._reporter).report_error
+        report_error.assert_called_once()
+        assert report_error.call_args.args[0] == "pending_upload_missing"
+        assert report_error.call_args.kwargs == {
+            "relative_path": "RUN-1/gone.csv",
+            "run_id": "RUN-1",
+        }
+
+    def test_without_the_endpoint_a_failure_while_running_changes_nothing_else(
+        self, uploader: Uploader, mock_client: MagicMock, state_db: StateDB, run_dir: Path
+    ) -> None:
+        (run_dir / "a.csv").write_text("x")
+        self._pending(state_db, "a.csv")
+        mock_client.report_upload_failures.return_value = None
+
+        with patch.object(uploader, "_upload_single", return_value=False):
+            uploader.upload_files("RUN-1", [_file_info(run_dir / "a.csv")])
+
+        assert self._rows(state_db) == [("RUN-1/a.csv", 0)]
+        cast(MagicMock, uploader._reporter).report_error.assert_not_called()
+        assert uploader._unsent == {}
+
+    def test_a_give_up_that_drops_the_row_is_not_replaced_by_a_later_one_that_does_not(
+        self, uploader: Uploader
+    ) -> None:
+        uploader._give_up_auto("RUN-1/a.csv", "RUN-1", "upload_error", drop_row=True)
+        uploader._give_up_auto("RUN-1/a.csv", "RUN-1", "upload_error", detail="later")
+
+        assert uploader._unsent["RUN-1/a.csv"].drop_row is True
+
+    def test_a_give_up_put_back_after_a_failed_report_leaves_a_newer_one(
+        self, uploader: Uploader
+    ) -> None:
+        older = _GiveUp(
+            UploadFailure(
+                run_id="RUN-1", reason="upload_error", relative_path="RUN-1/a.csv", detail="old"
+            )
+        )
+        uploader._give_up_auto("RUN-1/a.csv", "RUN-1", "upload_error", detail="new")
+
+        uploader._keep_unsent(older, newer=False)
+
+        assert uploader._unsent["RUN-1/a.csv"].failure.detail == "new"
+
+    def test_a_give_up_put_back_that_drops_the_row_wins_over_a_newer_one_that_does_not(
+        self, uploader: Uploader
+    ) -> None:
+        older = _GiveUp(
+            UploadFailure(run_id="RUN-1", reason="upload_error", relative_path="RUN-1/a.csv"),
+            drop_row=True,
+        )
+        uploader._give_up_auto("RUN-1/a.csv", "RUN-1", "upload_error", detail="new")
+
+        uploader._keep_unsent(older, newer=False)
+
+        assert uploader._unsent["RUN-1/a.csv"] is older
 
 
 class _Locker:
@@ -1853,6 +2585,10 @@ class TestFileThatCantBeReadYet:
         [pending] = state_db.pending_uploads()
         assert pending.attempts == 0
         assert len(_events(uploader)) == 1
+        # Data Hub marks it failed now, and the row stays for the next start.
+        assert _reports(cast(MagicMock, uploader._client)) == [
+            [UploadFailure(run_id="RUN-1", reason="upload_error", relative_path="RUN-1/scan.csv")]
+        ]
 
     def test_a_file_locked_after_the_open_check_waits_too(
         self,
@@ -1912,13 +2648,10 @@ class TestFileThatCantBeReadYet:
         upload.assert_not_called()
         assert uploader._waiting == {}
         assert state_db.pending_uploads() == []
-        report_error = cast(MagicMock, uploader._reporter).report_error
-        report_error.assert_called_once()
-        assert report_error.call_args.args[0] == "pending_upload_missing"
-        assert report_error.call_args.kwargs == {
-            "relative_path": "RUN-1/scan.csv",
-            "run_id": "RUN-1",
-        }
+        assert _reports(cast(MagicMock, uploader._client)) == [
+            [UploadFailure(run_id="RUN-1", reason="file_missing", relative_path="RUN-1/scan.csv")]
+        ]
+        cast(MagicMock, uploader._reporter).report_error.assert_not_called()
 
     def test_a_start_up_retry_of_a_locked_file_is_not_an_attempt(
         self, uploader: Uploader, mock_client: MagicMock, state_db: StateDB, locked: Path
@@ -4217,7 +4950,7 @@ class TestParallelQueue:
             up.poll_upload_queue()
             assert len(finished) == 3
 
-    def test_the_attempt_cap_cancels_each_file(
+    def test_the_attempt_cap_gives_up_on_each_file_in_one_report(
         self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path
     ) -> None:
         mock_client.get_upload_queue.return_value = UploadQueueResponse(
@@ -4237,11 +4970,11 @@ class TestParallelQueue:
         for _ in range(MAX_QUEUE_FILE_ATTEMPTS):
             up.poll_upload_queue()
 
-        cancelled = sorted(c.args[0] for c in mock_client.cancel_upload_request.call_args_list)
-        assert cancelled == [1, 2, 3]
-        report_error = cast(MagicMock, up._reporter).report_error
-        assert [c.args[0] for c in report_error.call_args_list] == ["upload_request_cancelled"] * 3
-        # Each file reported its missing file once.
+        [report] = _reports(mock_client)
+        assert sorted(f.file_id or 0 for f in report) == [1, 2, 3]
+        mock_client.cancel_upload_request.assert_not_called()
+        cast(MagicMock, up._reporter).report_error.assert_not_called()
+        # Each file counted its missing file once.
         assert up._counters.errors == 3
 
     def test_an_unexpected_error_in_one_file_does_not_end_the_others(
