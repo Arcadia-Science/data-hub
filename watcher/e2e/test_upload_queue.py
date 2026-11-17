@@ -395,7 +395,9 @@ def test_auto_mode_watcher_uploads_a_file_requested_after_its_own_attempt_gave_u
 
     content = write_run(watch_dir, RUN, {"a.csv": SMALL})["a.csv"]
     server.wait_for_event(pc.watcher_id, event_type="upload_failed")
-    row = server.wait_for_file(instrument_id, RUN, f"{RUN}/a.csv", status="detected")
+    # The watcher reported the failure at once, so the file is marked failed (watcher 1.4.5).
+    row = server.wait_for_file(instrument_id, RUN, f"{RUN}/a.csv", status="upload_failed")
+    assert row.upload_failure_reason == "upload_error"
     assert pending(pc) == [(f"{RUN}/a.csv", RUN, 0)]
 
     # The automatic upload failed. Asking for the file from the run page queues it, and the
@@ -798,9 +800,10 @@ def test_queued_file_whose_upload_keeps_failing_is_marked_upload_failed_after_th
     [item] = reported_files(proxy, report_at)
     assert (item["file_id"], item["reason"]) == (a.row.id, "upload_error")
     assert str(item["detail"]).startswith("Upload URL request failed")
-    # Three polls, three failed attempts, and then the watcher stopped asking.
+    # Three polls, three failed attempts, and then the watcher stopped asking. The report is
+    # sent at once, and the events with the next heartbeat.
     assert len(calls(proxy, "POST", "/request-upload-url")) == 3
-    failed = server.events(pc.watcher_id, event_type="upload_failed")
+    failed = server.wait_for_events(pc.watcher_id, event_type="upload_failed", count=3)
     assert [e.message for e in failed] == ["Presigned URL request failed: a.csv"] * 3
     assert file_patches(proxy, a.row.id) == []
     assert s3_puts(proxy) == []
