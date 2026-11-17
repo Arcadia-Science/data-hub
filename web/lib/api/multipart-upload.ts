@@ -9,6 +9,10 @@ import {
   planMultipartUpload,
 } from "@/lib/multipart";
 import {
+  IN_S3_FILE_STATUSES,
+  PRE_UPLOAD_FILE_STATUSES,
+} from "@/lib/runs/file-buckets";
+import {
   abortMultipartUpload,
   completeMultipartUpload,
   createMultipartUpload,
@@ -18,7 +22,7 @@ import {
   MultipartUploadError,
 } from "@/lib/s3";
 
-const PRE_UPLOAD = new Set(["detected", "upload_requested"]);
+const PRE_UPLOAD = new Set<string>(PRE_UPLOAD_FILE_STATUSES);
 // These are about the bytes the watcher sent. It can retry or start over.
 // Anything else (a missing permission, a 503) is reported as 502 so it is
 // not mistaken for a bad token.
@@ -29,13 +33,7 @@ const CALLER_FIXABLE_S3_ERRORS = new Set([
   "EntityTooSmall",
   "NoSuchUpload",
 ]);
-const UPLOADED_OR_LATER = new Set([
-  "uploaded",
-  "queued",
-  "processing",
-  "completed",
-  "failed",
-]);
+const UPLOADED_OR_LATER = new Set<string>(IN_S3_FILE_STATUSES);
 
 export interface MultipartFileContext {
   bucket: string;
@@ -242,7 +240,7 @@ async function markUploaded(file: MultipartFileContext): Promise<boolean> {
     .where(
       and(
         eq(files.id, file.fileId),
-        inArray(files.status, ["detected", "upload_requested"])
+        inArray(files.status, [...PRE_UPLOAD_FILE_STATUSES])
       )
     )
     .returning({ id: files.id });

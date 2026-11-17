@@ -111,30 +111,36 @@ export interface RunStatusCounts {
   filesUploaded: number;
 }
 
-// Keep the priority order in sync with the SQL predicates in
-// `buildRunListQuery`. Every non-deleted raw file falls into one bucket (the
-// `file_status` enum has no other values), so `empty` needs no `fileCount`.
+// The run statuses that come from a run's raw files, in priority order. `empty`
+// is the one that doesn't: it means the run has no raw files at all. Which file
+// statuses count toward each one is `RUN_BUCKET_BY_FILE_STATUS` in
+// `file-buckets.ts`.
+export type RunFileBucket = Exclude<RunStatus, "empty">;
+
+export const RUN_FILE_BUCKETS = RUN_STATUS_VALUES.filter(
+  (status): status is RunFileBucket => status !== "empty"
+);
+
+// The counter that holds each bucket's file count.
+const COUNT_FIELD_BY_BUCKET = {
+  failed: "filesFailed",
+  stalled: "filesStalled",
+  pending: "filesPendingUpload",
+  uploaded: "filesUploaded",
+  queued: "filesQueued",
+  processing: "filesProcessing",
+  completed: "filesCompleted",
+} as const satisfies Record<RunFileBucket, keyof RunStatusCounts>;
+
+// The first bucket in priority order that holds a file. The runs-list status
+// filter (`runStatusCondition` in `buildRunListQuery`) walks the same order.
+// Every non-deleted raw file falls into one bucket, so `empty` needs no
+// `fileCount`.
 export function deriveRunStatus(counts: RunStatusCounts): RunStatus {
-  if (counts.filesFailed > 0) {
-    return "failed";
-  }
-  if (counts.filesStalled > 0) {
-    return "stalled";
-  }
-  if (counts.filesPendingUpload > 0) {
-    return "pending";
-  }
-  if (counts.filesUploaded > 0) {
-    return "uploaded";
-  }
-  if (counts.filesQueued > 0) {
-    return "queued";
-  }
-  if (counts.filesProcessing > 0) {
-    return "processing";
-  }
-  if (counts.filesCompleted > 0) {
-    return "completed";
+  for (const bucket of RUN_FILE_BUCKETS) {
+    if (counts[COUNT_FIELD_BY_BUCKET[bucket]] > 0) {
+      return bucket;
+    }
   }
   return "empty";
 }
