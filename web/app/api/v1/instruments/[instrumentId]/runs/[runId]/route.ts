@@ -77,6 +77,8 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
       status: f.status,
       metadata: f.metadata,
       error_message: f.errorMessage,
+      upload_failure_reason: f.uploadFailureReason,
+      upload_failed_at: f.uploadFailedAt,
       detected_at: f.detectedAt,
       upload_requested_at: f.uploadRequestedAt,
       uploaded_at: f.uploadedAt,

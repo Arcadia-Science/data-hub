@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { authorize } from "@/lib/api/auth";
 import { apiErrorFromResult } from "@/lib/api/errors";
 import { readRunIdParam } from "@/lib/api/run-id-param";
-import { requestAllRunUploads } from "@/lib/api/run-uploads";
+import { requestAllRunUploads, uploadRequesterId } from "@/lib/api/run-uploads";
 
 interface RouteContext {
   params: Promise<{ instrumentId: string; runId: string }>;
@@ -11,8 +11,9 @@ interface RouteContext {
 // ---------------------------------------------------------------------------
 // POST /api/v1/instruments/:instrumentId/runs/:runId/request-upload-all
 //
-// Run-level convenience endpoint that transitions every `detected` file on
-// the run to `upload_requested`. Used by the runs list row/bulk actions.
+// Run-level convenience endpoint that transitions every `detected` and
+// `upload_failed` file on the run to `upload_requested`. Used by the runs list
+// row/bulk actions.
 // ---------------------------------------------------------------------------
 
 export async function POST(request: NextRequest, { params }: RouteContext) {
@@ -23,7 +24,11 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
 
   const { instrumentId, runId: runIdParam } = await params;
   const runId = readRunIdParam(request.headers, runIdParam);
-  const result = await requestAllRunUploads(instrumentId, runId);
+  const result = await requestAllRunUploads(
+    instrumentId,
+    runId,
+    await uploadRequesterId(authResult)
+  );
 
   if (!result.ok) {
     return apiErrorFromResult(result);

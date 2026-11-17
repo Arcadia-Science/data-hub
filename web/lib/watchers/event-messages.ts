@@ -5,6 +5,10 @@
 // watcher (`watcher/src/data_hub_watcher/events.py`) or the server writes. No
 // database imports, so server pages and client rows share it.
 
+import {
+  UPLOAD_FAILURE_SUMMARY,
+  type UploadFailureReason,
+} from "@/lib/runs/upload-failure";
 import { formatBytes } from "@/lib/utils";
 import { baseName, describeDuration, pluralize, sentenceCase } from "./phrases";
 import {
@@ -67,6 +71,7 @@ export const EVENT_TYPE_OPTIONS = [
   { value: "update_succeeded", label: "Update finished" },
   { value: "update_failed", label: "Update failed" },
   { value: "upload_requests_cancelled", label: "Uploads cancelled" },
+  { value: "uploads_failed", label: "Couldn't upload" },
 ] as const;
 
 /** The label for an event type, written from its name when it isn't listed. */
@@ -506,6 +511,44 @@ function describeCancelled(details: Details): Described {
   return { label: "Uploads cancelled", tone: "warning", message, facts };
 }
 
+/**
+ * The server marked files the watcher gave up on as `upload_failed`, one event
+ * per run and reason (`uploads_failed`, written by
+ * POST /watchers/:id/upload-failures).
+ */
+function describeUploadsFailed(event: EventInput, details: Details): Described {
+  const count = whole(details, "failed_count");
+  const runId = text(details, "run_id");
+  const reason = text(details, "reason");
+  const what = count === null ? "files" : pluralize(count, "file");
+  const summary =
+    reason && reason in UPLOAD_FAILURE_SUMMARY
+      ? UPLOAD_FAILURE_SUMMARY[reason as UploadFailureReason]
+      : null;
+  if (!(runId && summary)) {
+    return {
+      label: "Couldn't upload",
+      tone: "error",
+      message: ownMessage(event, "Couldn't upload files"),
+    };
+  }
+  const facts: EventFact[] = [];
+  const folder = text(details, "folder");
+  if (folder) {
+    facts.push({ kind: "value", label: "Folder", value: folder });
+  }
+  return {
+    label: "Couldn't upload",
+    tone: "error",
+    message: [
+      t(`Couldn't upload ${what} in run `),
+      run(runId),
+      t(`: ${summary}`),
+    ],
+    facts,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // `error` events: the watcher says what went wrong in `details.kind`
 // ---------------------------------------------------------------------------
@@ -789,6 +832,8 @@ function describeByType(event: EventInput, details: Details): Described {
       return describeUpdateFailed(event, details);
     case "upload_requests_cancelled":
       return describeCancelled(details);
+    case "uploads_failed":
+      return describeUploadsFailed(event, details);
     default: {
       // A type added to the enum after this was written: a label from its name
       // and the watcher's message, never the raw type.

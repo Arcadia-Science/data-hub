@@ -23,6 +23,7 @@ import { WATCHER_FEATURES, watcherClientFrom } from "@/lib/api/watcher-compat";
 import { db } from "@/lib/db";
 import { files } from "@/lib/db/schema";
 import { multipartThresholdBytes, SINGLE_PUT_MAX_BYTES } from "@/lib/multipart";
+import { IN_S3_FILE_STATUSES } from "@/lib/runs/file-buckets";
 import { getPresignedUploadUrl, getS3RawDataBucket } from "@/lib/s3";
 
 interface RouteContext {
@@ -31,13 +32,7 @@ interface RouteContext {
 
 const UPLOAD_URL_EXPIRY_SECONDS = 60 * 60; // 1 hour
 
-const UPLOADED_OR_LATER_STATUSES = new Set([
-  "uploaded",
-  "queued",
-  "processing",
-  "completed",
-  "failed",
-]);
+const UPLOADED_OR_LATER_STATUSES = new Set<string>(IN_S3_FILE_STATUSES);
 
 // ---------------------------------------------------------------------------
 // POST /api/v1/instruments/:instrumentId/runs/:runId/request-upload-url

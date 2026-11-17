@@ -3,6 +3,7 @@ import {
   fileCategorySchema,
   fileStatusSchema,
   isoDateTime,
+  uploadFailureReasonSchema,
 } from "@/lib/api/openapi/schemas/common";
 
 /** Full `files` row as returned by `get_file` after JSON round-trip. */
@@ -19,6 +20,10 @@ export const getFileOutputSchema = z.object({
   status: fileStatusSchema,
   metadata: z.record(z.string(), z.unknown()),
   errorMessage: z.string().nullable(),
+  uploadFailureReason: uploadFailureReasonSchema.nullable(),
+  uploadFailedAt: isoDateTime.nullable(),
+  uploadRequestedBy: z.string().nullable(),
+  autoUploadExpectedAt: isoDateTime.nullable(),
   detectedAt: isoDateTime.nullable(),
   uploadRequestedAt: isoDateTime.nullable(),
   uploadedAt: isoDateTime.nullable(),

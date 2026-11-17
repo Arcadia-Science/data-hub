@@ -48,6 +48,7 @@ export function toMcpFile(f: RunFile) {
     sizeBytes: f.sizeBytes,
     contentType: f.contentType,
     errorMessage: f.errorMessage,
+    uploadFailureReason: f.uploadFailureReason,
     createdAt: f.createdAt,
     uploadedAt: f.uploadedAt,
     processedAt: f.processedAt,

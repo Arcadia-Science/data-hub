@@ -1,4 +1,8 @@
-import { RUN_STATUS_VALUES, type RunStatus } from "@/lib/runs/run-status";
+import {
+  expandRunStatusAlias,
+  RUN_STATUS_VALUES,
+  type RunStatus,
+} from "@/lib/runs/run-status";
 
 const KEBAB_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const UUID_RE =
@@ -52,9 +56,12 @@ export function parseRunStatusParam(
   const seen = new Set<RunStatus>();
   for (const raw of searchParams.getAll("status")) {
     for (const part of raw.split(",")) {
-      const value = part.trim();
-      if (RUN_STATUS_SET.has(value)) {
-        seen.add(value as RunStatus);
+      // The deprecated `pending` still filters, as both statuses that
+      // replaced it.
+      for (const value of expandRunStatusAlias(part.trim())) {
+        if (RUN_STATUS_SET.has(value)) {
+          seen.add(value as RunStatus);
+        }
       }
     }
   }
