@@ -47,3 +47,26 @@ export function isBoundToOtherToken(
     registeredByToken !== authResult.tokenId
   );
 }
+
+/**
+ * Whether a token may change a file on `instrumentId`, given every watcher
+ * the token registered, deregistered ones included. A token that registered
+ * no watcher, such as the Lambda's, may change any file. A token that did may
+ * change only the files of an instrument whose active watcher it registered,
+ * so a token whose watchers were all deregistered may change none.
+ */
+export function tokenMayChangeInstrumentFiles(
+  registeredWatchers: readonly {
+    deletedAt: Date | null;
+    instrumentId: string;
+  }[],
+  instrumentId: string
+): boolean {
+  if (registeredWatchers.length === 0) {
+    return true;
+  }
+  return registeredWatchers.some(
+    (watcher) =>
+      watcher.deletedAt === null && watcher.instrumentId === instrumentId
+  );
+}

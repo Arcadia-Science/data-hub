@@ -57,7 +57,7 @@ registry.registerPath({
   operationId: "updateFile",
   summary: "Update a file",
   description:
-    "Requires scope `files:update`. PAT only; browser sessions are rejected.",
+    "Requires scope `files:update`. PAT only; browser sessions are rejected. A token that registered a watcher may update only the files of an instrument whose active watcher it registered, and gets 403 for any other file.",
   tags: ["Files"],
   security: bearerSecurity,
   request: { params: fileParams, body: body(patchFileBody) },
