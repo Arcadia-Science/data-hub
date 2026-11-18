@@ -75,12 +75,13 @@ export function tokenMayActOnInstrument(
 }
 
 /**
- * Whether a token may rename, retype, retire or confirm instruments. The
- * watcher never does any of these, so a token that ever registered a watcher
- * may not, even for its own instrument. Any other token may, if it has the
- * scope.
+ * Whether a token may do an admin's work on instruments and watchers: rename,
+ * retype, retire or confirm an instrument, or remove or reconfigure a
+ * watcher. The watcher never does any of these, so a token that ever
+ * registered a watcher may not, even for its own instrument. Any other token
+ * may, if it has the scope.
  */
-export function tokenMayEditInstruments(
+export function tokenMayAdminister(
   registeredWatchers: readonly RegisteredWatcher[]
 ): boolean {
   return registeredWatchers.length === 0;

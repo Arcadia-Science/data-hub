@@ -1,5 +1,6 @@
 import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { SCOPE_PRESETS } from "@/lib/api/scope-catalog";
 import { ALL_SCOPES } from "@/lib/api/scopes";
 import {
   archiveJobs,
@@ -219,7 +220,7 @@ const ROUTES: RouteCase[] = [
 // The 403 this change adds, told apart from a missing scope, which is also a
 // 403.
 const OWNERSHIP_REFUSAL =
-  /not authorized for this (instrument|file's instrument)|can't change instruments/;
+  /not authorized for this (instrument|file's instrument)|can't change instruments|can't remove or reconfigure watchers/;
 
 async function expectOwnershipRefusal(res: Response) {
   expect(res.status).toBe(403);
@@ -229,6 +230,7 @@ async function expectOwnershipRefusal(res: Response) {
 }
 
 async function expectNotOwnershipRefusal(res: Response) {
+  expect(res.status).toBeLessThan(500);
   if (res.status !== 403) {
     return;
   }
@@ -384,6 +386,60 @@ describe("a watcher's token writes only to its own instrument", () => {
     expect(await snapshotInstrumentA()).toEqual(before);
   });
 
+  it("lets a Watcher-preset token report a run and upload a file on its own instrument", async () => {
+    const C = "scope-instr-c";
+    const preset = SCOPE_PRESETS.find((p) => p.id === "watcher");
+    if (!preset) {
+      throw new Error("Scope preset 'watcher' is missing");
+    }
+    const { token } = await seedTestUser({ scopes: [...preset.scopes] });
+    await getTestDb()
+      .insert(instruments)
+      .values({ id: C, displayName: "Scope C", status: "active" });
+    const watcherId = await registerWatcher(token, C);
+    const runPath = `/api/v1/instruments/${C}/runs/${RUN}`;
+
+    const created = await api(`/api/v1/instruments/${C}/runs`, {
+      method: "POST",
+      token,
+      body: {
+        run_id: RUN,
+        source: "watcher",
+        watcher_id: watcherId,
+        detected_files: [
+          { relative_path: "one.csv", filename: "one.csv", size_bytes: 1 },
+        ],
+      },
+    });
+    expect(created.status).toBe(201);
+
+    const updated = await api(runPath, {
+      method: "PATCH",
+      token,
+      body: {
+        detected_files: [
+          { relative_path: "two.csv", filename: "two.csv", size_bytes: 1 },
+        ],
+      },
+    });
+    expect(updated.status).toBe(200);
+
+    const link = await api(`${runPath}/request-upload-url`, {
+      method: "POST",
+      token,
+      body: { filename: "one.csv", size_bytes: 1 },
+    });
+    expect(link.status).toBe(200);
+    const { file_id: fileId } = await link.json();
+
+    const uploaded = await api(`/api/v1/files/${fileId}`, {
+      method: "PATCH",
+      token,
+      body: { status: "uploaded" },
+    });
+    expect(uploaded.status).toBe(200);
+  });
+
   it("refuses a bulk notebook-link request that names a run on another instrument", async () => {
     const res = await api("/api/v1/instrument-runs/notebook-links", {
       method: "POST",
@@ -413,6 +469,41 @@ describe("a watcher's token writes only to its own instrument", () => {
       .from(instruments)
       .where(eq(instruments.id, A));
     expect(row.displayName).toBe("Scope A");
+  });
+
+  it("refuses every watcher token on the watcher admin routes, its own watcher included", async () => {
+    const adminRoutes: { method: "DELETE" | "POST"; path: string }[] = [
+      { method: "DELETE", path: `/api/v1/watchers/${watcherAId}` },
+      {
+        method: "POST",
+        path: `/api/v1/watchers/${watcherAId}/config-revisions`,
+      },
+      { method: "POST", path: `/api/v1/watchers/${watcherAId}/config-preview` },
+    ];
+    for (const token of [tokenA, tokenB]) {
+      for (const route of adminRoutes) {
+        const res = await api(route.path, {
+          method: route.method,
+          token,
+          body: route.method === "POST" ? {} : undefined,
+        });
+        await expectOwnershipRefusal(res);
+      }
+    }
+    const [row] = await getTestDb()
+      .select({ deletedAt: watchers.deletedAt })
+      .from(watchers)
+      .where(eq(watchers.id, watcherAId));
+    expect(row.deletedAt).toBeNull();
+  });
+
+  it("lets a token that registered no watcher use the watcher admin routes", async () => {
+    const res = await api(`/api/v1/watchers/${watcherAId}/config-preview`, {
+      method: "POST",
+      token: unboundToken,
+      body: {},
+    });
+    await expectNotOwnershipRefusal(res);
   });
 
   it("lets a token that registered no watcher edit an instrument", async () => {

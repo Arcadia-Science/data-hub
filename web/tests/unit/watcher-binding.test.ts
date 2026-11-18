@@ -4,7 +4,7 @@ import {
   decideWatcherBinding,
   isBoundToOtherToken,
   tokenMayActOnInstrument,
-  tokenMayEditInstruments,
+  tokenMayAdminister,
 } from "@/lib/api/watcher-binding";
 
 // Pure decision coverage for watcher↔PAT binding. Imports the DB-free
@@ -121,20 +121,20 @@ describe("tokenMayActOnInstrument", () => {
   });
 });
 
-describe("tokenMayEditInstruments", () => {
-  it("lets a token that registered no watcher edit instruments", () => {
-    expect(tokenMayEditInstruments([])).toBe(true);
+describe("tokenMayAdminister", () => {
+  it("lets a token that registered no watcher do admin work", () => {
+    expect(tokenMayAdminister([])).toBe(true);
   });
 
   it("refuses a watcher's token, even for its own instrument", () => {
     expect(
-      tokenMayEditInstruments([{ deletedAt: null, instrumentId: "instr-a" }])
+      tokenMayAdminister([{ deletedAt: null, instrumentId: "instr-a" }])
     ).toBe(false);
   });
 
   it("refuses a token whose watchers were all deregistered", () => {
     expect(
-      tokenMayEditInstruments([
+      tokenMayAdminister([
         {
           deletedAt: new Date("2026-11-01T00:00:00Z"),
           instrumentId: "instr-a",

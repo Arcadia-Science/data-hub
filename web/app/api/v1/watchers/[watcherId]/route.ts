@@ -13,6 +13,7 @@ import { computeEffectiveStatus } from "@/lib/api/watcher-status";
 import {
   deregisterWatcherRow,
   findWatcherIncludingDeleted,
+  refuseWatcherTokenAdmin,
   watcherDeregisteredResponse,
   watcherNotFoundResponse,
 } from "@/lib/api/watchers";
@@ -79,9 +80,16 @@ export async function DELETE(
   }
 
   // Browser callers (the Deregister dialog in Settings › Watchers) must
-  // additionally be admins. PAT callers pass through purely on the
-  // `watchers:admin` scope.
-  const adminGate = await requireAdminForSession(authResult);
+  // additionally be admins. A token that ever registered a watcher is
+  // refused: the watcher never deregisters one, and a lab PC's token could
+  // otherwise free another instrument and register itself there. Other PATs
+  // pass on the `watchers:admin` scope.
+  const adminGate =
+    (await requireAdminForSession(authResult)) ??
+    (await refuseWatcherTokenAdmin(
+      authResult,
+      "A watcher's token can't remove or reconfigure watchers"
+    ));
   if (adminGate) {
     return adminGate;
   }

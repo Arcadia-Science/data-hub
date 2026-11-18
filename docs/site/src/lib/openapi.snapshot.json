@@ -5191,7 +5191,7 @@
       "patch": {
         "operationId": "updateRunNotebookLink",
         "summary": "Edit a lab notebook link",
-        "description": "Requires scope `runs:link`. Anyone with the scope can edit any link. A token that registered a watcher may act only on instruments whose active watcher it registered, and gets 403 for any other.",
+        "description": "Requires scope `runs:link`. Anyone with the scope can edit any link, not only their own. A token that registered a watcher may act only on instruments whose active watcher it registered, and gets 403 for any other.",
         "tags": [
           "Runs"
         ],
@@ -5447,7 +5447,7 @@
       "post": {
         "operationId": "bulkAddRunNotebookLink",
         "summary": "Add a lab notebook link to many runs",
-        "description": "Requires scope `runs:link`. Reports an outcome for each run instead of failing the whole request. A token that registered a watcher may act only on instruments whose active watcher it registered, and gets 403 for any other.",
+        "description": "Requires scope `runs:link`. Reports an outcome for each run instead of failing the whole request. The exception is a token that registered a watcher: it gets 403 for the whole request when any listed run is on an instrument whose active watcher it didn't register.",
         "tags": [
           "Runs"
         ],
@@ -5661,7 +5661,7 @@
       "post": {
         "operationId": "bulkRemoveRunNotebookLinks",
         "summary": "Remove lab notebook links from many runs",
-        "description": "Requires scope `runs:link`. Reports an outcome for each run instead of failing the whole request. A token that registered a watcher may act only on instruments whose active watcher it registered, and gets 403 for any other.",
+        "description": "Requires scope `runs:link`. Reports an outcome for each run instead of failing the whole request. The exception is a token that registered a watcher: it gets 403 for the whole request when any listed run is on an instrument whose active watcher it didn't register.",
         "tags": [
           "Runs"
         ],
@@ -8743,7 +8743,7 @@
       "post": {
         "operationId": "createWatcherConfigRevision",
         "summary": "Change a watcher's config",
-        "description": "Requires a token that lists `watchers:admin` explicitly; legacy tokens with `*` or `watchers:write` get 403. Browser sessions must belong to an admin. Stores a pending revision that the watcher applies after its next heartbeat. Returns 409 when `base_revision` isn't the latest revision (`details.reason: stale_revision`) or the watcher runs a version older than 1.4.0 (`details.reason: watcher_update_required`).",
+        "description": "Requires a token that lists `watchers:admin` explicitly; legacy tokens with `*` or `watchers:write` get 403. Browser sessions must belong to an admin. A token that registered a watcher gets 403, even for its own watcher. Stores a pending revision that the watcher applies after its next heartbeat. Returns 409 when `base_revision` isn't the latest revision (`details.reason: stale_revision`) or the watcher runs a version older than 1.4.0 (`details.reason: watcher_update_required`).",
         "tags": [
           "Watchers"
         ],
@@ -9257,7 +9257,7 @@
       "post": {
         "operationId": "dispatchNotifications",
         "summary": "Send a notification to users",
-        "description": "Requires scope `notifications:create`. PAT only; browser sessions are rejected. Posts a free-text `generic` notification to each recipient, optionally anchored to a run. Delivery is per-recipient preference: in-app bell and/or Slack DM. Exact repeats of an unread message are skipped, so retries are safe. A token that registered a watcher may act only on instruments whose active watcher it registered, and gets 403 for any other.",
+        "description": "Requires scope `notifications:create`. PAT only; browser sessions are rejected. Posts a free-text `generic` notification to each recipient, optionally anchored to a run. Delivery is per-recipient preference: in-app bell and/or Slack DM. Exact repeats of an unread message are skipped, so retries are safe. When `run` is given, a token that registered a watcher gets 403 unless the run is on an instrument whose active watcher it registered.",
         "tags": [
           "Notifications"
         ],

@@ -8,7 +8,7 @@ import { apiError, NOT_FOUND, VALIDATION_ERROR } from "@/lib/api/errors";
 import { readJsonBody, watcherConfigPreviewBody } from "@/lib/api/openapi";
 import { isValidUUID } from "@/lib/api/validators";
 import { previewConfigForInstrument } from "@/lib/api/watcher-config/revisions";
-import { findActiveWatcher } from "@/lib/api/watchers";
+import { findActiveWatcher, refuseWatcherTokenAdmin } from "@/lib/api/watchers";
 
 // Shows which of the instrument's recent files a settings change would match
 // and the run ID each would get. Used only by the edit form, so it stays out
@@ -24,9 +24,14 @@ export async function POST(
   // Browser sessions must belong to an admin. Tokens must list
   // `watchers:admin` themselves: the legacy `watchers:write` and `*` that old
   // watcher PCs carry imply it, but must not let them repoint other watchers.
+  // A token that ever registered a watcher is refused even with the scope.
   const adminGate =
     (await requireAdminForSession(authResult)) ??
-    requireExplicitTokenScope(authResult, "watchers:admin");
+    requireExplicitTokenScope(authResult, "watchers:admin") ??
+    (await refuseWatcherTokenAdmin(
+      authResult,
+      "A watcher's token can't remove or reconfigure watchers"
+    ));
   if (adminGate) {
     return adminGate;
   }
