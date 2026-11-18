@@ -11,7 +11,7 @@ import {
 import { patchInstrumentBody, readJsonBody } from "@/lib/api/openapi";
 import {
   deregisterInstrumentWatchers,
-  refuseWatcherTokenInstrumentEdit,
+  refuseWatcherTokenAdmin,
 } from "@/lib/api/watchers";
 import { db } from "@/lib/db";
 import { instrumentRuns, instruments } from "@/lib/db/schema";
@@ -86,7 +86,10 @@ export async function PATCH(
   // `instruments:write` scope alone, so existing automation keeps working.
   const adminGate =
     (await requireAdminForSession(authResult)) ??
-    (await refuseWatcherTokenInstrumentEdit(authResult));
+    (await refuseWatcherTokenAdmin(
+      authResult,
+      "A watcher's token can't change instruments"
+    ));
   if (adminGate) {
     return adminGate;
   }

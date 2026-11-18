@@ -34,7 +34,7 @@ import {
   isBoundToOtherToken,
   type RegisteredWatcher,
   tokenMayActOnInstrument,
-  tokenMayEditInstruments,
+  tokenMayAdminister,
 } from "@/lib/api/watcher-binding";
 import {
   type ConfigRevisionStatus,
@@ -324,21 +324,23 @@ export function enforceWatcherTokenArchiveJob(
 }
 
 /**
- * Returns a 403 when a token that ever registered a watcher tries to rename,
- * retype, retire or confirm an instrument, and null otherwise. Sessions are
- * not limited here. See `tokenMayEditInstruments` for the rule.
+ * Returns a 403 with `message` when a token that ever registered a watcher
+ * calls an admin route: changing an instrument, or removing or reconfiguring
+ * a watcher. Returns null otherwise. Sessions are not limited here. See
+ * `tokenMayAdminister` for the rule.
  */
-export async function refuseWatcherTokenInstrumentEdit(
-  authResult: AuthResult
+export async function refuseWatcherTokenAdmin(
+  authResult: AuthResult,
+  message: string
 ): Promise<Response | null> {
   if (authResult.authMethod !== "token") {
     return null;
   }
   const registered = await watchersRegisteredBy(authResult.tokenId);
-  if (tokenMayEditInstruments(registered)) {
+  if (tokenMayAdminister(registered)) {
     return null;
   }
-  return apiError(403, FORBIDDEN, "A watcher's token can't change instruments");
+  return apiError(403, FORBIDDEN, message);
 }
 
 /**

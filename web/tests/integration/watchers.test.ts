@@ -26,13 +26,17 @@ import {
 // This mirrors the real watcher lifecycle (CLI registers, sends heartbeats,
 // reports events, syncs config, and eventually deregisters).
 describe("Watchers API", () => {
+  // `token` registers watchers and reports for them. A token that registered
+  // a watcher can't deregister one, so `adminToken` does.
   let token: string;
+  let adminToken: string;
   let watcherId: string;
   const instrumentId = "watcher-test-instrument";
 
   beforeAll(async () => {
     await resetDb();
     ({ token } = await seedTestUser());
+    ({ token: adminToken } = await seedTestUser());
 
     const db = getTestDb();
     await db.insert(instruments).values({
@@ -507,7 +511,7 @@ describe("Watchers API", () => {
   it("DELETE /api/v1/watchers/:id soft-deletes the watcher", async () => {
     const res = await api(`/api/v1/watchers/${watcherId}`, {
       method: "DELETE",
-      token,
+      token: adminToken,
     });
     expect(res.status).toBe(200);
     const data = await res.json();
@@ -519,7 +523,7 @@ describe("Watchers API", () => {
   it("DELETE /api/v1/watchers/:id returns 409 for already-deleted watcher", async () => {
     const res = await api(`/api/v1/watchers/${watcherId}`, {
       method: "DELETE",
-      token,
+      token: adminToken,
     });
     expect(res.status).toBe(409);
   });
@@ -774,7 +778,10 @@ const ALL_STATUSES: ShownStatus[] = [
 ];
 
 describe("Watchers API: the status a watcher shows", () => {
+  // `token` registers watchers and reports for them. A token that registered
+  // a watcher can't deregister one, so `adminToken` does.
   let token: string;
+  let adminToken: string;
   const idByCase = new Map<string, string>();
 
   async function registerWatcher(
@@ -857,6 +864,7 @@ describe("Watchers API: the status a watcher shows", () => {
   beforeAll(async () => {
     await resetDb();
     ({ token } = await seedTestUser());
+    ({ token: adminToken } = await seedTestUser());
 
     for (const [index, testCase] of ALL_CASES.entries()) {
       const id = await registerWatcher(
@@ -873,7 +881,7 @@ describe("Watchers API: the status a watcher shows", () => {
       if (testCase.deregistered) {
         const res = await api(`/api/v1/watchers/${id}`, {
           method: "DELETE",
-          token,
+          token: adminToken,
         });
         expect(res.status).toBe(200);
       }

@@ -23,7 +23,7 @@ import {
   listConfigRevisions,
   toRevisionWire,
 } from "@/lib/api/watcher-config/revisions";
-import { findActiveWatcher } from "@/lib/api/watchers";
+import { findActiveWatcher, refuseWatcherTokenAdmin } from "@/lib/api/watchers";
 
 // History of a watcher's config changes, newest first. Any signed-in member
 // can read it, as can a token with `watchers:read`.
@@ -77,9 +77,14 @@ export async function POST(
   // Browser sessions must belong to an admin. Tokens must list
   // `watchers:admin` themselves: the legacy `watchers:write` and `*` that old
   // watcher PCs carry imply it, but must not let them repoint other watchers.
+  // A token that ever registered a watcher is refused even with the scope.
   const adminGate =
     (await requireAdminForSession(authResult)) ??
-    requireExplicitTokenScope(authResult, "watchers:admin");
+    requireExplicitTokenScope(authResult, "watchers:admin") ??
+    (await refuseWatcherTokenAdmin(
+      authResult,
+      "A watcher's token can't remove or reconfigure watchers"
+    ));
   if (adminGate) {
     return adminGate;
   }

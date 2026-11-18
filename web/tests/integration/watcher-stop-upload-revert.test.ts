@@ -94,8 +94,9 @@ async function insertWatcher(
 
 describe("Heartbeat — revert upload queue on watcher stop", () => {
   // `token` sends the heartbeats, which binds each watcher to it. A token
-  // bound to a watcher may create runs only on that watcher's instrument, so
-  // `runToken`, which no watcher is bound to, seeds the runs.
+  // bound to a watcher may create runs only on that watcher's instrument and
+  // can't deregister watchers, so `runToken`, which no watcher is bound to,
+  // seeds the runs and deregisters.
   let token: string;
   let runToken: string;
 
@@ -423,7 +424,7 @@ describe("Heartbeat — revert upload queue on watcher stop", () => {
 
     const res = await api(`/api/v1/watchers/${watcherId}`, {
       method: "DELETE",
-      token,
+      token: runToken,
     });
     expect(res.status).toBe(200);
 
