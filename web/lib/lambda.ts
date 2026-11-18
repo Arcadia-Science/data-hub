@@ -1,4 +1,5 @@
 import { Hash } from "@smithy/hash-node";
+import { memoize } from "@smithy/property-provider";
 import { HttpRequest } from "@smithy/protocol-http";
 import { SignatureV4 } from "@smithy/signature-v4";
 import type { AwsCredentialIdentityProvider } from "@smithy/types";
@@ -25,12 +26,29 @@ const staticCredentialsProvider: AwsCredentialIdentityProvider = () => {
   );
 };
 
-// Module-level cache for the OIDC provider so its internal credential cache
-// (and the underlying STS AssumeRoleWithWebIdentity round-trip) is reused
-// across requests on the same warm function instance. `awsCredentialsProvider`
-// is itself memoizing, but only once you hold on to the same instance —
-// reconstructing it per call defeats that. Keyed on AWS_ROLE_ARN so a config
-// change between invocations naturally re-provisions.
+// Assume the role again once the STS credentials are this close to expiring.
+// The AWS SDK clients refresh at the same point.
+const CREDENTIALS_REFRESH_WINDOW_MS = 5 * 60 * 1000;
+
+// `awsCredentialsProvider` calls STS AssumeRoleWithWebIdentity every time it
+// runs, and the signer runs it for every request it signs. This wrapper keeps
+// the credentials until they near expiry, so a warm function instance calls
+// STS about once an hour instead of once per Lambda invoke. `memoize` doesn't
+// keep a failed call, so the next request asks STS again.
+function reuseUntilNearExpiry(
+  provider: AwsCredentialIdentityProvider
+): AwsCredentialIdentityProvider {
+  return memoize(
+    provider,
+    ({ expiration }) =>
+      expiration !== undefined &&
+      expiration.getTime() - Date.now() < CREDENTIALS_REFRESH_WINDOW_MS
+  );
+}
+
+// One credentials provider per warm function instance, so the credentials it
+// keeps outlive a single request. Keyed on AWS_ROLE_ARN so a change to it
+// builds a new provider.
 let cachedCredentialsProvider: {
   key: string;
   provider: AwsCredentialIdentityProvider;
@@ -42,7 +60,7 @@ function getCredentialsProvider(): AwsCredentialIdentityProvider {
     return cachedCredentialsProvider.provider;
   }
   const provider = roleArn
-    ? awsCredentialsProvider({ roleArn })
+    ? reuseUntilNearExpiry(awsCredentialsProvider({ roleArn }))
     : staticCredentialsProvider;
   cachedCredentialsProvider = { key: roleArn, provider };
   return provider;

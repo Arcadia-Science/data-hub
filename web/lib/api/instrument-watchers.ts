@@ -23,8 +23,11 @@ import {
   compareInstrumentNames,
   computeConnection,
   deriveConfigState,
+  type InstrumentBadgeState,
   type InstrumentWatcher,
+  instrumentBadgeState,
 } from "@/lib/instruments/connection";
+import type { PauseWatcher } from "@/lib/instruments/offline-alerts";
 
 /**
  * The computer a watcher runs on, for matching watchers on the same one:
@@ -268,6 +271,101 @@ export async function getInstrumentConnection(
       )
     );
   return computeConnection(null, past?.count ?? 0);
+}
+
+/** One instrument as the offline-alert job sees it. */
+export interface InstrumentConnectionSnapshot {
+  badge: InstrumentBadgeState;
+  connection: Connection;
+  displayName: string;
+  instrumentId: string;
+  /** What the alert's sentence needs of the active watcher, or null without one. */
+  watcher: {
+    hostname: string | null;
+    lastHeartbeatAt: Date | null;
+    watchDirectory: string | null;
+  } | null;
+}
+
+/**
+ * The badge of every instrument at `now`, and the stored status and last
+ * heartbeat of every active watcher for the job's pause, in one query. It
+ * builds each badge with the same functions the web app uses, but with the
+ * caller's clock, so one run judges every instrument at the same moment and
+ * tests can pin it.
+ */
+export async function listInstrumentConnections(
+  now: Date,
+  executor: DbExecutor = db
+): Promise<{
+  instruments: InstrumentConnectionSnapshot[];
+  watchers: PauseWatcher[];
+}> {
+  const rows = await executor
+    .select({
+      instrumentId: instruments.id,
+      displayName: instruments.displayName,
+      instrumentStatus: instruments.status,
+      watcherId: watchers.id,
+      hostname: watchers.hostname,
+      status: watchers.status,
+      statusReason: watchers.statusReason,
+      lastHeartbeatAt: watchers.lastHeartbeatAt,
+      configYaml: watchers.configYaml,
+      pastWatcherCount: sql<number>`(
+        select cast(count(*) as int) from ${watchers} as past
+        where past.instrument_id = ${instruments.id}
+          and past.deleted_at is not null
+      )`,
+    })
+    .from(instruments)
+    .leftJoin(
+      watchers,
+      and(eq(watchers.instrumentId, instruments.id), isNull(watchers.deletedAt))
+    );
+
+  const snapshots: InstrumentConnectionSnapshot[] = [];
+  const pauseWatchers: PauseWatcher[] = [];
+  for (const row of rows) {
+    let connectionWatcher: ConnectionWatcher | null = null;
+    let watcher: InstrumentConnectionSnapshot["watcher"] = null;
+    if (row.watcherId !== null && row.status !== null) {
+      pauseWatchers.push({
+        status: row.status,
+        lastHeartbeatAt: row.lastHeartbeatAt,
+      });
+      connectionWatcher = {
+        status: computeEffectiveStatus(
+          {
+            status: row.status,
+            statusReason: row.statusReason,
+            lastHeartbeatAt: row.lastHeartbeatAt,
+            deletedAt: null,
+          },
+          now
+        ),
+        statusReason: row.statusReason,
+      };
+      watcher = {
+        hostname: row.hostname,
+        lastHeartbeatAt: row.lastHeartbeatAt,
+        watchDirectory: readInstrumentConfigFields(row.configYaml)
+          .watchDirectory,
+      };
+    }
+    const connection = computeConnection(
+      connectionWatcher,
+      row.pastWatcherCount
+    );
+    snapshots.push({
+      instrumentId: row.instrumentId,
+      displayName: row.displayName,
+      badge: instrumentBadgeState(row.instrumentStatus, connection),
+      connection,
+      watcher,
+    });
+  }
+  return { instruments: snapshots, watchers: pauseWatchers };
 }
 
 /**

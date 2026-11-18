@@ -20,6 +20,7 @@ import {
 import { readRunIdParam } from "@/lib/api/run-id-param";
 import { touchRuns } from "@/lib/api/touch-runs";
 import { WATCHER_FEATURES, watcherClientFrom } from "@/lib/api/watcher-compat";
+import { enforceWatcherTokenInstrument } from "@/lib/api/watchers";
 import { db } from "@/lib/db";
 import { files } from "@/lib/db/schema";
 import { multipartThresholdBytes, SINGLE_PUT_MAX_BYTES } from "@/lib/multipart";
@@ -44,6 +45,8 @@ const UPLOADED_OR_LATER_STATUSES = new Set<string>(IN_S3_FILE_STATUSES);
 //
 // PAT-only: session `*` would let any member mint a presigned PUT for the
 // canonical raw-data key. The dashboard queues uploads via `request-upload`.
+// A token that registered a watcher may upload only to its own instrument's
+// runs, since the key decides which instrument the Lambda files it under.
 // ---------------------------------------------------------------------------
 
 export async function POST(request: NextRequest, { params }: RouteContext) {
@@ -53,6 +56,10 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   }
 
   const { instrumentId, runId: runIdParam } = await params;
+  const denied = await enforceWatcherTokenInstrument(authResult, instrumentId);
+  if (denied) {
+    return denied;
+  }
   const runId = readRunIdParam(request.headers, runIdParam);
   const run = await lookupRunByNaturalKey(instrumentId, runId);
 

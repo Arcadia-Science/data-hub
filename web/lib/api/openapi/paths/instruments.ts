@@ -67,7 +67,8 @@ registry.registerPath({
   path: "/instruments/{instrumentId}",
   operationId: "updateInstrument",
   summary: "Update an instrument",
-  description: "Requires scope `instruments:write`.",
+  description:
+    "Requires scope `instruments:write`. A browser session must belong to an admin. A token that registered a watcher gets 403, even for its own instrument.",
   tags: ["Instruments"],
   security: bearerSecurity,
   request: {

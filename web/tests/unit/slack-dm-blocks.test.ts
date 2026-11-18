@@ -4,6 +4,7 @@ import {
   buildFeedbackSubmittedBlocks,
   buildFeedbackUpdatedBlocks,
   buildGenericBlocks,
+  buildInstrumentConnectionBlocks,
   buildRunCreatedBlocks,
   buildUploadFailedBlocks,
 } from "@/lib/slack/dm";
@@ -145,6 +146,31 @@ describe("buildUploadFailedBlocks", () => {
   it("keeps the Data Hub link as the only angle-bracket span", () => {
     expect(angleBracketSpans(text.text)).toEqual([
       `<${RUN_URL}|View in Data Hub>`,
+    ]);
+    expect(text.verbatim).toBe(true);
+  });
+});
+
+describe("buildInstrumentConnectionBlocks", () => {
+  const instrumentUrl = "https://datahub.test/instruments/inst-1";
+  const text = sectionText(
+    buildInstrumentConnectionBlocks({
+      heading: `${HOSTILE} is offline`,
+      message: `The watcher can't find ${HOSTILE}, so it isn't picking up new files from this instrument.`,
+      instrumentUrl,
+    })
+  );
+
+  it("bolds the escaped heading and escapes the sentence", () => {
+    expect(text.text.startsWith(`*${ESCAPED_HOSTILE} is offline*\n`)).toBe(
+      true
+    );
+    expect(text.text).toContain(`can't find ${ESCAPED_HOSTILE}, so`);
+  });
+
+  it("keeps the instrument link as the only angle-bracket span", () => {
+    expect(angleBracketSpans(text.text)).toEqual([
+      `<${instrumentUrl}|View in Data Hub>`,
     ]);
     expect(text.verbatim).toBe(true);
   });

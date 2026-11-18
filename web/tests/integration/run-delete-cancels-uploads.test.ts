@@ -127,7 +127,9 @@ async function readFile(id: number) {
   return row;
 }
 
-// The names of the files in the watcher's upload queue.
+// The names of the files in the watcher's upload queue. Read it with a token
+// that does nothing else: reading binds each watcher to the token, and a token
+// bound to a watcher may then write only to that watcher's instrument.
 async function readQueue(token: string, watcherId: string): Promise<string[]> {
   const res = await api(`/api/v1/watchers/${watcherId}/upload-queue`, {
     token,
@@ -201,12 +203,14 @@ async function callMcpTool(
 
 describe("Deleting a run cancels its requested uploads", () => {
   let token: string;
+  let watcherToken: string;
   let mcpToken: string;
 
   beforeAll(async () => {
     await resetDb();
     const user = await seedTestUser();
     token = user.token;
+    ({ token: watcherToken } = await seedTestUser());
     mcpToken = await getMcpAccessToken(user.userId);
   });
 
@@ -287,9 +291,9 @@ describe("Deleting a run cancels its requested uploads", () => {
     const doomed = await seedRun(token, instrumentId, "doomed", ["a", "b"]);
     await markRequested(Object.values(doomed.fileIds));
 
-    expect(await readQueue(token, watcherId)).toEqual(["a", "b"]);
+    expect(await readQueue(watcherToken, watcherId)).toEqual(["a", "b"]);
     await deleteRun(token, instrumentId, "doomed");
-    expect(await readQueue(token, watcherId)).toEqual([]);
+    expect(await readQueue(watcherToken, watcherId)).toEqual([]);
   });
 
   it("leaves the requests of another run and of another instrument alone", async () => {
@@ -321,8 +325,10 @@ describe("Deleting a run cancels its requested uploads", () => {
       expect(file.status).toBe("upload_requested");
       expect(file.uploadRequestedAt).not.toBeNull();
     }
-    expect(await readQueue(token, watcherId)).toEqual(["sibling.csv"]);
-    expect(await readQueue(token, otherWatcherId)).toEqual(["namesake.csv"]);
+    expect(await readQueue(watcherToken, watcherId)).toEqual(["sibling.csv"]);
+    expect(await readQueue(watcherToken, otherWatcherId)).toEqual([
+      "namesake.csv",
+    ]);
     expect(await readCancelEvents(otherWatcherId)).toHaveLength(0);
   });
 
@@ -387,14 +393,14 @@ describe("Deleting a run cancels its requested uploads", () => {
       expect(file.status).toBe("detected");
       expect(file.uploadRequestedAt).toBeNull();
     }
-    expect(await readQueue(token, watcherId)).toEqual([]);
+    expect(await readQueue(watcherToken, watcherId)).toEqual([]);
 
     const request = await api(
       `/api/v1/instruments/${instrumentId}/runs/run-1/request-upload-all`,
       { method: "POST", token }
     );
     expect(request.status).toBe(200);
-    expect(await readQueue(token, watcherId)).toEqual(["a", "b"]);
+    expect(await readQueue(watcherToken, watcherId)).toEqual(["a", "b"]);
   });
 
   it("records nothing more when the run is deleted a second time", async () => {
@@ -474,7 +480,7 @@ describe("Deleting a run cancels its requested uploads", () => {
       .set({ deletedAt: new Date() })
       .where(eq(instrumentRuns.id, stuck.runUuid));
 
-    expect(await readQueue(token, watcherId)).toEqual(["live.csv"]);
+    expect(await readQueue(watcherToken, watcherId)).toEqual(["live.csv"]);
   });
 
   it("cancels the requests when the run is deleted through MCP", async () => {
@@ -493,7 +499,7 @@ describe("Deleting a run cancels its requested uploads", () => {
     for (const id of Object.values(run.fileIds)) {
       expect((await readFile(id)).status).toBe("detected");
     }
-    expect(await readQueue(token, watcherId)).toEqual([]);
+    expect(await readQueue(watcherToken, watcherId)).toEqual([]);
     expect(await readCancelEvents(watcherId)).toHaveLength(1);
   });
 
@@ -647,11 +653,13 @@ const lockFilesTable = (tx: TestTx) =>
 
 describe("Deleting a run while other requests are in flight", () => {
   let token: string;
+  let watcherToken: string;
   let userId: string;
 
   beforeAll(async () => {
     await resetDb();
     ({ token, userId } = await seedTestUser());
+    ({ token: watcherToken } = await seedTestUser());
   });
 
   afterAll(async () => {
@@ -797,7 +805,7 @@ describe("Deleting a run while other requests are in flight", () => {
       expect(file.status).toBe("detected");
       expect(file.uploadRequestedAt).toBeNull();
     }
-    expect(await readQueue(token, watcherId)).toEqual([]);
+    expect(await readQueue(watcherToken, watcherId)).toEqual([]);
   });
 
   it("changes nothing when a request for chosen files loses to a delete", async () => {
@@ -829,7 +837,7 @@ describe("Deleting a run while other requests are in flight", () => {
     for (const id of Object.values(run.fileIds)) {
       expect((await readFile(id)).status).toBe("detected");
     }
-    expect(await readQueue(token, watcherId)).toEqual([]);
+    expect(await readQueue(watcherToken, watcherId)).toEqual([]);
   });
 
   it("does not queue a file that stopped being detected while the request ran", async () => {
@@ -881,6 +889,6 @@ describe("Deleting a run while other requests are in flight", () => {
 
     expect(responses.map((res) => res.status)).toEqual([200, 200]);
     expect((await readFile(run.fileIds.a)).status).toBe("upload_requested");
-    expect(await readQueue(token, watcherId)).toEqual(["a"]);
+    expect(await readQueue(watcherToken, watcherId)).toEqual(["a"]);
   });
 });

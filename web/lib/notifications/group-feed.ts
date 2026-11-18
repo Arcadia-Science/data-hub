@@ -53,6 +53,30 @@ export interface UploadFailedEntry {
   notification: AnchoredNotificationItem;
 }
 
+type InstrumentNotificationItem = NotificationItem & {
+  type: "instrument_offline" | "instrument_back_online";
+  instrumentId: string;
+  instrumentDisplayName: string;
+};
+
+function isInstrumentConnection(
+  n: NotificationItem
+): n is InstrumentNotificationItem {
+  return (
+    (n.type === "instrument_offline" || n.type === "instrument_back_online") &&
+    n.instrumentId !== null &&
+    n.instrumentDisplayName !== null
+  );
+}
+
+// An instrument went offline or is back online. It names an instrument, not a
+// run, so it links to the instrument page.
+export interface InstrumentConnectionEntry {
+  id: string;
+  kind: "instrument_connection";
+  notification: InstrumentNotificationItem;
+}
+
 export interface RunGroupEntry {
   id: string;
   instrumentDisplayName: string;
@@ -67,6 +91,7 @@ export type FeedEntry =
   | CommentEntry
   | FeedbackEntry
   | GenericEntry
+  | InstrumentConnectionEntry
   | RunGroupEntry
   | UploadFailedEntry;
 
@@ -104,6 +129,14 @@ export function buildNotificationFeed(
     }
     if (n.type === "generic") {
       section.entries.push({ kind: "generic", id: n.id, notification: n });
+      continue;
+    }
+    if (isInstrumentConnection(n)) {
+      section.entries.push({
+        kind: "instrument_connection",
+        id: n.id,
+        notification: n,
+      });
       continue;
     }
     if (!isAnchored(n)) {

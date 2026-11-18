@@ -18,7 +18,7 @@ import {
 import { type ActorRef, type ActorToken, actorColumns } from "@/lib/api/actor";
 import type { FailedUploadsByRun } from "@/lib/api/upload-failures";
 import { runCommentHref } from "@/lib/comment-hash";
-import { db } from "@/lib/db";
+import { type DbExecutor, db } from "@/lib/db";
 import {
   files,
   type InstrumentType,
@@ -33,12 +33,17 @@ import {
   slackConnections,
   users,
 } from "@/lib/db/schema";
+import {
+  type InstrumentConnectionNotificationKind,
+  instrumentConnectionHeading,
+} from "@/lib/instruments/offline-alerts";
 import { uploadFailedNotificationText } from "@/lib/runs/upload-failure";
 import {
   buildCommentBlocks,
   buildFeedbackSubmittedBlocks,
   buildFeedbackUpdatedBlocks,
   buildGenericBlocks,
+  buildInstrumentConnectionBlocks,
   buildRunCreatedBlocks,
   buildUploadFailedBlocks,
   deliverSlackDms,
@@ -69,6 +74,12 @@ import { toInitials } from "@/lib/utils";
 //   - `upload_failed`         : the watcher gave up on files someone
 //                                requested; that requester only, one row per
 //                                run and reason.
+//   - `instrument_offline`    : a subscribed instrument's badge has been
+//                                Offline for 30 minutes; every subscriber,
+//                                whatever `runsAllMuted` says. Sent by the
+//                                offline-alert cron job.
+//   - `instrument_back_online`: the same instrument is Online again. It shares
+//                                the toggles of `instrument_offline`.
 //
 // Preference-mutating routes remain session-only — they're personal-UX
 // surfaces, never invoked by PATs.
@@ -82,6 +93,8 @@ export interface NotificationPreferencesDto {
   // In-app `generic` delivery defaults on — dispatch messages are always
   // addressed to the recipient, so they're expected to be low-volume.
   genericEnabled: boolean;
+  // A subscribed instrument went offline, or is back online.
+  instrumentOfflineEnabled: boolean;
   // In-app delivery
   runsAllMuted: boolean;
   slackCommentsAttributedEnabled: boolean;
@@ -89,6 +102,7 @@ export interface NotificationPreferencesDto {
   slackFeedbackSubmittedEnabled: boolean;
   slackFeedbackUpdatedEnabled: boolean;
   slackGenericEnabled: boolean;
+  slackInstrumentOfflineEnabled: boolean;
   // Slack delivery — independent of in-app; all default false until the user
   // connects Slack (at which point the OAuth callback flips these to true).
   slackRunsEnabled: boolean;
@@ -112,6 +126,8 @@ const DEFAULT_PREFERENCES: NotificationPreferencesDto = {
   slackFeedbackUpdatedEnabled: false,
   uploadFailedEnabled: true,
   slackUploadFailedEnabled: false,
+  instrumentOfflineEnabled: true,
+  slackInstrumentOfflineEnabled: false,
 };
 
 // ---------------------------------------------------------------------------
@@ -148,6 +164,10 @@ export async function getPreferences(
       uploadFailedEnabled: notificationPreferences.uploadFailedEnabled,
       slackUploadFailedEnabled:
         notificationPreferences.slackUploadFailedEnabled,
+      instrumentOfflineEnabled:
+        notificationPreferences.instrumentOfflineEnabled,
+      slackInstrumentOfflineEnabled:
+        notificationPreferences.slackInstrumentOfflineEnabled,
     })
     .from(notificationPreferences)
     .where(eq(notificationPreferences.userId, userId))
@@ -270,8 +290,10 @@ export interface NotificationDto {
   // Set when a personal access token caused it (for example an integration
   // dispatching a generic message).
   actorToken: ActorToken | null;
-  // Caller-supplied message for `generic` and feedback rows, preview-truncated
-  // like `commentBody`. NULL for every other type.
+  // The stored text: the caller's message for `generic` and feedback rows, the
+  // count and reason for `upload_failed`, and the sentence for the two
+  // instrument types. Preview-truncated like `commentBody`, except on feedback
+  // rows. NULL for every other type.
   body: string | null;
   // Truncated markdown body of the originating comment — only populated
   // when `commentId` is set. NULL for `run_created` rows and for comment
@@ -285,7 +307,10 @@ export interface NotificationDto {
   fileCount: number | null;
   filesFailed: number | null;
   id: string;
-  // Run + instrument fields are NULL on anchor-less `generic` rows.
+  // Run fields are NULL on rows without a run. Instrument fields come from the
+  // run, or from `notifications.instrument_id` on the two instrument types,
+  // which have no run. They are NULL on feedback rows and on `generic` rows
+  // without a run.
   instrumentDisplayName: string | null;
   // Natural keys for linking — `/instruments/:instrumentId/runs/:runId` is
   // what the row navigates to.
@@ -304,7 +329,9 @@ export interface NotificationDto {
     | "generic"
     | "feedback_submitted"
     | "feedback_updated"
-    | "upload_failed";
+    | "upload_failed"
+    | "instrument_offline"
+    | "instrument_back_online";
 }
 
 export async function listNotifications(
@@ -325,7 +352,7 @@ export async function listNotifications(
       runId: instrumentRuns.id,
       runDisplayId: instrumentRuns.runId,
       runAcquiredAt: instrumentRuns.acquiredAt,
-      instrumentId: instrumentRuns.instrumentId,
+      instrumentId: instruments.id,
       instrumentDisplayName: instruments.displayName,
       instrumentType: instruments.instrumentType,
       commentId: notifications.commentId,
@@ -345,8 +372,16 @@ export async function listNotifications(
     })
     .from(notifications)
     // Left joins: anchor-less `generic` rows have no run to join through.
+    // The instrument types name their instrument directly; every other row
+    // reaches it through the run.
     .leftJoin(instrumentRuns, eq(instrumentRuns.id, notifications.runId))
-    .leftJoin(instruments, eq(instruments.id, instrumentRuns.instrumentId))
+    .leftJoin(
+      instruments,
+      eq(
+        instruments.id,
+        sql`coalesce(${notifications.instrumentId}, ${instrumentRuns.instrumentId})`
+      )
+    )
     .leftJoin(actor, eq(actor.id, notifications.actorUserId))
     .leftJoin(
       personalAccessTokens,
@@ -1186,4 +1221,101 @@ export async function notifyUploadFailed(input: {
   } catch (err) {
     console.error("notifyUploadFailed failed", err);
   }
+}
+
+/**
+ * Writes the in-app rows for an instrument that went offline or is back
+ * online, and returns the Slack DMs to send. The offline-alert job calls it
+ * inside the transaction that claims the change, so it takes that transaction
+ * and lets errors through: a failed insert rolls the claim back and the next
+ * run tries again. Send the DMs with `deliverSlackDms` after the commit, so a
+ * rolled-back claim never leaves a DM behind.
+ *
+ * Recipients are the instrument's subscribers. `runsAllMuted` mutes new runs
+ * only, so it plays no part here. Missing preference rows count as in-app on
+ * and Slack off.
+ */
+export async function notifyInstrumentConnection(
+  executor: DbExecutor,
+  input: {
+    instrumentDisplayName: string;
+    instrumentId: string;
+    kind: InstrumentConnectionNotificationKind;
+    message: string;
+    // Needed for the Slack message's link. Without it, Slack DMs are skipped.
+    origin?: string;
+  }
+): Promise<SlackDmJob[]> {
+  const candidates = await executor
+    .select({
+      userId: instrumentNotificationSubscriptions.userId,
+      instrumentOfflineEnabled:
+        notificationPreferences.instrumentOfflineEnabled,
+      slackUserId: slackConnections.slackUserId,
+      slackInstrumentOfflineEnabled:
+        notificationPreferences.slackInstrumentOfflineEnabled,
+      slackRevokedAt: slackConnections.revokedAt,
+    })
+    .from(instrumentNotificationSubscriptions)
+    .leftJoin(
+      notificationPreferences,
+      eq(
+        notificationPreferences.userId,
+        instrumentNotificationSubscriptions.userId
+      )
+    )
+    .leftJoin(
+      slackConnections,
+      eq(slackConnections.userId, instrumentNotificationSubscriptions.userId)
+    )
+    .where(
+      and(
+        eq(
+          instrumentNotificationSubscriptions.instrumentId,
+          input.instrumentId
+        ),
+        eq(instrumentNotificationSubscriptions.enabled, true)
+      )
+    );
+
+  const inAppRows: (typeof notifications.$inferInsert)[] = candidates
+    .filter((c) => c.instrumentOfflineEnabled !== false)
+    .map((c) => ({
+      userId: c.userId,
+      type: input.kind,
+      instrumentId: input.instrumentId,
+      body: input.message,
+    }));
+  if (inAppRows.length > 0) {
+    await executor.insert(notifications).values(inAppRows);
+  }
+
+  const { origin } = input;
+  if (!origin) {
+    return [];
+  }
+  const heading = instrumentConnectionHeading(
+    input.kind,
+    input.instrumentDisplayName
+  );
+  const instrumentUrl = `${origin}/instruments/${encodeURIComponent(input.instrumentId)}`;
+  return candidates
+    .filter(
+      (c) =>
+        c.slackUserId &&
+        !c.slackRevokedAt &&
+        (c.slackInstrumentOfflineEnabled ?? false)
+    )
+    .map((c) => ({
+      userId: c.userId,
+      slackUserId: c.slackUserId ?? "",
+      payload: {
+        text: `${escapeMrkdwn(heading)}: ${escapeMrkdwn(input.message)}`,
+        blocks: buildInstrumentConnectionBlocks({
+          heading,
+          instrumentUrl,
+          message: input.message,
+        }),
+      },
+    }));
 }

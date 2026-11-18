@@ -47,3 +47,42 @@ export function isBoundToOtherToken(
     registeredByToken !== authResult.tokenId
   );
 }
+
+/** A watcher a token registered, as the ownership rules below need it. */
+export interface RegisteredWatcher {
+  deletedAt: Date | null;
+  instrumentId: string;
+}
+
+/**
+ * Whether a token may write to `instrumentId`, given every watcher the token
+ * registered, deregistered ones included. A token that registered no watcher,
+ * such as the Lambda's, may write to any instrument. A token that did may
+ * write only to an instrument whose active watcher it registered, so a token
+ * whose watchers were all deregistered may write to none.
+ */
+export function tokenMayActOnInstrument(
+  registeredWatchers: readonly RegisteredWatcher[],
+  instrumentId: string
+): boolean {
+  if (registeredWatchers.length === 0) {
+    return true;
+  }
+  return registeredWatchers.some(
+    (watcher) =>
+      watcher.deletedAt === null && watcher.instrumentId === instrumentId
+  );
+}
+
+/**
+ * Whether a token may do an admin's work on instruments and watchers: rename,
+ * retype, retire or confirm an instrument, or remove or reconfigure a
+ * watcher. The watcher never does any of these, so a token that ever
+ * registered a watcher may not, even for its own instrument. Any other token
+ * may, if it has the scope.
+ */
+export function tokenMayAdminister(
+  registeredWatchers: readonly RegisteredWatcher[]
+): boolean {
+  return registeredWatchers.length === 0;
+}

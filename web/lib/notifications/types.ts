@@ -7,7 +7,8 @@ import type { InstrumentType } from "@/lib/db/schema";
 export interface NotificationItem {
   // The person or token that caused the row; null when nobody was recorded.
   actor: Actor | null;
-  // Caller-supplied message for `generic` and feedback rows; null otherwise.
+  // Caller-supplied message for `generic` and feedback rows, and the sentence
+  // for `upload_failed` and the two instrument types; null otherwise.
   body: string | null;
   commentBody: string | null;
   commentId: string | null;
@@ -34,5 +35,7 @@ export interface NotificationItem {
     | "generic"
     | "feedback_submitted"
     | "feedback_updated"
-    | "upload_failed";
+    | "upload_failed"
+    | "instrument_offline"
+    | "instrument_back_online";
 }

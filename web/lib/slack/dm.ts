@@ -272,6 +272,25 @@ export function buildUploadFailedBlocks(opts: {
   ];
 }
 
+// An instrument that has been Offline for 30 minutes, or is back Online. The
+// heading names the instrument, and the link opens its page.
+export function buildInstrumentConnectionBlocks(opts: {
+  heading: string;
+  instrumentUrl: string;
+  message: string;
+}): (Block | KnownBlock)[] {
+  return [
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `*${escapeMrkdwn(opts.heading)}*\n${escapeMrkdwn(opts.message)}\n<${opts.instrumentUrl}|View in Data Hub>`,
+        verbatim: true,
+      },
+    },
+  ];
+}
+
 export function buildGenericBlocks(opts: {
   actorDisplayName: string;
   message: string;

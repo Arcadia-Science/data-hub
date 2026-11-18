@@ -40,7 +40,7 @@ async function seedQueuedRun(
     status: "active",
   });
 
-  await api(`/api/v1/instruments/${instrumentId}/runs`, {
+  const created = await api(`/api/v1/instruments/${instrumentId}/runs`, {
     method: "POST",
     token,
     body: {
@@ -52,6 +52,7 @@ async function seedQueuedRun(
       ],
     },
   });
+  expect(created.ok).toBe(true);
 
   const [run] = await db
     .select({ id: instrumentRuns.id })
@@ -92,11 +93,17 @@ async function insertWatcher(
 }
 
 describe("Heartbeat — revert upload queue on watcher stop", () => {
+  // `token` sends the heartbeats, which binds each watcher to it. A token
+  // bound to a watcher may create runs only on that watcher's instrument and
+  // can't deregister watchers, so `runToken`, which no watcher is bound to,
+  // seeds the runs and deregisters.
   let token: string;
+  let runToken: string;
 
   beforeAll(async () => {
     await resetDb();
     ({ token } = await seedTestUser());
+    ({ token: runToken } = await seedTestUser());
   });
 
   afterAll(async () => {
@@ -105,7 +112,7 @@ describe("Heartbeat — revert upload queue on watcher stop", () => {
 
   it("reverts queued files to detected when the watcher reports stopped", async () => {
     const instrumentId = "stop-revert-inst";
-    const ids = await seedQueuedRun(instrumentId, "run-1", token);
+    const ids = await seedQueuedRun(instrumentId, "run-1", runToken);
     const watcherId = await insertWatcher(instrumentId, "lab-pc");
 
     const res = await api(`/api/v1/watchers/${watcherId}/heartbeat`, {
@@ -149,7 +156,7 @@ describe("Heartbeat — revert upload queue on watcher stop", () => {
 
   it("keeps queued files when the stopped heartbeat says Windows is shutting down", async () => {
     const instrumentId = "stop-keep-system-shutdown-inst";
-    const ids = await seedQueuedRun(instrumentId, "run-1", token);
+    const ids = await seedQueuedRun(instrumentId, "run-1", runToken);
     const watcherId = await insertWatcher(instrumentId, "lab-pc");
 
     const res = await api(`/api/v1/watchers/${watcherId}/heartbeat`, {
@@ -191,7 +198,7 @@ describe("Heartbeat — revert upload queue on watcher stop", () => {
 
   it("keeps queued files when the stopped heartbeat says the watcher is stopping to update", async () => {
     const instrumentId = "stop-keep-auto-update-inst";
-    const ids = await seedQueuedRun(instrumentId, "run-1", token);
+    const ids = await seedQueuedRun(instrumentId, "run-1", runToken);
     const watcherId = await insertWatcher(instrumentId, "lab-pc");
 
     const res = await api(`/api/v1/watchers/${watcherId}/heartbeat`, {
@@ -230,7 +237,7 @@ describe("Heartbeat — revert upload queue on watcher stop", () => {
 
   it("keeps queued files when the restart reason has spaces around it", async () => {
     const instrumentId = "stop-keep-padded-reason-inst";
-    const ids = await seedQueuedRun(instrumentId, "run-1", token);
+    const ids = await seedQueuedRun(instrumentId, "run-1", runToken);
     const watcherId = await insertWatcher(instrumentId, "lab-pc");
 
     const res = await api(`/api/v1/watchers/${watcherId}/heartbeat`, {
@@ -251,7 +258,7 @@ describe("Heartbeat — revert upload queue on watcher stop", () => {
 
   it("reverts queued files when a stopped heartbeat gives any other reason", async () => {
     const instrumentId = "stop-revert-other-reason-inst";
-    const ids = await seedQueuedRun(instrumentId, "run-1", token);
+    const ids = await seedQueuedRun(instrumentId, "run-1", runToken);
     const watcherId = await insertWatcher(instrumentId, "lab-pc");
 
     const res = await api(`/api/v1/watchers/${watcherId}/heartbeat`, {
@@ -278,7 +285,7 @@ describe("Heartbeat — revert upload queue on watcher stop", () => {
     "auto_update",
   ])("lets the sweep cancel the kept files if the watcher doesn't come back from a %s stop", async (reason) => {
     const instrumentId = `stop-keep-then-sweep-${reason}-inst`;
-    const ids = await seedQueuedRun(instrumentId, "run-1", token);
+    const ids = await seedQueuedRun(instrumentId, "run-1", runToken);
     const watcherId = await insertWatcher(instrumentId, "lab-pc");
     const db = getTestDb();
 
@@ -363,7 +370,7 @@ describe("Heartbeat — revert upload queue on watcher stop", () => {
 
   it("leaves the queue intact on a normal watching heartbeat", async () => {
     const instrumentId = "stop-revert-watching-inst";
-    const ids = await seedQueuedRun(instrumentId, "run-1", token);
+    const ids = await seedQueuedRun(instrumentId, "run-1", runToken);
     const watcherId = await insertWatcher(instrumentId, "lab-pc");
 
     const res = await api(`/api/v1/watchers/${watcherId}/heartbeat`, {
@@ -384,7 +391,7 @@ describe("Heartbeat — revert upload queue on watcher stop", () => {
 
   it("leaves the queue intact on a registered (startup) heartbeat", async () => {
     const instrumentId = "stop-revert-registered-inst";
-    const ids = await seedQueuedRun(instrumentId, "run-1", token);
+    const ids = await seedQueuedRun(instrumentId, "run-1", runToken);
     const watcherId = await insertWatcher(instrumentId, "lab-pc");
 
     const res = await api(`/api/v1/watchers/${watcherId}/heartbeat`, {
@@ -412,12 +419,12 @@ describe("Heartbeat — revert upload queue on watcher stop", () => {
 
   it("reverts queued files when the watcher is deregistered (DELETE)", async () => {
     const instrumentId = "deregister-revert-inst";
-    const ids = await seedQueuedRun(instrumentId, "run-1", token);
+    const ids = await seedQueuedRun(instrumentId, "run-1", runToken);
     const watcherId = await insertWatcher(instrumentId, "lab-pc");
 
     const res = await api(`/api/v1/watchers/${watcherId}`, {
       method: "DELETE",
-      token,
+      token: runToken,
     });
     expect(res.status).toBe(200);
 

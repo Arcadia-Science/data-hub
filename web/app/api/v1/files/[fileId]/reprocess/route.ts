@@ -7,6 +7,7 @@ import {
   VALIDATION_ERROR,
 } from "@/lib/api/errors";
 import { reprocessFile } from "@/lib/api/file-reprocessing";
+import { enforceWatcherTokenFile } from "@/lib/api/watchers";
 
 interface RouteContext {
   params: Promise<{ fileId: string }>;
@@ -33,6 +34,11 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   const numericId = Number.parseInt(fileId, 10);
   if (Number.isNaN(numericId)) {
     return apiError(400, VALIDATION_ERROR, "Invalid file ID");
+  }
+
+  const denied = await enforceWatcherTokenFile(authResult, numericId);
+  if (denied) {
+    return denied;
   }
 
   const result = await reprocessFile(numericId);

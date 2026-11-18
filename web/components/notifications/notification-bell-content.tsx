@@ -3,6 +3,7 @@
 import { BellOff, CloudAlert, Settings } from "lucide-react";
 import Link from "next/link";
 import { type MouseEvent, type ReactNode, useMemo } from "react";
+import { INSTRUMENT_BADGE_CONFIG } from "@/components/instruments/instrument-badge-config";
 import { useNotifications } from "@/components/notifications/notifications-provider";
 import { RunGroup } from "@/components/notifications/run-group";
 import { ActorAvatar } from "@/components/token-actor";
@@ -15,6 +16,7 @@ import { runCommentHref } from "@/lib/comment-hash";
 import { applySamePageCommentHash } from "@/lib/comment-hash-nav";
 import {
   buildNotificationFeed,
+  type InstrumentConnectionEntry,
   isAnchored,
 } from "@/lib/notifications/group-feed";
 import type { NotificationItem } from "@/lib/notifications/types";
@@ -144,6 +146,15 @@ export function NotificationBellContent({
                   }
                   onNavigate?.();
                 };
+                if (entry.kind === "instrument_connection") {
+                  return (
+                    <InstrumentConnectionNotificationRow
+                      key={entry.id}
+                      notification={entry.notification}
+                      onActivate={activate}
+                    />
+                  );
+                }
                 if (entry.kind === "upload_failed") {
                   return (
                     <UploadFailedNotificationRow
@@ -363,6 +374,60 @@ function UploadFailedNotificationRow({
             suppressHydrationWarning
           >
             {n.instrumentDisplayName} · {formatRelativeTime(n.createdAt)}
+          </p>
+        </div>
+      </Link>
+    </NotificationRowShell>
+  );
+}
+
+// An instrument went offline or is back online. No person caused it, so the
+// instrument badge's icon and color stand where the avatar goes. Opens the
+// instrument page, whose badge and notice say more.
+function InstrumentConnectionNotificationRow({
+  notification: n,
+  onActivate,
+}: {
+  notification: InstrumentConnectionEntry["notification"];
+  onActivate: () => void;
+}) {
+  const offline = n.type === "instrument_offline";
+  const { Icon, className } =
+    INSTRUMENT_BADGE_CONFIG[offline ? "offline" : "online"];
+  return (
+    <NotificationRowShell isUnread={n.readAt === null}>
+      <Link
+        className="flex items-start gap-3 px-4 py-3 outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+        href={`/instruments/${encodeURIComponent(n.instrumentId)}`}
+        onClick={onActivate}
+      >
+        <span
+          className={cn(
+            "flex size-6 shrink-0 items-center justify-center rounded-full",
+            className
+          )}
+        >
+          <Icon aria-hidden className="size-3.5" />
+        </span>
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <p className="text-sm leading-snug">
+            <span className="font-medium text-primary">
+              {n.instrumentDisplayName}
+            </span>{" "}
+            <span className="font-medium">
+              {offline ? "is offline" : "is back online"}
+            </span>
+          </p>
+          {n.body ? (
+            <p className="line-clamp-2 text-muted-foreground text-sm">
+              {n.body}
+            </p>
+          ) : null}
+          <p
+            className="text-muted-foreground/80 text-xs"
+            suppressHydrationWarning
+          >
+            {formatRelativeTime(n.createdAt)}
           </p>
         </div>
       </Link>

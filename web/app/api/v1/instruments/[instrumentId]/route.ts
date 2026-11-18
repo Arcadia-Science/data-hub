@@ -9,7 +9,10 @@ import {
   NO_WATCHER_INFO,
 } from "@/lib/api/instrument-watchers";
 import { patchInstrumentBody, readJsonBody } from "@/lib/api/openapi";
-import { deregisterInstrumentWatchers } from "@/lib/api/watchers";
+import {
+  deregisterInstrumentWatchers,
+  refuseWatcherTokenAdmin,
+} from "@/lib/api/watchers";
 import { db } from "@/lib/db";
 import { instrumentRuns, instruments } from "@/lib/db/schema";
 
@@ -76,10 +79,17 @@ export async function PATCH(
   }
 
   // Browser callers (the Edit dialog and the "Confirm pending" button on
-  // `/instruments`) must additionally be admins. PAT callers — the watcher
-  // CLI and Lambda — pass through purely on the `instruments:write` scope
-  // so existing automation continues to work without rotation.
-  const adminGate = await requireAdminForSession(authResult);
+  // `/instruments`) must additionally be admins. A token that ever
+  // registered a watcher is refused, even for its own instrument: the
+  // watcher never edits instruments, so a lab PC's token has no reason to
+  // rename, retype, retire or confirm one. Other tokens pass on the
+  // `instruments:write` scope alone, so existing automation keeps working.
+  const adminGate =
+    (await requireAdminForSession(authResult)) ??
+    (await refuseWatcherTokenAdmin(
+      authResult,
+      "A watcher's token can't change instruments"
+    ));
   if (adminGate) {
     return adminGate;
   }

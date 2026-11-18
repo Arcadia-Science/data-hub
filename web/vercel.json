@@ -9,6 +9,10 @@
     {
       "path": "/api/cron/reprocess-queue",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/instrument-offline-alerts",
+      "schedule": "*/5 * * * *"
     }
   ]
 }

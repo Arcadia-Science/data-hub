@@ -17,6 +17,11 @@ import {
   UPLOAD_ARRIVED_RESET,
   UPLOAD_REQUEST_CANCELLED_RESET,
 } from "@/lib/api/upload-state";
+import {
+  enforceWatcherTokenFile,
+  enforceWatcherTokenInstrument,
+  NOT_THIS_FILE,
+} from "@/lib/api/watchers";
 import { db } from "@/lib/db";
 import { files, instrumentRuns } from "@/lib/db/schema";
 import { getS3RawDataBucket } from "@/lib/s3";
@@ -71,6 +76,11 @@ const VALID_TRANSITIONS: Record<string, string[]> = {
 // Enforces the file status state machine and rejects mutations on
 // soft-deleted files or files whose parent run is soft-deleted.
 //
+// A token that registered a watcher may change only the files of an
+// instrument whose active watcher it registered, and gets 403 for any other
+// file. Tokens that registered no watcher, such as the Lambda's, may change
+// any file.
+//
 // PAT-only (no browser sessions): session auth carries `*` scope, and
 // accepting it let any signed-in user mark files uploaded or overwrite
 // Lambda-owned metadata. DELETE below stays session-reachable for dismiss.
@@ -98,12 +108,9 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
     return apiError(404, NOT_FOUND, `File '${fileId}' not found`);
   }
 
-  if (file.deletedAt) {
-    return apiError(409, CONFLICT, "Cannot update a soft-deleted file");
-  }
-
-  // Verify the parent run is not soft-deleted. Its natural key also feeds the
-  // server-derived S3 location on the `uploaded` transition below.
+  // The parent run gives the file's instrument for the check below. Its
+  // natural key also feeds the server-derived S3 location on the `uploaded`
+  // transition.
   const [parentRun] = await db
     .select({
       deletedAt: instrumentRuns.deletedAt,
@@ -114,7 +121,27 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
     .where(eq(instrumentRuns.id, file.instrumentRunId))
     .limit(1);
 
-  if (parentRun?.deletedAt) {
+  if (!parentRun) {
+    return apiError(404, NOT_FOUND, `File '${fileId}' not found`);
+  }
+
+  // A watcher's token may change only its own instrument's files. This comes
+  // before the soft-delete checks, so a refused token learns nothing more
+  // about another instrument's file.
+  const denied = await enforceWatcherTokenInstrument(
+    authResult,
+    parentRun.instrumentId,
+    NOT_THIS_FILE
+  );
+  if (denied) {
+    return denied;
+  }
+
+  if (file.deletedAt) {
+    return apiError(409, CONFLICT, "Cannot update a soft-deleted file");
+  }
+
+  if (parentRun.deletedAt) {
     return apiError(
       409,
       CONFLICT,
@@ -150,9 +177,6 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
       // Derive the S3 location from trusted DB state, not the request: the
       // watcher only echoed back what `request-upload-url` already computed,
       // and accepting it let any caller repoint a file at an arbitrary object.
-      if (!parentRun) {
-        return apiError(404, NOT_FOUND, `File '${fileId}' not found`);
-      }
       let bucket: string;
       try {
         bucket = getS3RawDataBucket();
@@ -286,6 +310,9 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
 // Soft-delete for dismissing individual detected/upload_requested files from
 // the UI. Files that have already been uploaded to S3 (status "uploaded" or
 // later) cannot be dismissed here — use the run-level DELETE instead.
+//
+// A token that registered a watcher may dismiss only its own instrument's
+// files, like PATCH above.
 // ---------------------------------------------------------------------------
 
 export async function DELETE(request: NextRequest, { params }: RouteContext) {
@@ -298,6 +325,11 @@ export async function DELETE(request: NextRequest, { params }: RouteContext) {
   const numericId = Number.parseInt(fileId, 10);
   if (Number.isNaN(numericId)) {
     return apiError(400, VALIDATION_ERROR, "Invalid file ID");
+  }
+
+  const denied = await enforceWatcherTokenFile(authResult, numericId);
+  if (denied) {
+    return denied;
   }
 
   const result = await dismissFile(numericId);

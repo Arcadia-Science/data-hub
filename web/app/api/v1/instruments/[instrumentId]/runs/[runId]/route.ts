@@ -21,6 +21,7 @@ import { softDeleteRun } from "@/lib/api/run-lifecycle";
 import { notebookLinkToWire } from "@/lib/api/run-notebook-link-wire";
 import { listNotebookLinksForRun } from "@/lib/api/run-notebook-links";
 import { watcherClientFrom } from "@/lib/api/watcher-compat";
+import { enforceWatcherTokenInstrument } from "@/lib/api/watchers";
 import { db } from "@/lib/db";
 import { files, instrumentRuns } from "@/lib/db/schema";
 import { getPresignedDownloadUrl } from "@/lib/s3";
@@ -124,6 +125,8 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
 //
 // PAT-only: session `*` would let any member overwrite Lambda metadata or
 // inject detected files. GET/DELETE stay session-reachable for the UI.
+// A token that registered a watcher may PATCH or DELETE only its own
+// instrument's runs.
 // ---------------------------------------------------------------------------
 
 export async function PATCH(request: NextRequest, { params }: RouteContext) {
@@ -133,6 +136,10 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
   }
 
   const { instrumentId, runId: runIdParam } = await params;
+  const denied = await enforceWatcherTokenInstrument(authResult, instrumentId);
+  if (denied) {
+    return denied;
+  }
   const runId = readRunIdParam(request.headers, runIdParam);
   const run = await lookupRunByNaturalKey(instrumentId, runId);
 
@@ -212,6 +219,10 @@ export async function DELETE(request: NextRequest, { params }: RouteContext) {
   }
 
   const { instrumentId, runId: runIdParam } = await params;
+  const denied = await enforceWatcherTokenInstrument(authResult, instrumentId);
+  if (denied) {
+    return denied;
+  }
   const runId = readRunIdParam(request.headers, runIdParam);
   const result = await softDeleteRun({
     instrumentId,

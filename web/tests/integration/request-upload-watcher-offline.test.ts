@@ -75,11 +75,17 @@ async function statusesOf(fileIds: number[]): Promise<string[]> {
 }
 
 describe("Request Upload — watcher offline guard", () => {
+  // `token` asks for uploads the way a person does. `watcherToken` makes the
+  // watcher's own calls, which bind the watcher to it. A token bound to a
+  // watcher may ask for uploads only on that watcher's instrument, so one
+  // token can't do both across these tests' instruments.
   let token: string;
+  let watcherToken: string;
 
   beforeAll(async () => {
     await resetDb();
     ({ token } = await seedTestUser());
+    ({ token: watcherToken } = await seedTestUser());
   });
 
   afterAll(async () => {
@@ -366,7 +372,7 @@ describe("Request Upload — watcher offline guard", () => {
 
     const queue = async (): Promise<number[]> => {
       const res = await api(`/api/v1/watchers/${watcher.id}/upload-queue`, {
-        token,
+        token: watcherToken,
       });
       expect(res.status).toBe(200);
       const body = watcherUploadQueueResponse.parse(await res.json());
@@ -398,7 +404,7 @@ describe("Request Upload — watcher offline guard", () => {
     // The watcher comes back and checks in, and its queue lists the files.
     const heartbeat = await api(`/api/v1/watchers/${watcher.id}/heartbeat`, {
       method: "POST",
-      token,
+      token: watcherToken,
       body: { status: "watching" },
     });
     expect(heartbeat.status).toBe(200);
