@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
+import { instrumentNotificationTooltip } from "@/components/notifications/instrument-notification-toggle";
 import {
   SlackConnectionCard,
   type SlackPreferences,
@@ -39,6 +40,7 @@ const inAppPreferencesSchema = z.object({
   feedbackUpdatedEnabled: z.boolean(),
   feedbackSubmittedEnabled: z.boolean().optional(),
   uploadFailedEnabled: z.boolean(),
+  instrumentOfflineEnabled: z.boolean(),
 });
 
 type InAppPreferences = z.infer<typeof inAppPreferencesSchema>;
@@ -123,6 +125,7 @@ export function NotificationsSettingsForm({
       genericEnabled: initialPreferences.genericEnabled,
       feedbackUpdatedEnabled: initialPreferences.feedbackUpdatedEnabled,
       uploadFailedEnabled: initialPreferences.uploadFailedEnabled,
+      instrumentOfflineEnabled: initialPreferences.instrumentOfflineEnabled,
       ...(adminNewFeedback
         ? { feedbackSubmittedEnabled: adminNewFeedback.inApp }
         : {}),
@@ -149,6 +152,7 @@ export function NotificationsSettingsForm({
         generic_enabled: value.genericEnabled,
         feedback_updated_enabled: value.feedbackUpdatedEnabled,
         upload_failed_enabled: value.uploadFailedEnabled,
+        instrument_offline_enabled: value.instrumentOfflineEnabled,
         ...(adminNewFeedback
           ? {
               feedback_submitted_enabled: value.feedbackSubmittedEnabled,
@@ -222,17 +226,40 @@ export function NotificationsSettingsForm({
                   <Field orientation="horizontal">
                     <FieldContent>
                       <FieldLabel htmlFor={field.name}>
-                        Mute all instrument notifications
+                        Mute new-run notifications
                       </FieldLabel>
                       <FieldDescription>
-                        When on, you won&apos;t be notified about new runs on
-                        any instrument — useful for quiet periods.
-                        Per-instrument preferences below are preserved and
-                        resume when you unmute.
+                        When on, new runs on any instrument don&apos;t appear in
+                        the bell, which is useful for quiet periods. Slack
+                        messages, outage alerts and the instruments you pick
+                        below stay as they are.
                       </FieldDescription>
                     </FieldContent>
                     <Switch
-                      aria-label="Mute all instrument notifications"
+                      aria-label="Mute new-run notifications"
+                      checked={field.state.value}
+                      id={field.name}
+                      name={field.name}
+                      onCheckedChange={field.handleChange}
+                    />
+                  </Field>
+                )}
+              </prefsForm.Field>
+
+              <prefsForm.Field name="instrumentOfflineEnabled">
+                {(field) => (
+                  <Field orientation="horizontal">
+                    <FieldContent>
+                      <FieldLabel htmlFor={field.name}>
+                        Instruments that go offline
+                      </FieldLabel>
+                      <FieldDescription>
+                        Notify me when an instrument I picked below has been
+                        offline for 30 minutes, and when it&apos;s back online.
+                      </FieldDescription>
+                    </FieldContent>
+                    <Switch
+                      aria-label="Instruments that go offline"
                       checked={field.state.value}
                       id={field.name}
                       name={field.name}
@@ -399,15 +426,14 @@ export function NotificationsSettingsForm({
                 <div className="mb-4">
                   <h3 className="font-medium text-sm">Per-instrument</h3>
                   <p className="text-muted-foreground text-sm">
-                    Pick the instruments you want to be notified about whenever
-                    a new run is reported.
+                    Pick the instruments you want to hear about: their new runs,
+                    and when they go offline.
                   </p>
                 </div>
-                {/* The per-instrument list subscribes only to the master-mute
-                  boolean (a single primitive), so toggling the master doesn't
-                  re-render every row's local Field — instead, each row's
-                  Switch is `disabled` when muted. This keeps the per-row
-                  subscriptions on their own prefsForm.Field renderers. */}
+                {/* The per-instrument list subscribes only to the new-run
+                  mute (a single primitive) for its tooltips, so toggling the
+                  mute doesn't re-render every row's local Field. The mute
+                  doesn't disable the rows: they also pick outage alerts. */}
                 <prefsForm.Subscribe
                   selector={(state) => state.values.runsAllMuted}
                 >
@@ -431,9 +457,8 @@ export function NotificationsSettingsForm({
                                   <TooltipTrigger asChild>
                                     <span className="inline-flex">
                                       <Switch
-                                        aria-label={`Notify me about new runs on ${row.displayName}`}
-                                        checked={enabled && !masterMuted}
-                                        disabled={masterMuted}
+                                        aria-label={`Notify me about new runs and outages on ${row.displayName}`}
+                                        checked={enabled}
                                         id={field.name}
                                         name={field.name}
                                         onCheckedChange={(v) =>
@@ -443,11 +468,10 @@ export function NotificationsSettingsForm({
                                     </span>
                                   </TooltipTrigger>
                                   <TooltipContent>
-                                    {masterMuted
-                                      ? "All instrument notifications muted"
-                                      : enabled
-                                        ? "Notifying you about new runs"
-                                        : "Click to be notified about new runs"}
+                                    {instrumentNotificationTooltip(
+                                      enabled,
+                                      masterMuted
+                                    )}
                                   </TooltipContent>
                                 </Tooltip>
                               </Field>
@@ -508,6 +532,8 @@ export function NotificationsSettingsForm({
               initialPreferences.slackFeedbackUpdatedEnabled,
             slackUploadFailedEnabled:
               initialPreferences.slackUploadFailedEnabled,
+            slackInstrumentOfflineEnabled:
+              initialPreferences.slackInstrumentOfflineEnabled,
             ...(adminNewFeedback?.slack === null || !adminNewFeedback
               ? {}
               : {

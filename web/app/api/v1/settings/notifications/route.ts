@@ -27,6 +27,8 @@ const PREFERENCE_FIELDS = {
   slack_feedback_updated_enabled: "slackFeedbackUpdatedEnabled",
   upload_failed_enabled: "uploadFailedEnabled",
   slack_upload_failed_enabled: "slackUploadFailedEnabled",
+  instrument_offline_enabled: "instrumentOfflineEnabled",
+  slack_instrument_offline_enabled: "slackInstrumentOfflineEnabled",
 } as const satisfies Record<string, keyof NotificationPreferencesDto>;
 
 type ApiPreferenceKey = keyof typeof PREFERENCE_FIELDS;

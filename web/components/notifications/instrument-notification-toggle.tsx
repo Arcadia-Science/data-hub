@@ -11,12 +11,31 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
-const DEFAULT_ARIA_LABEL = "Notify me about new runs on this instrument";
+const DEFAULT_ARIA_LABEL =
+  "Notify me about new runs and outages on this instrument";
+
+/**
+ * What the switch's tooltip says. A subscription covers new runs and outages,
+ * and the new-run mute in Settings silences only the first, so a muted
+ * subscriber still hears about outages.
+ */
+export function instrumentNotificationTooltip(
+  enabled: boolean,
+  newRunsMuted: boolean
+): string {
+  if (!enabled) {
+    return "Click to be notified about new runs and outages on this instrument";
+  }
+  return newRunsMuted
+    ? "Notifying you about outages on this instrument. New-run notifications are muted in Settings."
+    : "Notifying you about new runs and outages on this instrument";
+}
 
 interface InstrumentNotificationProps {
   ariaLabel?: string;
   initialEnabled: boolean;
   instrumentId: string;
+  /** The new-run mute in Settings. It changes the tooltip, not the switch. */
   masterMuted: boolean;
   size?: "sm" | "default";
 }
@@ -71,22 +90,13 @@ function useInstrumentNotification({
     });
   };
 
-  // Visual logic mirrors the WatcherReleaseForm "Mandatory update"
-  // pattern: we never overwrite the underlying value when masterMuted
-  // is true — the user's per-instrument intent is preserved through a
-  // master toggle round-trip — but the switch reads as off until the
-  // master mute is cleared.
-  const tooltip = masterMuted
-    ? "All instrument notifications muted in Settings"
-    : enabled
-      ? "Notifying you about new runs on this instrument"
-      : "Click to be notified about new runs on this instrument";
-
+  // The new-run mute doesn't disable the switch: the subscription also
+  // picks outage alerts, which the mute leaves alone.
   return {
-    checked: enabled && !masterMuted,
-    disabled: masterMuted || isPending,
+    checked: enabled,
+    disabled: isPending,
     handleChange,
-    tooltip,
+    tooltip: instrumentNotificationTooltip(enabled, masterMuted),
   };
 }
 

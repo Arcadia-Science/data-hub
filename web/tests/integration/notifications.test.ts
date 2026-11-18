@@ -125,6 +125,8 @@ describe("Notifications", () => {
         slackFeedbackUpdatedEnabled: false,
         uploadFailedEnabled: true,
         slackUploadFailedEnabled: false,
+        instrumentOfflineEnabled: true,
+        slackInstrumentOfflineEnabled: false,
       });
 
       // Defaults are lazy-upserted so subsequent reads hit the row, not
@@ -153,6 +155,8 @@ describe("Notifications", () => {
         slackFeedbackUpdatedEnabled: false,
         uploadFailedEnabled: true,
         slackUploadFailedEnabled: false,
+        instrumentOfflineEnabled: true,
+        slackInstrumentOfflineEnabled: false,
       });
 
       // A partial patch on the other axis leaves the first one intact.
@@ -173,6 +177,8 @@ describe("Notifications", () => {
         slackFeedbackUpdatedEnabled: false,
         uploadFailedEnabled: true,
         slackUploadFailedEnabled: false,
+        instrumentOfflineEnabled: true,
+        slackInstrumentOfflineEnabled: false,
       });
     });
 

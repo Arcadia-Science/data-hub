@@ -168,4 +168,44 @@ describe("buildNotificationFeed", () => {
       ["run_group", "group:2026-09-16:spectramax-id5-plate-reader"],
     ]);
   });
+
+  it("keeps instrument offline and back-online rows, which have no run", () => {
+    const noRun = {
+      runId: null,
+      runDisplayId: null,
+      runAcquiredAt: null,
+      instrumentType: null,
+      fileCount: null,
+      filesFailed: null,
+    };
+    const feed = buildNotificationFeed(
+      [
+        item({
+          ...noRun,
+          id: "back",
+          type: "instrument_back_online",
+          body: "It was offline for about 2 hours.",
+        }),
+        item({
+          ...noRun,
+          id: "down",
+          type: "instrument_offline",
+          body: "The watcher hasn't checked in for 35 minutes. New files won't appear until it's back.",
+        }),
+        item({
+          ...noRun,
+          id: "no-instrument",
+          type: "instrument_offline",
+          instrumentId: null,
+          instrumentDisplayName: null,
+        }),
+      ],
+      TZ,
+      NOW
+    );
+    expect(feed[0].entries.map((entry) => [entry.kind, entry.id])).toEqual([
+      ["instrument_connection", "back"],
+      ["instrument_connection", "down"],
+    ]);
+  });
 });
