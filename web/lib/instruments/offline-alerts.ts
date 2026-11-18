@@ -30,10 +30,18 @@ export const OFFLINE_ALERT_AFTER_MS = 30 * 60 * 1000;
 export const CRON_JITTER_MS = 60 * 1000;
 
 /**
- * The pause needs at least this many watchers that should be checking in, so
- * one PC going down on its own never pauses the job.
+ * The pause needs at least this many watchers that went quiet together, so one
+ * PC going down never pauses the job, even when the other watchers have been
+ * silent for days.
  */
 export const PAUSE_MIN_EXPECTED_WATCHERS = 2;
+
+/**
+ * Watchers "went quiet together" when each last checked in within this long of
+ * the most recent check-in. A watcher that died days before is outside it and
+ * doesn't count toward the pause.
+ */
+export const PAUSE_TOGETHER_WINDOW_MS = 60 * 60 * 1000;
 
 export interface OfflineAlertState {
   /** Set once subscribers were told. */
@@ -133,27 +141,38 @@ export interface PauseWatcher {
 }
 
 /**
- * Whether this run should hold back `unresponsive` alerts. True when at least
- * `PAUSE_MIN_EXPECTED_WATCHERS` active watchers should be checking in (stored
- * status `watching` or `waiting`) and none has within `STALE_THRESHOLD_MS`.
- * Every PC going quiet at once points to Data Hub not receiving heartbeats,
- * such as a broken heartbeat route, more than to the PCs.
+ * Whether this run should hold back `unresponsive` alerts. It looks at the
+ * active watchers that should be checking in (stored status `watching` or
+ * `waiting`, with a heartbeat), and pauses when none has checked in within
+ * `STALE_THRESHOLD_MS` and at least `PAUSE_MIN_EXPECTED_WATCHERS` of them went
+ * quiet together: each last checked in within `PAUSE_TOGETHER_WINDOW_MS` of the
+ * most recent check-in. Several PCs going quiet at once points to Data Hub not
+ * receiving heartbeats, such as a broken heartbeat route, more than to the PCs.
+ * A watcher that went quiet long before the others never counts, so a fleet
+ * with one long-dead watcher still alerts when its last live one goes down.
  */
 export function isOfflineAlertPaused(
   watchers: readonly PauseWatcher[],
   now: Date
 ): boolean {
-  const expected = watchers.filter(
-    (watcher) => watcher.status === "watching" || watcher.status === "waiting"
-  );
-  if (expected.length < PAUSE_MIN_EXPECTED_WATCHERS) {
+  const heartbeats = watchers
+    .filter(
+      (watcher) => watcher.status === "watching" || watcher.status === "waiting"
+    )
+    .flatMap((watcher) =>
+      watcher.lastHeartbeatAt ? [watcher.lastHeartbeatAt.getTime()] : []
+    );
+  if (heartbeats.length === 0) {
     return false;
   }
-  return expected.every(
-    (watcher) =>
-      watcher.lastHeartbeatAt === null ||
-      now.getTime() - watcher.lastHeartbeatAt.getTime() > STALE_THRESHOLD_MS
+  const newest = Math.max(...heartbeats);
+  if (now.getTime() - newest <= STALE_THRESHOLD_MS) {
+    return false;
+  }
+  const quietTogether = heartbeats.filter(
+    (heartbeat) => newest - heartbeat <= PAUSE_TOGETHER_WINDOW_MS
   );
+  return quietTogether.length >= PAUSE_MIN_EXPECTED_WATCHERS;
 }
 
 /** A length of time in words: "35 minutes", "2 hours", "1 day". */

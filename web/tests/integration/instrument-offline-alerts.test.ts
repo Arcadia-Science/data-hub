@@ -19,6 +19,7 @@ import {
   instrumentOfflineAlerts,
   instruments,
   notifications,
+  slackConnections,
   watchers,
 } from "@/lib/db/schema";
 import { upsertSlackConnection } from "@/lib/slack/connections";
@@ -340,6 +341,70 @@ describe("Instrument offline alerts", () => {
     });
     expect(await rowsOfType("instrument_offline")).toHaveLength(0);
     expect(warn).toHaveBeenCalledOnce();
+  });
+
+  it("explains a deregistered watcher, told apart from one that never existed", async () => {
+    await subscribe();
+    await seedWatcher({
+      status: "watching",
+      statusReason: null,
+      lastHeartbeatAt: at(-60),
+    });
+    await getTestDb()
+      .update(watchers)
+      .set({ deletedAt: at(-30) })
+      .where(eq(watchers.instrumentId, INSTRUMENT_ID));
+
+    await run(T0);
+    expect((await run(at(30))).alerted).toBe(1);
+
+    const [row] = await rowsOfType("instrument_offline");
+    expect(row.body).toBe(
+      "Its watcher was deregistered. New files won't appear until a new watcher is set up."
+    );
+  });
+
+  it("sends no Slack DM when the toggle is off or the connection is revoked", async () => {
+    const toggleOff = await subscribe();
+    await upsertSlackConnection(toggleOff, {
+      slackUserId: "U_TOGGLE_OFF",
+      slackTeamId: "T_TEST",
+      slackTeamName: "Test Workspace",
+    });
+    await updatePreferences(toggleOff, {
+      slackInstrumentOfflineEnabled: false,
+    });
+    const revoked = await subscribe();
+    await upsertSlackConnection(revoked, {
+      slackUserId: "U_REVOKED",
+      slackTeamId: "T_TEST",
+      slackTeamName: "Test Workspace",
+    });
+    await getTestDb()
+      .update(slackConnections)
+      .set({ revokedAt: at(-60) })
+      .where(eq(slackConnections.userId, revoked));
+
+    await alertAtThirtyMinutes();
+
+    expect(
+      (await rowsOfType("instrument_offline")).map((row) => row.userId).sort()
+    ).toEqual([toggleOff, revoked].sort());
+    expect(await getCapturedSlackDms()).toHaveLength(0);
+  });
+
+  it("says back online once when two runs see the recovery at the same moment", async () => {
+    await subscribe();
+    await alertAtThirtyMinutes();
+    await setWatcher(watching(at(74)));
+
+    const summaries = await Promise.all([run(at(75)), run(at(75))]);
+
+    expect(summaries.map((summary) => summary.recovered).sort()).toEqual([
+      0, 1,
+    ]);
+    expect(await rowsOfType("instrument_back_online")).toHaveLength(1);
+    expect(await alertRow()).toBeNull();
   });
 
   it("turns the Slack toggle on when someone connects Slack", async () => {

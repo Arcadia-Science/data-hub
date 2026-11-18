@@ -57,7 +57,7 @@ export async function runInstrumentOfflineAlerts(
   const paused = isOfflineAlertPaused(snapshot.watchers, now);
   if (paused) {
     console.warn(
-      "[instrument-offline-alerts] No watcher has checked in for 5 minutes, so unresponsive alerts are paused this run."
+      "[instrument-offline-alerts] Several watchers went quiet together and none has checked in for 5 minutes, so unresponsive alerts are paused this run."
     );
   }
 

@@ -245,6 +245,47 @@ describe("isOfflineAlertPaused", () => {
     const edge = { status: "watching", lastHeartbeatAt: ago(5 * MINUTE) };
     expect(isOfflineAlertPaused([edge, silent], NOW)).toBe(false);
   });
+
+  it("doesn't count a watcher that went quiet long before the others", () => {
+    const deadForAWeek = {
+      status: "watching",
+      lastHeartbeatAt: ago(7 * 24 * HOUR),
+    };
+    // The last live PC just went down: alone, it must still alert.
+    expect(isOfflineAlertPaused([deadForAWeek, silent], NOW)).toBe(false);
+    // Two that went quiet together still pause, whatever the dead one does.
+    expect(
+      isOfflineAlertPaused(
+        [
+          deadForAWeek,
+          silent,
+          { status: "watching", lastHeartbeatAt: ago(HOUR) },
+        ],
+        NOW
+      )
+    ).toBe(true);
+  });
+
+  it("counts watchers that went quiet within an hour of the latest check-in", () => {
+    const longAgo = (ms: number) => ({
+      status: "watching",
+      lastHeartbeatAt: ago(3 * HOUR + ms),
+    });
+    // A Data Hub fault that has lasted 3 hours still pauses.
+    expect(isOfflineAlertPaused([longAgo(0), longAgo(HOUR)], NOW)).toBe(true);
+    expect(
+      isOfflineAlertPaused([longAgo(0), longAgo(HOUR + SECOND)], NOW)
+    ).toBe(false);
+  });
+
+  it("ignores a watcher that never checked in", () => {
+    expect(
+      isOfflineAlertPaused(
+        [silent, { status: "watching", lastHeartbeatAt: null }],
+        NOW
+      )
+    ).toBe(false);
+  });
 });
 
 describe("offline alert wording", () => {

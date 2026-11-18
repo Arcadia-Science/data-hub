@@ -229,10 +229,10 @@ export function NotificationsSettingsForm({
                         Mute new-run notifications
                       </FieldLabel>
                       <FieldDescription>
-                        When on, you won&apos;t be notified about new runs on
-                        any instrument, which is useful for quiet periods.
-                        Outage alerts and the instruments you pick below stay as
-                        they are.
+                        When on, new runs on any instrument don&apos;t appear in
+                        the bell, which is useful for quiet periods. Slack
+                        messages, outage alerts and the instruments you pick
+                        below stay as they are.
                       </FieldDescription>
                     </FieldContent>
                     <Switch

@@ -290,8 +290,10 @@ export interface NotificationDto {
   // Set when a personal access token caused it (for example an integration
   // dispatching a generic message).
   actorToken: ActorToken | null;
-  // Caller-supplied message for `generic` and feedback rows, preview-truncated
-  // like `commentBody`. NULL for every other type.
+  // The stored text: the caller's message for `generic` and feedback rows, the
+  // count and reason for `upload_failed`, and the sentence for the two
+  // instrument types. Preview-truncated like `commentBody`, except on feedback
+  // rows. NULL for every other type.
   body: string | null;
   // Truncated markdown body of the originating comment — only populated
   // when `commentId` is set. NULL for `run_created` rows and for comment
@@ -305,9 +307,10 @@ export interface NotificationDto {
   fileCount: number | null;
   filesFailed: number | null;
   id: string;
-  // Run fields are NULL on anchor-less rows. Instrument fields are NULL on
-  // `generic` and feedback rows, and set on the two instrument types, which
-  // name an instrument without a run.
+  // Run fields are NULL on rows without a run. Instrument fields come from the
+  // run, or from `notifications.instrument_id` on the two instrument types,
+  // which have no run. They are NULL on feedback rows and on `generic` rows
+  // without a run.
   instrumentDisplayName: string | null;
   // Natural keys for linking — `/instruments/:instrumentId/runs/:runId` is
   // what the row navigates to.
