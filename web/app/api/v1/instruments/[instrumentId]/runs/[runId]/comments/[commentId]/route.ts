@@ -25,6 +25,7 @@ import {
   validateCommentBody,
 } from "@/lib/api/run-comments";
 import { readRunIdParam } from "@/lib/api/run-id-param";
+import { enforceWatcherTokenInstrument } from "@/lib/api/watchers";
 
 interface RouteContext {
   params: Promise<{
@@ -61,6 +62,10 @@ async function preflight(
   }
 
   const { instrumentId, runId: runIdParam, commentId } = await params;
+  const denied = await enforceWatcherTokenInstrument(authResult, instrumentId);
+  if (denied) {
+    return { kind: "error", response: denied };
+  }
   const runId = readRunIdParam(request.headers, runIdParam);
   const run = await lookupRunByNaturalKey(instrumentId, runId);
   if (!run) {

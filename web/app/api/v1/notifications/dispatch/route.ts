@@ -6,6 +6,7 @@ import { apiError, CONFLICT, VALIDATION_ERROR } from "@/lib/api/errors";
 import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
 import { notifyGeneric } from "@/lib/api/notifications";
 import { dispatchNotificationsBody, readJsonBody } from "@/lib/api/openapi";
+import { enforceWatcherTokenInstrument } from "@/lib/api/watchers";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { deliverSlackDms } from "@/lib/slack/dm";
@@ -44,6 +45,16 @@ export async function POST(request: NextRequest) {
       }
     | undefined;
   if (body.run) {
+    // A watcher's token may anchor a notification only to its own
+    // instrument's runs. This comes before the run lookup, so a refused
+    // token learns nothing about another instrument's runs.
+    const denied = await enforceWatcherTokenInstrument(
+      authResult,
+      body.run.instrument_id
+    );
+    if (denied) {
+      return denied;
+    }
     const found = await lookupRunByNaturalKey(
       body.run.instrument_id,
       body.run.run_id

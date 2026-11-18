@@ -6,6 +6,7 @@ import { apiErrorFromResult } from "@/lib/api/errors";
 import { bulkAddNotebookLinkBody, readJsonBody } from "@/lib/api/openapi";
 import { bulkAddResultToWire } from "@/lib/api/run-notebook-link-wire";
 import { bulkAddNotebookLink } from "@/lib/api/run-notebook-links";
+import { enforceWatcherTokenInstrument } from "@/lib/api/watchers";
 import { blankLabelToNull } from "@/lib/notebook-links/url";
 
 // ---------------------------------------------------------------------------
@@ -27,6 +28,16 @@ export async function POST(request: NextRequest) {
   const payload = await readJsonBody(request, bulkAddNotebookLinkBody);
   if (payload instanceof Response) {
     return payload;
+  }
+
+  // A watcher's token may change only its own instrument's runs, so one
+  // run on another instrument refuses the whole request.
+  const denied = await enforceWatcherTokenInstrument(
+    authResult,
+    payload.runs.map((run) => run.instrument_id)
+  );
+  if (denied) {
+    return denied;
   }
 
   const result = await bulkAddNotebookLink({

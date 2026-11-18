@@ -7,6 +7,7 @@ import {
   jsonResponse,
   registry,
   runIdParam,
+  WATCHER_TOKEN_OWN_INSTRUMENT,
 } from "../registry";
 import {
   createFileBody,
@@ -40,8 +41,7 @@ registry.registerPath({
   path: "/instruments/{instrumentId}/runs/{runId}/files",
   operationId: "createRunFile",
   summary: "Create a run file record",
-  description:
-    "Requires scope `files:create`. PAT only; browser sessions are rejected.",
+  description: `Requires scope \`files:create\`. PAT only; browser sessions are rejected. ${WATCHER_TOKEN_OWN_INSTRUMENT}`,
   tags: ["Files"],
   security: bearerSecurity,
   request: { params: runParams, body: body(createFileBody) },
@@ -56,8 +56,7 @@ registry.registerPath({
   path: "/files/{fileId}",
   operationId: "updateFile",
   summary: "Update a file",
-  description:
-    "Requires scope `files:update`. PAT only; browser sessions are rejected. A token that registered a watcher may update only the files of an instrument whose active watcher it registered, and gets 403 for any other file.",
+  description: `Requires scope \`files:update\`. PAT only; browser sessions are rejected. ${WATCHER_TOKEN_OWN_INSTRUMENT}`,
   tags: ["Files"],
   security: bearerSecurity,
   request: { params: fileParams, body: body(patchFileBody) },
@@ -68,7 +67,7 @@ registry.registerPath({
   path: "/files/{fileId}",
   operationId: "dismissFile",
   summary: "Dismiss a file",
-  description: "Requires scope `files:delete`.",
+  description: `Requires scope \`files:delete\`. ${WATCHER_TOKEN_OWN_INSTRUMENT}`,
   tags: ["Files"],
   security: bearerSecurity,
   request: { params: fileParams },
@@ -99,8 +98,7 @@ registry.registerPath({
   path: "/files/{fileId}/multipart-upload/part-urls",
   operationId: "signMultipartPartUrls",
   summary: "Sign URLs for multipart upload parts",
-  description:
-    "Requires scope `runs:upload`. PAT only. Returns a few presigned UploadPart URLs. Fetch the next batch when these expire.",
+  description: `Requires scope \`runs:upload\`. PAT only. Returns a few presigned UploadPart URLs. Fetch the next batch when these expire. ${WATCHER_TOKEN_OWN_INSTRUMENT}`,
   tags: ["Files"],
   security: bearerSecurity,
   request: { params: fileParams, body: body(multipartPartUrlsBody) },
@@ -111,8 +109,7 @@ registry.registerPath({
   path: "/files/{fileId}/multipart-upload/complete",
   operationId: "completeMultipartUpload",
   summary: "Finish a multipart upload",
-  description:
-    "Requires scope `runs:upload`. PAT only. Sends the part list and the whole-file CRC64NVME checksum to S3, then marks the file uploaded.",
+  description: `Requires scope \`runs:upload\`. PAT only. Sends the part list and the whole-file CRC64NVME checksum to S3, then marks the file uploaded. ${WATCHER_TOKEN_OWN_INSTRUMENT}`,
   tags: ["Files"],
   security: bearerSecurity,
   request: { params: fileParams, body: body(multipartCompleteBody) },
@@ -123,8 +120,7 @@ registry.registerPath({
   path: "/files/{fileId}/multipart-upload",
   operationId: "abortMultipartUpload",
   summary: "Cancel a multipart upload",
-  description:
-    "Requires scope `runs:upload`. PAT only. Cancels the in-progress S3 upload and clears it from the file.",
+  description: `Requires scope \`runs:upload\`. PAT only. Cancels the in-progress S3 upload and clears it from the file. ${WATCHER_TOKEN_OWN_INSTRUMENT}`,
   tags: ["Files"],
   security: bearerSecurity,
   request: { params: fileParams, body: body(multipartAbortBody) },
@@ -135,8 +131,7 @@ registry.registerPath({
   path: "/files/{fileId}/reprocess",
   operationId: "reprocessFile",
   summary: "Reprocess a file",
-  description:
-    "Requires scope `files:reprocess`. Raw files only. Eligible statuses: `uploaded`, `failed`, `completed`, or stalled `processing` (file must have an S3 location). The file's instrument must have a Lambda processor. The file is queued first and starts as soon as a processing slot is free. Returns `processing` when the file started right away. Returns `queued` when it did not, for example because 10 raw files are already processing (the default limit across Data Hub). A file that is already `queued` returns `409`.",
+  description: `Requires scope \`files:reprocess\`. Raw files only. Eligible statuses: \`uploaded\`, \`failed\`, \`completed\`, or stalled \`processing\` (file must have an S3 location). The file's instrument must have a Lambda processor. The file is queued first and starts as soon as a processing slot is free. Returns \`processing\` when the file started right away. Returns \`queued\` when it did not, for example because 10 raw files are already processing (the default limit across Data Hub). A file that is already \`queued\` returns \`409\`. ${WATCHER_TOKEN_OWN_INSTRUMENT}`,
   tags: ["Files"],
   security: bearerSecurity,
   request: { params: fileParams },

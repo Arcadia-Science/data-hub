@@ -6,6 +6,7 @@ import {
   loadMultipartFile,
 } from "@/lib/api/multipart-upload";
 import { multipartCompleteBody, readJsonBody } from "@/lib/api/openapi";
+import { enforceWatcherTokenFile } from "@/lib/api/watchers";
 
 interface RouteContext {
   params: Promise<{ fileId: string }>;
@@ -29,6 +30,11 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   const body = await readJsonBody(request, multipartCompleteBody);
   if (body instanceof Response) {
     return body;
+  }
+
+  const denied = await enforceWatcherTokenFile(authResult, fileId);
+  if (denied) {
+    return denied;
   }
 
   const file = await loadMultipartFile(fileId);

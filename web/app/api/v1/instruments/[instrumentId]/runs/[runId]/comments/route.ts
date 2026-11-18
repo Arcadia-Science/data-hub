@@ -17,6 +17,7 @@ import {
   validateCommentBody,
 } from "@/lib/api/run-comments";
 import { readRunIdParam } from "@/lib/api/run-id-param";
+import { enforceWatcherTokenInstrument } from "@/lib/api/watchers";
 
 interface RouteContext {
   params: Promise<{ instrumentId: string; runId: string }>;
@@ -66,6 +67,10 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   }
 
   const { instrumentId, runId: runIdParam } = await params;
+  const denied = await enforceWatcherTokenInstrument(authResult, instrumentId);
+  if (denied) {
+    return denied;
+  }
   const runId = readRunIdParam(request.headers, runIdParam);
   const run = await lookupRunByNaturalKey(instrumentId, runId);
   if (!run) {

@@ -3,6 +3,7 @@ import { authorizeToken } from "@/lib/api/auth";
 import { apiError, VALIDATION_ERROR } from "@/lib/api/errors";
 import { loadMultipartFile, signPartUrls } from "@/lib/api/multipart-upload";
 import { multipartPartUrlsBody, readJsonBody } from "@/lib/api/openapi";
+import { enforceWatcherTokenFile } from "@/lib/api/watchers";
 import { PART_URL_EXPIRY_SECONDS } from "@/lib/multipart";
 
 interface RouteContext {
@@ -23,6 +24,11 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   const body = await readJsonBody(request, multipartPartUrlsBody);
   if (body instanceof Response) {
     return body;
+  }
+
+  const denied = await enforceWatcherTokenFile(authResult, fileId);
+  if (denied) {
+    return denied;
   }
 
   const file = await loadMultipartFile(fileId);

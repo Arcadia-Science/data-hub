@@ -5,6 +5,7 @@ import {
   errorResponses,
   jsonResponse,
   registry,
+  WATCHER_TOKEN_OWN_INSTRUMENT,
 } from "../registry";
 import { archiveJobDetail, patchArchiveJobBody } from "../schemas/archive";
 
@@ -13,8 +14,7 @@ registry.registerPath({
   path: "/archive-jobs/{id}",
   operationId: "updateArchiveJob",
   summary: "Update an archive job",
-  description:
-    "Requires scope `archive-jobs:write`. PAT only; browser sessions are rejected.",
+  description: `Requires scope \`archive-jobs:write\`. PAT only; browser sessions are rejected. ${WATCHER_TOKEN_OWN_INSTRUMENT}`,
   tags: ["Archive"],
   security: bearerSecurity,
   request: {

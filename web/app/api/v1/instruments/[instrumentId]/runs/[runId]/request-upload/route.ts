@@ -4,6 +4,7 @@ import { apiErrorFromResult } from "@/lib/api/errors";
 import { readJsonBody, requestUploadBody } from "@/lib/api/openapi";
 import { readRunIdParam } from "@/lib/api/run-id-param";
 import { requestRunUploads, uploadRequesterId } from "@/lib/api/run-uploads";
+import { enforceWatcherTokenInstrument } from "@/lib/api/watchers";
 
 interface RouteContext {
   params: Promise<{ instrumentId: string; runId: string }>;
@@ -23,6 +24,10 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   }
 
   const { instrumentId, runId: runIdParam } = await params;
+  const denied = await enforceWatcherTokenInstrument(authResult, instrumentId);
+  if (denied) {
+    return denied;
+  }
   const runId = readRunIdParam(request.headers, runIdParam);
 
   const body = await readJsonBody(request, requestUploadBody);

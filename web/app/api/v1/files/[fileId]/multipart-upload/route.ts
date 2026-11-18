@@ -6,6 +6,7 @@ import {
   loadMultipartFile,
 } from "@/lib/api/multipart-upload";
 import { multipartAbortBody, readJsonBody } from "@/lib/api/openapi";
+import { enforceWatcherTokenFile } from "@/lib/api/watchers";
 
 interface RouteContext {
   params: Promise<{ fileId: string }>;
@@ -25,6 +26,11 @@ export async function DELETE(request: NextRequest, { params }: RouteContext) {
   const body = await readJsonBody(request, multipartAbortBody);
   if (body instanceof Response) {
     return body;
+  }
+
+  const denied = await enforceWatcherTokenFile(authResult, fileId);
+  if (denied) {
+    return denied;
   }
 
   const file = await loadMultipartFile(fileId);
