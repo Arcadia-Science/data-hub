@@ -150,9 +150,9 @@ export function MainNav({
             currentPath={pathname}
             icon={NotebookText}
             items={sidebarNotebooks}
-            label="Notebooks"
+            label="Lab Notebooks"
             recentlyViewedItems={recentlyViewedNotebooks}
-            viewAllHref="/notebooks"
+            viewAllHref="/lab-notebooks"
           />
         </SidebarMenu>
       </SidebarGroupContent>

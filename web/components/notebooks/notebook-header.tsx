@@ -51,7 +51,7 @@ export function NotebookHeader({
         <BreadcrumbList>
           <BreadcrumbItem>
             <BreadcrumbLink asChild>
-              <Link href="/notebooks">Notebooks</Link>
+              <Link href="/lab-notebooks">Lab Notebooks</Link>
             </BreadcrumbLink>
           </BreadcrumbItem>
           <BreadcrumbSeparator />
@@ -80,7 +80,8 @@ export function NotebookHeader({
                 ) : null}
               </span>
               <span className="text-muted-foreground">
-                Runs don&rsquo;t list this notebook until it&rsquo;s restored.
+                Runs don&rsquo;t list this lab notebook until it&rsquo;s
+                restored.
               </span>
             </div>
           </div>
@@ -146,7 +147,7 @@ export function NotebookHeader({
           <Button asChild size="sm" variant="outline">
             <a href={notebook.url} rel="noopener noreferrer" target="_blank">
               <ExternalLink aria-hidden="true" className="size-4" />
-              Open notebook
+              Open lab notebook
               <span className="sr-only"> (opens in a new tab)</span>
             </a>
           </Button>

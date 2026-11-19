@@ -36,7 +36,7 @@ const publicPrefixes = [
   "/api/cron",
   "/instruments",
   // A notebook's page unfurls with the notebook's name.
-  "/notebooks",
+  "/lab-notebooks",
   "/settings",
   // Linear attachment links redirect here before the viewer is signed in.
   "/feedback",

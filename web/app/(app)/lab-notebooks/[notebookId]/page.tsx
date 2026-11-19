@@ -44,7 +44,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { notebookId } = await params;
   const notebook = await loadNotebook(notebookId);
   if (!notebook) {
-    return { title: "Notebook not found" };
+    return { title: "Lab notebook not found" };
   }
   // Link previews in Slack or Notion show the name. The description stays
   // generic: the notebook's own description and its runs need a sign-in.
@@ -65,7 +65,7 @@ export default async function NotebookPage({ params, searchParams }: Props) {
   // unfurls with the notebook's name. A signed-out visitor gets a sign-in
   // prompt that returns here.
   if (!session) {
-    return <SignInRequired>Sign in to view this notebook.</SignInRequired>;
+    return <SignInRequired>Sign in to view this lab notebook.</SignInRequired>;
   }
 
   // Before anything streams, so an unknown notebook is a real 404.
@@ -104,7 +104,7 @@ export default async function NotebookPage({ params, searchParams }: Props) {
 /**
  * The notebook's runs from every instrument, with the Home page's search,
  * instrument, date, and status filters. The page fixes the notebook, so the
- * URL's `notebook_id` and `has_notebook` are ignored, and it lists all time
+ * URL's `lab_notebook_id` and `has_lab_notebook` are ignored, and it lists all time
  * unless a date range is picked.
  */
 async function NotebookRunsSection({
@@ -155,8 +155,8 @@ async function NotebookRunsSection({
 
   const hasFilters = hasActiveFilters({
     ...params,
-    has_notebook: null,
-    notebook_id: null,
+    has_lab_notebook: null,
+    lab_notebook_id: null,
   });
 
   return (
@@ -174,7 +174,7 @@ async function NotebookRunsSection({
           <TablePendingBoundary>
             <RunsTable
               data={runResult.data}
-              emptyLabel="No runs in this notebook yet. Add runs from a run’s page, or select runs in any runs table and choose Add to notebook."
+              emptyLabel="No runs in this lab notebook yet. Add runs from a run’s page, or select runs in any runs table and choose Add to lab notebook."
               hasFilters={hasFilters}
               notebookId={notebook.id}
               ranByOptions={ranByOptions}

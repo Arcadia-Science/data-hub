@@ -18,9 +18,9 @@ import { notebooksEmptyMessage } from "@/lib/notebooks/details";
 import { notebooksIndexParamsCache } from "@/lib/search-params";
 
 export const metadata: Metadata = {
-  title: "Notebooks",
-  openGraph: { title: "Notebooks" },
-  twitter: { title: "Notebooks" },
+  title: "Lab Notebooks",
+  openGraph: { title: "Lab Notebooks" },
+  twitter: { title: "Lab Notebooks" },
 };
 
 const NOTEBOOKS_PER_PAGE = 50;
@@ -45,7 +45,7 @@ export default async function NotebooksPage({
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6 2xl:w-6xl">
       <div className="flex items-center justify-between gap-3">
-        <h1 className="font-semibold text-2xl tracking-tight">Notebooks</h1>
+        <h1 className="font-semibold text-2xl tracking-tight">Lab Notebooks</h1>
         <NewNotebookDialog />
       </div>
       <TablePendingProvider>

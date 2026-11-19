@@ -206,7 +206,7 @@ export const runDetailParamsCache = createSearchParamsCache(
   runDetailSearchParams
 );
 
-// The `/notebooks` index. `q` is a name, part of a description, or a pasted
+// The `/lab-notebooks` index. `q` is a name, part of a description, or a pasted
 // link. The sorts are the ones `listNotebooks` takes that have a column; a
 // missing `order` leaves it to the sort (A to Z for names, otherwise largest
 // or newest first).

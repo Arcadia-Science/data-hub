@@ -11,7 +11,7 @@ import {
 
 /** The Data Hub page for a notebook. */
 export function notebookPageHref(notebookId: string): string {
-  return `/notebooks/${encodeURIComponent(notebookId)}`;
+  return `/lab-notebooks/${encodeURIComponent(notebookId)}`;
 }
 
 /** "1 run", "2 runs". */
@@ -24,7 +24,7 @@ export function deleteNotebookMessage(name: string, runCount: number): string {
   if (runCount === 0) {
     return `“${name}” has no runs. You can restore it later.`;
   }
-  return `This takes ${countLabel(runCount, "run")} out of “${name}”. Restoring the notebook puts ${runCount === 1 ? "it" : "them"} back.`;
+  return `This takes ${countLabel(runCount, "run")} out of “${name}”. Restoring the lab notebook puts ${runCount === 1 ? "it" : "them"} back.`;
 }
 
 /**
@@ -50,7 +50,7 @@ export interface NotebookEditValues {
   url: string;
 }
 
-/** The fields `PATCH /api/v1/notebooks/:id` takes. */
+/** The fields `PATCH /api/v1/lab-notebooks/:id` takes. */
 export interface NotebookPatch {
   description?: string | null;
   name?: string;
@@ -95,16 +95,16 @@ export function notebookEditPatch(
   return patch;
 }
 
-/** What `/notebooks` says when the list is empty, for the search it ran. */
+/** What `/lab-notebooks` says when the list is empty, for the search it ran. */
 export function notebooksEmptyMessage(query: string): string {
   const trimmed = query.trim();
   if (trimmed === "") {
-    return "No notebooks yet. Create one with New notebook, or add a run to a notebook from the run’s page.";
+    return "No lab notebooks yet. Create one with New lab notebook, or add a run to a lab notebook from the run’s page.";
   }
   if (trimmed.includes("://") && notebookUrlKey(trimmed) !== null) {
-    return "No notebook has this page yet. Create one with New notebook.";
+    return "No lab notebook has this page yet. Create one with New lab notebook.";
   }
-  return "No notebooks match your search.";
+  return "No lab notebooks match your search.";
 }
 
 /**

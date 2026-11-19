@@ -79,8 +79,8 @@ export function EditNotebookDialog({
         <DialogHeader>
           <DialogTitle>Edit details</DialogTitle>
           <DialogDescription>
-            Change the notebook&rsquo;s name, description, owner, or link. Its
-            runs stay in it.
+            Change the lab notebook&rsquo;s name, description, owner, or link.
+            Its runs stay in it.
           </DialogDescription>
         </DialogHeader>
         {/* Mounted only while open, so each opening starts from the
@@ -175,7 +175,7 @@ function EditNotebookForm({
       );
       return;
     }
-    toast.success("Notebook updated");
+    toast.success("Lab notebook updated");
     onClose();
     router.refresh();
   }
@@ -232,7 +232,7 @@ function EditNotebookForm({
         </Field>
         <NotebookLinkField
           error={errors.url}
-          hint="No other notebook can have the same page."
+          hint="No other lab notebook can have the same page."
           id={`${id}-url`}
           inputRef={urlRef}
           onChange={(value) => {

@@ -114,12 +114,14 @@ export function RunBulkActionBar({ notebook }: { notebook?: BulkBarNotebook }) {
   const anyInNotebook = refs.some((ref) => ref.notebooks.length > 0);
   // The notebook endpoints take at most this many runs per request.
   const tooManyToLink = refs.length > NOTEBOOK_RUNS_PER_REQUEST_MAX;
-  const tooManyReason = `Select at most ${NOTEBOOK_RUNS_PER_REQUEST_MAX} runs to change notebooks at once.`;
-  const addLabel = notebook ? "Add to another notebook" : "Add to notebook";
+  const tooManyReason = `Select at most ${NOTEBOOK_RUNS_PER_REQUEST_MAX} runs to change lab notebooks at once.`;
+  const addLabel = notebook
+    ? "Add to another lab notebook"
+    : "Add to lab notebook";
   // A deleted notebook's runs can't change until it's restored.
   let removeFromThisReason: string | null = null;
   if (notebook?.deleted) {
-    removeFromThisReason = "Restore this notebook to change its runs.";
+    removeFromThisReason = "Restore this lab notebook to change its runs.";
   } else if (tooManyToLink) {
     removeFromThisReason = tooManyReason;
   }
@@ -443,7 +445,7 @@ function RemoveFromThisNotebookButton({
   if (disabledReason) {
     return (
       <DisabledReasonButton reason={disabledReason} size="sm" variant="outline">
-        Remove from this notebook
+        Remove from this lab notebook
       </DisabledReasonButton>
     );
   }
@@ -455,7 +457,7 @@ function RemoveFromThisNotebookButton({
       type="button"
       variant="outline"
     >
-      Remove from this notebook
+      Remove from this lab notebook
     </Button>
   );
 }

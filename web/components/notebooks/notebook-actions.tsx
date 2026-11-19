@@ -83,7 +83,7 @@ export function NotebookActions({
       <DropdownMenu onOpenChange={setMenuOpen} open={menuOpen}>
         <DropdownMenuTrigger asChild>
           <Button
-            aria-label="Notebook actions"
+            aria-label="Lab notebook actions"
             ref={triggerRef}
             size="icon-sm"
             type="button"
@@ -159,12 +159,12 @@ function DeleteNotebookDialog({
         toast.error(
           error instanceof NotebookRequestError
             ? error.message
-            : "Couldn't delete the notebook. Try again?"
+            : "Couldn't delete the lab notebook. Try again?"
         );
         return;
       }
       forget(notebook.id);
-      toast.success("Notebook deleted");
+      toast.success("Lab notebook deleted");
       // In a transition with the refresh, so the dialog stays until the
       // page shows the notebook as deleted.
       startTransition(() => {
@@ -193,7 +193,7 @@ function DeleteNotebookDialog({
         }}
       >
         <AlertDialogHeader>
-          <AlertDialogTitle>Delete this notebook?</AlertDialogTitle>
+          <AlertDialogTitle>Delete this lab notebook?</AlertDialogTitle>
           <AlertDialogDescription>
             {deleteNotebookMessage(notebook.name, notebook.run_count)}
           </AlertDialogDescription>
@@ -208,7 +208,7 @@ function DeleteNotebookDialog({
             {isPending ? (
               <Loader2 className="animate-spin" data-icon="inline-start" />
             ) : null}
-            Delete notebook
+            Delete lab notebook
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

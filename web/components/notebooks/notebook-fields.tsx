@@ -174,12 +174,12 @@ export function PageTakenNotice({
           toast.error(
             error instanceof NotebookRequestError
               ? error.message
-              : "Couldn't restore the notebook. Try again?"
+              : "Couldn't restore the lab notebook. Try again?"
           );
           return;
         }
       }
-      toast.success("Notebook restored");
+      toast.success("Lab notebook restored");
       onNavigate?.();
       router.push(href);
     });
@@ -198,7 +198,7 @@ export function PageTakenNotice({
           onClick={restore}
           type="button"
         >
-          {isRestoring ? "Restoring…" : "Restore notebook"}
+          {isRestoring ? "Restoring…" : "Restore lab notebook"}
         </button>
       ) : (
         <Link
@@ -206,7 +206,7 @@ export function PageTakenNotice({
           href={href}
           onClick={onNavigate}
         >
-          Open that notebook
+          Open that lab notebook
         </Link>
       )}
     </div>

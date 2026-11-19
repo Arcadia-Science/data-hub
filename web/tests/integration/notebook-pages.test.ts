@@ -46,7 +46,7 @@ function expectRendered(html: string) {
   expect(html).not.toContain("Couldn’t load this.");
 }
 
-describe("Notebook pages", () => {
+describe("Lab notebook pages", () => {
   let cookie: string;
   let liveId: string;
   let deletedId: string;
@@ -63,14 +63,14 @@ describe("Notebook pages", () => {
   }
 
   async function createNotebook(body: Record<string, unknown>) {
-    const res = await api("/api/v1/notebooks", {
+    const res = await api("/api/v1/lab-notebooks", {
       method: "POST",
       headers: { Cookie: cookie },
       body,
     });
     expect(res.status).toBe(201);
-    const created = (await res.json()) as { notebook: { id: string } };
-    return created.notebook.id;
+    const created = (await res.json()) as { lab_notebook: { id: string } };
+    return created.lab_notebook.id;
   }
 
   beforeAll(async () => {
@@ -109,7 +109,7 @@ describe("Notebook pages", () => {
       url: notionUrl("Old-pilot", 3),
       name: DELETED_NAME,
     });
-    const deleted = await api(`/api/v1/notebooks/${deletedId}`, {
+    const deleted = await api(`/api/v1/lab-notebooks/${deletedId}`, {
       method: "DELETE",
       headers: { Cookie: cookie },
     });
@@ -120,31 +120,31 @@ describe("Notebook pages", () => {
     await closeTestDb();
   });
 
-  describe("/notebooks", () => {
-    it("lists live notebooks and leaves deleted ones out", async () => {
-      const res = await page("/notebooks");
+  describe("/lab-notebooks", () => {
+    it("lists live lab notebooks and leaves deleted ones out", async () => {
+      const res = await page("/lab-notebooks");
       const html = await res.text();
       expect(res.status).toBe(200);
       expectRendered(html);
-      expect(html).toContain("<title>Notebooks | Data Hub</title>");
-      expect(html).toContain("New notebook");
+      expect(html).toContain("<title>Lab Notebooks | Data Hub</title>");
+      expect(html).toContain("New lab notebook");
       expect(html).toContain(rowLink(LIVE_NAME));
       expect(html).toContain(rowLink(EMPTY_NAME));
-      expect(html).toContain(`href="/notebooks/${emptyId}"`);
+      expect(html).toContain(`href="/lab-notebooks/${emptyId}"`);
       expect(html).not.toContain(DELETED_NAME);
     });
 
-    it("shows deleted notebooks when asked", async () => {
-      const res = await page("/notebooks?include_deleted=true");
+    it("shows deleted lab notebooks when asked", async () => {
+      const res = await page("/lab-notebooks?include_deleted=true");
       const html = await res.text();
       expect(res.status).toBe(200);
       expect(html).toContain(rowLink(DELETED_NAME));
       expect(html).toContain(rowLink(LIVE_NAME));
     });
 
-    it("finds a notebook by a pasted link, and only that one", async () => {
+    it("finds a lab notebook by a pasted link, and only that one", async () => {
       const q = encodeURIComponent(`${notionUrl("Renamed-title", 1)}?pvs=4`);
-      const res = await page(`/notebooks?q=${q}`);
+      const res = await page(`/lab-notebooks?q=${q}`);
       const html = await res.text();
       expect(res.status).toBe(200);
       expect(html).toContain(rowLink(LIVE_NAME));
@@ -152,24 +152,24 @@ describe("Notebook pages", () => {
     });
 
     it("says when nothing matches", async () => {
-      const res = await page("/notebooks?q=no-such-notebook-text");
+      const res = await page("/lab-notebooks?q=no-such-notebook-text");
       const html = await res.text();
       expect(res.status).toBe(200);
-      expect(html).toContain("No notebooks match your search.");
+      expect(html).toContain("No lab notebooks match your search.");
       expect(html).not.toContain(rowLink(LIVE_NAME));
     });
   });
 
-  describe("/notebooks/:id", () => {
-    it("shows the notebook, its owner and counts, and its runs", async () => {
-      const res = await page(`/notebooks/${liveId}`);
+  describe("/lab-notebooks/:id", () => {
+    it("shows the lab notebook, its owner and counts, and its runs", async () => {
+      const res = await page(`/lab-notebooks/${liveId}`);
       const html = await res.text();
       expect(res.status).toBe(200);
       expectRendered(html);
       expect(html).toContain(`<title>${LIVE_NAME} | Data Hub</title>`);
       expect(html).toContain(LIVE_DESCRIPTION);
-      expect(html).toContain("Open notebook");
-      expect(html).toContain('aria-label="Notebook actions"');
+      expect(html).toContain("Open lab notebook");
+      expect(html).toContain('aria-label="Lab notebook actions"');
       const text = textOf(html);
       expect(text).toContain("1 run");
       expect(text).toContain("1 instrument");
@@ -181,40 +181,40 @@ describe("Notebook pages", () => {
       expect(text).not.toContain("until it’s restored");
     });
 
-    it("says an empty notebook has no runs yet", async () => {
-      const res = await page(`/notebooks/${emptyId}`);
+    it("says an empty lab notebook has no runs yet", async () => {
+      const res = await page(`/lab-notebooks/${emptyId}`);
       const html = await res.text();
       expect(res.status).toBe(200);
       expect(html).toContain(EMPTY_NAME);
       expect(html).toContain("No runs yet");
-      expect(html).toContain("No runs in this notebook yet.");
+      expect(html).toContain("No runs in this lab notebook yet.");
     });
 
-    it("shows a deleted notebook with who deleted it and a Restore button", async () => {
-      const res = await page(`/notebooks/${deletedId}`);
+    it("shows a deleted lab notebook with who deleted it and a Restore button", async () => {
+      const res = await page(`/lab-notebooks/${deletedId}`);
       const html = await res.text();
       expect(res.status).toBe(200);
       expectRendered(html);
       expect(html).toContain(DELETED_NAME);
       const text = textOf(html);
       expect(text).toContain(
-        "Runs don’t list this notebook until it’s restored."
+        "Runs don’t list this lab notebook until it’s restored."
       );
       expect(text).toMatch(/Deleted .*by/);
       expect(text).toMatch(/>Restore<\/button>/);
     });
 
-    it("returns 404 for a notebook that doesn't exist", async () => {
+    it("returns 404 for a lab notebook that doesn't exist", async () => {
       const unknown = await page(
-        "/notebooks/00000000-0000-4000-8000-000000000000"
+        "/lab-notebooks/00000000-0000-4000-8000-000000000000"
       );
       expect(unknown.status).toBe(404);
-      const garbage = await page("/notebooks/not-a-uuid");
+      const garbage = await page("/lab-notebooks/not-a-uuid");
       expect(garbage.status).toBe(404);
     });
 
     it("unfurls for a signed-out visitor with the name but nothing else", async () => {
-      const res = await page(`/notebooks/${liveId}`, false);
+      const res = await page(`/lab-notebooks/${liveId}`, false);
       const html = await res.text();
       expect(res.status).toBe(200);
       expect(html).toContain(`property="og:title" content="${LIVE_NAME}"`);
@@ -223,31 +223,31 @@ describe("Notebook pages", () => {
     });
   });
 
-  describe("links to notebook pages", () => {
-    it("lists notebooks that got a run in the sidebar, but not deleted or empty ones", async () => {
+  describe("links to lab notebook pages", () => {
+    it("lists lab notebooks that got a run in the sidebar, but not deleted or empty ones", async () => {
       const res = await page("/instruments");
       const html = await res.text();
       expect(res.status).toBe(200);
-      expect(html).toContain('href="/notebooks"');
-      expect(html).toContain(`href="/notebooks/${liveId}"`);
-      expect(html).not.toContain(`href="/notebooks/${deletedId}"`);
-      expect(html).not.toContain(`href="/notebooks/${emptyId}"`);
+      expect(html).toContain('href="/lab-notebooks"');
+      expect(html).toContain(`href="/lab-notebooks/${liveId}"`);
+      expect(html).not.toContain(`href="/lab-notebooks/${deletedId}"`);
+      expect(html).not.toContain(`href="/lab-notebooks/${emptyId}"`);
     });
 
-    it("links the Lab Notebook column to the notebook page, with the page itself a click away", async () => {
+    it("links the Lab Notebook column to the lab notebook page, with the page itself a click away", async () => {
       const res = await page(`/instruments/${INSTRUMENT}`);
       const html = await res.text();
       expect(res.status).toBe(200);
-      expect(html).toContain(`href="/notebooks/${liveId}"`);
+      expect(html).toContain(`href="/lab-notebooks/${liveId}"`);
       expect(html).toContain(rowLink(LIVE_NAME));
     });
 
-    it("links the run page's Lab notebooks rows to the notebook page", async () => {
+    it("links the run page's Lab Notebooks rows to the lab notebook page", async () => {
       const res = await page(`/instruments/${INSTRUMENT}/runs/${RUN_ID}`);
       const html = await res.text();
       expect(res.status).toBe(200);
       expectRendered(html);
-      expect(html).toContain(`href="/notebooks/${liveId}"`);
+      expect(html).toContain(`href="/lab-notebooks/${liveId}"`);
       expect(html).toContain(rowLink(LIVE_NAME));
     });
   });

@@ -32,7 +32,7 @@ function defaultOrder(field: NotebookSortField): "asc" | "desc" {
 }
 
 /**
- * A `/notebooks` column header with a menu to sort by that column, the way
+ * A `/lab-notebooks` column header with a menu to sort by that column, the way
  * the runs tables sort by time. Picking an order goes back to page 1.
  */
 export function NotebookSortHeader({

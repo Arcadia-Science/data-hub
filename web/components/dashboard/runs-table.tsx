@@ -152,7 +152,7 @@ export function RunsTable({
                 </TableCell>
                 <TableCell>
                   <NotebookLinksCell
-                    notebooks={row.notebooks}
+                    notebooks={row.lab_notebooks}
                     pageNotebookId={notebookId}
                   />
                 </TableCell>

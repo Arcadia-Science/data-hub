@@ -31,7 +31,7 @@ function NoValue({ label }: { label: string }) {
 }
 
 /**
- * The `/notebooks` table: one row per notebook, whose name opens its page.
+ * The `/lab-notebooks` table: one row per notebook, whose name opens its page.
  * `emptyMessage` is what to say when there are no rows, which depends on the
  * search.
  */
@@ -138,7 +138,7 @@ export function NotebooksTableSkeleton() {
   return (
     <div
       aria-busy="true"
-      aria-label="Loading notebooks"
+      aria-label="Loading lab notebooks"
       className="rounded-lg border bg-background dark:bg-muted"
       role="status"
     >

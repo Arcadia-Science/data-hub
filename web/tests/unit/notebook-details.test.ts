@@ -15,9 +15,9 @@ const NOTION_URL =
   "https://www.notion.so/lab/Heat-stress-day-1-3f2a9c01b7e44d1a8c2f4e5d6a7b8c01";
 
 describe("notebookPageHref", () => {
-  it("points at the notebook's page", () => {
+  it("points at the lab notebook's page", () => {
     expect(notebookPageHref("3f2a9c1e-7b4d-4e0a-9c55-1d2e8f6a7b90")).toBe(
-      "/notebooks/3f2a9c1e-7b4d-4e0a-9c55-1d2e8f6a7b90"
+      "/lab-notebooks/3f2a9c1e-7b4d-4e0a-9c55-1d2e8f6a7b90"
     );
   });
 });
@@ -31,16 +31,16 @@ describe("countLabel", () => {
 });
 
 describe("deleteNotebookMessage", () => {
-  it("says how many runs leave the notebook and that restoring puts them back", () => {
+  it("says how many runs leave the lab notebook and that restoring puts them back", () => {
     expect(deleteNotebookMessage("Growth curves", 12)).toBe(
-      "This takes 12 runs out of “Growth curves”. Restoring the notebook puts them back."
+      "This takes 12 runs out of “Growth curves”. Restoring the lab notebook puts them back."
     );
     expect(deleteNotebookMessage("Growth curves", 1)).toBe(
-      "This takes 1 run out of “Growth curves”. Restoring the notebook puts it back."
+      "This takes 1 run out of “Growth curves”. Restoring the lab notebook puts it back."
     );
   });
 
-  it("says so when the notebook has no runs", () => {
+  it("says so when the lab notebook has no runs", () => {
     expect(deleteNotebookMessage("Scratch", 0)).toBe(
       "“Scratch” has no runs. You can restore it later."
     );
@@ -48,25 +48,25 @@ describe("deleteNotebookMessage", () => {
 });
 
 describe("notebooksEmptyMessage", () => {
-  it("invites the first notebook when there's no search", () => {
-    expect(notebooksEmptyMessage("  ")).toMatch(/^No notebooks yet\./);
+  it("invites the first lab notebook when there's no search", () => {
+    expect(notebooksEmptyMessage("  ")).toMatch(/^No lab notebooks yet\./);
   });
 
-  it("says no notebook has a pasted page", () => {
+  it("says no lab notebook has a pasted page", () => {
     expect(notebooksEmptyMessage(NOTION_URL)).toBe(
-      "No notebook has this page yet. Create one with New notebook."
+      "No lab notebook has this page yet. Create one with New lab notebook."
     );
   });
 
   it("says nothing matched a text search", () => {
     expect(notebooksEmptyMessage("growth")).toBe(
-      "No notebooks match your search."
+      "No lab notebooks match your search."
     );
   });
 });
 
 describe("suggestedNotebookName", () => {
-  it("names a new notebook after its page", () => {
+  it("names a new lab notebook after its page", () => {
     expect(suggestedNotebookName(`  ${NOTION_URL} `)).toBe("Heat stress day 1");
   });
 

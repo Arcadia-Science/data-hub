@@ -25,12 +25,12 @@ export function RestoreNotebookButton({ notebookId }: { notebookId: string }) {
           toast.error(
             error instanceof NotebookRequestError
               ? error.message
-              : "Couldn't restore the notebook. Try again?"
+              : "Couldn't restore the lab notebook. Try again?"
           );
           return;
         }
       }
-      toast.success("Notebook restored");
+      toast.success("Lab notebook restored");
       router.refresh();
     });
   }

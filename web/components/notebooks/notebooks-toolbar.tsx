@@ -16,7 +16,7 @@ const toolbarParams = {
 };
 
 /**
- * The search box and the deleted-notebooks switch above the `/notebooks`
+ * The search box and the deleted-notebooks switch above the `/lab-notebooks`
  * table. Both live in the URL, and a change goes back to page 1.
  */
 export function NotebooksToolbar() {
@@ -36,7 +36,7 @@ export function NotebooksToolbar() {
           className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
         />
         <Input
-          aria-label="Search notebooks"
+          aria-label="Search lab notebooks"
           className="pl-9"
           onChange={(event) => setParams({ q: event.target.value, page: null })}
           placeholder="Search by name or paste a link…"
@@ -52,7 +52,7 @@ export function NotebooksToolbar() {
           }
         />
         <Label className="font-normal" htmlFor={switchId}>
-          Show deleted notebooks
+          Show deleted lab notebooks
         </Label>
       </div>
     </div>

@@ -37,7 +37,7 @@ import {
 } from "@/lib/runs/notebook-requests";
 
 /**
- * The "New notebook" button on `/notebooks` and the dialog it opens: a link
+ * The "New lab notebook" button on `/lab-notebooks` and the dialog it opens: a link
  * to the notebook's page, a name worked out from the link until the person
  * types their own, an optional description, and the viewer as owner unless
  * they untick it. Saving opens the new notebook's page.
@@ -50,12 +50,12 @@ export function NewNotebookDialog() {
       <DialogTrigger asChild>
         <Button className="gap-1.5" type="button">
           <Plus aria-hidden="true" className="size-4" />
-          New notebook
+          New lab notebook
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>New notebook</DialogTitle>
+          <DialogTitle>New lab notebook</DialogTitle>
           <DialogDescription>
             Paste the link to a lab notebook page, such as a Notion page. You
             can add runs to it from any runs table or run page.
@@ -122,9 +122,9 @@ function NewNotebookForm({ onClose }: { onClose: () => void }) {
         description: description.trim() || undefined,
         ownedByMe,
       });
-      toast.success(`Created “${created.notebook.name}”`);
+      toast.success(`Created “${created.lab_notebook.name}”`);
       onClose();
-      router.push(notebookPageHref(created.notebook.id));
+      router.push(notebookPageHref(created.lab_notebook.id));
     } catch (error) {
       setSubmitting(false);
       const taken = pageTakenConflict(error);
@@ -135,7 +135,7 @@ function NewNotebookForm({ onClose }: { onClose: () => void }) {
       setFormError(
         error instanceof NotebookRequestError && error.status === 400
           ? error.message
-          : "Couldn't create the notebook. Try again?"
+          : "Couldn't create the lab notebook. Try again?"
       );
     }
   }
@@ -208,7 +208,7 @@ function NewNotebookForm({ onClose }: { onClose: () => void }) {
           {submitting ? (
             <Loader2 className="animate-spin" data-icon="inline-start" />
           ) : null}
-          Create notebook
+          Create lab notebook
         </Button>
       </DialogFooter>
     </form>

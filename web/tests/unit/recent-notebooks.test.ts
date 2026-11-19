@@ -46,7 +46,7 @@ describe("parseRecentNotebooks", () => {
     ]);
   });
 
-  it("keeps the first of two entries for one notebook", () => {
+  it("keeps the first of two entries for one lab notebook", () => {
     const raw = JSON.stringify([
       visit("a", "New name", 2),
       visit("a", "Old", 1),
@@ -85,7 +85,7 @@ describe("withNotebookVisit", () => {
 });
 
 describe("withoutNotebook", () => {
-  it("takes a notebook off the list and keeps the rest in order", () => {
+  it("takes a lab notebook off the list and keeps the rest in order", () => {
     const list = [visit("a"), visit("b"), visit("c")];
     expect(withoutNotebook(list, "b").map((entry) => entry.notebookId)).toEqual(
       ["a", "c"]
