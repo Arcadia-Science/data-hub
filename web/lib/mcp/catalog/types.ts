@@ -6,7 +6,7 @@ export const MCP_TOOL_GROUPS = {
   runs: "Runs",
   attribution: "Run attribution",
   comments: "Comments",
-  notebook_links: "Lab notebook links",
+  notebooks: "Lab notebooks",
   files: "Files",
   watchers: "Watchers",
   discovery: "Discovery",

@@ -37,15 +37,14 @@ export const parseAsRunStatuses = createParser<RunStatus[]>({
     a.length === b.length && a.every((status, i) => status === b[i]),
 });
 
-// "Lab Notebook" column filter: runs with at least one notebook link, or none.
-export const HAS_NOTEBOOK_LINK_VALUES = ["true", "false"] as const;
+// "Lab Notebook" column filter: runs in at least one notebook or in none
+// (`has_notebook`), or runs in one notebook, by its ID (`notebook_id`). The
+// column's menu sets one of them at a time.
+export const HAS_NOTEBOOK_VALUES = ["true", "false"] as const;
 
-// The rest of the "Lab Notebook" column filter: runs with a link by one name,
-// or with a link whose name contains some text. The column's menu sets one of
-// these or `has_notebook_link` at a time.
-export const notebookLinkNameSearchParams = {
-  notebook_link_name: parseAsString,
-  notebook_link_search: parseAsString,
+export const notebookFilterSearchParams = {
+  has_notebook: parseAsStringLiteral(HAS_NOTEBOOK_VALUES),
+  notebook_id: parseAsString,
 };
 
 // Shared by the dashboard, a member's runs page, and every instrument page.
@@ -87,8 +86,7 @@ export const dashboardSearchParams = {
   // Attribution filter: either a userId or the reserved sentinel
   // "unattributed". Mirrors `instrumentDetailSearchParams.ran_by`.
   ran_by: parseAsString,
-  has_notebook_link: parseAsStringLiteral(HAS_NOTEBOOK_LINK_VALUES),
-  ...notebookLinkNameSearchParams,
+  ...notebookFilterSearchParams,
   page: parseAsInteger.withDefault(1),
   per_page: parseAsInteger.withDefault(10),
   ...runSortSearchParams,
@@ -136,8 +134,7 @@ export const instrumentDetailSearchParams = {
   aunty_ramp_rate: parseAsString,
   // Attribution filter: either a userId or the reserved sentinel "unattributed".
   ran_by: parseAsString,
-  has_notebook_link: parseAsStringLiteral(HAS_NOTEBOOK_LINK_VALUES),
-  ...notebookLinkNameSearchParams,
+  ...notebookFilterSearchParams,
   // Derived run status, multi-select. Empty array = no filter (show all).
   status: parseAsRunStatuses
     .withDefault([])
@@ -237,9 +234,8 @@ export function hasActiveFilters(params: {
   include_deleted: boolean;
   status: RunStatus[];
   ran_by: string | null;
-  has_notebook_link: string | null;
-  notebook_link_name: string | null;
-  notebook_link_search: string | null;
+  has_notebook: string | null;
+  notebook_id: string | null;
 }): boolean {
   return (
     params.search !== "" ||
@@ -249,9 +245,8 @@ export function hasActiveFilters(params: {
     params.include_deleted ||
     params.status.length > 0 ||
     params.ran_by !== null ||
-    params.has_notebook_link !== null ||
-    params.notebook_link_name !== null ||
-    params.notebook_link_search !== null
+    params.has_notebook !== null ||
+    params.notebook_id !== null
   );
 }
 
@@ -279,9 +274,8 @@ export const INSTRUMENT_NULLABLE_FILTER_KEYS = [
   "aunty_temperature",
   "aunty_ramp_rate",
   "ran_by",
-  "has_notebook_link",
-  "notebook_link_name",
-  "notebook_link_search",
+  "has_notebook",
+  "notebook_id",
 ] as const;
 
 type InstrumentFilterParams = {

@@ -30,6 +30,10 @@
       "description": "Instrument runs, comments, attributions, uploads, and search"
     },
     {
+      "name": "Notebooks",
+      "description": "Lab notebooks and the runs in them"
+    },
+    {
       "name": "Files",
       "description": "Run files, downloads, and reprocessing"
     },
@@ -509,11 +513,12 @@
           "comment_count": {
             "type": "integer"
           },
-          "notebook_links": {
+          "notebooks": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/RunNotebookLink"
-            }
+              "$ref": "#/components/schemas/RunNotebook"
+            },
+            "description": "The run's lab notebooks, in the order the run was added to them."
           }
         },
         "required": [
@@ -543,7 +548,7 @@
           "error_messages",
           "attributions",
           "comment_count",
-          "notebook_links"
+          "notebooks"
         ]
       },
       "RunAttribution": {
@@ -572,36 +577,30 @@
           "avatarUrl"
         ]
       },
-      "RunNotebookLink": {
+      "RunNotebook": {
         "type": "object",
         "properties": {
           "id": {
             "type": "string",
             "format": "uuid"
           },
+          "name": {
+            "type": "string"
+          },
           "url": {
             "type": "string",
-            "description": "The link as saved, ready to open."
+            "description": "The notebook's page, ready to open."
           },
           "url_key": {
             "type": "string",
             "description": "Two links with the same key point to the same page. The key ignores http vs. https, `www.`, a trailing slash, the fragment, and tracking parameters. Notion links are keyed by page ID, so a renamed page still matches."
           },
-          "label": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "display_name": {
+          "linked_at": {
             "type": "string",
-            "description": "The label, or a name worked out from the URL when there is none."
+            "format": "date-time",
+            "description": "When the run was added to the notebook."
           },
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "created_by": {
+          "linked_by": {
             "type": [
               "object",
               "null"
@@ -630,58 +629,18 @@
               "avatarUrl"
             ]
           },
-          "created_by_token": {
-            "$ref": "#/components/schemas/TokenActor"
-          },
-          "updated_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "updated_by": {
-            "type": [
-              "object",
-              "null"
-            ],
-            "properties": {
-              "id": {
-                "type": "string"
-              },
-              "displayName": {
-                "type": "string"
-              },
-              "initials": {
-                "type": "string"
-              },
-              "avatarUrl": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              }
-            },
-            "required": [
-              "id",
-              "displayName",
-              "initials",
-              "avatarUrl"
-            ]
-          },
-          "updated_by_token": {
+          "linked_by_token": {
             "$ref": "#/components/schemas/TokenActor"
           }
         },
         "required": [
           "id",
+          "name",
           "url",
           "url_key",
-          "label",
-          "display_name",
-          "created_at",
-          "created_by",
-          "created_by_token",
-          "updated_at",
-          "updated_by",
-          "updated_by_token"
+          "linked_at",
+          "linked_by",
+          "linked_by_token"
         ]
       },
       "TokenActor": {
@@ -814,11 +773,12 @@
               "$ref": "#/components/schemas/RunAttribution"
             }
           },
-          "notebook_links": {
+          "notebooks": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/RunNotebookLink"
-            }
+              "$ref": "#/components/schemas/RunNotebook"
+            },
+            "description": "The run's lab notebooks, in the order the run was added to them."
           },
           "files": {
             "type": "array",
@@ -842,7 +802,7 @@
           "deleted_by_token",
           "metadata",
           "attributions",
-          "notebook_links",
+          "notebooks",
           "files"
         ]
       },
@@ -1296,6 +1256,351 @@
           "token",
           "created_at",
           "edited_at"
+        ]
+      },
+      "Notebook": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "url": {
+            "type": "string",
+            "description": "The notebook's page, ready to open."
+          },
+          "url_key": {
+            "type": "string",
+            "description": "Two links with the same key point to the same page. The key ignores http vs. https, `www.`, a trailing slash, the fragment, and tracking parameters. Notion links are keyed by page ID, so a renamed page still matches."
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "owner": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              },
+              "initials": {
+                "type": "string"
+              },
+              "avatarUrl": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "displayName",
+              "initials",
+              "avatarUrl"
+            ]
+          },
+          "run_count": {
+            "type": "integer",
+            "description": "How many runs are in the notebook. Deleted runs don't count."
+          },
+          "instrument_count": {
+            "type": "integer",
+            "description": "How many instruments those runs come from."
+          },
+          "last_run_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the newest run started: its acquired time, or its created time when that is missing. Null when the notebook has no runs."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_by": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              },
+              "initials": {
+                "type": "string"
+              },
+              "avatarUrl": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "displayName",
+              "initials",
+              "avatarUrl"
+            ]
+          },
+          "created_by_token": {
+            "$ref": "#/components/schemas/TokenActor"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_by": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              },
+              "initials": {
+                "type": "string"
+              },
+              "avatarUrl": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "displayName",
+              "initials",
+              "avatarUrl"
+            ]
+          },
+          "updated_by_token": {
+            "$ref": "#/components/schemas/TokenActor"
+          },
+          "deleted_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "deleted_by": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              },
+              "initials": {
+                "type": "string"
+              },
+              "avatarUrl": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "displayName",
+              "initials",
+              "avatarUrl"
+            ]
+          },
+          "deleted_by_token": {
+            "$ref": "#/components/schemas/TokenActor"
+          }
+        },
+        "required": [
+          "id",
+          "url",
+          "url_key",
+          "name",
+          "description",
+          "owner",
+          "run_count",
+          "instrument_count",
+          "last_run_at",
+          "created_at",
+          "created_by",
+          "created_by_token",
+          "updated_at",
+          "updated_by",
+          "updated_by_token",
+          "deleted_at",
+          "deleted_by",
+          "deleted_by_token"
+        ]
+      },
+      "NotebookRunsAdded": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "notebook_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "instrument_id": {
+                  "type": "string"
+                },
+                "run_id": {
+                  "type": "string",
+                  "description": "The run ID as sent, without spaces at the start or end."
+                },
+                "outcome": {
+                  "type": "string",
+                  "enum": [
+                    "added",
+                    "already_in_notebook",
+                    "run_deleted",
+                    "limit_reached",
+                    "not_found"
+                  ]
+                }
+              },
+              "required": [
+                "instrument_id",
+                "run_id",
+                "outcome"
+              ]
+            },
+            "description": "One outcome per run, in the order sent. `already_in_notebook`: the run was in the notebook already. `run_deleted`: the run is deleted. `limit_reached`: the run is already in 20 notebooks, the most allowed, counting deleted ones. `not_found`: there is no such run."
+          },
+          "counts": {
+            "type": "object",
+            "properties": {
+              "added": {
+                "type": "integer"
+              },
+              "already_in_notebook": {
+                "type": "integer"
+              },
+              "run_deleted": {
+                "type": "integer"
+              },
+              "limit_reached": {
+                "type": "integer"
+              },
+              "not_found": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "added",
+              "already_in_notebook",
+              "run_deleted",
+              "limit_reached",
+              "not_found"
+            ]
+          }
+        },
+        "required": [
+          "notebook_id",
+          "results",
+          "counts"
+        ],
+        "description": "What happened to each run sent in `runs`. Null when none were."
+      },
+      "NotebookRunsRemoved": {
+        "type": "object",
+        "properties": {
+          "notebook_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "instrument_id": {
+                  "type": "string"
+                },
+                "run_id": {
+                  "type": "string",
+                  "description": "The run ID as sent, without spaces at the start or end."
+                },
+                "outcome": {
+                  "type": "string",
+                  "enum": [
+                    "removed",
+                    "not_in_notebook",
+                    "run_deleted",
+                    "not_found"
+                  ]
+                }
+              },
+              "required": [
+                "instrument_id",
+                "run_id",
+                "outcome"
+              ]
+            },
+            "description": "One outcome per run, in the order sent. `not_in_notebook`: the run wasn't in the notebook. `run_deleted`: the run is deleted. `not_found`: there is no such run."
+          },
+          "counts": {
+            "type": "object",
+            "properties": {
+              "removed": {
+                "type": "integer"
+              },
+              "not_in_notebook": {
+                "type": "integer"
+              },
+              "run_deleted": {
+                "type": "integer"
+              },
+              "not_found": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "removed",
+              "not_in_notebook",
+              "run_deleted",
+              "not_found"
+            ]
+          }
+        },
+        "required": [
+          "notebook_id",
+          "results",
+          "counts"
         ]
       },
       "FileDetail": {
@@ -2381,31 +2686,21 @@
                 "true",
                 "false"
               ],
-              "description": "`true` lists only runs with at least one lab notebook link; `false` lists only runs with none."
+              "description": "`true` lists only runs in at least one lab notebook; `false` lists only runs in none. Deleted notebooks don't count."
             },
             "required": false,
-            "description": "`true` lists only runs with at least one lab notebook link; `false` lists only runs with none.",
-            "name": "has_notebook_link",
+            "description": "`true` lists only runs in at least one lab notebook; `false` lists only runs in none. Deleted notebooks don't count.",
+            "name": "has_notebook",
             "in": "query"
           },
           {
             "schema": {
               "type": "string",
-              "description": "Lists only runs with a lab notebook link named exactly this, matching case. A link's name is its `display_name`: its label, or a name worked out from its URL when it has no label. A blank value is ignored."
+              "description": "Lists only runs in this lab notebook. A deleted notebook still lists its runs. A blank value is ignored, and an ID that matches no notebook matches no runs."
             },
             "required": false,
-            "description": "Lists only runs with a lab notebook link named exactly this, matching case. A link's name is its `display_name`: its label, or a name worked out from its URL when it has no label. A blank value is ignored.",
-            "name": "notebook_link_name",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Lists only runs with a lab notebook link whose name (`display_name`) contains this text, ignoring case. With `notebook_link_name`, one link has to match both. A blank value is ignored."
-            },
-            "required": false,
-            "description": "Lists only runs with a lab notebook link whose name (`display_name`) contains this text, ignoring case. With `notebook_link_name`, one link has to match both. A blank value is ignored.",
-            "name": "notebook_link_search",
+            "description": "Lists only runs in this lab notebook. A deleted notebook still lists its runs. A blank value is ignored, and an ID that matches no notebook matches no runs.",
+            "name": "notebook_id",
             "in": "query"
           },
           {
@@ -2710,31 +3005,21 @@
                 "true",
                 "false"
               ],
-              "description": "`true` lists only runs with at least one lab notebook link; `false` lists only runs with none."
+              "description": "`true` lists only runs in at least one lab notebook; `false` lists only runs in none. Deleted notebooks don't count."
             },
             "required": false,
-            "description": "`true` lists only runs with at least one lab notebook link; `false` lists only runs with none.",
-            "name": "has_notebook_link",
+            "description": "`true` lists only runs in at least one lab notebook; `false` lists only runs in none. Deleted notebooks don't count.",
+            "name": "has_notebook",
             "in": "query"
           },
           {
             "schema": {
               "type": "string",
-              "description": "Lists only runs with a lab notebook link named exactly this, matching case. A link's name is its `display_name`: its label, or a name worked out from its URL when it has no label. A blank value is ignored."
+              "description": "Lists only runs in this lab notebook. A deleted notebook still lists its runs. A blank value is ignored, and an ID that matches no notebook matches no runs."
             },
             "required": false,
-            "description": "Lists only runs with a lab notebook link named exactly this, matching case. A link's name is its `display_name`: its label, or a name worked out from its URL when it has no label. A blank value is ignored.",
-            "name": "notebook_link_name",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Lists only runs with a lab notebook link whose name (`display_name`) contains this text, ignoring case. With `notebook_link_name`, one link has to match both. A blank value is ignored."
-            },
-            "required": false,
-            "description": "Lists only runs with a lab notebook link whose name (`display_name`) contains this text, ignoring case. With `notebook_link_name`, one link has to match both. A blank value is ignored.",
-            "name": "notebook_link_search",
+            "description": "Lists only runs in this lab notebook. A deleted notebook still lists its runs. A blank value is ignored, and an ID that matches no notebook matches no runs.",
+            "name": "notebook_id",
             "in": "query"
           },
           {
@@ -4994,13 +5279,13 @@
         }
       }
     },
-    "/instruments/{instrumentId}/runs/{runId}/notebook-links": {
+    "/notebooks": {
       "get": {
-        "operationId": "listRunNotebookLinks",
-        "summary": "List a run's lab notebook links",
-        "description": "Requires scope `runs:read`. Oldest first.",
+        "operationId": "listNotebooks",
+        "summary": "List lab notebooks",
+        "description": "Requires scope `runs:read`. To list a notebook's runs, filter a run list by `notebook_id`.",
         "tags": [
-          "Runs"
+          "Notebooks"
         ],
         "security": [
           {
@@ -5011,41 +5296,130 @@
           {
             "schema": {
               "type": "string",
-              "example": "plate-reader"
+              "description": "Text in a notebook's name, description, or link, ignoring case. A pasted link, with or without `https://`, matches only the notebook for that page."
             },
-            "required": true,
-            "name": "instrumentId",
-            "in": "path"
+            "required": false,
+            "description": "Text in a notebook's name, description, or link, ignoring case. A pasted link, with or without `https://`, matches only the notebook for that page.",
+            "name": "q",
+            "in": "query"
           },
           {
             "schema": {
               "type": "string",
-              "description": "The run ID. Spaces at the start or end are ignored.",
-              "example": "run-2026-001"
+              "description": "Lists only notebooks this user owns."
             },
-            "required": true,
-            "description": "The run ID. Spaces at the start or end are ignored.",
-            "name": "runId",
-            "in": "path"
+            "required": false,
+            "description": "Lists only notebooks this user owns.",
+            "name": "owner_id",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ],
+              "description": "`true` lists deleted notebooks too."
+            },
+            "required": false,
+            "description": "`true` lists deleted notebooks too.",
+            "name": "include_deleted",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "last_run",
+                "name",
+                "run_count",
+                "created"
+              ],
+              "description": "`last_run` (default): when the newest run started. `name`, `run_count`, or `created`."
+            },
+            "required": false,
+            "description": "`last_run` (default): when the newest run started. `name`, `run_count`, or `created`.",
+            "name": "sort",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "description": "Defaults to `asc` for `name` and `desc` for the others."
+            },
+            "required": false,
+            "description": "Defaults to `asc` for `name` and `desc` for the others.",
+            "name": "order",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "required": false,
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "description": "Defaults to 50."
+            },
+            "required": false,
+            "description": "Defaults to 50.",
+            "name": "per_page",
+            "in": "query"
           }
         ],
         "responses": {
           "200": {
-            "description": "Notebook links.",
+            "description": "Paginated notebooks.",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "notebook_links": {
+                    "data": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/components/schemas/RunNotebookLink"
+                        "$ref": "#/components/schemas/Notebook"
                       }
+                    },
+                    "pagination": {
+                      "type": "object",
+                      "properties": {
+                        "page": {
+                          "type": "integer"
+                        },
+                        "per_page": {
+                          "type": "integer"
+                        },
+                        "total": {
+                          "type": "integer"
+                        },
+                        "total_pages": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "page",
+                        "per_page",
+                        "total",
+                        "total_pages"
+                      ]
                     }
                   },
                   "required": [
-                    "notebook_links"
+                    "data",
+                    "pagination"
                   ]
                 }
               }
@@ -5104,37 +5478,15 @@
         }
       },
       "post": {
-        "operationId": "createRunNotebookLink",
-        "summary": "Add a lab notebook link to a run",
-        "description": "Requires scope `runs:link`. Returns 409 when the run is deleted, already links to the same page (`details.link_id` names that link), or has the most links allowed. A token that registered a watcher may act only on instruments whose active watcher it registered, and gets 403 for any other.",
+        "operationId": "createNotebook",
+        "summary": "Create a lab notebook",
+        "description": "Requires scope `notebooks:write`. A notebook is one page, such as a Notion page. Send `runs` to add runs in the same request; each one gets its own outcome, as in `POST /notebooks/{notebookId}/runs`. Returns 409 when another notebook already has the page, deleted ones included: `details.notebook_id` names that notebook and `details.deleted` says whether it is deleted. Restore a deleted one instead. Returns 400 when `owner_id` names no user. A token that registered a watcher gets 403. It may only add its own instrument's runs to a notebook and remove them.",
         "tags": [
-          "Runs"
+          "Notebooks"
         ],
         "security": [
           {
             "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "example": "plate-reader"
-            },
-            "required": true,
-            "name": "instrumentId",
-            "in": "path"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "The run ID. Spaces at the start or end are ignored.",
-              "example": "run-2026-001"
-            },
-            "required": true,
-            "description": "The run ID. Spaces at the start or end are ignored.",
-            "name": "runId",
-            "in": "path"
           }
         ],
         "requestBody": {
@@ -5148,17 +5500,53 @@
                     "minLength": 1,
                     "maxLength": 2048
                   },
-                  "label": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "description": {
                     "type": [
                       "string",
                       "null"
                     ],
-                    "maxLength": 200,
-                    "description": "Optional name for the link. Blank or null means none."
+                    "maxLength": 2000,
+                    "description": "Optional. Blank or null means none."
+                  },
+                  "owner_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "minLength": 1,
+                    "description": "The user who owns the notebook. Left out or null, it has no owner. `\"me\"` means the signed-in person, so a token can't use it."
+                  },
+                  "runs": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "instrument_id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "run_id": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "instrument_id",
+                        "run_id"
+                      ]
+                    },
+                    "maxItems": 100,
+                    "description": "Runs to add as the notebook is created, at most 100. They can belong to different instruments."
                   }
                 },
                 "required": [
-                  "url"
+                  "url",
+                  "name"
                 ]
               }
             }
@@ -5166,11 +5554,23 @@
         },
         "responses": {
           "201": {
-            "description": "Created notebook link.",
+            "description": "Created notebook.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RunNotebookLink"
+                  "type": "object",
+                  "properties": {
+                    "notebook": {
+                      "$ref": "#/components/schemas/Notebook"
+                    },
+                    "runs": {
+                      "$ref": "#/components/schemas/NotebookRunsAdded"
+                    }
+                  },
+                  "required": [
+                    "notebook",
+                    "runs"
+                  ]
                 }
               }
             }
@@ -5228,13 +5628,13 @@
         }
       }
     },
-    "/instruments/{instrumentId}/runs/{runId}/notebook-links/{linkId}": {
-      "patch": {
-        "operationId": "updateRunNotebookLink",
-        "summary": "Edit a lab notebook link",
-        "description": "Requires scope `runs:link`. Anyone with the scope can edit any link, not only their own. A token that registered a watcher may act only on instruments whose active watcher it registered, and gets 403 for any other.",
+    "/notebooks/{notebookId}": {
+      "get": {
+        "operationId": "getNotebook",
+        "summary": "Get a lab notebook",
+        "description": "Requires scope `runs:read`. Deleted notebooks are returned too, with `deleted_at` set.",
         "tags": [
-          "Runs"
+          "Notebooks"
         ],
         "security": [
           {
@@ -5245,23 +5645,90 @@
           {
             "schema": {
               "type": "string",
-              "example": "plate-reader"
+              "format": "uuid",
+              "example": "9b2c4e1a-7d3f-4a5b-8c6d-0e1f2a3b4c5d"
             },
             "required": true,
-            "name": "instrumentId",
+            "name": "notebookId",
             "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Notebook.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Notebook"
+                }
+              }
+            }
           },
+          "400": {
+            "description": "Invalid request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token does not have the required scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested resource was not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with resource state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateNotebook",
+        "summary": "Edit a lab notebook",
+        "description": "Requires scope `notebooks:write`. Fields left out stay as they are. Returns 409 when another notebook already has the page, deleted ones included: `details.notebook_id` names that notebook and `details.deleted` says whether it is deleted. Restore a deleted one instead. Returns 400 when `owner_id` names no user, and 409 when the notebook is deleted. A token that registered a watcher gets 403. It may only add its own instrument's runs to a notebook and remove them.",
+        "tags": [
+          "Notebooks"
+        ],
+        "security": [
           {
-            "schema": {
-              "type": "string",
-              "description": "The run ID. Spaces at the start or end are ignored.",
-              "example": "run-2026-001"
-            },
-            "required": true,
-            "description": "The run ID. Spaces at the start or end are ignored.",
-            "name": "runId",
-            "in": "path"
-          },
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
           {
             "schema": {
               "type": "string",
@@ -5269,7 +5736,7 @@
               "example": "9b2c4e1a-7d3f-4a5b-8c6d-0e1f2a3b4c5d"
             },
             "required": true,
-            "name": "linkId",
+            "name": "notebookId",
             "in": "path"
           }
         ],
@@ -5279,18 +5746,32 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "url": {
+                  "name": {
                     "type": "string",
                     "minLength": 1,
-                    "maxLength": 2048
+                    "maxLength": 200
                   },
-                  "label": {
+                  "description": {
                     "type": [
                       "string",
                       "null"
                     ],
-                    "maxLength": 200,
-                    "description": "Null or blank clears the label. Leave it out to keep it."
+                    "maxLength": 2000,
+                    "description": "Null or blank clears it. Leave it out to keep it."
+                  },
+                  "owner_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "minLength": 1,
+                    "description": "Null clears the owner. Leave it out to keep it. `\"me\"` means the signed-in person, so a token can't use it."
+                  },
+                  "url": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2048,
+                    "description": "A new link. It must point to a page no other notebook has, deleted ones included."
                   }
                 }
               }
@@ -5299,11 +5780,11 @@
         },
         "responses": {
           "200": {
-            "description": "Updated notebook link.",
+            "description": "Updated notebook.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RunNotebookLink"
+                  "$ref": "#/components/schemas/Notebook"
                 }
               }
             }
@@ -5361,11 +5842,11 @@
         }
       },
       "delete": {
-        "operationId": "deleteRunNotebookLink",
-        "summary": "Remove a lab notebook link",
-        "description": "Requires scope `runs:link`. The link is deleted for good. Removing it again returns 404. A token that registered a watcher may act only on instruments whose active watcher it registered, and gets 403 for any other.",
+        "operationId": "deleteNotebook",
+        "summary": "Delete a lab notebook",
+        "description": "Requires scope `notebooks:write`. Marks the notebook deleted. Its runs keep their place in it, so restoring the notebook brings them back. Until then, runs don't list it and `has_notebook` doesn't count it. Returns 409 when it is already deleted. A token that registered a watcher gets 403. It may only add its own instrument's runs to a notebook and remove them.",
         "tags": [
-          "Runs"
+          "Notebooks"
         ],
         "security": [
           {
@@ -5376,23 +5857,92 @@
           {
             "schema": {
               "type": "string",
-              "example": "plate-reader"
+              "format": "uuid",
+              "example": "9b2c4e1a-7d3f-4a5b-8c6d-0e1f2a3b4c5d"
             },
             "required": true,
-            "name": "instrumentId",
+            "name": "notebookId",
             "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted notebook.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Notebook"
+                }
+              }
+            }
           },
+          "400": {
+            "description": "Invalid request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token does not have the required scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested resource was not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with resource state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/notebooks/{notebookId}/restore": {
+      "post": {
+        "operationId": "restoreNotebook",
+        "summary": "Restore a lab notebook",
+        "description": "Requires scope `notebooks:write`. Brings back a deleted notebook with the runs it had. Returns 409 when it isn't deleted. A token that registered a watcher gets 403. It may only add its own instrument's runs to a notebook and remove them.",
+        "tags": [
+          "Notebooks"
+        ],
+        "security": [
           {
-            "schema": {
-              "type": "string",
-              "description": "The run ID. Spaces at the start or end are ignored.",
-              "example": "run-2026-001"
-            },
-            "required": true,
-            "description": "The run ID. Spaces at the start or end are ignored.",
-            "name": "runId",
-            "in": "path"
-          },
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
           {
             "schema": {
               "type": "string",
@@ -5400,33 +5950,17 @@
               "example": "9b2c4e1a-7d3f-4a5b-8c6d-0e1f2a3b4c5d"
             },
             "required": true,
-            "name": "linkId",
+            "name": "notebookId",
             "in": "path"
           }
         ],
         "responses": {
           "200": {
-            "description": "Removed notebook link.",
+            "description": "Restored notebook.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string",
-                      "format": "uuid"
-                    },
-                    "deleted": {
-                      "type": "boolean",
-                      "enum": [
-                        true
-                      ]
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "deleted"
-                  ]
+                  "$ref": "#/components/schemas/Notebook"
                 }
               }
             }
@@ -5484,17 +6018,29 @@
         }
       }
     },
-    "/instrument-runs/notebook-links": {
+    "/notebooks/{notebookId}/runs": {
       "post": {
-        "operationId": "bulkAddRunNotebookLink",
-        "summary": "Add a lab notebook link to many runs",
-        "description": "Requires scope `runs:link`. Reports an outcome for each run instead of failing the whole request. The exception is a token that registered a watcher: it gets 403 for the whole request when any listed run is on an instrument whose active watcher it didn't register.",
+        "operationId": "addRunsToNotebook",
+        "summary": "Add runs to a lab notebook",
+        "description": "Requires scope `notebooks:write`. Reports an outcome for each run instead of failing the whole request. Runs already in the notebook stay as they are. Returns 409 when the notebook is deleted. A token that registered a watcher gets 403 for the whole request when any listed run is on an instrument whose active watcher it didn't register.",
         "tags": [
-          "Runs"
+          "Notebooks"
         ],
         "security": [
           {
             "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "example": "9b2c4e1a-7d3f-4a5b-8c6d-0e1f2a3b4c5d"
+            },
+            "required": true,
+            "name": "notebookId",
+            "in": "path"
           }
         ],
         "requestBody": {
@@ -5524,25 +6070,11 @@
                     },
                     "minItems": 1,
                     "maxItems": 100,
-                    "description": "The runs to change, at most 100. They can belong to different instruments."
-                  },
-                  "url": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 2048
-                  },
-                  "label": {
-                    "type": [
-                      "string",
-                      "null"
-                    ],
-                    "maxLength": 200,
-                    "description": "Optional name for the new links. Runs that already link to the page keep their own label."
+                    "description": "The runs to add or remove, at most 100. They can belong to different instruments."
                   }
                 },
                 "required": [
-                  "runs",
-                  "url"
+                  "runs"
                 ]
               }
             }
@@ -5554,93 +6086,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "url": {
-                      "type": "string"
-                    },
-                    "url_key": {
-                      "type": "string"
-                    },
-                    "results": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "instrument_id": {
-                            "type": "string"
-                          },
-                          "run_id": {
-                            "type": "string"
-                          },
-                          "outcome": {
-                            "type": "string",
-                            "enum": [
-                              "added",
-                              "already_linked",
-                              "run_deleted",
-                              "limit_reached",
-                              "not_found"
-                            ],
-                            "description": "`already_linked`: the run already links to the same page and was left as it was. `limit_reached`: the run already has the most links allowed."
-                          },
-                          "link": {
-                            "allOf": [
-                              {
-                                "$ref": "#/components/schemas/RunNotebookLink"
-                              },
-                              {
-                                "type": [
-                                  "object",
-                                  "null"
-                                ],
-                                "description": "The run's link to the page, for `added` and `already_linked`."
-                              }
-                            ]
-                          }
-                        },
-                        "required": [
-                          "instrument_id",
-                          "run_id",
-                          "outcome",
-                          "link"
-                        ]
-                      }
-                    },
-                    "counts": {
-                      "type": "object",
-                      "properties": {
-                        "added": {
-                          "type": "integer"
-                        },
-                        "already_linked": {
-                          "type": "integer"
-                        },
-                        "run_deleted": {
-                          "type": "integer"
-                        },
-                        "limit_reached": {
-                          "type": "integer"
-                        },
-                        "not_found": {
-                          "type": "integer"
-                        }
-                      },
-                      "required": [
-                        "added",
-                        "already_linked",
-                        "run_deleted",
-                        "limit_reached",
-                        "not_found"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "url",
-                    "url_key",
-                    "results",
-                    "counts"
-                  ]
+                  "$ref": "#/components/schemas/NotebookRunsAdded"
                 }
               }
             }
@@ -5698,17 +6144,29 @@
         }
       }
     },
-    "/instrument-runs/notebook-links/remove": {
+    "/notebooks/{notebookId}/runs/remove": {
       "post": {
-        "operationId": "bulkRemoveRunNotebookLinks",
-        "summary": "Remove lab notebook links from many runs",
-        "description": "Requires scope `runs:link`. Reports an outcome for each run instead of failing the whole request. The exception is a token that registered a watcher: it gets 403 for the whole request when any listed run is on an instrument whose active watcher it didn't register.",
+        "operationId": "removeRunsFromNotebook",
+        "summary": "Remove runs from a lab notebook",
+        "description": "Requires scope `notebooks:write`. Reports an outcome for each run instead of failing the whole request. The notebook stays, even with no runs left. Returns 409 when the notebook is deleted. A POST rather than a DELETE with a body, which some proxies and clients drop. A token that registered a watcher gets 403 for the whole request when any listed run is on an instrument whose active watcher it didn't register.",
         "tags": [
-          "Runs"
+          "Notebooks"
         ],
         "security": [
           {
             "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "example": "9b2c4e1a-7d3f-4a5b-8c6d-0e1f2a3b4c5d"
+            },
+            "required": true,
+            "name": "notebookId",
+            "in": "path"
           }
         ],
         "requestBody": {
@@ -5738,23 +6196,11 @@
                     },
                     "minItems": 1,
                     "maxItems": 100,
-                    "description": "The runs to change, at most 100. They can belong to different instruments."
-                  },
-                  "urls": {
-                    "type": "array",
-                    "items": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 2048
-                    },
-                    "minItems": 1,
-                    "maxItems": 20,
-                    "description": "Links to remove. Each removes any link to the same page, so a copy of the URL with a different query string or `www.` still matches."
+                    "description": "The runs to add or remove, at most 100. They can belong to different instruments."
                   }
                 },
                 "required": [
-                  "runs",
-                  "urls"
+                  "runs"
                 ]
               }
             }
@@ -5766,75 +6212,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "url_keys": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      }
-                    },
-                    "results": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "instrument_id": {
-                            "type": "string"
-                          },
-                          "run_id": {
-                            "type": "string"
-                          },
-                          "outcome": {
-                            "type": "string",
-                            "enum": [
-                              "removed",
-                              "not_linked",
-                              "run_deleted",
-                              "not_found"
-                            ]
-                          },
-                          "removed": {
-                            "type": "integer"
-                          }
-                        },
-                        "required": [
-                          "instrument_id",
-                          "run_id",
-                          "outcome",
-                          "removed"
-                        ]
-                      }
-                    },
-                    "counts": {
-                      "type": "object",
-                      "properties": {
-                        "removed": {
-                          "type": "integer"
-                        },
-                        "not_linked": {
-                          "type": "integer"
-                        },
-                        "run_deleted": {
-                          "type": "integer"
-                        },
-                        "not_found": {
-                          "type": "integer"
-                        }
-                      },
-                      "required": [
-                        "removed",
-                        "not_linked",
-                        "run_deleted",
-                        "not_found"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "url_keys",
-                    "results",
-                    "counts"
-                  ]
+                  "$ref": "#/components/schemas/NotebookRunsRemoved"
                 }
               }
             }

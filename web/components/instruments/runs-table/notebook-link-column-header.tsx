@@ -13,16 +13,16 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  type NotebookLinkFilter,
-  type NotebookLinkNameOptions,
-  notebookLinkFilterParams,
-  readNotebookLinkFilter,
-} from "@/lib/notebook-links/name-filter";
+import type { NotebookFilterOption } from "@/lib/api/notebooks";
 import { preloader } from "@/lib/preload";
 import {
+  type NotebookFilter,
+  notebookFilterParams,
+  readNotebookFilter,
+} from "@/lib/runs/notebook-filter";
+import {
   instrumentDetailSearchParams,
-  notebookLinkNameSearchParams,
+  notebookFilterSearchParams,
 } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
 import { FILTERED_COLUMN_HEADER_CLASS_NAME } from "./filterable-column-header";
@@ -30,8 +30,7 @@ import { FILTERED_COLUMN_HEADER_CLASS_NAME } from "./filterable-column-header";
 // The dashboard's params map uses the same parsers for these keys, so one map
 // serves every runs table.
 const filterParams = {
-  has_notebook_link: instrumentDetailSearchParams.has_notebook_link,
-  ...notebookLinkNameSearchParams,
+  ...notebookFilterSearchParams,
   page: instrumentDetailSearchParams.page,
 };
 
@@ -53,13 +52,12 @@ const NotebookLinkFilterList = dynamic(loadNotebookLinkFilterList, {
 
 /**
  * The "Lab Notebook" column header: a menu that filters the runs table to
- * runs with or without a link, or with a link by a name the viewer picks or
- * searches for.
+ * runs in any notebook, in none, or in one notebook the viewer picks.
  */
 export function NotebookLinkColumnHeader({
-  names,
+  options,
 }: {
-  names: NotebookLinkNameOptions;
+  options: NotebookFilterOption[];
 }) {
   const { startTransition } = useTablePending();
   const [params, setParams] = useQueryStates(filterParams, {
@@ -68,12 +66,12 @@ export function NotebookLinkColumnHeader({
     startTransition,
   });
   const [open, setOpen] = useState(false);
-  const filter = readNotebookLinkFilter(params);
+  const filter = readNotebookFilter(params);
   const filtered = filter.kind !== "all";
 
-  function select(next: NotebookLinkFilter) {
+  function select(next: NotebookFilter) {
     setOpen(false);
-    setParams({ ...notebookLinkFilterParams(next), page: 1 });
+    setParams({ ...notebookFilterParams(next), page: 1 });
   }
 
   return (
@@ -102,7 +100,7 @@ export function NotebookLinkColumnHeader({
           <NotebookLinkFilterList
             filter={filter}
             onSelect={select}
-            options={names}
+            options={options}
           />
         </LoadErrorBoundary>
       </PopoverContent>

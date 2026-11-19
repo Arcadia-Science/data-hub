@@ -15,9 +15,8 @@ const noDashboardFilters = {
   include_deleted: false,
   status: [],
   ran_by: null,
-  has_notebook_link: null,
-  notebook_link_name: null,
-  notebook_link_search: null,
+  has_notebook: null,
+  notebook_id: null,
 };
 
 describe("hasActiveFilters", () => {
@@ -40,16 +39,13 @@ describe("hasActiveFilters", () => {
       true
     );
     expect(
-      hasActiveFilters({ ...noDashboardFilters, has_notebook_link: "false" })
+      hasActiveFilters({ ...noDashboardFilters, has_notebook: "false" })
     ).toBe(true);
     expect(
       hasActiveFilters({
         ...noDashboardFilters,
-        notebook_link_name: "Growth curves",
+        notebook_id: "00000000-0000-4000-8000-000000000001",
       })
-    ).toBe(true);
-    expect(
-      hasActiveFilters({ ...noDashboardFilters, notebook_link_search: "grow" })
     ).toBe(true);
     expect(
       hasActiveFilters({ ...noDashboardFilters, date_from: "2026-10-01" })

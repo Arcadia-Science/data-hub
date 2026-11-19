@@ -41,7 +41,7 @@ const BASE: RunRow = {
   error_messages: [],
   comment_count: 0,
   attributions: [],
-  notebook_links: [],
+  notebooks: [],
 };
 
 function row(overrides: Partial<RunRow>): RunRow {
@@ -202,5 +202,48 @@ describe("runRowToRef unclaimed", () => {
       runRowToRef(row({ deleted_at: new Date("2025-02-01T00:00:00.000Z") }))
         .unclaimed
     ).toBe(false);
+  });
+});
+
+// The bulk dialogs name and count notebooks across the selection from these
+// refs, so they need each notebook's ID, name, and link.
+describe("runRowToRef notebooks", () => {
+  it("keeps each notebook's ID, name, and link, in the row's order", () => {
+    const ref = runRowToRef(
+      row({
+        notebooks: [
+          {
+            id: "00000000-0000-4000-8000-0000000000a1",
+            name: "Heat stress day 1",
+            url: "https://notes.example.com/heat-stress-day-1",
+            url_key: "notes.example.com/heat-stress-day-1",
+            linked_at: "2025-01-02T00:00:00.000Z",
+            linked_by: null,
+            linked_by_token: null,
+          },
+          {
+            id: "00000000-0000-4000-8000-0000000000a2",
+            name: "Growth curves",
+            url: "https://notes.example.com/growth-curves",
+            url_key: "notes.example.com/growth-curves",
+            linked_at: "2025-01-03T00:00:00.000Z",
+            linked_by: null,
+            linked_by_token: null,
+          },
+        ],
+      })
+    );
+    expect(ref.notebooks).toEqual([
+      {
+        id: "00000000-0000-4000-8000-0000000000a1",
+        name: "Heat stress day 1",
+        url: "https://notes.example.com/heat-stress-day-1",
+      },
+      {
+        id: "00000000-0000-4000-8000-0000000000a2",
+        name: "Growth curves",
+        url: "https://notes.example.com/growth-curves",
+      },
+    ]);
   });
 });

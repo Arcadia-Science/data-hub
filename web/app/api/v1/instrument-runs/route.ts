@@ -3,9 +3,9 @@ import { authorize } from "@/lib/api/auth";
 import { buildRunListQuery } from "@/lib/api/instrument-runs";
 import { parseRunMetadataFilters } from "@/lib/api/run-metadata-filters";
 import {
-  parseHasNotebookLinkParam,
+  parseHasNotebookParam,
   parseIntParam,
-  parseNotebookLinkNameParams,
+  parseNotebookIdParam,
   parseRunStatusParam,
 } from "@/lib/api/validators";
 
@@ -44,13 +44,8 @@ export async function GET(request: NextRequest) {
     }),
     includeDeleted: searchParams.get("include_deleted") === "true",
     ranBy: searchParams.get("ran_by") ?? undefined,
-    hasNotebookLink: parseHasNotebookLinkParam(
-      searchParams.get("has_notebook_link")
-    ),
-    ...parseNotebookLinkNameParams({
-      name: searchParams.get("notebook_link_name"),
-      search: searchParams.get("notebook_link_search"),
-    }),
+    hasNotebook: parseHasNotebookParam(searchParams.get("has_notebook")),
+    ...parseNotebookIdParam(searchParams.get("notebook_id")),
     statuses: parseRunStatusParam(searchParams),
     ...parseRunMetadataFilters(searchParams),
   });

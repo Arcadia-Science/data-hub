@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  blankToNull,
   NOTEBOOK_LINK_URL_MAX_LENGTH,
-  notebookLinkDisplayName,
-  notebookLinkLabelSchema,
+  NOTEBOOK_NAME_MAX_LENGTH,
+  notebookDescriptionSchema,
   notebookLinkUrlSchema,
+  notebookNameFromUrl,
+  notebookNameSchema,
   notebookSearchKey,
   notebookUrlKey,
   parseNotebookLinkUrl,
@@ -113,48 +116,44 @@ describe("notebookSearchKey", () => {
   });
 });
 
-describe("notebookLinkDisplayName", () => {
-  it("prefers the label", () => {
+describe("notebookNameFromUrl", () => {
+  it("names a page after its title, without the ID or the site", () => {
     expect(
-      notebookLinkDisplayName("https://example.com/a", "  Day 1 heat stress ")
-    ).toBe("Day 1 heat stress");
-  });
-
-  it("names a Notion page after its title, without the ID", () => {
-    expect(
-      notebookLinkDisplayName(
-        `https://www.notion.so/arcadia/Osmotic-and-H2O2-stress-${NOTION_ID}`,
-        null
+      notebookNameFromUrl(
+        `https://www.notion.so/arcadia/Osmotic-and-H2O2-stress-${NOTION_ID}`
       )
-    ).toBe("notion.so › Osmotic and H2O2 stress");
+    ).toBe("Osmotic and H2O2 stress");
   });
 
   it("falls back to the site when the path is only an ID or empty", () => {
-    expect(
-      notebookLinkDisplayName(`https://app.notion.com/p/${NOTION_ID}`, null)
-    ).toBe("app.notion.com");
-    expect(notebookLinkDisplayName("https://example.com/", "")).toBe(
-      "example.com"
+    expect(notebookNameFromUrl(`https://app.notion.com/p/${NOTION_ID}`)).toBe(
+      "app.notion.com"
     );
+    expect(notebookNameFromUrl("https://example.com/")).toBe("example.com");
   });
 
   it("strips UUIDs, decodes the segment, and skips edit or view", () => {
     expect(
-      notebookLinkDisplayName(
-        `https://eln.example.com/entries/Gel%20ladder_run-${NOTION_UUID}/edit`,
-        null
+      notebookNameFromUrl(
+        `https://eln.example.com/entries/Gel%20ladder_run-${NOTION_UUID}/edit`
       )
-    ).toBe("eln.example.com › Gel ladder run");
+    ).toBe("Gel ladder run");
   });
 
   it("keeps short hex-looking words", () => {
-    expect(
-      notebookLinkDisplayName("https://example.com/notes/cafe-beef", null)
-    ).toBe("example.com › cafe beef");
+    expect(notebookNameFromUrl("https://example.com/notes/cafe-beef")).toBe(
+      "cafe beef"
+    );
+  });
+
+  it("keeps a segment that isn't valid percent-encoding as it is", () => {
+    expect(notebookNameFromUrl("https://example.com/notes/100%25-done")).toBe(
+      "100% done"
+    );
   });
 });
 
-describe("notebookLinkUrlSchema and notebookLinkLabelSchema", () => {
+describe("notebook form schemas", () => {
   it("accepts and trims an http link", () => {
     expect(notebookLinkUrlSchema.parse(" https://example.com/a ")).toBe(
       "https://example.com/a"
@@ -167,9 +166,20 @@ describe("notebookLinkUrlSchema and notebookLinkLabelSchema", () => {
     ).toBe(false);
   });
 
-  it("turns a blank label into null and rejects line breaks", () => {
-    expect(notebookLinkLabelSchema.parse("   ")).toBeNull();
-    expect(notebookLinkLabelSchema.parse(" Day 1 ")).toBe("Day 1");
-    expect(notebookLinkLabelSchema.safeParse("Day\n1").success).toBe(false);
+  it("requires a one-line name and trims it", () => {
+    expect(notebookNameSchema.parse(" Day 1 ")).toBe("Day 1");
+    expect(notebookNameSchema.safeParse("   ").success).toBe(false);
+    expect(notebookNameSchema.safeParse("Day\n1").success).toBe(false);
+    expect(
+      notebookNameSchema.safeParse("a".repeat(NOTEBOOK_NAME_MAX_LENGTH + 1))
+        .success
+    ).toBe(false);
+  });
+
+  it("treats a blank description as none", () => {
+    expect(blankToNull(notebookDescriptionSchema.parse("   "))).toBeNull();
+    expect(
+      blankToNull(notebookDescriptionSchema.parse(" Two lines\nok "))
+    ).toBe("Two lines\nok");
   });
 });

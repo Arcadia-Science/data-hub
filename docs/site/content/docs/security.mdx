@@ -42,7 +42,7 @@ Revoking someone’s access on the Google side, by removing them from your Works
 
 | Role | Can do |
 | --- | --- |
-| **Member** | Sign in to the dashboard; view instruments, runs, files, and the token list; claim runs; comment, and edit or delete their own comments; add, edit, and remove lab notebook links; delete and restore runs; send feedback and see the reports they sent. Cannot create or revoke tokens, confirm or update instruments, or manage other users. |
+| **Member** | Sign in to the dashboard; view instruments, runs, files, and the token list; claim runs; comment, and edit or delete their own comments; create, edit, delete, and restore lab notebooks, and add runs to them or remove runs from them; delete and restore runs; send feedback and see the reports they sent. Cannot create or revoke tokens, confirm or update instruments, or manage other users. |
 | **Admin** | Everything members can, plus: confirm and update instruments; change watcher configs; create and revoke tokens; promote and demote other users; delete any run comment; review every feedback report; manage **Settings → Integrations**; and set watcher release versions. |
 
 The first admin is bootstrapped from the `ADMIN_EMAILS` environment variable
@@ -76,7 +76,7 @@ Because a token isn’t a person, three things need a signed-in person instead: 
 
 The routes that the watcher and the Lambda call work the other way round. They accept only tokens and return `401 Unauthorized` to a browser session, so a signed-in member can’t act as a watcher. These routes cover watcher registration and heartbeats, upload links, file updates, run creation and updates, and instrument creation.
 
-A token that registered a watcher can change runs and files only on instruments whose current watcher it registered. It gets `403 Forbidden` if it tries to change another instrument's runs, uploads, files, comments, notebook links or download archives, or to send a notification about another instrument's run. It also can't rename, retype, retire or confirm any instrument, or remove or reconfigure any watcher, its own included, because the watcher never does. A token whose watchers were all deregistered can't change any instrument's runs or files until it registers a watcher again. The Lambda's token registered no watcher, so it works on every instrument. These limits cover changes only. Reads follow the token's scopes, and the **Watcher** preset has no scope that reads runs or files. Once an older token has registered a watcher, its `*` or coarse `:write` scope doesn't let it read them either; see [Token scopes](#token-scopes).
+A token that registered a watcher can change runs and files only on instruments whose current watcher it registered. It gets `403 Forbidden` if it tries to change another instrument's runs, uploads, files, comments, lab notebook memberships or download archives, or to send a notification about another instrument's run. It also can't rename, retype, retire or confirm any instrument, or remove or reconfigure any watcher, its own included, because the watcher never does. A token whose watchers were all deregistered can't change any instrument's runs or files until it registers a watcher again. The Lambda's token registered no watcher, so it works on every instrument. These limits cover changes only. Reads follow the token's scopes, and the **Watcher** preset has no scope that reads runs or files. Once an older token has registered a watcher, its `*` or coarse `:write` scope doesn't let it read them either; see [Token scopes](#token-scopes).
 
 Tokens keep working when the admin who created them leaves. Revoke a departing person’s tokens yourself; see [When someone leaves](/docs/manage-tokens#when-someone-leaves).
 
@@ -88,14 +88,14 @@ Every personal access token carries an array of permission **scopes**. A token-a
 | --- | --- |
 | `instruments:read` | Read instruments, dashboard status, and each instrument’s watcher state and file patterns. Where the watcher runs (hostname, operating system, version, watch folder, and other instruments on the same computer) needs `watchers:read` too |
 | `instruments:write` | Create instruments and edit their configuration |
-| `runs:read` | Read and search runs, their files, comments, attributions, and lab notebook links |
+| `runs:read` | Read and search runs, their files, comments, attributions, and lab notebooks |
 | `runs:create` | Create run records |
 | `runs:update` | Update run metadata |
 | `runs:delete` | Soft-delete and restore runs |
 | `runs:reprocess` | Re-run the processing workflow for a run |
 | `runs:upload` | Request presigned S3 URLs to upload files to a run |
 | `runs:comment` | Post run comments as this token, and edit or delete the ones it posted |
-| `runs:link` | Add, edit, and remove lab notebook links on runs |
+| `notebooks:write` | Create, edit, delete, and restore lab notebooks, and add runs to them or remove runs from them. Tokens made before this scope was renamed from `runs:link` keep it |
 | `files:read` | Read file metadata and download files and run archives |
 | `files:create` | Register file records against a run. Each record must point at its own file in that run's folder in S3 |
 | `files:update` | Update file metadata and upload state |

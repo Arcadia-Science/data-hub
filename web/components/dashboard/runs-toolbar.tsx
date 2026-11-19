@@ -91,9 +91,8 @@ export function RunsToolbar({
       include_deleted: false,
       status: [],
       ran_by: null,
-      has_notebook_link: null,
-      notebook_link_name: null,
-      notebook_link_search: null,
+      has_notebook: null,
+      notebook_id: null,
       page: 1,
     });
   }

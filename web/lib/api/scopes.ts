@@ -13,7 +13,7 @@ export const ALL_SCOPES = [
   "runs:reprocess",
   "runs:upload",
   "runs:comment",
-  "runs:link",
+  "notebooks:write",
   "files:read",
   "files:create",
   "files:update",
@@ -58,6 +58,16 @@ export const LEGACY_SCOPE_EXPANSIONS: Record<string, readonly Scope[]> = {
   "watchers:write": ["watchers:report", "watchers:admin"],
 };
 
+// Scopes that were renamed. A stored token can carry the old name until the
+// migration that renames it has run, so `hasScope` reads it as the new one.
+// Unlike the legacy scopes above, a renamed scope keeps its full meaning on a
+// token that registered a watcher.
+// - `runs:link` became `notebooks:write` when notebooks got their own table
+//   (migration 0072_lab_notebooks).
+export const RENAMED_SCOPES: Record<string, Scope> = {
+  "runs:link": "notebooks:write",
+};
+
 // Shape required by `hasScope`. We intentionally avoid importing the full
 // `AuthResult` from `@/lib/api/auth` to break a circular dependency —
 // scopes.ts is imported by auth.ts callers.
@@ -67,6 +77,9 @@ interface AuthLike {
 
 export function hasScope(auth: AuthLike, required: Scope): boolean {
   if (auth.scopes.includes("*") || auth.scopes.includes(required)) {
+    return true;
+  }
+  if (auth.scopes.some((held) => RENAMED_SCOPES[held] === required)) {
     return true;
   }
   // A held legacy `:write` covers the fine scope it used to imply.

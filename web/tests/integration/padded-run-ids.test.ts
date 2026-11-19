@@ -305,6 +305,31 @@ describe("Run IDs with spaces at the start or end", () => {
     expect(restoredBody.deleted_at).toBeNull();
   });
 
+  it("adds the run to a lab notebook once, by either spelling", async () => {
+    const created = await api("/api/v1/notebooks", {
+      method: "POST",
+      token,
+      body: { url: "https://example.com/eln/padded", name: "Padded runs" },
+    });
+    expect(created.status).toBe(201);
+    const notebookId = (await created.json()).notebook.id;
+
+    const res = await api(`/api/v1/notebooks/${notebookId}/runs`, {
+      method: "POST",
+      token,
+      body: {
+        runs: SPELLINGS.map(([, runId]) => ({
+          instrument_id: instrumentId,
+          run_id: runId,
+        })),
+      },
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json()).results).toEqual([
+      { instrument_id: instrumentId, run_id: storedRunId, outcome: "added" },
+    ]);
+  });
+
   it("sends comment notifications with the stored run ID", async () => {
     const { userId: recipientId } = await seedTestUser();
     const db = getTestDb();
@@ -375,8 +400,6 @@ describe("Run IDs with spaces at the start or end", () => {
     ["POST", "/request-upload-url"],
     ["POST", "/request-upload-all"],
     ["POST", "/comments"],
-    ["GET", "/notebook-links"],
-    ["POST", "/notebook-links"],
   ])("%s %s returns 404 for an ID that is only spaces", async (method, suffix) => {
     const res = await api(runPath("   ", suffix), {
       method,

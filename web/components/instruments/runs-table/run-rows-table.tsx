@@ -7,7 +7,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type { NotebookLinkNameOptions } from "@/lib/notebook-links/name-filter";
+import type { NotebookFilterOption } from "@/lib/api/notebooks";
 import { runRowToRef } from "@/lib/runs/row-actions";
 import { cn, formatBytes } from "@/lib/utils";
 
@@ -41,20 +41,20 @@ export interface MetadataColumn {
 /**
  * The runs table every instrument shares: a checkbox, the run ID, file count
  * and size, then the instrument's own metadata columns, then who ran it, its
- * lab notebook links, and when. An instrument's table passes only its metadata columns, so a new
+ * lab notebooks, and when. An instrument's table passes only its metadata columns, so a new
  * shared column or a fix to row selection happens here once.
  */
 export function RunRowsTable({
   columns = [],
   data,
   instrumentId,
-  notebookLinkNames,
+  notebookOptions,
   ranByOptions,
 }: {
   columns?: MetadataColumn[];
   data: RunRow[];
   instrumentId: string;
-  notebookLinkNames: NotebookLinkNameOptions;
+  notebookOptions: NotebookFilterOption[];
   ranByOptions: { value: string; label: string }[];
 }) {
   const runRefs = data.map(runRowToRef);
@@ -86,7 +86,7 @@ export function RunRowsTable({
             />
           </TableHead>
           <TableHead>
-            <NotebookLinkColumnHeader names={notebookLinkNames} />
+            <NotebookLinkColumnHeader options={notebookOptions} />
           </TableHead>
           <RunTimeHeads />
         </TableRow>
@@ -124,7 +124,7 @@ export function RunRowsTable({
                 />
               </TableCell>
               <TableCell>
-                <NotebookLinksCell links={row.notebook_links} />
+                <NotebookLinksCell notebooks={row.notebooks} />
               </TableCell>
               <RunTimeCells row={row} />
             </TableRow>

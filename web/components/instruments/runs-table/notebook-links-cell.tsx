@@ -9,52 +9,57 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import type { NotebookLinkWire } from "@/lib/api/run-notebook-link-wire";
-import { parseNotebookLinkNameParams } from "@/lib/api/validators";
-import { matchingLinkFirst } from "@/lib/notebook-links/name-filter";
-import { notebookLinkNameSearchParams } from "@/lib/search-params";
+import type { RunNotebookWire } from "@/lib/api/notebook-wire";
+import {
+  matchingNotebookFirst,
+  readNotebookFilter,
+} from "@/lib/runs/notebook-filter";
+import { notebookFilterSearchParams } from "@/lib/search-params";
 
 /**
- * A run's lab notebook links in a runs table: the first link by name, and a
- * "+N" button that lists them all when the run has more than one. While the
- * column is filtered by a link name, the link that matches it comes first.
+ * The lab notebooks a run is in, in a runs table: the first one by name, and
+ * a "+N" button that lists them all when the run is in more than one. While
+ * the column is filtered to one notebook, that notebook comes first. A name
+ * opens the notebook's page.
  */
-export function NotebookLinksCell({ links }: { links: NotebookLinkWire[] }) {
-  const [params] = useQueryStates(notebookLinkNameSearchParams);
-  const { notebookLinkName, notebookLinkSearch } = parseNotebookLinkNameParams({
-    name: params.notebook_link_name,
-    search: params.notebook_link_search,
-  });
-  const [first, ...rest] = matchingLinkFirst(links, {
-    name: notebookLinkName,
-    search: notebookLinkSearch,
-  });
+export function NotebookLinksCell({
+  notebooks,
+}: {
+  notebooks: RunNotebookWire[];
+}) {
+  const [params] = useQueryStates(notebookFilterSearchParams);
+  const filter = readNotebookFilter(params);
+  const ordered = matchingNotebookFirst(
+    notebooks,
+    filter.kind === "notebook" ? filter.id : null
+  );
+  const [first, ...rest] = ordered;
   if (!first) {
     return (
       <span className="text-muted-foreground text-sm">
         <span aria-hidden="true">—</span>
-        <span className="sr-only">No lab notebook links</span>
+        <span className="sr-only">In no lab notebook</span>
       </span>
     );
   }
 
   return (
     <div className="flex max-w-56 items-center gap-1">
-      <TruncatedTooltip text={first.display_name}>
+      <TruncatedTooltip text={first.name}>
         <a
           className="relative z-10 truncate rounded-sm text-sm underline-offset-2 hover:underline focus-visible:underline focus-visible:outline-none"
           href={first.url}
           rel="noopener noreferrer"
           target="_blank"
         >
-          {first.display_name}
+          {first.name}
         </a>
       </TruncatedTooltip>
       {rest.length > 0 ? (
         <Popover>
           <PopoverTrigger asChild>
             <Button
-              aria-label={`Show all ${links.length} lab notebook links`}
+              aria-label={`Show all ${notebooks.length} lab notebooks`}
               className="relative z-10 h-6 shrink-0 px-1.5 text-muted-foreground text-xs tabular-nums"
               size="sm"
               type="button"
@@ -65,20 +70,20 @@ export function NotebookLinksCell({ links }: { links: NotebookLinkWire[] }) {
           </PopoverTrigger>
           <PopoverContent align="start" className="w-72 p-1">
             <ul className="flex flex-col">
-              {links.map((link) => (
-                <li key={link.id}>
+              {ordered.map((notebook) => (
+                <li key={notebook.id}>
                   <a
                     className="flex items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
-                    href={link.url}
+                    href={notebook.url}
                     rel="noopener noreferrer"
                     target="_blank"
-                    title={link.url}
+                    title={notebook.url}
                   >
                     <ExternalLink
                       aria-hidden="true"
                       className="size-3.5 shrink-0 text-muted-foreground"
                     />
-                    <span className="truncate">{link.display_name}</span>
+                    <span className="truncate">{notebook.name}</span>
                   </a>
                 </li>
               ))}

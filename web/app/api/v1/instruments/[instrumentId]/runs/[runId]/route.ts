@@ -14,12 +14,12 @@ import {
   lookupRunByNaturalKey,
   parseAcquiredAt,
 } from "@/lib/api/instrument-runs";
+import { runNotebookToWire } from "@/lib/api/notebook-wire";
+import { listNotebooksForRun } from "@/lib/api/notebooks";
 import { patchRunBody, readJsonBody } from "@/lib/api/openapi";
 import { recordDetectedFiles } from "@/lib/api/run-file-identity";
 import { readRunIdParam } from "@/lib/api/run-id-param";
 import { softDeleteRun } from "@/lib/api/run-lifecycle";
-import { notebookLinkToWire } from "@/lib/api/run-notebook-link-wire";
-import { listNotebookLinksForRun } from "@/lib/api/run-notebook-links";
 import { watcherClientFrom } from "@/lib/api/watcher-compat";
 import { enforceWatcherTokenInstrument } from "@/lib/api/watchers";
 import { db } from "@/lib/db";
@@ -55,13 +55,13 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
     );
   }
 
-  const [fileRows, notebookLinks] = await Promise.all([
+  const [fileRows, runNotebooks] = await Promise.all([
     db
       .select()
       .from(files)
       .where(eq(files.instrumentRunId, run.id))
       .orderBy(files.createdAt),
-    listNotebookLinksForRun(run.id),
+    listNotebooksForRun(run.id),
   ]);
 
   // Generate short-lived pre-signed URLs only for files that have been
@@ -110,7 +110,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
     deleted_by_token: actorToken(run.deletedBy),
     metadata: run.metadata,
     attributions: run.attributions,
-    notebook_links: notebookLinks.map(notebookLinkToWire),
+    notebooks: runNotebooks.map(runNotebookToWire),
     files: filesWithUrls,
   });
 }

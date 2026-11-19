@@ -6,7 +6,7 @@ import { registerDiscoveryTools } from "@/lib/mcp/tools/discovery";
 import { registerDocsTools } from "@/lib/mcp/tools/docs";
 import { registerFileTools } from "@/lib/mcp/tools/files";
 import { registerInstrumentTools } from "@/lib/mcp/tools/instruments";
-import { registerNotebookLinkTools } from "@/lib/mcp/tools/notebook-links";
+import { registerNotebookTools } from "@/lib/mcp/tools/notebooks";
 import { registerReportViewTools } from "@/lib/mcp/tools/report-views";
 import { registerRunTools } from "@/lib/mcp/tools/runs";
 import { registerWatcherTools } from "@/lib/mcp/tools/watchers";
@@ -14,7 +14,7 @@ import { registerWatcherTools } from "@/lib/mcp/tools/watchers";
 export function registerTools(server: McpServer) {
   registerInstrumentTools(server);
   registerRunTools(server);
-  registerNotebookLinkTools(server);
+  registerNotebookTools(server);
   registerReportViewTools(server);
   registerDiscoveryTools(server);
   registerDocsTools(server);

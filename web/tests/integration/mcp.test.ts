@@ -14,7 +14,7 @@ import {
 } from "@/tests/integration/helpers";
 
 /** Bump when adding/removing an MCP tool so the change shows up in review. */
-const EXPECTED_MCP_TOOL_COUNT = 46;
+const EXPECTED_MCP_TOOL_COUNT = 50;
 
 function jsonRpc(method: string, params: unknown = {}, id = 1) {
   return {
@@ -189,7 +189,8 @@ describe("MCP Server (HTTP)", () => {
     expect(toolNames).toContain("claim_run");
     expect(toolNames).toContain("unclaim_run");
     expect(toolNames).toContain("list_run_attributors");
-    expect(toolNames).toContain("list_notebook_link_names");
+    expect(toolNames).toContain("list_notebooks");
+    expect(toolNames).toContain("add_runs_to_notebook");
     expect(toolNames).toContain("global_search");
     expect(toolNames).toContain("get_me");
     expect(toolNames).toContain("list_run_comments");
@@ -1383,196 +1384,233 @@ describe("MCP Server (HTTP)", () => {
     expect(res.status).toBe(401);
   });
 
-  // ---- Lab notebook links ---------------------------------------------------
-  // The link tools act as the signed-in user. Another user can change the
-  // same link, and get_run, search_runs, and global_search report it.
+  // ---- Lab notebooks --------------------------------------------------------
+  // The notebook tools act as the signed-in user. Another user can change the
+  // same notebook, and get_run, search_runs, and global_search report it.
 
-  it("add/update/remove_notebook_link round-trip and show up in the run tools", async () => {
+  function parseResult(result: { content: Array<{ text: string }> }) {
+    return JSON.parse(result.content[0].text);
+  }
+
+  async function runNotebookIds(): Promise<string[]> {
+    const run = parseResult(await callTool("get_run", { instrumentId, runId }));
+    return run.notebooks.map((notebook: { id: string }) => notebook.id);
+  }
+
+  it("create_notebook, add and remove runs, and the run tools list the notebook", async () => {
     const pageId = "0123456789abcdef0123456789abcdef";
-    const add = await callTool("add_notebook_link", {
+    const create = await callTool("create_notebook", {
+      url: `https://www.notion.so/lab/Heat-stress-${pageId}`,
+      name: "Heat stress",
       instrumentId,
       runIds: [runId, "mcp-missing-run"],
-      url: `https://www.notion.so/lab/Heat-stress-${pageId}`,
-      label: "Heat stress",
       userId: "spoofed-user",
     });
-    expect(add.isError).toBeFalsy();
-    const added = JSON.parse(add.content[0].text);
-    expect(added.counts).toMatchObject({ added: 1, not_found: 1 });
-    const link = added.results[0].link;
-    expect(link.created_by.id).toBe(userId);
+    expect(create.isError).toBeFalsy();
+    const created = parseResult(create);
+    expect(created.runs.counts).toMatchObject({ added: 1, not_found: 1 });
+    const notebook = created.notebook;
+    expect(notebook.created_by.id).toBe(userId);
+    // The API and MCP leave the owner empty unless the caller sets one.
+    expect(notebook.owner).toBeNull();
+    expect(notebook.run_count).toBe(1);
 
-    const run = JSON.parse(
-      (await callTool("get_run", { instrumentId, runId })).content[0].text
-    );
-    expect(run.notebookLinks.map((l: { id: string }) => l.id)).toEqual([
-      link.id,
+    const run = parseResult(await callTool("get_run", { instrumentId, runId }));
+    expect(run).not.toHaveProperty("notebookLinks");
+    expect(run.notebooks).toEqual([
+      expect.objectContaining({ id: notebook.id, name: "Heat stress" }),
     ]);
 
-    const update = await callTool(
-      "update_notebook_link",
-      { instrumentId, runId, linkId: link.id, label: null },
-      tokenB
-    );
-    expect(update.isError).toBeFalsy();
-    const updated = JSON.parse(update.content[0].text);
-    expect(updated.label).toBeNull();
-    expect(updated.display_name).toBe("notion.so › Heat stress");
-    expect(updated.created_by.id).toBe(userId);
-    expect(updated.updated_by.id).not.toBe(userId);
-
-    const linked = JSON.parse(
-      (
-        await callTool("search_runs", {
-          instrumentId,
-          hasNotebookLink: true,
-        })
-      ).content[0].text
+    const linked = parseResult(
+      await callTool("search_runs", { instrumentId, hasNotebook: true })
     );
     expect(linked.data.map((r: { run_id: string }) => r.run_id)).toEqual([
       runId,
     ]);
-    expect(linked.data[0].notebook_links).toHaveLength(1);
+    expect(linked.data[0].notebooks).toHaveLength(1);
 
-    const found = JSON.parse(
-      (
-        await callTool("global_search", {
-          query: `notion.so/Renamed-${pageId}?pvs=4`,
-          scope: "runs",
-        })
-      ).content[0].text
+    const found = parseResult(
+      await callTool("global_search", {
+        query: `notion.so/Renamed-${pageId}?pvs=4`,
+        scope: "runs",
+      })
     );
     expect(found.runs[0]).toMatchObject({
       runId,
       matchReason: "notebook_link",
+      matchedNotebook: { id: notebook.id, name: "Heat stress" },
     });
 
-    const remove = await callTool("remove_notebook_link", {
+    const listed = parseResult(
+      await callTool("list_notebooks", { query: `notion.so/${pageId}` })
+    );
+    expect(listed.data.map((n: { id: string }) => n.id)).toEqual([notebook.id]);
+
+    // The same page in another form already has this notebook.
+    const again = await callTool("create_notebook", {
+      url: `http://notion.so/${pageId}`,
+      name: "Heat stress again",
+    });
+    expect(again.isError).toBe(true);
+    expect(again.content[0].text).toContain(notebook.id);
+    expect(again.content[0].text).toContain("add_runs_to_notebook");
+
+    const update = await callTool(
+      "update_notebook",
+      { notebookId: notebook.id, name: "Heat stress day 1", ownerId: "me" },
+      tokenB
+    );
+    expect(update.isError).toBeFalsy();
+    const updated = parseResult(update);
+    expect(updated.name).toBe("Heat stress day 1");
+    expect(updated.created_by.id).toBe(userId);
+    expect(updated.updated_by.id).not.toBe(userId);
+    expect(updated.owner.id).toBe(updated.updated_by.id);
+
+    const remove = await callTool("remove_runs_from_notebook", {
+      notebookId: notebook.id,
       instrumentId,
       runIds: [runId],
-      url: `http://notion.so/${pageId}`,
     });
     expect(remove.isError).toBeFalsy();
-    expect(JSON.parse(remove.content[0].text).counts.removed).toBe(1);
+    expect(parseResult(remove).counts.removed).toBe(1);
 
-    const unlinked = JSON.parse(
-      (
-        await callTool("search_runs", {
-          instrumentId,
-          hasNotebookLink: true,
-        })
-      ).content[0].text
+    const unlinked = parseResult(
+      await callTool("search_runs", { instrumentId, hasNotebook: true })
     );
     expect(unlinked.data).toHaveLength(0);
+    // A notebook whose last run is removed stays.
+    const kept = parseResult(
+      await callTool("get_notebook", { notebookId: notebook.id })
+    );
+    expect(kept).toMatchObject({ run_count: 0, deleted_at: null });
   });
 
-  it("update_notebook_link reports a duplicate link by its ID", async () => {
-    const add = JSON.parse(
-      (
-        await callTool("add_notebook_link", {
-          instrumentId,
-          runIds: [runId],
-          url: "https://example.com/eln/one",
-        })
-      ).content[0].text
-    );
-    const second = JSON.parse(
-      (
-        await callTool("add_notebook_link", {
-          instrumentId,
-          runIds: [runId],
-          url: "https://example.com/eln/two",
-        })
-      ).content[0].text
-    );
-    const clash = await callTool("update_notebook_link", {
-      instrumentId,
-      runId,
-      linkId: second.results[0].link.id,
-      url: "https://www.example.com/eln/one/",
-    });
-    expect(clash.isError).toBe(true);
-    expect(clash.content[0].text).toContain(add.results[0].link.id);
+  it("delete_notebook hides it from runs and restore_notebook brings it back", async () => {
+    const url = "https://example.com/eln/delete-me";
+    const notebook = parseResult(
+      await callTool("create_notebook", {
+        url,
+        name: "Delete me",
+        instrumentId,
+        runIds: [runId],
+      })
+    ).notebook;
+    expect(await runNotebookIds()).toEqual([notebook.id]);
 
-    await callTool("remove_notebook_link", {
+    const del = await callTool("delete_notebook", { notebookId: notebook.id });
+    expect(del.isError).toBeFalsy();
+    expect(parseResult(del).deleted_by.id).toBe(userId);
+    expect(await runNotebookIds()).toEqual([]);
+
+    const live = parseResult(
+      await callTool("list_notebooks", { query: "Delete me" })
+    );
+    expect(live.data).toHaveLength(0);
+    const all = parseResult(
+      await callTool("list_notebooks", {
+        query: "Delete me",
+        includeDeleted: true,
+      })
+    );
+    expect(all.data.map((n: { id: string }) => n.id)).toEqual([notebook.id]);
+
+    const create = await callTool("create_notebook", { url, name: "Again" });
+    expect(create.isError).toBe(true);
+    expect(create.content[0].text).toContain(notebook.id);
+    expect(create.content[0].text).toContain("restore_notebook");
+
+    const add = await callTool("add_runs_to_notebook", {
+      notebookId: notebook.id,
       instrumentId,
       runIds: [runId],
-      url: "https://example.com/eln/one",
     });
-    await callTool("remove_notebook_link", {
+    expect(add.isError).toBe(true);
+
+    const restore = await callTool("restore_notebook", {
+      notebookId: notebook.id,
+    });
+    expect(restore.isError).toBeFalsy();
+    expect(parseResult(restore).deleted_at).toBeNull();
+    expect(await runNotebookIds()).toEqual([notebook.id]);
+
+    await callTool("remove_runs_from_notebook", {
+      notebookId: notebook.id,
       instrumentId,
       runIds: [runId],
-      url: "https://example.com/eln/two",
     });
   });
 
-  it("search_runs filters by a link's name, and list_notebook_link_names counts them", async () => {
-    const namesInstrument = "mcp-link-names";
+  it("search_runs lists a notebook's runs on every instrument, and list_notebooks filters by owner", async () => {
+    const otherInstrument = "mcp-notebook-other";
     const db = getTestDb();
     await db.insert(schema.instruments).values({
-      id: namesInstrument,
-      displayName: "MCP Link Names",
+      id: otherInstrument,
+      displayName: "MCP Notebook Other",
       status: "active",
     });
     await db.insert(schema.instrumentRuns).values(
-      ["names-a", "names-b", "names-c"].map((id) => ({
-        instrumentId: namesInstrument,
+      ["other-a", "other-b"].map((id) => ({
+        instrumentId: otherInstrument,
         runId: id,
         source: "lambda" as const,
       }))
     );
-    const add = async (runIds: string[], url: string, label?: string) => {
-      const result = await callTool("add_notebook_link", {
-        instrumentId: namesInstrument,
-        runIds,
-        url,
-        label,
-      });
-      expect(result.isError).toBeFalsy();
-    };
-    await add(
-      ["names-a", "names-b"],
-      "https://example.com/eln/1",
-      "Growth curve method"
-    );
-    await add(["names-c"], "https://example.com/eln/yeast-growth");
 
-    const names = JSON.parse(
-      (
-        await callTool("list_notebook_link_names", {
-          instrumentId: namesInstrument,
-        })
-      ).content[0].text
+    const create = await callTool("create_notebook", {
+      url: "https://example.com/eln/yeast-growth",
+      name: "Yeast growth",
+      description: "Two instruments",
+      ownerId: "me",
+      instrumentId,
+      runIds: [runId],
+    });
+    expect(create.isError).toBeFalsy();
+    const notebook = parseResult(create).notebook;
+    expect(notebook.owner.id).toBe(userId);
+
+    const add = await callTool("add_runs_to_notebook", {
+      notebookId: notebook.id,
+      instrumentId: otherInstrument,
+      runIds: ["other-a", "other-b", "other-a"],
+    });
+    expect(add.isError).toBeFalsy();
+    expect(parseResult(add).counts.added).toBe(2);
+
+    const runs = parseResult(
+      await callTool("search_runs", { notebookId: notebook.id })
     );
-    expect(names).toEqual({
-      names: [
-        { name: "Growth curve method", runCount: 2 },
-        { name: "example.com › yeast growth", runCount: 1 },
-      ],
+    expect(runs.data.map((r: { run_id: string }) => r.run_id).sort()).toEqual([
+      "mcp-test-run",
+      "other-a",
+      "other-b",
+    ]);
+
+    const detail = parseResult(
+      await callTool("get_notebook", { notebookId: notebook.id })
+    );
+    expect(detail).toMatchObject({
+      name: "Yeast growth",
+      description: "Two instruments",
+      run_count: 3,
+      instrument_count: 2,
     });
 
-    const runIds = async (args: Record<string, unknown>) => {
-      const result = await callTool("search_runs", {
-        instrumentId: namesInstrument,
-        ...args,
-      });
-      expect(result.isError).toBeFalsy();
-      return JSON.parse(result.content[0].text)
-        .data.map((run: { run_id: string }) => run.run_id)
-        .sort();
-    };
-    expect(await runIds({ notebookLinkName: "Growth curve method" })).toEqual([
-      "names-a",
-      "names-b",
-    ]);
-    expect(await runIds({ notebookLinkName: "growth curve method" })).toEqual(
-      []
+    const mine = parseResult(
+      await callTool("list_notebooks", { ownerId: "me" })
     );
-    expect(await runIds({ notebookLinkSearch: "GROWTH" })).toEqual([
-      "names-a",
-      "names-b",
-      "names-c",
-    ]);
-    expect(await runIds({ notebookLinkSearch: "yeast" })).toEqual(["names-c"]);
+    expect(mine.data.map((n: { id: string }) => n.id)).toEqual([notebook.id]);
+    const theirs = parseResult(
+      await callTool("list_notebooks", { ownerId: "me" }, tokenB)
+    );
+    expect(theirs.data.map((n: { id: string }) => n.id)).not.toContain(
+      notebook.id
+    );
+
+    await callTool("remove_runs_from_notebook", {
+      notebookId: notebook.id,
+      instrumentId,
+      runIds: [runId],
+    });
   });
 });

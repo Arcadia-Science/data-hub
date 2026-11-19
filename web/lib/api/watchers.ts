@@ -326,8 +326,9 @@ export function enforceWatcherTokenArchiveJob(
 
 /**
  * Returns a 403 with `message` when a token that ever registered a watcher
- * calls an admin route: changing an instrument, or removing or reconfiguring
- * a watcher. Returns null otherwise. Sessions are not limited here. See
+ * calls an admin route: changing an instrument, removing or reconfiguring a
+ * watcher, or creating, editing, deleting, or restoring a lab notebook.
+ * Returns null otherwise. Sessions are not limited here. See
  * `tokenMayAdminister` for the rule.
  */
 export async function refuseWatcherTokenAdmin(

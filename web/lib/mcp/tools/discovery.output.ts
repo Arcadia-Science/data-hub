@@ -32,12 +32,12 @@ const searchRunResultSchema = z.object({
     "ran_by",
   ]),
   matchedFilename: z.string().nullable(),
-  // Set when `matchReason` is "notebook_link".
-  matchedNotebookLink: z
+  // The lab notebook that matched. Set when `matchReason` is "notebook_link".
+  matchedNotebook: z
     .object({
+      id: z.string(),
+      name: z.string(),
       url: z.string(),
-      label: z.string().nullable(),
-      displayName: z.string(),
     })
     .nullable(),
 });

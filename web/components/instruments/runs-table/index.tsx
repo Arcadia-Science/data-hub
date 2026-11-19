@@ -1,7 +1,7 @@
 import { SearchX } from "lucide-react";
 import { EmptyState } from "@/components/empty-state";
 import type { RunListRow } from "@/lib/api/instrument-runs";
-import type { NotebookLinkNameOptions } from "@/lib/notebook-links/name-filter";
+import type { NotebookFilterOption } from "@/lib/api/notebooks";
 import { cn } from "@/lib/utils";
 import { RunsTableFooter } from "./runs-table-footer";
 
@@ -23,7 +23,7 @@ export interface RanByOption {
 export interface RunsTableProps {
   data: RunRow[];
   instrumentId: string;
-  notebookLinkNames: NotebookLinkNameOptions;
+  notebookOptions: NotebookFilterOption[];
   ranByOptions: RanByOption[];
 }
 

@@ -125,13 +125,10 @@ export function SearchRunRow({
           </span>
         </span>
       ) : null}
-      {result.matchReason === "notebook_link" && result.matchedNotebookLink ? (
+      {result.matchReason === "notebook_link" && result.matchedNotebook ? (
         <span className="block truncate text-muted-foreground text-xs">
           Lab notebook:{" "}
-          <Highlight
-            query={query}
-            text={result.matchedNotebookLink.displayName}
-          />
+          <Highlight query={query} text={result.matchedNotebook.name} />
         </span>
       ) : null}
     </ResultRowShell>
