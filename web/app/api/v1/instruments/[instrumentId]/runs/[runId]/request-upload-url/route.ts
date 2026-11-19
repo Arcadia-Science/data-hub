@@ -17,6 +17,7 @@ import {
   type IncomingRunFile,
   resolveRunFiles,
 } from "@/lib/api/run-file-identity";
+import { runFileS3Key } from "@/lib/api/run-file-location";
 import { readRunIdParam } from "@/lib/api/run-id-param";
 import { touchRuns } from "@/lib/api/touch-runs";
 import { WATCHER_FEATURES, watcherClientFrom } from "@/lib/api/watcher-compat";
@@ -157,7 +158,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
 
   const storedName = existingFile?.filename ?? filename;
   // The stored run ID, not the one in the URL, which can have spaces around it.
-  const s3Key = `${instrumentId}/${run.runId}/${storedName}`;
+  const s3Key = runFileS3Key(instrumentId, run.runId, storedName);
 
   let fileId: number;
 

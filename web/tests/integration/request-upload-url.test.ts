@@ -16,6 +16,7 @@ import {
   resetDb,
   seedTestUser,
 } from "@/tests/integration/helpers";
+import { TEST_RAW_BUCKET } from "@/tests/integration/test-buckets";
 
 describe("Request Upload URL API", () => {
   let token: string;
@@ -138,7 +139,7 @@ describe("Request Upload URL API", () => {
       token,
       body: {
         status: "uploaded",
-        s3_bucket: "test-bucket",
+        s3_bucket: TEST_RAW_BUCKET,
         s3_key: `${instrumentId}/${runId}/already_done.csv`,
       },
     });
@@ -386,7 +387,7 @@ describe("Request Upload URL API", () => {
     const started = await res.json();
     const mirrorFile = path.join(
       "/tmp/data-hub-integration-s3",
-      "test-raw-data-bucket",
+      TEST_RAW_BUCKET,
       instrumentId,
       runId,
       "recovered.bin"

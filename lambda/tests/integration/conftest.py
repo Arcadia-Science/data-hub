@@ -91,8 +91,10 @@ def integration_env(
         tmp_data = tmp_path_factory.mktemp("data")
         os.environ["DATA_HUB_API_URL"] = f"{env.base_url}/api/v1"
         os.environ["DATA_HUB_API_KEY"] = env.api_token
-        os.environ["AWS_S3_RAW_DATA_BUCKET"] = "test-bucket"
-        os.environ["AWS_S3_PROCESSED_DATA_BUCKET"] = "test-processed-bucket"
+        # The server only stores a file in the bucket for its category, so the
+        # Lambda has to name the same buckets the server was started with.
+        os.environ["AWS_S3_RAW_DATA_BUCKET"] = env.raw_bucket
+        os.environ["AWS_S3_PROCESSED_DATA_BUCKET"] = env.processed_bucket
         os.environ["LOCAL_DATA_DIRPATH"] = str(tmp_data)
 
         _reset_singletons()

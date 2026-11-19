@@ -1,10 +1,65 @@
 import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { touchRuns } from "@/lib/api/touch-runs";
+import { UPLOAD_ARRIVED_RESET } from "@/lib/api/upload-state";
 import { db } from "@/lib/db";
 import { files, instrumentRuns } from "@/lib/db/schema";
 import { PRE_UPLOAD_FILE_STATUSES } from "@/lib/runs/file-buckets";
 
 export type FileRow = typeof files.$inferSelect;
+
+export type AdoptedFileValues = Pick<
+  typeof files.$inferInsert,
+  "s3Bucket" | "s3Key" | "contentType" | "sizeBytes" | "category" | "uploadedAt"
+>;
+
+// What `adoptPreUploadFile` did:
+// - `adopted`: the row is now `uploaded` at the given location.
+// - `moved_on`: the row left pre-upload after the caller read it; `row` is
+//   how it is now, untouched.
+// - `dismissed`: the row was dismissed after the caller read it. It no longer
+//   blocks a new row with the same name, so the caller can insert one.
+export type AdoptResult =
+  | { kind: "adopted"; row: FileRow }
+  | { kind: "moved_on"; row: FileRow }
+  | { kind: "dismissed" };
+
+// Moves a pre-upload row to `uploaded` at the given S3 location: the Lambda
+// found the file's bytes before the watcher reported them.
+//
+// The pre-upload check is part of the write. Between the caller's read and
+// this update, the watcher's PATCH can mark the row uploaded and processing
+// can start. An update keyed on the ID alone would then move the row back to
+// `uploaded` and rewrite a location that is meant to be set only once.
+export async function adoptPreUploadFile(
+  fileId: number,
+  values: AdoptedFileValues
+): Promise<AdoptResult> {
+  const [updated] = await db
+    .update(files)
+    .set({ ...values, ...UPLOAD_ARRIVED_RESET, status: "uploaded" })
+    .where(
+      and(
+        eq(files.id, fileId),
+        inArray(files.status, PRE_UPLOAD_FILE_STATUSES),
+        isNull(files.deletedAt)
+      )
+    )
+    .returning();
+  if (updated) {
+    return { kind: "adopted", row: updated };
+  }
+  const [current] = await db
+    .select()
+    .from(files)
+    .where(eq(files.id, fileId))
+    .limit(1);
+  // File rows are never hard-deleted, so a missing row is treated like a
+  // dismissed one.
+  if (!current || current.deletedAt) {
+    return { kind: "dismissed" };
+  }
+  return { kind: "moved_on", row: current };
+}
 
 // Fetches an active (not soft-deleted) file by numeric ID.
 export async function getActiveFileById(

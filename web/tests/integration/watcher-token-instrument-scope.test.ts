@@ -19,6 +19,7 @@ import {
   seedSessionCookie,
   seedTestUser,
 } from "@/tests/integration/helpers";
+import { TEST_RAW_BUCKET } from "@/tests/integration/test-buckets";
 
 // Every write route that names an instrument, run, file or archive job lets a
 // watcher's token act only on its own instrument. The watcher tokens here
@@ -84,7 +85,7 @@ const ROUTES: RouteCase[] = [
     method: "POST",
     path: () => `${RUN_PATH}/files`,
     body: () => ({
-      s3_bucket: "test-bucket",
+      s3_bucket: TEST_RAW_BUCKET,
       s3_key: `${A}/${RUN}/injected.csv`,
       filename: "injected.csv",
     }),

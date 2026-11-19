@@ -97,7 +97,7 @@ Every personal access token carries an array of permission **scopes**. A token-a
 | `runs:comment` | Post run comments as this token, and edit or delete the ones it posted |
 | `runs:link` | Add, edit, and remove lab notebook links on runs |
 | `files:read` | Read file metadata and download files and run archives |
-| `files:create` | Register file records against a run |
+| `files:create` | Register file records against a run. Each record must point at its own file in that run's folder in S3 |
 | `files:update` | Update file metadata and upload state |
 | `files:delete` | Delete files |
 | `files:reprocess` | Re-run the processing workflow for a file |

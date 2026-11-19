@@ -1,7 +1,12 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { adoptPreUploadFile } from "@/lib/api/files";
 import { fileDetail, fileDismissed, runReprocessed } from "@/lib/api/openapi";
-import { instruments, files as schemaFiles } from "@/lib/db/schema";
+import {
+  instrumentRuns,
+  instruments,
+  files as schemaFiles,
+} from "@/lib/db/schema";
 import {
   api,
   closeTestDb,
@@ -9,6 +14,10 @@ import {
   resetDb,
   seedTestUser,
 } from "@/tests/integration/helpers";
+import {
+  TEST_PROCESSED_BUCKET,
+  TEST_RAW_BUCKET,
+} from "@/tests/integration/test-buckets";
 
 // Files have two distinct lifecycle paths through the status state machine:
 //
@@ -105,7 +114,7 @@ describe("Files API", () => {
         method: "POST",
         token,
         body: {
-          s3_bucket: "test-bucket",
+          s3_bucket: TEST_PROCESSED_BUCKET,
           s3_key: `${instrumentId}/${runId}/processed_output.csv`,
           filename: "processed_output.csv",
           content_type: "text/csv",
@@ -117,7 +126,7 @@ describe("Files API", () => {
     expect(res.status).toBe(201);
     const data = await res.json();
     expect(data.status).toBe("uploaded");
-    expect(data.s3_bucket).toBe("test-bucket");
+    expect(data.s3_bucket).toBe(TEST_PROCESSED_BUCKET);
     expect(data.category).toBe("processed");
     expect(data.relative_path).toBe("processed_output.csv");
     lambdaFileId = data.id;
@@ -170,7 +179,7 @@ describe("Files API", () => {
         method: "POST",
         token,
         body: {
-          s3_bucket: "test-bucket",
+          s3_bucket: TEST_RAW_BUCKET,
           s3_key: `${instrumentId}/${reconcileRunId}/${filename}`,
           filename,
           content_type: "text/csv",
@@ -227,7 +236,7 @@ describe("Files API", () => {
         method: "POST",
         token,
         body: {
-          s3_bucket: "test-bucket",
+          s3_bucket: TEST_RAW_BUCKET,
           s3_key: `${instrumentId}/${reconcileRunId}/${filename}`,
           filename,
         },
@@ -294,7 +303,7 @@ describe("Files API", () => {
           method: "POST",
           token,
           body: {
-            s3_bucket: "test-bucket",
+            s3_bucket: TEST_RAW_BUCKET,
             s3_key: `${instrumentId}/${adoptRunId}/${filename}`,
             filename,
           },
@@ -322,9 +331,10 @@ describe("Files API", () => {
         method: "POST",
         token,
         body: {
-          s3_bucket: "test-bucket",
+          s3_bucket: TEST_PROCESSED_BUCKET,
           s3_key: `${instrumentId}/${runId}/processed_output.csv`,
           filename: "processed_output.csv",
+          category: "processed",
         },
       }
     );
@@ -376,7 +386,7 @@ describe("Files API", () => {
         method: "POST",
         token: scopedToken,
         body: {
-          s3_bucket: "test-bucket",
+          s3_bucket: TEST_RAW_BUCKET,
           s3_key: `${instrumentId}/${runId}/scope-denied.csv`,
           filename: "scope-denied.csv",
         },
@@ -386,6 +396,317 @@ describe("Files API", () => {
     const body = await res.json();
     expect(body.error.code).toBe("FORBIDDEN");
     expect(body.error.message).toMatch(/missing required scope: files:create/);
+  });
+
+  // Download links are signed for whatever location a row holds, so the
+  // route must only store the file's own: `<instrument>/<run>/<filename>` in
+  // the bucket for its category (ENG-2275).
+  describe("POST only stores the file's own S3 location", () => {
+    const locRunId = "files-location-run";
+    const otherRunId = "files-location-other-run";
+
+    async function runUuid(id: string): Promise<string> {
+      const [row] = await getTestDb()
+        .select({ id: instrumentRuns.id })
+        .from(instrumentRuns)
+        .where(
+          and(
+            eq(instrumentRuns.instrumentId, instrumentId),
+            eq(instrumentRuns.runId, id)
+          )
+        );
+      return row.id;
+    }
+
+    function postFile(id: string, body: Record<string, unknown>) {
+      return api(`/api/v1/instruments/${instrumentId}/runs/${id}/files`, {
+        method: "POST",
+        token,
+        body,
+      });
+    }
+
+    beforeAll(async () => {
+      for (const id of [locRunId, otherRunId]) {
+        await api(`/api/v1/instruments/${instrumentId}/runs`, {
+          method: "POST",
+          token,
+          body: { run_id: id, source: "lambda" },
+        });
+      }
+    });
+
+    const BAD_LOCATIONS: [
+      label: string,
+      body: () => Record<string, unknown>,
+      message: RegExp,
+    ][] = [
+      [
+        "a key under another instrument",
+        () => ({
+          s3_bucket: TEST_RAW_BUCKET,
+          s3_key: `another-instrument/${locRunId}/a.csv`,
+          filename: "a.csv",
+        }),
+        /s3_key must be/,
+      ],
+      [
+        "a key under another run of this instrument",
+        () => ({
+          s3_bucket: TEST_RAW_BUCKET,
+          s3_key: `${instrumentId}/${otherRunId}/a.csv`,
+          filename: "a.csv",
+        }),
+        /s3_key must be/,
+      ],
+      [
+        "a key in a folder below the run's",
+        () => ({
+          s3_bucket: TEST_RAW_BUCKET,
+          s3_key: `${instrumentId}/${locRunId}/nested/a.csv`,
+          filename: "a.csv",
+        }),
+        /s3_key must be/,
+      ],
+      [
+        "a key whose name isn't the filename",
+        () => ({
+          s3_bucket: TEST_RAW_BUCKET,
+          s3_key: `${instrumentId}/${locRunId}/b.csv`,
+          filename: "a.csv",
+        }),
+        /s3_key must be/,
+      ],
+      [
+        "a filename with a slash",
+        () => ({
+          s3_bucket: TEST_RAW_BUCKET,
+          s3_key: `${instrumentId}/${locRunId}/nested/a.csv`,
+          filename: "nested/a.csv",
+        }),
+        /filename must not contain/,
+      ],
+      [
+        "a bucket Data Hub doesn't use",
+        () => ({
+          s3_bucket: "someone-elses-bucket",
+          s3_key: `${instrumentId}/${locRunId}/a.csv`,
+          filename: "a.csv",
+        }),
+        /s3_bucket must be Data Hub's raw bucket/,
+      ],
+      [
+        "a raw file in the processed bucket",
+        () => ({
+          s3_bucket: TEST_PROCESSED_BUCKET,
+          s3_key: `${instrumentId}/${locRunId}/a.csv`,
+          filename: "a.csv",
+        }),
+        /s3_bucket must be Data Hub's raw bucket/,
+      ],
+      [
+        "a processed file in the raw bucket",
+        () => ({
+          s3_bucket: TEST_RAW_BUCKET,
+          s3_key: `${instrumentId}/${locRunId}/a.csv`,
+          filename: "a.csv",
+          category: "processed",
+        }),
+        /s3_bucket must be Data Hub's processed bucket/,
+      ],
+    ];
+
+    it.each(
+      BAD_LOCATIONS
+    )("rejects %s and stores nothing", async (_label, body, message) => {
+      const sent = body();
+      const res = await postFile(locRunId, sent);
+      expect(res.status).toBe(400);
+      const data = await res.json();
+      expect(data.error.code).toBe("VALIDATION_ERROR");
+      expect(data.error.message).toMatch(message);
+
+      const rows = await getTestDb()
+        .select({ id: schemaFiles.id })
+        .from(schemaFiles)
+        .where(
+          and(
+            eq(schemaFiles.instrumentRunId, await runUuid(locRunId)),
+            eq(schemaFiles.filename, String(sent.filename))
+          )
+        );
+      expect(rows).toHaveLength(0);
+    });
+
+    it("leaves a pre-upload row with that filename alone", async () => {
+      const filename = "waiting.csv";
+      await api(`/api/v1/instruments/${instrumentId}/runs/${locRunId}`, {
+        method: "PATCH",
+        token,
+        body: {
+          detected_files: [
+            { relative_path: filename, filename, size_bytes: 8 },
+          ],
+        },
+      });
+
+      const res = await postFile(locRunId, {
+        s3_bucket: TEST_RAW_BUCKET,
+        s3_key: `another-instrument/${otherRunId}/${filename}`,
+        filename,
+      });
+      expect(res.status).toBe(400);
+
+      const [row] = await getTestDb()
+        .select()
+        .from(schemaFiles)
+        .where(
+          and(
+            eq(schemaFiles.instrumentRunId, await runUuid(locRunId)),
+            eq(schemaFiles.filename, filename)
+          )
+        );
+      expect(row.status).toBe("detected");
+      expect(row.s3Bucket).toBeNull();
+      expect(row.s3Key).toBeNull();
+    });
+
+    // A file's location is set once, when it leaves pre-upload. If the
+    // watcher's PATCH and processing land between the route's read and its
+    // write, the adopt must change nothing.
+    it("doesn't adopt a row that left pre-upload after it was read", async () => {
+      const filename = "moved-on.csv";
+      const [row] = await getTestDb()
+        .insert(schemaFiles)
+        .values({
+          instrumentRunId: await runUuid(locRunId),
+          relativePath: filename,
+          filename,
+          status: "detected",
+        })
+        .returning();
+      const canonicalKey = `${instrumentId}/${locRunId}/${filename}`;
+      // What the watcher's PATCH and the Lambda's processing leave behind.
+      await getTestDb()
+        .update(schemaFiles)
+        .set({
+          status: "processing",
+          s3Bucket: TEST_RAW_BUCKET,
+          s3Key: canonicalKey,
+          uploadedAt: new Date(),
+          processingStartedAt: new Date(),
+        })
+        .where(eq(schemaFiles.id, row.id));
+
+      const adopt = await adoptPreUploadFile(row.id, {
+        s3Bucket: TEST_PROCESSED_BUCKET,
+        s3Key: `${instrumentId}/${otherRunId}/${filename}`,
+        category: "processed",
+        uploadedAt: new Date(),
+      });
+      expect(adopt.kind).toBe("moved_on");
+
+      const [after] = await getTestDb()
+        .select()
+        .from(schemaFiles)
+        .where(eq(schemaFiles.id, row.id));
+      expect(after.status).toBe("processing");
+      expect(after.s3Bucket).toBe(TEST_RAW_BUCKET);
+      expect(after.s3Key).toBe(canonicalKey);
+      expect(after.category).toBe("raw");
+
+      // Finish the row so it doesn't count toward the processing limit the
+      // reprocess tests below rely on.
+      await getTestDb()
+        .update(schemaFiles)
+        .set({ status: "completed", processedAt: new Date() })
+        .where(eq(schemaFiles.id, row.id));
+    });
+
+    // A row dismissed between the route's read and its write no longer
+    // blocks a new row, so the route inserts one instead of returning it.
+    it("doesn't adopt a row that was dismissed after it was read", async () => {
+      const filename = "dismissed-meanwhile.csv";
+      const [row] = await getTestDb()
+        .insert(schemaFiles)
+        .values({
+          instrumentRunId: await runUuid(locRunId),
+          relativePath: filename,
+          filename,
+          status: "detected",
+          deletedAt: new Date(),
+        })
+        .returning();
+
+      const adopt = await adoptPreUploadFile(row.id, {
+        s3Bucket: TEST_RAW_BUCKET,
+        s3Key: `${instrumentId}/${locRunId}/${filename}`,
+        category: "raw",
+        uploadedAt: new Date(),
+      });
+      expect(adopt.kind).toBe("dismissed");
+
+      const [after] = await getTestDb()
+        .select()
+        .from(schemaFiles)
+        .where(eq(schemaFiles.id, row.id));
+      expect(after.status).toBe("detected");
+      expect(after.s3Key).toBeNull();
+    });
+
+    it("adopts a row that is still pre-upload", async () => {
+      const filename = "still-waiting.csv";
+      const [row] = await getTestDb()
+        .insert(schemaFiles)
+        .values({
+          instrumentRunId: await runUuid(locRunId),
+          relativePath: filename,
+          filename,
+          status: "upload_requested",
+          uploadRequestedAt: new Date(),
+        })
+        .returning();
+
+      const adopt = await adoptPreUploadFile(row.id, {
+        s3Bucket: TEST_RAW_BUCKET,
+        s3Key: `${instrumentId}/${locRunId}/${filename}`,
+        category: "raw",
+        uploadedAt: new Date(),
+      });
+      expect(adopt.kind).toBe("adopted");
+      if (adopt.kind === "adopted") {
+        expect(adopt.row.status).toBe("uploaded");
+        expect(adopt.row.s3Key).toBe(`${instrumentId}/${locRunId}/${filename}`);
+      }
+    });
+
+    // `uq_files_s3_key` spans every run. A row stored in another run before
+    // this check existed, holding this run's key, must not be handed back.
+    it("returns 409 when another run's row already holds the key", async () => {
+      const filename = "claimed.csv";
+      const canonicalKey = `${instrumentId}/${locRunId}/${filename}`;
+      await getTestDb()
+        .insert(schemaFiles)
+        .values({
+          instrumentRunId: await runUuid(otherRunId),
+          relativePath: filename,
+          filename,
+          status: "uploaded",
+          s3Bucket: TEST_RAW_BUCKET,
+          s3Key: canonicalKey,
+          uploadedAt: new Date(),
+        });
+
+      const res = await postFile(locRunId, {
+        s3_bucket: TEST_RAW_BUCKET,
+        s3_key: canonicalKey,
+        filename,
+      });
+      expect(res.status).toBe(409);
+      const data = await res.json();
+      expect(data.error.code).toBe("CONFLICT");
+      expect(data.error.message).toMatch(/already uses this S3 key/);
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -410,7 +731,7 @@ describe("Files API", () => {
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.status).toBe("uploaded");
-    expect(data.s3_bucket).toBe("test-raw-data-bucket");
+    expect(data.s3_bucket).toBe(TEST_RAW_BUCKET);
     expect(data.s3_key).toBe(`${instrumentId}/${runId}/sample.csv`);
     expect(data.uploaded_at).toBeTruthy();
     fileDetail.parse(data);
@@ -738,7 +1059,7 @@ describe("Files API", () => {
         method: "POST",
         token,
         body: {
-          s3_bucket: "test-bucket",
+          s3_bucket: TEST_RAW_BUCKET,
           s3_key: `${instrumentId}/${deletedRunId}/data.csv`,
           filename: "data.csv",
         },
@@ -799,7 +1120,7 @@ describe("Files API", () => {
         method: "POST",
         token,
         body: {
-          s3_bucket: "test-bucket",
+          s3_bucket: TEST_RAW_BUCKET,
           s3_key: `${instrumentId}/${failedRunId}/raw.csv`,
           filename: "raw.csv",
         },
@@ -850,7 +1171,7 @@ describe("Files API", () => {
         method: "POST",
         token,
         body: {
-          s3_bucket: "test-bucket",
+          s3_bucket: TEST_RAW_BUCKET,
           s3_key: `${instrumentId}/${uploadedRunId}/stuck.csv`,
           filename: "stuck.csv",
         },
@@ -890,7 +1211,7 @@ describe("Files API", () => {
         method: "POST",
         token,
         body: {
-          s3_bucket: "test-bucket",
+          s3_bucket: TEST_RAW_BUCKET,
           s3_key: `${noProcessorId}/${noProcessorRunId}/data.csv`,
           filename: "data.csv",
         },
@@ -931,7 +1252,7 @@ describe("Files API", () => {
         method: "POST",
         token,
         body: {
-          s3_bucket: "test-bucket",
+          s3_bucket: TEST_RAW_BUCKET,
           s3_key: `${genericFplcId}/${genericRunId}/chromatogram.pdf`,
           filename: "chromatogram.pdf",
         },
@@ -963,7 +1284,7 @@ describe("Files API", () => {
         method: "POST",
         token,
         body: {
-          s3_bucket: "test-bucket",
+          s3_bucket: TEST_RAW_BUCKET,
           s3_key: `${instrumentId}/${inflightRunId}/inflight.csv`,
           filename: "inflight.csv",
         },
@@ -999,7 +1320,7 @@ describe("Files API", () => {
         method: "POST",
         token,
         body: {
-          s3_bucket: "test-bucket",
+          s3_bucket: TEST_RAW_BUCKET,
           s3_key: `${instrumentId}/${stalledRunId}/stalled.csv`,
           filename: "stalled.csv",
         },
@@ -1043,7 +1364,7 @@ describe("Files API", () => {
         method: "POST",
         token,
         body: {
-          s3_bucket: "test-bucket",
+          s3_bucket: TEST_RAW_BUCKET,
           s3_key: `${instrumentId}/${legacyRunId}/legacy.csv`,
           filename: "legacy.csv",
         },
@@ -1089,7 +1410,7 @@ describe("Files API", () => {
         method: "POST",
         token,
         body: {
-          s3_bucket: "test-bucket",
+          s3_bucket: TEST_RAW_BUCKET,
           s3_key: `${instrumentId}/${skipRunId}/stack.tif`,
           filename: "stack.tif",
         },
@@ -1101,7 +1422,7 @@ describe("Files API", () => {
         method: "POST",
         token,
         body: {
-          s3_bucket: "processed-bucket",
+          s3_bucket: TEST_PROCESSED_BUCKET,
           s3_key: `${instrumentId}/${skipRunId}/stack.jpg`,
           filename: "stack.jpg",
           category: "processed",
@@ -1149,7 +1470,7 @@ describe("Files API", () => {
           method: "POST",
           token,
           body: {
-            s3_bucket: "test-bucket",
+            s3_bucket: TEST_RAW_BUCKET,
             s3_key: `${instrumentId}/${mixedRunId}/${filename}`,
             filename,
           },

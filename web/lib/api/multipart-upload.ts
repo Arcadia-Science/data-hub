@@ -1,5 +1,6 @@
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { apiError, CONFLICT, NOT_FOUND } from "@/lib/api/errors";
+import { runFileS3Key } from "@/lib/api/run-file-location";
 import { touchRuns } from "@/lib/api/touch-runs";
 import { UPLOAD_ARRIVED_RESET } from "@/lib/api/upload-state";
 import { db } from "@/lib/db";
@@ -95,7 +96,7 @@ export async function loadMultipartFile(
     instrumentId: parentRun.instrumentId,
     runId: parentRun.runId,
     bucket,
-    key: `${parentRun.instrumentId}/${parentRun.runId}/${file.filename}`,
+    key: runFileS3Key(parentRun.instrumentId, parentRun.runId, file.filename),
   };
 }
 
