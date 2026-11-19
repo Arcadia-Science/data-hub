@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { AuthResult } from "@/lib/api/auth";
+import { SCOPE_PRESETS } from "@/lib/api/scope-catalog";
+import { ALL_SCOPES, hasScope } from "@/lib/api/scopes";
 import {
   decideWatcherBinding,
+  hasLegacyScope,
   isBoundToOtherToken,
+  narrowWatcherTokenScopes,
   tokenMayActOnInstrument,
   tokenMayAdminister,
 } from "@/lib/api/watcher-binding";
@@ -141,5 +145,96 @@ describe("tokenMayAdminister", () => {
         },
       ])
     ).toBe(false);
+  });
+});
+
+describe("hasLegacyScope", () => {
+  it("finds the wildcard and the coarse :write scopes", () => {
+    expect(hasLegacyScope(["*"])).toBe(true);
+    expect(hasLegacyScope(["instruments:read", "runs:write"])).toBe(true);
+    expect(hasLegacyScope(["files:write"])).toBe(true);
+    expect(hasLegacyScope(["watchers:write"])).toBe(true);
+  });
+
+  it("ignores fine-grained scopes and object built-ins", () => {
+    expect(hasLegacyScope([])).toBe(false);
+    expect(hasLegacyScope(["runs:read", "watchers:report"])).toBe(false);
+    expect(hasLegacyScope(["constructor", "toString"])).toBe(false);
+  });
+});
+
+describe("narrowWatcherTokenScopes", () => {
+  const watcherPreset =
+    SCOPE_PRESETS.find((preset) => preset.id === "watcher")?.scopes ?? [];
+
+  it("turns the wildcard into the Watcher preset", () => {
+    expect(watcherPreset.length).toBeGreaterThan(0);
+    expect([...narrowWatcherTokenScopes(["*"])].sort()).toEqual(
+      [...watcherPreset].sort()
+    );
+  });
+
+  it("drops read access to other instruments' runs and files", () => {
+    const narrowed = { scopes: narrowWatcherTokenScopes(["*"]) };
+    expect(hasScope(narrowed, "runs:read")).toBe(false);
+    expect(hasScope(narrowed, "files:read")).toBe(false);
+    expect(hasScope(narrowed, "archive-jobs:read")).toBe(false);
+    expect(hasScope(narrowed, "watchers:report")).toBe(true);
+  });
+
+  it("keeps only the watcher's part of each coarse :write scope", () => {
+    expect(
+      narrowWatcherTokenScopes([
+        "instruments:read",
+        "runs:write",
+        "files:write",
+        "watchers:write",
+      ])
+    ).toEqual([
+      "instruments:read",
+      "runs:create",
+      "runs:update",
+      "runs:upload",
+      "files:update",
+      "watchers:report",
+    ]);
+  });
+
+  it("keeps scopes the token lists explicitly", () => {
+    expect(narrowWatcherTokenScopes(["runs:read", "watchers:write"])).toEqual([
+      "runs:read",
+      "watchers:report",
+    ]);
+    expect(narrowWatcherTokenScopes(["no-longer-a-scope", "*"])).toEqual([
+      ...ALL_SCOPES.filter((scope) => watcherPreset.includes(scope)),
+      "no-longer-a-scope",
+    ]);
+  });
+
+  it("leaves a token without legacy scopes as it was", () => {
+    expect(narrowWatcherTokenScopes(watcherPreset)).toEqual(
+      ALL_SCOPES.filter((scope) => watcherPreset.includes(scope))
+    );
+    expect(narrowWatcherTokenScopes([])).toEqual([]);
+  });
+
+  it("never allows a scope the stored scopes didn't", () => {
+    const inputs = [
+      ["*"],
+      ["runs:write"],
+      ["files:write", "instruments:read"],
+      ["watchers:write", "runs:read"],
+      ["*", "runs:write", "files:write", "watchers:write"],
+    ];
+    for (const scopes of inputs) {
+      const narrowed = { scopes: narrowWatcherTokenScopes(scopes) };
+      for (const scope of ALL_SCOPES) {
+        if (hasScope(narrowed, scope)) {
+          expect(hasScope({ scopes }, scope), `${scopes} → ${scope}`).toBe(
+            true
+          );
+        }
+      }
+    }
   });
 });

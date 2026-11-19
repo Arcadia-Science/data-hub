@@ -3,9 +3,13 @@ import type { NextRequest } from "next/server";
 import { after } from "next/server";
 import { apiError, FORBIDDEN, UNAUTHORIZED } from "@/lib/api/errors";
 import { hasScope, type Scope } from "@/lib/api/scopes";
+import {
+  hasLegacyScope,
+  narrowWatcherTokenScopes,
+} from "@/lib/api/watcher-binding";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { personalAccessTokens, users } from "@/lib/db/schema";
+import { personalAccessTokens, users, watchers } from "@/lib/db/schema";
 import { hashToken } from "@/lib/tokens";
 
 // A signed-in person. Sessions are treated as fully privileged, so `scopes`
@@ -23,7 +27,8 @@ export interface SessionAuthResult {
 // `enforceWatcherBinding`).
 export interface TokenAuthResult {
   authMethod: "token";
-  // Carries the `scopes` column from `personal_access_tokens`.
+  // The `scopes` column from `personal_access_tokens`, narrowed by
+  // `narrowWatcherTokenScopes` when the token registered a watcher.
   scopes: string[];
   tokenId: string;
   tokenName: string;
@@ -91,15 +96,35 @@ async function validatePat(
   return {
     userId: null,
     authMethod: "token",
-    scopes: pat.scopes,
+    scopes: await tokenScopes(pat.id, pat.scopes),
     tokenId: pat.id,
     tokenName: pat.name,
   };
 }
 
+// A token that registered a watcher, deregistered ones included, gets only
+// what a watcher needs from `*` and the coarse `:write` scopes. See
+// `narrowWatcherTokenScopes`. Tokens minted since the fine-grained split carry
+// neither, so they skip the extra query.
+async function tokenScopes(
+  tokenId: string,
+  scopes: string[]
+): Promise<string[]> {
+  if (!hasLegacyScope(scopes)) {
+    return scopes;
+  }
+  const [registered] = await db
+    .select({ id: watchers.id })
+    .from(watchers)
+    .where(eq(watchers.registeredByToken, tokenId))
+    .limit(1);
+  return registered ? narrowWatcherTokenScopes(scopes) : scopes;
+}
+
 /**
  * Resolve a v1 request to either a Better Auth session or a PAT. Sessions
- * are treated as fully privileged; PATs carry their stored `scopes` array.
+ * are treated as fully privileged; PATs carry their `scopes` (see
+ * `TokenAuthResult`).
  *
  * @internal — route handlers should call {@link authorize} instead, which
  * combines this with the per-route scope check. Exported only because
@@ -213,7 +238,7 @@ export async function requireAdminForSession(
 /**
  * For routes where a token must list `scope` itself. `hasScope` also
  * accepts the wildcard `*` and the legacy coarse scopes (`watchers:write`
- * implies `watchers:admin`), which old watcher PCs still carry. Some
+ * implies `watchers:admin`), which some old tokens still carry. Some
  * actions are too sensitive to grant that way, such as pointing a watcher
  * at another folder. Sessions pass; pair this with `requireAdminForSession`.
  * Returns null when allowed, or a 403 `Response`.

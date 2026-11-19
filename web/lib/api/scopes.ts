@@ -35,9 +35,11 @@ export const SCOPE_SET: Set<Scope> = new Set<Scope>(ALL_SCOPES);
 
 // Coarse scopes minted before the fine-grained split, plus `*`. These are no
 // longer offered when creating a token, but tokens already carrying them
-// (deployed watchers, the Lambda, migration-backfilled PATs) must keep
-// authorizing. `hasScope` expands them to the fine scopes they used to imply
-// so nothing breaks before those tokens are rotated to least-privilege.
+// (the Lambda, migration-backfilled PATs) must keep authorizing. `hasScope`
+// expands them to the fine scopes they used to imply so nothing breaks before
+// those tokens are rotated to least-privilege. A token that registered a
+// watcher gets less: `validatePat` narrows its legacy scopes to what a watcher
+// needs (`narrowWatcherTokenScopes`).
 export const LEGACY_SCOPE_EXPANSIONS: Record<string, readonly Scope[]> = {
   "runs:write": [
     "runs:create",

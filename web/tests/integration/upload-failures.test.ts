@@ -30,6 +30,11 @@ import {
 const instrumentId = "upload-failures-inst";
 const otherInstrumentId = "upload-failures-other";
 
+// The instrument PC's token, for what the watcher does. Like an old lab PC
+// token it carries `*`, so it gets only what a watcher needs.
+let watcherToken: string;
+// A person's token, for reads, upload requests and dismissals. It registered
+// no watcher, so it keeps every scope.
 let token: string;
 let userId: string;
 let watcherId: string;
@@ -51,13 +56,13 @@ const configYaml = (instrument: string, mode: "auto" | "manual") =>
 async function registerWatcher(instrument: string): Promise<string> {
   const reg = await api("/api/v1/watchers/register", {
     method: "POST",
-    token,
+    token: watcherToken,
     body: { instrument_id: instrument, hostname: `${instrument}-pc` },
   });
   const id = (await reg.json()).watcher_id as string;
   await api(`/api/v1/watchers/${id}/config`, {
     method: "PUT",
-    token,
+    token: watcherToken,
     body: {
       config_checksum: "sum",
       config_yaml: configYaml(instrument, "auto"),
@@ -70,7 +75,7 @@ async function registerWatcher(instrument: string): Promise<string> {
 async function heartbeat(id: string, mode: "auto" | "manual") {
   const res = await api(`/api/v1/watchers/${id}/heartbeat`, {
     method: "POST",
-    token,
+    token: watcherToken,
     body: { status: "watching", upload_mode: mode },
   });
   expect(res.status).toBe(200);
@@ -87,7 +92,7 @@ async function reportRun(
   const instrument = options.instrument ?? instrumentId;
   const res = await api(`/api/v1/instruments/${instrument}/runs`, {
     method: "POST",
-    token,
+    token: watcherToken,
     body: {
       run_id: runId,
       source: "watcher",
@@ -133,14 +138,16 @@ async function requestUpload(runId: string, ids: number[]) {
 }
 
 async function queue(id = watcherId) {
-  const res = await api(`/api/v1/watchers/${id}/upload-queue`, { token });
+  const res = await api(`/api/v1/watchers/${id}/upload-queue`, {
+    token: watcherToken,
+  });
   return watcherUploadQueueResponse.parse(await res.json()).files;
 }
 
 async function reportFailures(body: unknown, id = watcherId) {
   const res = await api(`/api/v1/watchers/${id}/upload-failures`, {
     method: "POST",
-    token,
+    token: watcherToken,
     body,
   });
   return res;
@@ -172,6 +179,7 @@ async function runStatuses(status: string): Promise<string[]> {
 
 beforeAll(async () => {
   await resetDb();
+  ({ token: watcherToken } = await seedTestUser());
   ({ token, userId } = await seedTestUser());
   await getTestDb()
     .insert(instruments)
@@ -465,7 +473,7 @@ describe("after a failure", () => {
     const { id } = await failedFile();
     const res = await api(`/api/v1/files/${id}`, {
       method: "PATCH",
-      token,
+      token: watcherToken,
       body: { status: "uploaded" },
     });
     expect(res.status).toBe(200);
@@ -496,7 +504,7 @@ describe("T3 and T4: clearing the mark", () => {
     await requestUpload(runId, [ids["a.nd2"]]);
     const res = await api(`/api/v1/files/${ids["a.nd2"]}`, {
       method: "PATCH",
-      token,
+      token: watcherToken,
       body: { status: "detected" },
     });
     expect(res.status).toBe(200);
@@ -512,7 +520,7 @@ describe("T3 and T4: clearing the mark", () => {
     const marked = await reportRun(["b.nd2"], { willUpload: true });
     await api(`/api/v1/watchers/${watcherId}/config`, {
       method: "PUT",
-      token,
+      token: watcherToken,
       body: {
         config_checksum: "sum-moved",
         config_yaml: configYaml(instrumentId, "auto").replace(
