@@ -12,6 +12,7 @@ import {
   CHANNEL_COLOR_STYLES,
   IMAGING_MODE_COLORS,
 } from "@/lib/instrument-colors";
+import type { NotebookLinkNameOptions } from "@/lib/notebook-links/name-filter";
 import type { RunRow } from ".";
 import { type MetadataColumn, RunRowsTable } from "./run-rows-table";
 
@@ -19,11 +20,13 @@ export function GelDocRunsTable({
   data,
   instrumentId,
   filterOptions,
+  notebookLinkNames,
   ranByOptions,
 }: {
   data: RunRow[];
   instrumentId: string;
   filterOptions: GelDocFilterOptions;
+  notebookLinkNames: NotebookLinkNameOptions;
   ranByOptions: { value: string; label: string }[];
 }) {
   const allWavelengths = data.flatMap((row) =>
@@ -105,6 +108,7 @@ export function GelDocRunsTable({
       columns={columns}
       data={data}
       instrumentId={instrumentId}
+      notebookLinkNames={notebookLinkNames}
       ranByOptions={ranByOptions}
     />
   );

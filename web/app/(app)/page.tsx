@@ -38,7 +38,11 @@ import {
 } from "@/lib/api/instrument-runs";
 import { getRecentActiveInstrumentsForDashboard } from "@/lib/api/instruments";
 import { listCommentFeed } from "@/lib/api/run-comments";
-import { parseHasNotebookLinkParam } from "@/lib/api/validators";
+import { getNotebookLinkNameOptions } from "@/lib/api/run-notebook-links";
+import {
+  parseHasNotebookLinkParam,
+  parseNotebookLinkNameParams,
+} from "@/lib/api/validators";
 import { auth } from "@/lib/auth";
 import { startOfTodayISO } from "@/lib/date";
 import {
@@ -170,29 +174,36 @@ async function DashboardRunsSection({
   // viewer timezone for the default "today" lookback.
   const instrumentsPromise = getInstruments(true);
   const ranByUsersPromise = getRanByFilterOptions();
+  const notebookLinkNamesPromise = getNotebookLinkNameOptions();
   const defaultDateFrom = startOfTodayISO(await getViewerTimeZone());
 
-  const [instruments, ranByUsers, runResult] = await Promise.all([
-    instrumentsPromise,
-    ranByUsersPromise,
-    buildRunListQuery({
-      instrumentId: instrumentIds,
-      search: params.search || undefined,
-      dateFrom:
-        params.date_from === ALL_TIME_DATE_FROM
-          ? undefined
-          : (params.date_from ?? defaultDateFrom),
-      dateTo: params.date_to ?? undefined,
-      page: params.page,
-      perPage: params.per_page,
-      includeDeleted: params.include_deleted,
-      ranBy: params.ran_by ?? undefined,
-      hasNotebookLink: parseHasNotebookLinkParam(params.has_notebook_link),
-      statuses: params.status.length > 0 ? params.status : undefined,
-      sort: params.sort,
-      order: params.order,
-    }),
-  ]);
+  const [instruments, ranByUsers, notebookLinkNames, runResult] =
+    await Promise.all([
+      instrumentsPromise,
+      ranByUsersPromise,
+      notebookLinkNamesPromise,
+      buildRunListQuery({
+        instrumentId: instrumentIds,
+        search: params.search || undefined,
+        dateFrom:
+          params.date_from === ALL_TIME_DATE_FROM
+            ? undefined
+            : (params.date_from ?? defaultDateFrom),
+        dateTo: params.date_to ?? undefined,
+        page: params.page,
+        perPage: params.per_page,
+        includeDeleted: params.include_deleted,
+        ranBy: params.ran_by ?? undefined,
+        hasNotebookLink: parseHasNotebookLinkParam(params.has_notebook_link),
+        ...parseNotebookLinkNameParams({
+          name: params.notebook_link_name,
+          search: params.notebook_link_search,
+        }),
+        statuses: params.status.length > 0 ? params.status : undefined,
+        sort: params.sort,
+        order: params.order,
+      }),
+    ]);
 
   // Current user pinned as "You" at the top (if they've attributed anything),
   // then other attributors by display name, then the "Unattributed" sentinel —
@@ -220,6 +231,7 @@ async function DashboardRunsSection({
             <RunsTable
               data={runResult.data}
               hasFilters={hasFilters}
+              notebookLinkNames={notebookLinkNames}
               ranByOptions={ranByOptions}
               totalCount={runResult.pagination.total}
             />

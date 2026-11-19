@@ -37,7 +37,7 @@ Home and the instrument pages share the same four controls:
 - **Add filter**: filter by run status, or turn on **Show deleted runs**
 - **Column headers**: sort by **Run Started**, **Last Updated**, size, who ran it, or any instrument-specific column
 
-The **Lab Notebook** column header filters the list to runs that have a [lab notebook link](#lab-notebook), or to runs that don’t.
+The **Lab Notebook** column header filters the list by [lab notebook link](#lab-notebook). Pick **Has a link** or **No link**, or pick one of the link labels it lists to see only the runs with that link. Each label shows how many runs have it. Type in the menu’s search box to narrow the labels, or choose **Labels containing “…”** to see the runs whose link label contains what you typed. A link without its own label is listed by the name the table shows for it. While the column is filtered by a label, each run shows its matching link first.
 
 **Run Started** is when the instrument acquired the run. **Last Updated** changes when the run’s files change, or when someone edits, claims, or comments on it, or changes its lab notebook links. The default order is newest run first. The sort order is saved in the page link, so a link you share opens with the same order.
 
@@ -156,7 +156,7 @@ On the run page, choose **Add link** in the **Lab notebooks** section, paste the
 - Anyone signed in can add, edit, or remove any link.
 - A deleted run keeps its links, but they can’t change until the run is restored.
 
-Runs tables show each run’s first link in the **Lab Notebook** column, with **+1**, **+2**, and so on when there are more. Filter that column to **No link** to find runs that still need one. To link many runs at once, select them and choose **Add notebook link**; see [Act on several runs at once](#bulk-actions).
+Runs tables show each run’s first link in the **Lab Notebook** column, with **+1**, **+2**, and so on when there are more. Filter that column to **No link** to find runs that still need one, or to a label to find every run linked to that notebook page. To link many runs at once, select them and choose **Add notebook link**; see [Act on several runs at once](#bulk-actions).
 
 Scripts can manage links through the [REST API](/docs/api) with a token that has the `runs:link` scope. An AI assistant connected to the [MCP server](/docs/mcp) can add, edit, and remove them with the `add_notebook_link`, `update_notebook_link`, and `remove_notebook_link` tools.
 

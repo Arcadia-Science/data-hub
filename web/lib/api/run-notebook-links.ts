@@ -1,4 +1,14 @@
-import { and, asc, count, eq, inArray, ne, type SQL, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  eq,
+  inArray,
+  isNull,
+  ne,
+  type SQL,
+  sql,
+} from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import {
   type Actor,
@@ -11,9 +21,15 @@ import { type DbExecutor, db } from "@/lib/db";
 import {
   instrumentRuns,
   personalAccessTokens,
+  runAttributions,
   runNotebookLinks,
   users,
 } from "@/lib/db/schema";
+import {
+  buildNotebookLinkNameOptions,
+  type NotebookLinkNameOptions,
+  notebookLinkNameMatches,
+} from "@/lib/notebook-links/name-filter";
 import {
   NOTEBOOK_LINK_BULK_RUNS_MAX,
   NOTEBOOK_LINK_BULK_URLS_MAX,
@@ -207,6 +223,76 @@ async function getLinkById(id: string): Promise<NotebookLinkDto> {
 export function notebookLinkCondition(hasLink: boolean): SQL {
   const linked = sql`exists (select 1 from ${runNotebookLinks} where ${runNotebookLinks.runId} = ${instrumentRuns.id})`;
   return hasLink ? linked : sql`not ${linked}`;
+}
+
+// A link's name is its label, or else a name worked out from its URL in
+// `notebookLinkDisplayName`. Postgres can't work that out, so the two
+// functions below read the links' URLs and labels and name them here.
+
+/**
+ * The link names the "Lab Notebook" column's filter menu lists, with how many
+ * runs have a link by each name. Deleted runs don't count. Pass an instrument
+ * for its runs table, or a person for the runs attributed to them.
+ */
+export async function getNotebookLinkNameOptions(
+  scope: { instrumentId?: string; ranBy?: string } = {}
+): Promise<NotebookLinkNameOptions> {
+  const rows = await db
+    .select({
+      runId: runNotebookLinks.runId,
+      url: runNotebookLinks.url,
+      label: runNotebookLinks.label,
+    })
+    .from(runNotebookLinks)
+    .innerJoin(instrumentRuns, eq(instrumentRuns.id, runNotebookLinks.runId))
+    .where(
+      and(
+        isNull(instrumentRuns.deletedAt),
+        scope.instrumentId
+          ? eq(instrumentRuns.instrumentId, scope.instrumentId)
+          : undefined,
+        scope.ranBy
+          ? sql`exists (select 1 from ${runAttributions} where ${runAttributions.runId} = ${instrumentRuns.id} and ${runAttributions.userId} = ${scope.ranBy})`
+          : undefined
+      )
+    );
+  return buildNotebookLinkNameOptions(
+    rows.map((row) => ({
+      runId: row.runId,
+      name: notebookLinkDisplayName(row.url, row.label),
+    }))
+  );
+}
+
+/**
+ * SQL for the runs list's link name filter: runs with a link named exactly
+ * `name`, or with a link whose name contains `search`. When both are given, one
+ * link has to pass both. Deleted runs are left to the list's own
+ * `include_deleted` condition.
+ */
+export async function notebookLinkNameCondition(match: {
+  name?: string;
+  search?: string;
+}): Promise<SQL> {
+  const rows = await db
+    .select({
+      runId: runNotebookLinks.runId,
+      url: runNotebookLinks.url,
+      label: runNotebookLinks.label,
+    })
+    .from(runNotebookLinks);
+  const runIds = new Set<string>();
+  for (const row of rows) {
+    if (
+      notebookLinkNameMatches(
+        notebookLinkDisplayName(row.url, row.label),
+        match
+      )
+    ) {
+      runIds.add(row.runId);
+    }
+  }
+  return runIds.size > 0 ? inArray(instrumentRuns.id, [...runIds]) : sql`false`;
 }
 
 // Locks the run so writes to its links take turns. Returns an error when

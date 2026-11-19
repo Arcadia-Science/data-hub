@@ -57,6 +57,11 @@ export type InstrumentFilterParamKey = FilterParamKey<
 // (e.g., `ran_by` stores a userId but renders the user's display name).
 export type FilterOption = string | { value: string; label: string };
 
+// A column header whose filter is set is tinted, so a filtered table is easy
+// to spot. The tint holds while the header's menu is open.
+export const FILTERED_COLUMN_HEADER_CLASS_NAME =
+  "bg-blue-500/10 text-blue-700 hover:bg-blue-500/15 hover:text-blue-700 aria-expanded:bg-blue-500/15 aria-expanded:text-blue-700 dark:bg-blue-400/15 dark:text-blue-300 dark:aria-expanded:bg-blue-400/20 dark:hover:bg-blue-400/20 dark:aria-expanded:text-blue-300 dark:hover:text-blue-300";
+
 function normalizeOption(option: FilterOption): {
   value: string;
   label: string;
@@ -95,7 +100,7 @@ export function FilterableColumnHeader<
         <Button
           className={cn(
             "-ml-2 h-8 gap-1 font-medium",
-            currentValue && "text-foreground"
+            currentValue && FILTERED_COLUMN_HEADER_CLASS_NAME
           )}
           size="sm"
           variant="ghost"

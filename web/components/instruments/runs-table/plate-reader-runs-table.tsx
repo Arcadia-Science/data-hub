@@ -11,6 +11,7 @@ import {
   MEASUREMENT_MODE_COLORS,
   MEASUREMENT_TYPE_COLORS,
 } from "@/lib/instrument-colors";
+import type { NotebookLinkNameOptions } from "@/lib/notebook-links/name-filter";
 import type { RunRow } from ".";
 import { type MetadataColumn, RunRowsTable } from "./run-rows-table";
 
@@ -18,11 +19,13 @@ export function PlateReaderRunsTable({
   data,
   instrumentId,
   filterOptions,
+  notebookLinkNames,
   ranByOptions,
 }: {
   data: RunRow[];
   instrumentId: string;
   filterOptions: PlateReaderFilterOptions;
+  notebookLinkNames: NotebookLinkNameOptions;
   ranByOptions: { value: string; label: string }[];
 }) {
   const wavelengthColors = buildWavelengthColorMap(filterOptions.wavelengths);
@@ -83,6 +86,7 @@ export function PlateReaderRunsTable({
       columns={columns}
       data={data}
       instrumentId={instrumentId}
+      notebookLinkNames={notebookLinkNames}
       ranByOptions={ranByOptions}
     />
   );

@@ -6,10 +6,8 @@ import {
   type RanByOption,
   RUNS_TABLE_EDGE_PADDING,
 } from "@/components/instruments/runs-table/index";
-import {
-  NOTEBOOK_LINK_FILTER_OPTIONS,
-  NotebookLinksCell,
-} from "@/components/instruments/runs-table/notebook-links-cell";
+import { NotebookLinkColumnHeader } from "@/components/instruments/runs-table/notebook-link-column-header";
+import { NotebookLinksCell } from "@/components/instruments/runs-table/notebook-links-cell";
 import { RanByCell } from "@/components/instruments/runs-table/ran-by-cell";
 import { RawFileColumnHeader } from "@/components/instruments/runs-table/raw-file-column-header";
 import { RunIdCell } from "@/components/instruments/runs-table/run-id-cell";
@@ -33,6 +31,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { RunListRow } from "@/lib/api/instrument-runs";
+import type { NotebookLinkNameOptions } from "@/lib/notebook-links/name-filter";
 import { runRowToRef } from "@/lib/runs/row-actions";
 import { cn, formatBytes } from "@/lib/utils";
 
@@ -40,12 +39,16 @@ export function RunsTable({
   data,
   hasFilters,
   totalCount,
+  notebookLinkNames,
   ranByOptions,
   emptyLabel = "No instrument runs yet.",
 }: {
   data: RunListRow[];
   hasFilters: boolean;
   totalCount: number;
+  // The link names the "Lab Notebook" menu lists, counted over the runs this
+  // page can show.
+  notebookLinkNames: NotebookLinkNameOptions;
   // When provided, the "Ran By" column becomes a filterable dropdown bound to
   // the dashboard `ran_by` search param. Omitted on a member's runs page, where
   // every row is the same user, so a plain header is rendered instead.
@@ -101,12 +104,7 @@ export function RunsTable({
               )}
             </TableHead>
             <TableHead>
-              <FilterableColumnHeader
-                label="Lab Notebook"
-                options={NOTEBOOK_LINK_FILTER_OPTIONS}
-                paramKey="has_notebook_link"
-                paramsSource="dashboard"
-              />
+              <NotebookLinkColumnHeader names={notebookLinkNames} />
             </TableHead>
             <RunTimeHeads />
           </TableRow>

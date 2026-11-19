@@ -81,3 +81,18 @@ export function parseHasNotebookLinkParam(
   }
   return;
 }
+
+// The "Lab Notebook" column's link name filters: `notebook_link_name` is one
+// link name exactly, and `notebook_link_search` is text a link name contains.
+// A missing or blank value means "don't filter".
+export function parseNotebookLinkNameParams(params: {
+  name: string | null;
+  search: string | null;
+}): { notebookLinkName?: string; notebookLinkSearch?: string } {
+  const name = params.name?.trim();
+  const search = params.search?.trim();
+  return {
+    ...(name ? { notebookLinkName: name } : {}),
+    ...(search ? { notebookLinkSearch: search } : {}),
+  };
+}
