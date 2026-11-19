@@ -28,10 +28,11 @@ const uploadFailureItem = z
         "With `relative_path`: names a file the watcher was uploading on its own (auto mode), whose ID it doesn't know.",
     }),
     relative_path: z.string().min(1).optional(),
-    reason: uploadFailureReasonSchema.openapi({
-      description:
-        "`folder_missing`: the file's folder is gone from the instrument PC. `file_missing`: the folder is there but the file isn't. `upload_error`: the upload kept failing. `unsafe_path`: the path points outside the watch folder.",
-    }),
+    // `.describe`, not `.openapi`, on schemas from `./common`. See the note
+    // at the top of that file.
+    reason: uploadFailureReasonSchema.describe(
+      "`folder_missing`: the file's folder is gone from the instrument PC. `file_missing`: the folder is there but the file isn't. `upload_error`: the upload kept failing. `unsafe_path`: the path points outside the watch folder."
+    ),
     detail: z.string().max(1000).optional().openapi({
       description: "The last error, for `upload_error`.",
     }),
@@ -127,12 +128,8 @@ export const watcherDetail = z
     instrument_display_name: z.string().nullable().optional(),
     hostname: z.string().nullable(),
     os_info: z.string().nullable(),
-    // `.describe` rather than `.openapi`. `watcherStatusSchema` is built in
-    // `./common`, which the MCP tool outputs also import directly. A schema
-    // built before `registry.ts` calls `extendZodWithOpenApi` has no
-    // `.openapi`, and whether `./common` loads before the registry depends on
-    // which route the server loads first, so `.openapi` here can break
-    // `next build`. `.describe` doesn't need the extension.
+    // `.describe`, not `.openapi`, on schemas from `./common`. See the note
+    // at the top of that file.
     status: watcherStatusSchema.describe(
       "The status Data Hub shows for the watcher. `stale` is worked out when you ask and is never stored. A `watching` or `waiting` watcher is `stale` when its last heartbeat is more than 5 minutes old. A `stopped` watcher stays `stopped`, however old its last heartbeat, unless it stopped for a restart or an update (see `status_reason`): then it is `stale` when its last heartbeat is more than 15 minutes old. A `registered` watcher, which hasn't sent its first heartbeat, is `stale` 15 minutes after it registered, or after its instrument was confirmed if that came later; while its instrument is pending it stays `registered`. A deregistered watcher is always `stopped`. The `status` filter on the list endpoint returns the watchers that show that status."
     ),
@@ -223,10 +220,9 @@ export const watcherUploadQueueResponse = z.object({
       relative_path: z.string(),
       filename: z.string(),
       size_bytes: z.number().nullable(),
-      upload_requested_at: isoDateTime.openapi({
-        description:
-          "When the current request was made. Send it back as `requested_at` when reporting a failure to POST /watchers/{watcherId}/upload-failures, so a failure from an earlier request doesn't fail a newer one.",
-      }),
+      upload_requested_at: isoDateTime.describe(
+        "When the current request was made. Send it back as `requested_at` when reporting a failure to POST /watchers/{watcherId}/upload-failures, so a failure from an earlier request doesn't fail a newer one."
+      ),
     })
   ),
 });
