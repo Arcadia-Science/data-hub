@@ -149,7 +149,7 @@ An AI assistant connected to the [MCP server](/docs/mcp) learns the same thing w
 
 A lab notebook in Data Hub stands for one lab notebook page, such as a Notion or Google Docs page. Adding a run to it lets whoever analyzes the run read how the experiment was set up, and gathers the lab notebook's runs from every instrument in one place. A run can be in several lab notebooks.
 
-On the run page, choose **Add to lab notebook** in the **Lab Notebooks** section. Type a lab notebook's name to pick one Data Hub already has, or paste the page's link. A link to a page that has no lab notebook yet creates one: give it a name, which starts as a name worked out from the link. For a Notion page, that's its title. Tick **I ran this run** to claim the run at the same time. Each lab notebook shows who added the run; use its **⋯** menu to copy the lab notebook's link or remove the run from it.
+On the run page, choose **Add to notebook** in the **Lab notebooks** section. Type a notebook's name to pick one Data Hub already has, or paste the page's link. A link to a page that has no notebook yet creates one: give it a name, which starts as a name worked out from the link. For a Notion page, that's its title. Leave **Make me the owner** ticked to own a notebook you create this way. Tick **I ran this run** to claim the run at the same time. Each notebook shows who added the run. Its name opens the [notebook's page](#notebook-page) in Data Hub, and the arrow beside it opens the notebook itself. Use its **⋯** menu to copy the notebook's link or remove the run from it.
 
 - A run can be in up to 20 lab notebooks.
 - Each page has one lab notebook, with one name that every run in it shares. Two links count as the same page when they differ only in `http` or `https`, `www.`, a trailing slash, the part after `#`, or tracking parameters such as `utm_source`. Notion links count as the same page when they have the same page ID, so a link copied before the page was renamed still finds its lab notebook.
@@ -158,6 +158,18 @@ On the run page, choose **Add to lab notebook** in the **Lab Notebooks** section
 - A deleted lab notebook keeps its runs, and restoring it brings them back. Pasting a deleted lab notebook's link offers to restore it.
 
 Runs tables show each run's first lab notebook in the **Lab Notebook** column, with **+1**, **+2**, and so on when there are more. Filter that column to **In no lab notebook** to find runs that still need one, or to a lab notebook to find all of its runs. To add many runs at once, select them and choose **Add to lab notebook**; see [Act on several runs at once](#bulk-actions).
+
+### A notebook's page [#notebook-page]
+
+Each notebook has a page in Data Hub that lists its runs from every instrument. Open it from a notebook's name anywhere in Data Hub, or from **Notebooks** in the sidebar, which lists the notebooks you opened last and the ones that most recently got a run. **View all** opens the list of every notebook, with its owner, run count, instruments, and newest run. Search it by name, or paste a notebook's link to find its page. Choose **New notebook** there to create a notebook before it has any runs.
+
+The page shows the notebook's description and owner above its runs, which you can search, filter, and act on like any runs table. **Open notebook** opens the notebook itself. From the **⋯** menu:
+
+- **Edit details** changes the notebook's name, description, owner, or link. The name is shared by every run in it. A link can't point to a page that another notebook already has.
+- **Copy page link** copies the address of the Data Hub page. Paste it into the notebook, so the notebook and its data point at each other.
+- **Delete** takes the notebook off its runs and out of lists and search. The page stays, with **Restore**, which brings the notebook back with all of its runs.
+
+Select runs on the page and choose **Remove from this notebook** to take them out.
 
 ### From scripts and AI assistants [#lab-notebook-api]
 

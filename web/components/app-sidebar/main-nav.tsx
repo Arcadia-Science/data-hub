@@ -6,6 +6,7 @@ import {
   Home,
   ListChecks,
   type LucideIcon,
+  NotebookText,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -27,18 +28,27 @@ import {
   SidebarMenuSubItem,
 } from "@/components/ui/sidebar";
 import { useRecentInstruments } from "@/hooks/use-recent-instruments";
-import type { SidebarInstrument } from "@/lib/api/sidebar";
+import { useRecentNotebooks } from "@/hooks/use-recent-notebooks";
+import type { SidebarInstrument, SidebarNotebook } from "@/lib/api/sidebar";
+import { notebookPageHref } from "@/lib/notebooks/details";
 
 // Every link sets `prefetch={false}`. `router.refresh()` prefetches each
 // visible link again, and a run page refreshes while files are in progress.
 const SIDEBAR_INSTRUMENTS_LIMIT = 5;
+const SIDEBAR_NOTEBOOKS_LIMIT = 5;
 
 interface MainNavProps {
   currentUserId: string;
   instruments: SidebarInstrument[];
+  // The live notebooks that most recently got a run, newest first.
+  notebooks: SidebarNotebook[];
 }
 
-export function MainNav({ currentUserId, instruments }: MainNavProps) {
+export function MainNav({
+  currentUserId,
+  instruments,
+  notebooks,
+}: MainNavProps) {
   const pathname = usePathname();
   const myRunsHref = `/users/${currentUserId}`;
   const { recent: recentInstruments } = useRecentInstruments();
@@ -65,6 +75,30 @@ export function MainNav({ currentUserId, instruments }: MainNavProps) {
         label: instrument.displayName,
       }));
   }, [instruments, recentlyViewedIds, recentlyViewedInstruments.length]);
+
+  // Recently viewed notebooks first, then the ones that most recently got a
+  // run, up to SIDEBAR_NOTEBOOKS_LIMIT in all.
+  const { recent: recentNotebooks } = useRecentNotebooks();
+  const recentlyViewedNotebooks = useMemo(
+    () =>
+      recentNotebooks.slice(0, SIDEBAR_NOTEBOOKS_LIMIT).map((notebook) => ({
+        key: notebook.notebookId,
+        href: notebookPageHref(notebook.notebookId),
+        label: notebook.name,
+      })),
+    [recentNotebooks]
+  );
+  const sidebarNotebooks = useMemo(() => {
+    const shown = new Set(recentlyViewedNotebooks.map((item) => item.key));
+    return notebooks
+      .filter((notebook) => !shown.has(notebook.id))
+      .slice(0, SIDEBAR_NOTEBOOKS_LIMIT - recentlyViewedNotebooks.length)
+      .map((notebook) => ({
+        key: notebook.id,
+        href: notebookPageHref(notebook.id),
+        label: notebook.name,
+      }));
+  }, [notebooks, recentlyViewedNotebooks]);
 
   return (
     <SidebarGroup>
@@ -110,6 +144,15 @@ export function MainNav({ currentUserId, instruments }: MainNavProps) {
               })
             )}
             viewAllHref="/instruments"
+          />
+
+          <CollapsibleNavSection
+            currentPath={pathname}
+            icon={NotebookText}
+            items={sidebarNotebooks}
+            label="Notebooks"
+            recentlyViewedItems={recentlyViewedNotebooks}
+            viewAllHref="/notebooks"
           />
         </SidebarMenu>
       </SidebarGroupContent>
