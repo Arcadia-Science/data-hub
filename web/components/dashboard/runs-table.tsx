@@ -152,8 +152,8 @@ export function RunsTable({
                 </TableCell>
                 <TableCell>
                   <NotebookLinksCell
-                    firstNotebookId={notebookId}
                     notebooks={row.notebooks}
+                    pageNotebookId={notebookId}
                   />
                 </TableCell>
                 <RunTimeCells row={row} />
