@@ -41,7 +41,7 @@ import { MIN_QUERY_LENGTH } from "@/lib/search-constants";
 export type SearchScope =
   | "all"
   | "runs"
-  | "notebooks"
+  | "lab_notebooks"
   | "files"
   | "instruments"
   | "users"
@@ -82,7 +82,7 @@ export interface SearchNotebookResult {
   // How many live (not deleted) runs are in the notebook, however many
   // results the search shows.
   runCount: number;
-  type: "notebook";
+  type: "lab_notebook";
   // The notebook's own page, such as its Notion page.
   url: string;
 }
@@ -154,7 +154,7 @@ export interface GlobalSearchResult {
     comments: number;
     files: number;
     instruments: number;
-    notebooks: number;
+    lab_notebooks: number;
     runs: number;
     // Sum of the *visible* (capped) results — this is the "N results for …"
     // figure the header shows, matching what the user actually sees.
@@ -163,7 +163,7 @@ export interface GlobalSearchResult {
   };
   files: SearchFileResult[];
   instruments: SearchInstrumentResult[];
-  notebooks: SearchNotebookResult[];
+  lab_notebooks: SearchNotebookResult[];
   runs: SearchRunResult[];
   users: SearchUserResult[];
 }
@@ -315,7 +315,7 @@ async function searchNotebooks(
     .limit(limit);
 
   return rows.map((row) => ({
-    type: "notebook" as const,
+    type: "lab_notebook" as const,
     id: row.id,
     name: row.name,
     url: row.url,
@@ -530,14 +530,14 @@ async function searchComments(
 function emptyResult(): GlobalSearchResult {
   return {
     runs: [],
-    notebooks: [],
+    lab_notebooks: [],
     files: [],
     instruments: [],
     users: [],
     comments: [],
     counts: {
       runs: 0,
-      notebooks: 0,
+      lab_notebooks: 0,
       files: 0,
       instruments: 0,
       users: 0,
@@ -585,7 +585,7 @@ export async function globalSearch({
     commentsResult,
   ] = await Promise.all([
     searchGroup("runs", searchRuns),
-    searchGroup("notebooks", searchNotebooks),
+    searchGroup("lab_notebooks", searchNotebooks),
     searchGroup("files", searchFiles),
     searchGroup("instruments", searchInstruments),
     searchGroup("users", searchUsers),
@@ -594,14 +594,14 @@ export async function globalSearch({
 
   return {
     runs,
-    notebooks: notebooksResult,
+    lab_notebooks: notebooksResult,
     files: filesResult,
     instruments: instrumentsResult,
     users: usersResult,
     comments: commentsResult,
     counts: {
       runs: runs.length,
-      notebooks: notebooksResult.length,
+      lab_notebooks: notebooksResult.length,
       files: filesResult.length,
       instruments: instrumentsResult.length,
       users: usersResult.length,

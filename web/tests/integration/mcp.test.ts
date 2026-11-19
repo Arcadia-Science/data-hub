@@ -1435,9 +1435,9 @@ describe("MCP Server (HTTP)", () => {
         query: `notion.so/Renamed-${pageId}?pvs=4`,
       })
     );
-    expect(found.notebooks).toEqual([
+    expect(found.lab_notebooks).toEqual([
       {
-        type: "notebook",
+        type: "lab_notebook",
         id: notebook.id,
         name: "Heat stress",
         url: notebook.url,

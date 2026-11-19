@@ -8146,7 +8146,7 @@
     {
       "name": "global_search",
       "title": "Global Search",
-      "description": "Fuzzy search across runs, lab notebooks, files, instruments, users, and comments (same backend as the UI ⌘K palette). Prefer this over search_runs when the query may match a filename, instrument display name, attributor name, user, comment body, or a lab notebook's name or description. A pasted notebook link returns only that page's notebook, ignoring http vs. https, www., tracking parameters, the fragment, and a Notion page's title. Runs don't match through their notebooks: pass a notebook's id to search_runs notebookId for its runs, or to get_notebook. The users scope returns workspace member names/emails to any authenticated caller (no row-level member privacy). Use search_runs for date/status/metadata filters. Queries shorter than 2 characters are rejected.",
+      "description": "Fuzzy search across runs, lab notebooks, files, instruments, users, and comments (same backend as the UI ⌘K palette). Prefer this over search_runs when the query may match a filename, instrument display name, attributor name, user, comment body, or a lab notebook's name or description. A pasted lab notebook link returns only that page's lab notebook, ignoring http vs. https, www., tracking parameters, the fragment, and a Notion page's title. Runs don't match through their notebooks: pass a lab notebook's id to search_runs labNotebookId for its runs, or to get_lab_notebook. The users scope returns workspace member names/emails to any authenticated caller (no row-level member privacy). Use search_runs for date/status/metadata filters. Queries shorter than 2 characters are rejected.",
       "group": "discovery",
       "scope": "runs:read",
       "annotations": {
@@ -8166,7 +8166,7 @@
             "enum": [
               "all",
               "runs",
-              "notebooks",
+              "lab_notebooks",
               "files",
               "instruments",
               "users",
@@ -8261,14 +8261,14 @@
               "additionalProperties": false
             }
           },
-          "notebooks": {
+          "lab_notebooks": {
             "type": "array",
             "items": {
               "type": "object",
               "properties": {
                 "type": {
                   "type": "string",
-                  "const": "notebook"
+                  "const": "lab_notebook"
                 },
                 "id": {
                   "type": "string"
@@ -8278,13 +8278,13 @@
                 },
                 "url": {
                   "type": "string",
-                  "description": "The notebook's own page, such as its Notion page."
+                  "description": "The lab notebook's own page, such as its Notion page."
                 },
                 "runCount": {
                   "type": "integer",
                   "minimum": -9007199254740991,
                   "maximum": 9007199254740991,
-                  "description": "Live runs in the notebook, not held to the result cap. List them with search_runs notebookId."
+                  "description": "Live runs in the lab notebook, not held to the result cap. List them with search_runs labNotebookId."
                 }
               },
               "required": [
@@ -8596,7 +8596,7 @@
                 "minimum": -9007199254740991,
                 "maximum": 9007199254740991
               },
-              "notebooks": {
+              "lab_notebooks": {
                 "type": "integer",
                 "minimum": -9007199254740991,
                 "maximum": 9007199254740991
@@ -8629,7 +8629,7 @@
             },
             "required": [
               "runs",
-              "notebooks",
+              "lab_notebooks",
               "files",
               "instruments",
               "users",
@@ -8641,7 +8641,7 @@
         },
         "required": [
           "runs",
-          "notebooks",
+          "lab_notebooks",
           "files",
           "instruments",
           "users",

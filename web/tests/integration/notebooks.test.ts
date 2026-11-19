@@ -1153,7 +1153,7 @@ describe("Lab notebooks API", () => {
       }
     });
 
-    it("finds the notebook in global search by a pasted link or its name, but not once deleted, and not its runs", async () => {
+    it("finds the lab notebook in global search by a pasted link or its name, but not once deleted, and not its runs", async () => {
       await createRun("search-linked");
       const { lab_notebook: notebook } = await createNotebook({
         url: notionUrl("Cardamom-osmotic-stress", 5),
@@ -1171,9 +1171,9 @@ describe("Lab notebooks API", () => {
       const pasted = await search(
         `http://notion.so/Renamed-page-${notionId(5)}/?pvs=4#top`
       );
-      expect(pasted.notebooks).toEqual([
+      expect(pasted.lab_notebooks).toEqual([
         {
-          type: "notebook",
+          type: "lab_notebook",
           id: notebook.id,
           name: "Cardamom osmotic stress",
           url: notebook.url,
@@ -1186,14 +1186,16 @@ describe("Lab notebooks API", () => {
       );
 
       const byName = await search("cardamom");
-      expect(byName.notebooks.map((n) => n.id)).toContain(notebook.id);
+      expect(byName.lab_notebooks.map((n) => n.id)).toContain(notebook.id);
       expect(byName.runs.map((run) => run.runId)).not.toContain(
         "search-linked"
       );
 
       await deleteNotebook(notebook.id);
       const afterDelete = await search("cardamom");
-      expect(afterDelete.notebooks.map((n) => n.id)).not.toContain(notebook.id);
+      expect(afterDelete.lab_notebooks.map((n) => n.id)).not.toContain(
+        notebook.id
+      );
     });
   });
 

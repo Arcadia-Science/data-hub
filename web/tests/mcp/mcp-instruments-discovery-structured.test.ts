@@ -130,14 +130,14 @@ vi.mock("@/lib/api/dashboard", () => ({
 vi.mock("@/lib/api/search", () => ({
   globalSearch: vi.fn().mockResolvedValue({
     runs: [],
-    notebooks: [],
+    lab_notebooks: [],
     files: [],
     instruments: [],
     users: [],
     comments: [],
     counts: {
       runs: 0,
-      notebooks: 0,
+      lab_notebooks: 0,
       files: 0,
       instruments: 0,
       users: 0,
@@ -359,14 +359,14 @@ describe("instruments + discovery structuredContent", () => {
     };
     const result = {
       runs: [],
-      notebooks: [],
+      lab_notebooks: [],
       files: [],
       instruments: [instrument],
       users: [],
       comments: [],
       counts: {
         runs: 0,
-        notebooks: 0,
+        lab_notebooks: 0,
         files: 0,
         instruments: 1,
         users: 0,
@@ -386,9 +386,9 @@ describe("instruments + discovery structuredContent", () => {
     ).toBe(false);
   });
 
-  it("global_search returns notebooks, and runs no longer match through them", () => {
+  it("global_search returns lab notebooks, and runs no longer match through them", () => {
     const notebook = {
-      type: "notebook",
+      type: "lab_notebook",
       id: "5d1f0c2a-8b3e-4f6a-9c7d-1e2f3a4b5c6d",
       name: "Heat stress",
       url: "https://www.notion.so/lab/Heat-stress-0123456789abcdef0123456789abcdef",
@@ -396,14 +396,14 @@ describe("instruments + discovery structuredContent", () => {
     };
     const result = {
       runs: [],
-      notebooks: [notebook],
+      lab_notebooks: [notebook],
       files: [],
       instruments: [],
       users: [],
       comments: [],
       counts: {
         runs: 0,
-        notebooks: 1,
+        lab_notebooks: 1,
         files: 0,
         instruments: 0,
         users: 0,
@@ -413,7 +413,7 @@ describe("instruments + discovery structuredContent", () => {
     };
     expect(globalSearchOutputSchema.parse(result)).toEqual(result);
 
-    const { notebooks: _notebooks, ...withoutNotebooks } = result;
+    const { lab_notebooks: _notebooks, ...withoutNotebooks } = result;
     expect(globalSearchOutputSchema.safeParse(withoutNotebooks).success).toBe(
       false
     );
@@ -442,16 +442,16 @@ describe("instruments + discovery structuredContent", () => {
     ).toBe(false);
   });
 
-  it("global_search passes the notebooks scope through", async () => {
+  it("global_search passes the lab notebooks scope through", async () => {
     const { globalSearch } = await import("@/lib/api/search");
     const result = await client.callTool({
       name: "global_search",
-      arguments: { query: "heat stress", scope: "notebooks" },
+      arguments: { query: "heat stress", scope: "lab_notebooks" },
     });
     expect(result.isError).toBeFalsy();
     expect(globalSearch).toHaveBeenLastCalledWith({
       query: "heat stress",
-      scope: "notebooks",
+      scope: "lab_notebooks",
     });
   });
 

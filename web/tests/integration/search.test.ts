@@ -67,7 +67,7 @@ async function seedNotebook({
   const db = getTestDb();
   const urlKey = notebookUrlKey(url);
   if (!urlKey) {
-    throw new Error(`Not a notebook link: ${url}`);
+    throw new Error(`Not a lab notebook link: ${url}`);
   }
   const [notebook] = await db
     .insert(notebooks)
@@ -219,7 +219,7 @@ describe("Global search API", () => {
     const result = await search(token, "n");
     expect(result.counts.total).toBe(0);
     expect(result.runs).toHaveLength(0);
-    expect(result.notebooks).toHaveLength(0);
+    expect(result.lab_notebooks).toHaveLength(0);
     expect(result.files).toHaveLength(0);
     expect(result.instruments).toHaveLength(0);
     expect(result.users).toHaveLength(0);
@@ -280,7 +280,7 @@ describe("Global search API", () => {
   it("scopes results to a single type when requested", async () => {
     const result = await search(token, "nd2", "runs");
     expect(result.runs.length).toBeGreaterThan(0);
-    expect(result.notebooks).toHaveLength(0);
+    expect(result.lab_notebooks).toHaveLength(0);
     expect(result.files).toHaveLength(0);
     expect(result.instruments).toHaveLength(0);
     expect(result.users).toHaveLength(0);
@@ -379,7 +379,7 @@ describe("Global search API", () => {
     expect(result.counts.users).toBeGreaterThan(0);
     expect(result.counts.total).toBe(
       result.counts.runs +
-        result.counts.notebooks +
+        result.counts.lab_notebooks +
         result.counts.files +
         result.counts.instruments +
         result.counts.users +
@@ -454,37 +454,37 @@ describe("Global search API", () => {
       });
     });
 
-    it("finds notebooks by name or description, ignoring case", async () => {
+    it("finds lab notebooks by name or description, ignoring case", async () => {
       const result = await search(token, "cardamom");
-      expect(result.notebooks.map((n) => n.id)).toEqual([
+      expect(result.lab_notebooks.map((n) => n.id)).toEqual([
         // A name prefix first, then the newest run, then no runs at all.
         osmoticId,
         heatId,
         leafId,
       ]);
-      expect(result.notebooks[0]).toEqual({
-        type: "notebook",
+      expect(result.lab_notebooks[0]).toEqual({
+        type: "lab_notebook",
         id: osmoticId,
         name: "Cardamom osmotic stress",
         url: osmoticUrl,
         // The deleted run doesn't count.
         runCount: 2,
       });
-      expect(result.counts.notebooks).toBe(3);
+      expect(result.counts.lab_notebooks).toBe(3);
 
-      const byDescription = await search(token, "salt series", "notebooks");
-      expect(byDescription.notebooks.map((n) => n.id)).toEqual([osmoticId]);
+      const byDescription = await search(token, "salt series", "lab_notebooks");
+      expect(byDescription.lab_notebooks.map((n) => n.id)).toEqual([osmoticId]);
     });
 
-    it("leaves deleted notebooks out", async () => {
+    it("leaves deleted lab notebooks out", async () => {
       const byName = await search(token, "Cardamom archive");
-      expect(byName.notebooks).toEqual([]);
+      expect(byName.lab_notebooks).toEqual([]);
 
       const byLink = await search(token, deletedUrl);
-      expect(byLink.notebooks).toEqual([]);
+      expect(byLink.lab_notebooks).toEqual([]);
     });
 
-    it("finds only the notebook for a pasted link, in any form of that page", async () => {
+    it("finds only the lab notebook for a pasted link, in any form of that page", async () => {
       for (const link of [
         osmoticUrl,
         // The same Notion page, renamed, over http, with a query and fragment.
@@ -492,7 +492,7 @@ describe("Global search API", () => {
       ]) {
         const result = await search(token, link);
         expect(
-          result.notebooks.map((n) => n.id),
+          result.lab_notebooks.map((n) => n.id),
           link
         ).toEqual([osmoticId]);
       }
@@ -502,24 +502,24 @@ describe("Global search API", () => {
         token,
         `https://www.notion.so/lab/Cardamom-${notionId(9)}`
       );
-      expect(unknown.notebooks).toEqual([]);
+      expect(unknown.lab_notebooks).toEqual([]);
     });
 
     it("matches text that could be a link either way", async () => {
       // A link without its scheme finds the notebook for that page.
       const byPage = await search(token, `notion.so/${notionId(1)}`);
-      expect(byPage.notebooks.map((n) => n.id)).toEqual([osmoticId]);
+      expect(byPage.lab_notebooks.map((n) => n.id)).toEqual([osmoticId]);
 
       // Dotted text that is no notebook's page still matches a name.
       const byName = await search(token, "rev.b");
-      expect(byName.notebooks.map((n) => n.id)).toEqual([revisionId]);
+      expect(byName.lab_notebooks.map((n) => n.id)).toEqual([revisionId]);
 
       // A bare Notion page ID matches part of the link.
       const byId = await search(token, notionId(2));
-      expect(byId.notebooks.map((n) => n.id)).toEqual([heatId]);
+      expect(byId.lab_notebooks.map((n) => n.id)).toEqual([heatId]);
     });
 
-    it("no longer finds runs through their notebooks", async () => {
+    it("no longer finds runs through their lab notebooks", async () => {
       for (const query of ["Cardamom osmotic", osmoticUrl]) {
         const result = await search(token, query, "runs");
         expect(
@@ -529,9 +529,9 @@ describe("Global search API", () => {
       }
     });
 
-    it("searches notebooks alone on the notebooks scope", async () => {
-      const result = await search(token, "cardamom", "notebooks");
-      expect(result.notebooks.length).toBe(3);
+    it("searches lab notebooks alone on the lab notebooks scope", async () => {
+      const result = await search(token, "cardamom", "lab_notebooks");
+      expect(result.lab_notebooks.length).toBe(3);
       expect(result.runs).toHaveLength(0);
       expect(result.files).toHaveLength(0);
       expect(result.instruments).toHaveLength(0);
@@ -540,9 +540,9 @@ describe("Global search API", () => {
       expect(result.counts.total).toBe(3);
     });
 
-    it("counts every live run in a notebook, past the result cap", async () => {
-      const result = await search(token, "Bulk screen", "notebooks");
-      expect(result.notebooks).toEqual([
+    it("counts every live run in a lab notebook, past the result cap", async () => {
+      const result = await search(token, "Bulk screen", "lab_notebooks");
+      expect(result.lab_notebooks).toEqual([
         expect.objectContaining({ id: bulkId, runCount: 30 }),
       ]);
     });

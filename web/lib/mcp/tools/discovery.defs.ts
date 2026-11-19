@@ -10,7 +10,7 @@ export const globalSearchTool = {
   name: "global_search",
   title: "Global Search",
   description:
-    "Fuzzy search across runs, lab notebooks, files, instruments, users, and comments (same backend as the UI ⌘K palette). Prefer this over search_runs when the query may match a filename, instrument display name, attributor name, user, comment body, or a lab notebook's name or description. A pasted notebook link returns only that page's notebook, ignoring http vs. https, www., tracking parameters, the fragment, and a Notion page's title. Runs don't match through their notebooks: pass a notebook's id to search_runs notebookId for its runs, or to get_notebook. The users scope returns workspace member names/emails to any authenticated caller (no row-level member privacy). Use search_runs for date/status/metadata filters. Queries shorter than 2 characters are rejected.",
+    "Fuzzy search across runs, lab notebooks, files, instruments, users, and comments (same backend as the UI ⌘K palette). Prefer this over search_runs when the query may match a filename, instrument display name, attributor name, user, comment body, or a lab notebook's name or description. A pasted lab notebook link returns only that page's lab notebook, ignoring http vs. https, www., tracking parameters, the fragment, and a Notion page's title. Runs don't match through their notebooks: pass a lab notebook's id to search_runs labNotebookId for its runs, or to get_lab_notebook. The users scope returns workspace member names/emails to any authenticated caller (no row-level member privacy). Use search_runs for date/status/metadata filters. Queries shorter than 2 characters are rejected.",
   group: "discovery",
   scope: "runs:read",
   inputSchema: {
@@ -19,7 +19,7 @@ export const globalSearchTool = {
       .enum([
         "all",
         "runs",
-        "notebooks",
+        "lab_notebooks",
         "files",
         "instruments",
         "users",

@@ -8,7 +8,7 @@ import { authorize } from "@/lib/api/auth";
 import { globalSearch, type SearchScope } from "@/lib/api/search";
 
 // ---------------------------------------------------------------------------
-// GET /api/v1/search?q=…&scope=all|runs|notebooks|files|instruments|users|comments
+// GET /api/v1/search?q=…&scope=all|runs|lab_notebooks|files|instruments|users|comments
 //
 // Cross-entity global search powering the ⌘K palette. Returns grouped,
 // relevance-ordered matches over runs, lab notebooks, files, instruments,
@@ -22,7 +22,7 @@ import { globalSearch, type SearchScope } from "@/lib/api/search";
 const VALID_SCOPES: ReadonlySet<SearchScope> = new Set([
   "all",
   "runs",
-  "notebooks",
+  "lab_notebooks",
   "files",
   "instruments",
   "users",

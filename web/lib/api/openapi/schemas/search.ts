@@ -6,7 +6,7 @@ export const searchQuery = z.object({
     .enum([
       "all",
       "runs",
-      "notebooks",
+      "lab_notebooks",
       "files",
       "instruments",
       "users",
@@ -16,24 +16,24 @@ export const searchQuery = z.object({
 });
 
 const searchNotebookResult = z.object({
-  type: z.literal("notebook"),
+  type: z.literal("lab_notebook"),
   id: z.string().uuid(),
   name: z.string(),
-  url: z.string().describe("The notebook's page, ready to open."),
+  url: z.string().describe("The lab notebook's page, ready to open."),
   runCount: z
     .number()
     .int()
     .describe(
-      "How many runs are in the notebook, however many results the search shows. Deleted runs don't count."
+      "How many runs are in the lab notebook, however many results the search shows. Deleted runs don't count."
     ),
 });
 
 export const searchResponse = z.object({
   runs: z.array(z.record(z.string(), z.unknown())),
-  notebooks: z
+  lab_notebooks: z
     .array(searchNotebookResult)
     .describe(
-      "Lab notebooks whose name or description matches. A pasted link returns only the notebook for that page. Deleted notebooks are left out."
+      "Lab notebooks whose name or description matches. A pasted link returns only the lab notebook for that page. Deleted lab notebooks are left out."
     ),
   files: z.array(z.record(z.string(), z.unknown())),
   instruments: z.array(z.record(z.string(), z.unknown())),

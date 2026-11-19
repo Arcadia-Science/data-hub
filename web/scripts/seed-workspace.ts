@@ -88,7 +88,7 @@ export async function seedWorkspace(db: Db): Promise<SeededWorkspace> {
     watchers,
   });
 
-  console.log("Seeding run comments, attributions, and notebooks…");
+  console.log("Seeding run comments, attributions, and lab notebooks…");
   const commentAuthors = [
     { id: userId, name: SEED_ADMIN_NAME },
     ...teammates.map((t) => ({ id: t.id, name: t.name })),

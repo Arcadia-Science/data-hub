@@ -29,15 +29,17 @@ const searchRunResultSchema = z.object({
 });
 
 const searchNotebookResultSchema = z.object({
-  type: z.literal("notebook"),
+  type: z.literal("lab_notebook"),
   id: z.string(),
   name: z.string(),
-  url: z.string().describe("The notebook's own page, such as its Notion page."),
+  url: z
+    .string()
+    .describe("The lab notebook's own page, such as its Notion page."),
   runCount: z
     .number()
     .int()
     .describe(
-      "Live runs in the notebook, not held to the result cap. List them with search_runs notebookId."
+      "Live runs in the lab notebook, not held to the result cap. List them with search_runs labNotebookId."
     ),
 });
 
@@ -95,14 +97,14 @@ const searchCommentResultSchema = z.object({
 /** Grouped result from `globalSearch` (dates already ISO strings). */
 export const globalSearchOutputSchema = z.object({
   runs: z.array(searchRunResultSchema),
-  notebooks: z.array(searchNotebookResultSchema),
+  lab_notebooks: z.array(searchNotebookResultSchema),
   files: z.array(searchFileResultSchema),
   instruments: z.array(searchInstrumentResultSchema),
   users: z.array(searchUserResultSchema),
   comments: z.array(searchCommentResultSchema),
   counts: z.object({
     runs: z.number().int(),
-    notebooks: z.number().int(),
+    lab_notebooks: z.number().int(),
     files: z.number().int(),
     instruments: z.number().int(),
     users: z.number().int(),

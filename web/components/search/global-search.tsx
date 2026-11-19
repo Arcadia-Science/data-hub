@@ -46,7 +46,7 @@ const DEBOUNCE_MS = 200;
 const SCOPE_TABS: { id: SearchScope; label: string }[] = [
   { id: "all", label: "All" },
   { id: "runs", label: "Runs" },
-  { id: "notebooks", label: "Notebooks" },
+  { id: "lab_notebooks", label: "Lab Notebooks" },
   { id: "files", label: "Files" },
   { id: "instruments", label: "Instruments" },
   { id: "users", label: "Users" },
@@ -55,14 +55,14 @@ const SCOPE_TABS: { id: SearchScope; label: string }[] = [
 
 const EMPTY_RESULT: GlobalSearchResult = {
   runs: [],
-  notebooks: [],
+  lab_notebooks: [],
   files: [],
   instruments: [],
   users: [],
   comments: [],
   counts: {
     runs: 0,
-    notebooks: 0,
+    lab_notebooks: 0,
     files: 0,
     instruments: 0,
     users: 0,
@@ -76,7 +76,7 @@ function runHref(run: SearchRunResult): string {
 }
 
 function notebookHref(notebook: SearchNotebookResult): string {
-  return `/notebooks/${encodeURIComponent(notebook.id)}`;
+  return `/lab-notebooks/${encodeURIComponent(notebook.id)}`;
 }
 
 // Files have no standalone page, so deep-link to the parent run and pre-fill
@@ -298,13 +298,13 @@ export function GlobalSearch({
       >
         <DialogTitle className="sr-only">Search Data Hub</DialogTitle>
         <DialogDescription className="sr-only">
-          Search across runs, notebooks, files, instruments, users, and
-          comments, or paste a notebook link.
+          Search across runs, lab notebooks, files, instruments, users, and
+          comments, or paste a lab notebook link.
         </DialogDescription>
 
         <CommandPrimitive
           className="flex w-full min-w-0 max-w-full flex-col overflow-hidden"
-          label="Search runs, notebooks, files, instruments, users, or comments"
+          label="Search runs, lab notebooks, files, instruments, users, or comments"
           loop
           shouldFilter={false}
         >
@@ -315,7 +315,7 @@ export function GlobalSearch({
             <CommandPrimitive.Input
               className="flex h-12 w-full bg-transparent text-base outline-none placeholder:text-muted-foreground"
               onValueChange={setQuery}
-              placeholder="Search or paste a notebook link…"
+              placeholder="Search or paste a lab notebook link…"
               value={query}
             />
             <Kbd>esc</Kbd>
@@ -382,9 +382,9 @@ export function GlobalSearch({
                   </CommandGroup>
                 ) : null}
 
-                {result.notebooks.length > 0 ? (
-                  <CommandGroup heading="Notebooks">
-                    {result.notebooks.map((notebook) => (
+                {result.lab_notebooks.length > 0 ? (
+                  <CommandGroup heading="Lab Notebooks">
+                    {result.lab_notebooks.map((notebook) => (
                       <ResultItem
                         action={
                           <NotebookPageLink
@@ -505,7 +505,7 @@ function RecentSearches({
       <div className="flex flex-col items-center justify-center gap-2 py-12 text-center">
         <SearchIcon className="size-7 text-muted-foreground" />
         <p className="text-muted-foreground text-sm">
-          Search runs, notebooks, files, instruments, users, or comments
+          Search runs, lab notebooks, files, instruments, users, or comments
         </p>
       </div>
     );
