@@ -96,6 +96,14 @@ export const runListQuery = z.object({
     description:
       "`true` lists only runs with at least one lab notebook link; `false` lists only runs with none.",
   }),
+  notebook_link_name: z.string().optional().openapi({
+    description:
+      "Lists only runs with a lab notebook link named exactly this, matching case. A link's name is its `display_name`: its label, or a name worked out from its URL when it has no label. A blank value is ignored.",
+  }),
+  notebook_link_search: z.string().optional().openapi({
+    description:
+      "Lists only runs with a lab notebook link whose name (`display_name`) contains this text, ignoring case. With `notebook_link_name`, one link has to match both. A blank value is ignored.",
+  }),
   metadata_key: z
     .string()
     .optional()

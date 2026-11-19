@@ -5,6 +5,7 @@ import { parseRunMetadataFilters } from "@/lib/api/run-metadata-filters";
 import {
   parseHasNotebookLinkParam,
   parseIntParam,
+  parseNotebookLinkNameParams,
   parseRunStatusParam,
 } from "@/lib/api/validators";
 
@@ -46,6 +47,10 @@ export async function GET(request: NextRequest) {
     hasNotebookLink: parseHasNotebookLinkParam(
       searchParams.get("has_notebook_link")
     ),
+    ...parseNotebookLinkNameParams({
+      name: searchParams.get("notebook_link_name"),
+      search: searchParams.get("notebook_link_search"),
+    }),
     statuses: parseRunStatusParam(searchParams),
     ...parseRunMetadataFilters(searchParams),
   });

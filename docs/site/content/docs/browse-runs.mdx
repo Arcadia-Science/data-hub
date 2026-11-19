@@ -160,6 +160,11 @@ Runs tables show each run’s first link in the **Lab Notebook** column, with **
 
 Scripts can manage links through the [REST API](/docs/api) with a token that has the `runs:link` scope. An AI assistant connected to the [MCP server](/docs/mcp) can add, edit, and remove them with the `add_notebook_link`, `update_notebook_link`, and `remove_notebook_link` tools.
 
+Scripts and AI assistants can also filter runs by link the way the **Lab Notebook** column does, and need only read access to do it:
+
+- The REST API’s run lists take `notebook_link_name` for one label exactly, with matching case, or `notebook_link_search` for labels containing some text. A link without its own label goes by the name the table shows for it, which responses call `display_name`.
+- The `search_runs` tool takes the same filters as `notebookLinkName` and `notebookLinkSearch`. The `list_notebook_link_names` tool lists the labels with how many runs have each one.
+
 ## Download files [#download-files]
 
 From the files table you can:

@@ -831,7 +831,7 @@
     {
       "name": "search_runs",
       "title": "Search Runs",
-      "description": "Search instrument runs with filtering, pagination, and sorting. Each run lists its lab notebook links. Supports run status, has-notebook-link, and instrument-metadata filters (plate reader, gel-doc, qPCR, Hina microscope, Epson scanner, Aunty). Prefer global_search when the query may match filenames, instrument names, or attributor names rather than run IDs. Discover valid metadata filter values via get_instrument_filter_options or datahub://instruments/{id}/filter-options.",
+      "description": "Search instrument runs with filtering, pagination, and sorting. Each run lists its lab notebook links. Supports run status, lab notebook link, and instrument-metadata filters (plate reader, gel-doc, qPCR, Hina microscope, Epson scanner, Aunty). Prefer global_search when the query may match filenames, instrument names, or attributor names rather than run IDs. Discover valid metadata filter values via get_instrument_filter_options or datahub://instruments/{id}/filter-options.",
       "group": "runs",
       "scope": "runs:read",
       "annotations": {
@@ -983,6 +983,14 @@
           "hasNotebookLink": {
             "description": "true: only runs with at least one lab notebook link. false: only runs with none.",
             "type": "boolean"
+          },
+          "notebookLinkName": {
+            "description": "Only runs with a lab notebook link named exactly this, matching case. A link's name is its display_name: its label, or a name worked out from its URL when it has no label. list_notebook_link_names lists the names.",
+            "type": "string"
+          },
+          "notebookLinkSearch": {
+            "description": "Only runs with a lab notebook link whose name (display_name) contains this text, ignoring case.",
+            "type": "string"
           },
           "status": {
             "description": "Filter by derived run status (OR'd together). Status is derived from a run's raw file states, priority-exclusive: failed (any file failed processing), stalled (a file has been in processing past the stall window and can be reprocessed), upload_failed (the watcher gave up on a file, for example because it's no longer on the instrument PC), waiting_upload (files requested, or ones the watcher uploads on its own), uploaded, queued (reprocessing files waiting for a free processing slot), processing (in flight), not_uploaded (files only on the instrument PC that nobody requested), completed (all done), empty (no files). The deprecated pending means waiting_upload or not_uploaded.",
@@ -3854,6 +3862,58 @@
           "instrumentId",
           "runId",
           "filesQueued"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "list_notebook_link_names",
+      "title": "List Notebook Link Names",
+      "description": "List the names of the lab notebook links on runs, with how many runs have a link by each name, most-used first. A link's name is its display_name: its label, or a name worked out from its URL when it has no label. Deleted runs don't count. Pass a name to search_runs as notebookLinkName to list those runs.",
+      "group": "notebook_links",
+      "scope": "runs:read",
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "instrumentId": {
+            "description": "Only count runs on this instrument. Leave out for all.",
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "names": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "runCount": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "name",
+                "runCount"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "names"
         ],
         "additionalProperties": false
       }
