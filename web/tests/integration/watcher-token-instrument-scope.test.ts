@@ -22,8 +22,8 @@ import {
 
 // Every write route that names an instrument, run, file or archive job lets a
 // watcher's token act only on its own instrument. The watcher tokens here
-// carry every scope, like a deployed watcher token minted with the legacy `*`
-// or `:write` scopes, so they reach routes the Watcher preset alone can't. A
+// list every scope, so they reach routes the Watcher preset alone can't. A
+// legacy `*` token no longer would: see watcher-token-legacy-scopes.test.ts. A
 // token that registered no watcher, such as the Lambda's, is not limited.
 
 const A = "scope-instr-a";

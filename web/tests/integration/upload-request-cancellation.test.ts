@@ -16,7 +16,11 @@ import {
 // files to `detected` (clearing upload_requested_at) so they drop out of the
 // upload queue instead of erroring on every heartbeat poll.
 describe("Upload request cancellation on watch-directory change", () => {
+  // The instrument PC's token. Like an old lab PC token it carries `*`, so it
+  // gets only what a watcher needs and can't read runs.
   let token: string;
+  // Reads the run's files, as a person would. It registered no watcher.
+  let readerToken: string;
   let watcherId: string;
   const instrumentId = "cancel-on-dirchange-instrument";
   const runId = "cancel-on-dirchange-run";
@@ -35,6 +39,7 @@ describe("Upload request cancellation on watch-directory change", () => {
   beforeAll(async () => {
     await resetDb();
     ({ token } = await seedTestUser());
+    ({ token: readerToken } = await seedTestUser());
 
     const db = getTestDb();
     await db.insert(instruments).values({
@@ -81,7 +86,7 @@ describe("Upload request cancellation on watch-directory change", () => {
 
   async function fileIdsByName(): Promise<Record<string, number>> {
     const res = await api(`/api/v1/instruments/${instrumentId}/runs/${runId}`, {
-      token,
+      token: readerToken,
     });
     const data = await res.json();
     const map: Record<string, number> = {};
@@ -133,7 +138,7 @@ describe("Upload request cancellation on watch-directory change", () => {
     // Files reverted to detected with upload_requested_at cleared.
     const detail = await api(
       `/api/v1/instruments/${instrumentId}/runs/${runId}`,
-      { token }
+      { token: readerToken }
     );
     const detailData = await detail.json();
     for (const f of detailData.files as {
