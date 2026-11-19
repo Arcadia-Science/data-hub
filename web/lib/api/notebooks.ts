@@ -142,8 +142,11 @@ const deleterToken = alias(personalAccessTokens, "deleter_token");
 
 const runStartedAt = sql`coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt})`;
 
-// Run count, instrument count, and newest run per notebook, over live runs.
-function notebookStats() {
+/**
+ * Run count, instrument count, and newest run per notebook, over live runs.
+ * A notebook with no live runs has no row, so left join it.
+ */
+export function notebookStats() {
   return db
     .select({
       notebookId: runNotebookLinks.notebookId,
@@ -345,19 +348,26 @@ function notebookListConditions(input: ListNotebooksInput): SQL | undefined {
       ilike(notebooks.description, pattern),
       ilike(notebooks.url, pattern)
     ) as SQL;
-    const urlKey = notebookSearchKey(query);
-    if (!urlKey) {
-      conditions.push(text);
-    } else if (query.includes("://")) {
-      // A pasted link matches only the notebook for that page.
-      conditions.push(eq(notebooks.urlKey, urlKey));
-    } else {
-      // Text like "v2.1" or "notion.so/abc" could be a name or a link
-      // without its scheme, so it matches either way.
-      conditions.push(or(eq(notebooks.urlKey, urlKey), text) as SQL);
-    }
+    conditions.push(notebookQueryCondition(query, text));
   }
   return conditions.length > 0 ? and(...conditions) : undefined;
+}
+
+/**
+ * Which notebooks a trimmed search query finds. Plain text matches `text`.
+ * A pasted link matches only the notebook for that page.
+ */
+export function notebookQueryCondition(query: string, text: SQL): SQL {
+  const urlKey = notebookSearchKey(query);
+  if (!urlKey) {
+    return text;
+  }
+  if (query.includes("://")) {
+    return eq(notebooks.urlKey, urlKey);
+  }
+  // Text like "v2.1" or "notion.so/abc" could be a name or a link without
+  // its scheme, so it matches either way.
+  return or(eq(notebooks.urlKey, urlKey), text) as SQL;
 }
 
 /** Notebooks matching the filters, a page at a time. */

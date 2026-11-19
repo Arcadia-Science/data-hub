@@ -10,13 +10,21 @@ export const globalSearchTool = {
   name: "global_search",
   title: "Global Search",
   description:
-    "Fuzzy search across runs, files, instruments, users, and comments (same backend as the UI ⌘K palette). Prefer this over search_runs when the query may match a filename, instrument display name, attributor name, user, comment body, or a lab notebook's name or link. A pasted lab notebook URL finds the runs in that page's lab notebook, ignoring http vs. https, www., the query string, and the fragment. A run found through a lab notebook has matchedNotebook; pass its id to get_lab_notebook or to search_runs labNotebookId. The users scope returns workspace member names/emails to any authenticated caller (no row-level member privacy). Use search_runs for date/status/metadata filters. Queries shorter than 2 characters are rejected.",
+    "Fuzzy search across runs, lab notebooks, files, instruments, users, and comments (same backend as the UI ⌘K palette). Prefer this over search_runs when the query may match a filename, instrument display name, attributor name, user, comment body, or a lab notebook's name or description. A pasted notebook link returns only that page's notebook, ignoring http vs. https, www., tracking parameters, the fragment, and a Notion page's title. Runs don't match through their notebooks: pass a notebook's id to search_runs notebookId for its runs, or to get_notebook. The users scope returns workspace member names/emails to any authenticated caller (no row-level member privacy). Use search_runs for date/status/metadata filters. Queries shorter than 2 characters are rejected.",
   group: "discovery",
   scope: "runs:read",
   inputSchema: {
     query: z.string().describe("Search query (min 2 characters)"),
     scope: z
-      .enum(["all", "runs", "files", "instruments", "users", "comments"])
+      .enum([
+        "all",
+        "runs",
+        "notebooks",
+        "files",
+        "instruments",
+        "users",
+        "comments",
+      ])
       .optional()
       .describe("Limit results to one entity type (default: all)"),
   },

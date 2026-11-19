@@ -8146,7 +8146,7 @@
     {
       "name": "global_search",
       "title": "Global Search",
-      "description": "Fuzzy search across runs, files, instruments, users, and comments (same backend as the UI ⌘K palette). Prefer this over search_runs when the query may match a filename, instrument display name, attributor name, user, comment body, or a lab notebook's name or link. A pasted lab notebook URL finds the runs in that page's lab notebook, ignoring http vs. https, www., the query string, and the fragment. A run found through a lab notebook has matchedNotebook; pass its id to get_lab_notebook or to search_runs labNotebookId. The users scope returns workspace member names/emails to any authenticated caller (no row-level member privacy). Use search_runs for date/status/metadata filters. Queries shorter than 2 characters are rejected.",
+      "description": "Fuzzy search across runs, lab notebooks, files, instruments, users, and comments (same backend as the UI ⌘K palette). Prefer this over search_runs when the query may match a filename, instrument display name, attributor name, user, comment body, or a lab notebook's name or description. A pasted notebook link returns only that page's notebook, ignoring http vs. https, www., tracking parameters, the fragment, and a Notion page's title. Runs don't match through their notebooks: pass a notebook's id to search_runs notebookId for its runs, or to get_notebook. The users scope returns workspace member names/emails to any authenticated caller (no row-level member privacy). Use search_runs for date/status/metadata filters. Queries shorter than 2 characters are rejected.",
       "group": "discovery",
       "scope": "runs:read",
       "annotations": {
@@ -8166,6 +8166,7 @@
             "enum": [
               "all",
               "runs",
+              "notebooks",
               "files",
               "instruments",
               "users",
@@ -8232,7 +8233,6 @@
                   "type": "string",
                   "enum": [
                     "run_id",
-                    "notebook_link",
                     "file",
                     "instrument",
                     "ran_by"
@@ -8242,33 +8242,6 @@
                   "type": [
                     "string",
                     "null"
-                  ]
-                },
-                "matchedNotebook": {
-                  "anyOf": [
-                    {
-                      "type": "object",
-                      "properties": {
-                        "id": {
-                          "type": "string"
-                        },
-                        "name": {
-                          "type": "string"
-                        },
-                        "url": {
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "id",
-                        "name",
-                        "url"
-                      ],
-                      "additionalProperties": false
-                    },
-                    {
-                      "type": "null"
-                    }
                   ]
                 }
               },
@@ -8283,8 +8256,43 @@
                 "fileCount",
                 "totalSizeBytes",
                 "matchReason",
-                "matchedFilename",
-                "matchedNotebook"
+                "matchedFilename"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "notebooks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "notebook"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string",
+                  "description": "The notebook's own page, such as its Notion page."
+                },
+                "runCount": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "Live runs in the notebook, not held to the result cap. List them with search_runs notebookId."
+                }
+              },
+              "required": [
+                "type",
+                "id",
+                "name",
+                "url",
+                "runCount"
               ],
               "additionalProperties": false
             }
@@ -8588,6 +8596,11 @@
                 "minimum": -9007199254740991,
                 "maximum": 9007199254740991
               },
+              "notebooks": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
               "files": {
                 "type": "integer",
                 "minimum": -9007199254740991,
@@ -8616,6 +8629,7 @@
             },
             "required": [
               "runs",
+              "notebooks",
               "files",
               "instruments",
               "users",
@@ -8627,6 +8641,7 @@
         },
         "required": [
           "runs",
+          "notebooks",
           "files",
           "instruments",
           "users",

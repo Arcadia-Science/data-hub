@@ -8,11 +8,12 @@ import { authorize } from "@/lib/api/auth";
 import { globalSearch, type SearchScope } from "@/lib/api/search";
 
 // ---------------------------------------------------------------------------
-// GET /api/v1/search?q=…&scope=all|runs|files|instruments|users|comments
+// GET /api/v1/search?q=…&scope=all|runs|notebooks|files|instruments|users|comments
 //
 // Cross-entity global search powering the ⌘K palette. Returns grouped,
-// relevance-ordered matches over runs, files, instruments, users, and
-// comments. There is no row-level scoping in Data Hub, so any caller with
+// relevance-ordered matches over runs, lab notebooks, files, instruments,
+// users, and comments. A pasted notebook link returns only that page's
+// notebook. There is no row-level scoping in Data Hub, so any caller with
 // `runs:read` sees the same set the rest of the app exposes — including
 // workspace member names and emails under the Users scope (intentional;
 // mirrors the members directory / attributor picker).
@@ -21,6 +22,7 @@ import { globalSearch, type SearchScope } from "@/lib/api/search";
 const VALID_SCOPES: ReadonlySet<SearchScope> = new Set([
   "all",
   "runs",
+  "notebooks",
   "files",
   "instruments",
   "users",

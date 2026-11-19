@@ -130,12 +130,14 @@ vi.mock("@/lib/api/dashboard", () => ({
 vi.mock("@/lib/api/search", () => ({
   globalSearch: vi.fn().mockResolvedValue({
     runs: [],
+    notebooks: [],
     files: [],
     instruments: [],
     users: [],
     comments: [],
     counts: {
       runs: 0,
+      notebooks: 0,
       files: 0,
       instruments: 0,
       users: 0,
@@ -357,12 +359,14 @@ describe("instruments + discovery structuredContent", () => {
     };
     const result = {
       runs: [],
+      notebooks: [],
       files: [],
       instruments: [instrument],
       users: [],
       comments: [],
       counts: {
         runs: 0,
+        notebooks: 0,
         files: 0,
         instruments: 1,
         users: 0,
@@ -380,6 +384,75 @@ describe("instruments + discovery structuredContent", () => {
         instruments: [withoutConnection],
       }).success
     ).toBe(false);
+  });
+
+  it("global_search returns notebooks, and runs no longer match through them", () => {
+    const notebook = {
+      type: "notebook",
+      id: "5d1f0c2a-8b3e-4f6a-9c7d-1e2f3a4b5c6d",
+      name: "Heat stress",
+      url: "https://www.notion.so/lab/Heat-stress-0123456789abcdef0123456789abcdef",
+      runCount: 72,
+    };
+    const result = {
+      runs: [],
+      notebooks: [notebook],
+      files: [],
+      instruments: [],
+      users: [],
+      comments: [],
+      counts: {
+        runs: 0,
+        notebooks: 1,
+        files: 0,
+        instruments: 0,
+        users: 0,
+        comments: 0,
+        total: 1,
+      },
+    };
+    expect(globalSearchOutputSchema.parse(result)).toEqual(result);
+
+    const { notebooks: _notebooks, ...withoutNotebooks } = result;
+    expect(globalSearchOutputSchema.safeParse(withoutNotebooks).success).toBe(
+      false
+    );
+
+    const run = {
+      type: "run",
+      id: "8a7b6c5d-4e3f-4a1b-9c8d-7e6f5a4b3c2d",
+      runId: "run-2026-001",
+      instrumentId: "test-plate-reader",
+      instrumentName: "Test Plate Reader",
+      acquiredAt: null,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      fileCount: 0,
+      totalSizeBytes: 0,
+      matchReason: "run_id",
+      matchedFilename: null,
+    };
+    expect(
+      globalSearchOutputSchema.safeParse({ ...result, runs: [run] }).success
+    ).toBe(true);
+    expect(
+      globalSearchOutputSchema.safeParse({
+        ...result,
+        runs: [{ ...run, matchReason: "notebook_link" }],
+      }).success
+    ).toBe(false);
+  });
+
+  it("global_search passes the notebooks scope through", async () => {
+    const { globalSearch } = await import("@/lib/api/search");
+    const result = await client.callTool({
+      name: "global_search",
+      arguments: { query: "heat stress", scope: "notebooks" },
+    });
+    expect(result.isError).toBeFalsy();
+    expect(globalSearch).toHaveBeenLastCalledWith({
+      query: "heat stress",
+      scope: "notebooks",
+    });
   });
 
   it("get_system_status structuredContent matches text and schema", async () => {

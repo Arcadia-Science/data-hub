@@ -4245,7 +4245,7 @@
       "get": {
         "operationId": "search",
         "summary": "Search Data Hub",
-        "description": "Requires scope `runs:read`.",
+        "description": "Requires scope `runs:read`. Searches runs, lab notebooks, files, instruments, users, and comments, with up to 5 results in each group, or up to 25 when `scope` names one group. A pasted notebook link returns only the notebook for that page, and runs don't match through their notebooks. List a notebook's runs with `GET /instrument-runs?notebook_id=…`.",
         "tags": [
           "Runs"
         ],
@@ -4269,6 +4269,7 @@
               "enum": [
                 "all",
                 "runs",
+                "notebooks",
                 "files",
                 "instruments",
                 "users",
@@ -4294,6 +4295,43 @@
                         "type": "object",
                         "additionalProperties": {}
                       }
+                    },
+                    "notebooks": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "notebook"
+                            ]
+                          },
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "url": {
+                            "type": "string",
+                            "description": "The notebook's page, ready to open."
+                          },
+                          "runCount": {
+                            "type": "integer",
+                            "description": "How many runs are in the notebook, however many results the search shows. Deleted runs don't count."
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "id",
+                          "name",
+                          "url",
+                          "runCount"
+                        ]
+                      },
+                      "description": "Lab notebooks whose name or description matches. A pasted link returns only the notebook for that page. Deleted notebooks are left out."
                     },
                     "files": {
                       "type": "array",
@@ -4326,6 +4364,7 @@
                   },
                   "required": [
                     "runs",
+                    "notebooks",
                     "files",
                     "instruments",
                     "users",

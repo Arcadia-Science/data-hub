@@ -1153,7 +1153,7 @@ describe("Lab notebooks API", () => {
       }
     });
 
-    it("finds runs in global search by a pasted link or a lab notebook's name, but not through a deleted lab notebook", async () => {
+    it("finds the notebook in global search by a pasted link or its name, but not once deleted, and not its runs", async () => {
       await createRun("search-linked");
       const { lab_notebook: notebook } = await createNotebook({
         url: notionUrl("Cardamom-osmotic-stress", 5),
@@ -1161,31 +1161,39 @@ describe("Lab notebooks API", () => {
         runs: [ref("search-linked")],
       });
       const search = async (q: string) => {
-        const params = new URLSearchParams({ q, scope: "runs" });
+        const params = new URLSearchParams({ q });
         const res = await api(`/api/v1/search?${params}`, { token });
         expect(res.status).toBe(200);
         return (await res.json()) as GlobalSearchResult;
       };
 
+      // The same page, renamed, over http, with a query and fragment.
       const pasted = await search(
         `http://notion.so/Renamed-page-${notionId(5)}/?pvs=4#top`
       );
-      const hit = pasted.runs.find((run) => run.runId === "search-linked");
-      expect(hit?.matchReason).toBe("notebook_link");
-      expect(hit?.matchedNotebook).toEqual({
-        id: notebook.id,
-        name: "Cardamom osmotic stress",
-        url: notebook.url,
-      });
+      expect(pasted.notebooks).toEqual([
+        {
+          type: "notebook",
+          id: notebook.id,
+          name: "Cardamom osmotic stress",
+          url: notebook.url,
+          runCount: 1,
+        },
+      ]);
+      // Its runs don't match through it.
+      expect(pasted.runs.map((run) => run.runId)).not.toContain(
+        "search-linked"
+      );
 
       const byName = await search("cardamom");
-      expect(byName.runs.map((run) => run.runId)).toContain("search-linked");
+      expect(byName.notebooks.map((n) => n.id)).toContain(notebook.id);
+      expect(byName.runs.map((run) => run.runId)).not.toContain(
+        "search-linked"
+      );
 
       await deleteNotebook(notebook.id);
       const afterDelete = await search("cardamom");
-      expect(afterDelete.runs.map((run) => run.runId)).not.toContain(
-        "search-linked"
-      );
+      expect(afterDelete.notebooks.map((n) => n.id)).not.toContain(notebook.id);
     });
   });
 

@@ -1,17 +1,19 @@
 "use client";
 
 import { Command as CommandPrimitive } from "cmdk";
-import { Clock, SearchIcon, SearchX } from "lucide-react";
+import { Clock, ExternalLink, SearchIcon, SearchX } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import {
   SearchCommentRow,
   SearchFileRow,
   SearchInstrumentRow,
+  SearchNotebookRow,
   SearchRunRow,
   SearchUserRow,
 } from "@/components/search/search-result-item";
 import { useRecentSearches } from "@/components/search/use-recent-searches";
+import { Button } from "@/components/ui/button";
 import {
   CommandGroup,
   CommandItem,
@@ -28,6 +30,7 @@ import type {
   SearchCommentResult,
   SearchFileResult,
   SearchInstrumentResult,
+  SearchNotebookResult,
   SearchRunResult,
   SearchScope,
   SearchUserResult,
@@ -43,6 +46,7 @@ const DEBOUNCE_MS = 200;
 const SCOPE_TABS: { id: SearchScope; label: string }[] = [
   { id: "all", label: "All" },
   { id: "runs", label: "Runs" },
+  { id: "notebooks", label: "Notebooks" },
   { id: "files", label: "Files" },
   { id: "instruments", label: "Instruments" },
   { id: "users", label: "Users" },
@@ -51,12 +55,14 @@ const SCOPE_TABS: { id: SearchScope; label: string }[] = [
 
 const EMPTY_RESULT: GlobalSearchResult = {
   runs: [],
+  notebooks: [],
   files: [],
   instruments: [],
   users: [],
   comments: [],
   counts: {
     runs: 0,
+    notebooks: 0,
     files: 0,
     instruments: 0,
     users: 0,
@@ -67,6 +73,10 @@ const EMPTY_RESULT: GlobalSearchResult = {
 
 function runHref(run: SearchRunResult): string {
   return `/instruments/${run.instrumentId}/runs/${encodeURIComponent(run.runId)}`;
+}
+
+function notebookHref(notebook: SearchNotebookResult): string {
+  return `/notebooks/${encodeURIComponent(notebook.id)}`;
 }
 
 // Files have no standalone page, so deep-link to the parent run and pre-fill
@@ -90,19 +100,22 @@ function commentHref(comment: SearchCommentResult): string {
 }
 
 // A result is a real link so Cmd/Ctrl-click and middle-click open it in a new
-// tab, and the browser's link menu works. The link fills the whole item, and
-// keyboard focus stays on the search input, so the link is not a tab stop.
+// tab, and the browser's link menu works. The link fills the item, apart from
+// an optional `action` after it, and keyboard focus stays on the search
+// input, so the link is not a tab stop.
 function ResultItem({
   href,
   value,
   onNavigate,
   onOpenInNewTab,
+  action,
   children,
 }: {
   href: string;
   value: string;
   onNavigate: (href: string) => void;
   onOpenInNewTab: () => void;
+  action?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
@@ -129,7 +142,51 @@ function ResultItem({
       >
         {children}
       </a>
+      {action}
     </CommandItem>
+  );
+}
+
+// Opens the notebook's own page, such as its Notion page, in a new tab. It
+// sits beside the row's link rather than inside it, because a link can't hold
+// another link.
+function NotebookPageLink({
+  notebook,
+  onOpen,
+}: {
+  notebook: SearchNotebookResult;
+  onOpen: () => void;
+}) {
+  return (
+    <Button
+      asChild
+      className="mr-1 text-muted-foreground hover:bg-background dark:hover:bg-background"
+      size="icon-sm"
+      variant="ghost"
+    >
+      <a
+        aria-label={`Open ${notebook.name} in a new tab`}
+        href={notebook.url}
+        onClick={(event) => {
+          // Without this, cmdk also selects the row, which opens the
+          // notebook in Data Hub and closes the dialog.
+          event.stopPropagation();
+          onOpen();
+        }}
+        onKeyDown={(event) => {
+          // cmdk handles Enter anywhere in the palette by selecting the
+          // highlighted row and cancelling the key, so the link would never
+          // open.
+          if (event.key === "Enter") {
+            event.stopPropagation();
+          }
+        }}
+        rel="noopener noreferrer"
+        target="_blank"
+      >
+        <ExternalLink aria-hidden="true" className="size-3.5" />
+      </a>
+    </Button>
   );
 }
 
@@ -241,12 +298,13 @@ export function GlobalSearch({
       >
         <DialogTitle className="sr-only">Search Data Hub</DialogTitle>
         <DialogDescription className="sr-only">
-          Search across runs, files, instruments, users, and comments.
+          Search across runs, notebooks, files, instruments, users, and
+          comments, or paste a notebook link.
         </DialogDescription>
 
         <CommandPrimitive
           className="flex w-full min-w-0 max-w-full flex-col overflow-hidden"
-          label="Search runs, files, instruments, users, or comments"
+          label="Search runs, notebooks, files, instruments, users, or comments"
           loop
           shouldFilter={false}
         >
@@ -257,7 +315,7 @@ export function GlobalSearch({
             <CommandPrimitive.Input
               className="flex h-12 w-full bg-transparent text-base outline-none placeholder:text-muted-foreground"
               onValueChange={setQuery}
-              placeholder="Search runs, files, instruments, users, or comments…"
+              placeholder="Search or paste a notebook link…"
               value={query}
             />
             <Kbd>esc</Kbd>
@@ -319,6 +377,28 @@ export function GlobalSearch({
                         value={`run:${run.id}`}
                       >
                         <SearchRunRow query={trimmed} result={run} />
+                      </ResultItem>
+                    ))}
+                  </CommandGroup>
+                ) : null}
+
+                {result.notebooks.length > 0 ? (
+                  <CommandGroup heading="Notebooks">
+                    {result.notebooks.map((notebook) => (
+                      <ResultItem
+                        action={
+                          <NotebookPageLink
+                            notebook={notebook}
+                            onOpen={rememberSearch}
+                          />
+                        }
+                        href={notebookHref(notebook)}
+                        key={notebook.id}
+                        onNavigate={navigate}
+                        onOpenInNewTab={rememberSearch}
+                        value={`notebook:${notebook.id}`}
+                      >
+                        <SearchNotebookRow query={trimmed} result={notebook} />
                       </ResultItem>
                     ))}
                   </CommandGroup>
@@ -425,7 +505,7 @@ function RecentSearches({
       <div className="flex flex-col items-center justify-center gap-2 py-12 text-center">
         <SearchIcon className="size-7 text-muted-foreground" />
         <p className="text-muted-foreground text-sm">
-          Search runs, files, instruments, users, or comments
+          Search runs, notebooks, files, instruments, users, or comments
         </p>
       </div>
     );
