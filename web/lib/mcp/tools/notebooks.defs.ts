@@ -30,9 +30,11 @@ const NOTEBOOK_SORT_VALUES = [
 export const NOTEBOOKS_PER_PAGE_MCP_DEFAULT = 20;
 export const NOTEBOOKS_PER_PAGE_MCP_MAX = 100;
 
-const notebookId = z
+const labNotebookId = z
   .string()
-  .describe("The notebook's id, from list_notebooks or a run's notebooks");
+  .describe(
+    "The lab notebook's id, from list_lab_notebooks or a run's lab notebooks"
+  );
 
 const runIds = z
   .array(z.string())
@@ -43,33 +45,33 @@ const runIds = z
   );
 
 export const listNotebooksTool = {
-  name: "list_notebooks",
-  group: "notebooks",
+  name: "list_lab_notebooks",
+  group: "lab_notebooks",
   scope: "runs:read",
-  title: "List Notebooks",
+  title: "List Lab Notebooks",
   description:
-    "List lab notebooks. A notebook is one lab notebook page (Notion, Google Docs, or any http or https page) with a name, and it can hold runs from any instrument. Search by name, description, or a pasted link; a link finds only the notebook for that page. Each notebook has its run count, instrument count, and last run. List a notebook's runs with search_runs notebookId.",
+    "List lab notebooks. A lab notebook is one page (Notion, Google Docs, or any http or https page) with a name, and it can hold runs from any instrument. Search by name, description, or a pasted link; a link finds only the lab notebook for that page. Each lab notebook has its run count, instrument count, and last run. List a lab notebook's runs with search_runs labNotebookId.",
   outputSchema: listNotebooksOutputSchema,
   inputSchema: {
     query: z
       .string()
       .optional()
-      .describe("A name, part of a description, or a pasted notebook link"),
+      .describe("A name, part of a description, or a pasted lab notebook link"),
     ownerId: z
       .string()
       .optional()
       .describe(
-        'Only notebooks owned by this user: a user id, or "me" for the signed-in user'
+        'Only lab notebooks owned by this user: a user id, or "me" for the signed-in user'
       ),
     includeDeleted: z
       .boolean()
       .optional()
-      .describe("Include deleted notebooks (default: false)"),
+      .describe("Include deleted lab notebooks (default: false)"),
     sort: z
       .enum(NOTEBOOK_SORT_VALUES)
       .optional()
       .describe(
-        "Sort field (default: last_run, when the notebook's newest run started)"
+        "Sort field (default: last_run, when the lab notebook's newest run started)"
       ),
     order: z
       .enum(["asc", "desc"])
@@ -95,30 +97,30 @@ export const listNotebooksTool = {
 } as const satisfies McpToolDef;
 
 export const getNotebookTool = {
-  name: "get_notebook",
-  group: "notebooks",
+  name: "get_lab_notebook",
+  group: "lab_notebooks",
   scope: "runs:read",
-  title: "Get Notebook",
+  title: "Get Lab Notebook",
   description:
-    "Get one lab notebook by id: its page link, name, description, owner, run count, instrument count, last run, and who created, changed, or deleted it. Deleted notebooks are returned too, with deleted_at set. List its runs with search_runs notebookId.",
+    "Get one lab notebook by id: its page link, name, description, owner, run count, instrument count, last run, and who created, changed, or deleted it. Deleted lab notebooks are returned too, with deleted_at set. List its runs with search_runs labNotebookId.",
   outputSchema: getNotebookOutputSchema,
-  inputSchema: { notebookId },
+  inputSchema: { labNotebookId },
   annotations: { readOnlyHint: true },
 } as const satisfies McpToolDef;
 
 export const createNotebookTool = {
-  name: "create_notebook",
-  group: "notebooks",
-  scope: "notebooks:write",
-  title: "Create Notebook",
-  description: `Create a lab notebook for one page, and optionally add up to ${NOTEBOOK_RUNS_PER_REQUEST_MAX} runs from one instrument to it. Each page can have only one notebook, deleted ones included. If the page already has one, this fails with that notebook's id: add runs to it with add_runs_to_notebook instead, after restore_notebook when it is deleted. Search first with list_notebooks and the link when unsure. The owner stays empty unless you pass ownerId. Acts as the signed-in user. Adding runs doesn't record who ran them; call claim_runs for that.`,
+  name: "create_lab_notebook",
+  group: "lab_notebooks",
+  scope: "lab-notebooks:write",
+  title: "Create Lab Notebook",
+  description: `Create a lab notebook for one page, and optionally add up to ${NOTEBOOK_RUNS_PER_REQUEST_MAX} runs from one instrument to it. Each page can have only one lab notebook, deleted ones included. If the page already has one, this fails with that lab notebook's id: add runs to it with add_runs_to_lab_notebook instead, after restore_lab_notebook when it is deleted. Search first with list_lab_notebooks and the link when unsure. The owner stays empty unless you pass ownerId. Acts as the signed-in user. Adding runs doesn't record who ran them; call claim_runs for that.`,
   outputSchema: createNotebookOutputSchema,
   inputSchema: {
     url: notebookLinkUrlSchema.describe(
-      "The notebook page's http or https URL"
+      "The lab notebook page's http or https URL"
     ),
     name: notebookNameSchema.describe(
-      "The notebook's name, usually the page's title"
+      "The lab notebook's name, usually the page's title"
     ),
     description: notebookDescriptionSchema
       .optional()
@@ -127,7 +129,7 @@ export const createNotebookTool = {
       .string()
       .optional()
       .describe(
-        'The person responsible for the notebook: a user id, or "me" for the signed-in user. Leave out for no owner. global_search with scope users finds a colleague\'s id.'
+        'The person responsible for the lab notebook: a user id, or "me" for the signed-in user. Leave out for no owner. global_search with scope users finds a colleague\'s id.'
       ),
     instrumentId: z
       .string()
@@ -143,15 +145,15 @@ export const createNotebookTool = {
 } as const satisfies McpToolDef;
 
 export const updateNotebookTool = {
-  name: "update_notebook",
-  group: "notebooks",
-  scope: "notebooks:write",
-  title: "Update Notebook",
+  name: "update_lab_notebook",
+  group: "lab_notebooks",
+  scope: "lab-notebooks:write",
+  title: "Update Lab Notebook",
   description:
-    "Change a lab notebook's name, description, owner, or page link. Leave a field out to keep it; pass null for description or ownerId to clear it. A new link must point to a page no other notebook has. A deleted notebook can't change until it is restored.",
+    "Change a lab notebook's name, description, owner, or page link. Leave a field out to keep it; pass null for description or ownerId to clear it. A new link must point to a page no other lab notebook has. A deleted lab notebook can't change until it is restored.",
   outputSchema: updateNotebookOutputSchema,
   inputSchema: {
-    notebookId,
+    labNotebookId,
     name: notebookNameSchema.optional().describe("New name"),
     description: notebookDescriptionSchema
       .nullable()
@@ -176,14 +178,14 @@ export const updateNotebookTool = {
 } as const satisfies McpToolDef;
 
 export const deleteNotebookTool = {
-  name: "delete_notebook",
-  group: "notebooks",
-  scope: "notebooks:write",
-  title: "Delete Notebook",
+  name: "delete_lab_notebook",
+  group: "lab_notebooks",
+  scope: "lab-notebooks:write",
+  title: "Delete Lab Notebook",
   description:
-    "Delete a lab notebook. Its runs stop listing it, but it keeps them, so restore_notebook brings it back with the same runs. Confirm with the user first, and say how many runs it holds (run_count from get_notebook).",
+    "Delete a lab notebook. Its runs stop listing it, but it keeps them, so restore_lab_notebook brings it back with the same runs. Confirm with the user first, and say how many runs it holds (run_count from get_lab_notebook).",
   outputSchema: deleteNotebookOutputSchema,
-  inputSchema: { notebookId },
+  inputSchema: { labNotebookId },
   annotations: {
     readOnlyHint: false,
     destructiveHint: true,
@@ -192,14 +194,14 @@ export const deleteNotebookTool = {
 } as const satisfies McpToolDef;
 
 export const restoreNotebookTool = {
-  name: "restore_notebook",
-  group: "notebooks",
-  scope: "notebooks:write",
-  title: "Restore Notebook",
+  name: "restore_lab_notebook",
+  group: "lab_notebooks",
+  scope: "lab-notebooks:write",
+  title: "Restore Lab Notebook",
   description:
-    "Bring back a deleted lab notebook with the runs it had. Find deleted notebooks with list_notebooks includeDeleted.",
+    "Bring back a deleted lab notebook with the runs it had. Find deleted lab notebooks with list_lab_notebooks includeDeleted.",
   outputSchema: restoreNotebookOutputSchema,
-  inputSchema: { notebookId },
+  inputSchema: { labNotebookId },
   annotations: {
     readOnlyHint: false,
     destructiveHint: false,
@@ -208,14 +210,14 @@ export const restoreNotebookTool = {
 } as const satisfies McpToolDef;
 
 export const addRunsToNotebookTool = {
-  name: "add_runs_to_notebook",
-  group: "notebooks",
-  scope: "notebooks:write",
-  title: "Add Runs to Notebook",
-  description: `Add up to ${NOTEBOOK_RUNS_PER_REQUEST_MAX} runs from one instrument to a lab notebook, and report an outcome for each. Runs already in it stay as they are, and deleted or missing runs are skipped. To link runs to a page, find its notebook with list_notebooks and the link, or make one with create_notebook. Acts as the signed-in user. Adding runs doesn't record who ran them; call claim_runs for that.`,
+  name: "add_runs_to_lab_notebook",
+  group: "lab_notebooks",
+  scope: "lab-notebooks:write",
+  title: "Add Runs to Lab Notebook",
+  description: `Add up to ${NOTEBOOK_RUNS_PER_REQUEST_MAX} runs from one instrument to a lab notebook, and report an outcome for each. Runs already in it stay as they are, and deleted or missing runs are skipped. To link runs to a page, find its lab notebook with list_lab_notebooks and the link, or make one with create_lab_notebook. Acts as the signed-in user. Adding runs doesn't record who ran them; call claim_runs for that.`,
   outputSchema: addRunsToNotebookOutputSchema,
   inputSchema: {
-    notebookId,
+    labNotebookId,
     instrumentId: z.string().describe("Instrument identifier"),
     runIds,
   },
@@ -227,14 +229,14 @@ export const addRunsToNotebookTool = {
 } as const satisfies McpToolDef;
 
 export const removeRunsFromNotebookTool = {
-  name: "remove_runs_from_notebook",
-  group: "notebooks",
-  scope: "notebooks:write",
-  title: "Remove Runs from Notebook",
-  description: `Remove up to ${NOTEBOOK_RUNS_PER_REQUEST_MAX} runs from one instrument from a lab notebook, and report an outcome for each. The notebook stays, even when it has no runs left.`,
+  name: "remove_runs_from_lab_notebook",
+  group: "lab_notebooks",
+  scope: "lab-notebooks:write",
+  title: "Remove Runs from Lab Notebook",
+  description: `Remove up to ${NOTEBOOK_RUNS_PER_REQUEST_MAX} runs from one instrument from a lab notebook, and report an outcome for each. The lab notebook stays, even when it has no runs left.`,
   outputSchema: removeRunsFromNotebookOutputSchema,
   inputSchema: {
-    notebookId,
+    labNotebookId,
     instrumentId: z.string().describe("Instrument identifier"),
     runIds,
   },

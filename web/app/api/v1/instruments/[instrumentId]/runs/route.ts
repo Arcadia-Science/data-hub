@@ -258,8 +258,8 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
     }),
     includeDeleted: searchParams.get("include_deleted") === "true",
     ranBy: searchParams.get("ran_by") ?? undefined,
-    hasNotebook: parseHasNotebookParam(searchParams.get("has_notebook")),
-    ...parseNotebookIdParam(searchParams.get("notebook_id")),
+    hasNotebook: parseHasNotebookParam(searchParams.get("has_lab_notebook")),
+    ...parseNotebookIdParam(searchParams.get("lab_notebook_id")),
     statuses: parseRunStatusParam(searchParams),
     ...parseRunMetadataFilters(searchParams),
   });

@@ -306,15 +306,15 @@ describe("Run IDs with spaces at the start or end", () => {
   });
 
   it("adds the run to a lab notebook once, by either spelling", async () => {
-    const created = await api("/api/v1/notebooks", {
+    const created = await api("/api/v1/lab-notebooks", {
       method: "POST",
       token,
       body: { url: "https://example.com/eln/padded", name: "Padded runs" },
     });
     expect(created.status).toBe(201);
-    const notebookId = (await created.json()).notebook.id;
+    const notebookId = (await created.json()).lab_notebook.id;
 
-    const res = await api(`/api/v1/notebooks/${notebookId}/runs`, {
+    const res = await api(`/api/v1/lab-notebooks/${notebookId}/runs`, {
       method: "POST",
       token,
       body: {

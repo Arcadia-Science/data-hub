@@ -41,7 +41,7 @@ function readRoutes(fileId: number): { name: string; path: string }[] {
     { name: "search", path: "/api/v1/search?q=legacy" },
     { name: "get a run", path: OTHER_RUN },
     { name: "list comments", path: `${OTHER_RUN}/comments` },
-    { name: "list notebooks", path: "/api/v1/notebooks" },
+    { name: "list lab notebooks", path: "/api/v1/lab-notebooks" },
     { name: "list report items", path: `${OTHER_RUN}/report-items` },
     { name: "download the archive", path: `${OTHER_RUN}/download-archive` },
     { name: "download a file", path: `/api/v1/files/${fileId}/download` },

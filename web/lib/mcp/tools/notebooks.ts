@@ -74,18 +74,18 @@ function notebookError(
   error: NotebookError,
   nextStep?: (deleted: boolean) => string
 ) {
-  const id = error.details?.notebook_id;
+  const id = error.details?.lab_notebook_id;
   if (typeof id !== "string") {
     return errorResult(error.message);
   }
   const next = nextStep ? ` ${nextStep(error.details?.deleted === true)}` : "";
-  return errorResult(`${error.message} Notebook id: ${id}.${next}`);
+  return errorResult(`${error.message} Lab notebook id: ${id}.${next}`);
 }
 
 function addRunsInstead(deleted: boolean): string {
   return deleted
-    ? "Call restore_notebook, then add_runs_to_notebook."
-    : "Add runs to it with add_runs_to_notebook.";
+    ? "Call restore_lab_notebook, then add_runs_to_lab_notebook."
+    : "Add runs to it with add_runs_to_lab_notebook.";
 }
 
 function runsToMcp<O extends string>(
@@ -95,7 +95,7 @@ function runsToMcp<O extends string>(
 ) {
   const wire = runOutcomesToWire(outcomes, result);
   return {
-    notebookId: wire.notebook_id,
+    labNotebookId: wire.lab_notebook_id,
     instrumentId,
     results: wire.results.map((entry) => ({
       runId: entry.run_id,
@@ -143,7 +143,7 @@ export function registerNotebookTools(server: McpServer) {
   server.registerTool(
     getNotebookTool.name,
     toolRegistrationConfig(getNotebookTool),
-    async ({ notebookId }) => {
+    async ({ labNotebookId: notebookId }) => {
       const notebook = await getNotebook(notebookId);
       if (!notebook) {
         return errorResult(`Notebook '${notebookId}' not found.`);
@@ -183,7 +183,7 @@ export function registerNotebookTools(server: McpServer) {
 
       const { notebook, runs } = result.value;
       return structuredResult({
-        notebook: notebookToWire(notebook),
+        labNotebook: notebookToWire(notebook),
         runs:
           runs && instrumentId
             ? runsToMcp(ADD_RUN_OUTCOMES, instrumentId, runs)
@@ -195,7 +195,10 @@ export function registerNotebookTools(server: McpServer) {
   server.registerTool(
     updateNotebookTool.name,
     toolRegistrationConfig(updateNotebookTool),
-    async ({ notebookId, name, description, ownerId, url }, ctx) => {
+    async (
+      { labNotebookId: notebookId, name, description, ownerId, url },
+      ctx
+    ) => {
       const user = writeUser(ctx.http?.authInfo);
       if (!user.ok) {
         return user.error;
@@ -230,7 +233,7 @@ export function registerNotebookTools(server: McpServer) {
   server.registerTool(
     deleteNotebookTool.name,
     toolRegistrationConfig(deleteNotebookTool),
-    async ({ notebookId }, ctx) => {
+    async ({ labNotebookId: notebookId }, ctx) => {
       const user = writeUser(ctx.http?.authInfo);
       if (!user.ok) {
         return user.error;
@@ -249,7 +252,7 @@ export function registerNotebookTools(server: McpServer) {
   server.registerTool(
     restoreNotebookTool.name,
     toolRegistrationConfig(restoreNotebookTool),
-    async ({ notebookId }, ctx) => {
+    async ({ labNotebookId: notebookId }, ctx) => {
       const user = writeUser(ctx.http?.authInfo);
       if (!user.ok) {
         return user.error;
@@ -268,7 +271,7 @@ export function registerNotebookTools(server: McpServer) {
   server.registerTool(
     addRunsToNotebookTool.name,
     toolRegistrationConfig(addRunsToNotebookTool),
-    async ({ notebookId, instrumentId, runIds }, ctx) => {
+    async ({ labNotebookId: notebookId, instrumentId, runIds }, ctx) => {
       const user = writeUser(ctx.http?.authInfo);
       if (!user.ok) {
         return user.error;
@@ -290,7 +293,7 @@ export function registerNotebookTools(server: McpServer) {
   server.registerTool(
     removeRunsFromNotebookTool.name,
     toolRegistrationConfig(removeRunsFromNotebookTool),
-    async ({ notebookId, instrumentId, runIds }, ctx) => {
+    async ({ labNotebookId: notebookId, instrumentId, runIds }, ctx) => {
       const writeError = requireMcpWrite(ctx.http?.authInfo);
       if (writeError) {
         return writeError;

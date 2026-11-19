@@ -130,7 +130,7 @@ You can also run `npm run db:seed` on its own — it calls the schema-driven `cl
 | `run_comments` | multi-author threads | Q&A / notes across Alice + teammates; richer threads on ~⅓ of runs |
 | `run_attributions` | 1 per run | Rotated across Alice + teammates |
 | `notebooks` | 5 | Synthetic Notion and ELN pages; one has no runs and one is deleted |
-| `run_notebook_links` | 0–2 per run | Every other run is in one of the three notebooks with runs, every sixth run in two |
+| `run_notebook_links` | 0–2 per run | Every other run is in one of the three lab notebooks with runs, every sixth run in two |
 | `archive_jobs` | 3 | One each of `ready` / `building` / `failed` |
 | `watcher_release_config` | 1 (singleton) | `1.4.3 / 0.1.0 / false` (the version most seeded watchers run; Colony Counter G runs 1.4.0 and Balance F runs 1.3.2, so one is behind and one needs an update before its settings can be edited) |
 

@@ -46,7 +46,7 @@ export interface RunDetailProps {
   filesDownloadableCount: RunFilesPage["downloadableCount"];
   filesPagination: RunFilesPage["pagination"];
   instrumentId: string;
-  // The "Lab notebooks" section between the summary card and the files.
+  // The "Lab Notebooks" section between the summary card and the files.
   // Parent composes it, like `attributionsSlot`.
   notebooksSlot: React.ReactNode;
   // Parsed qPCR melting-curve plate JSON plus the tidy CSV file id.

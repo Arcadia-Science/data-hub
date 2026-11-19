@@ -56,7 +56,7 @@ describe("notebookPickerState", () => {
     ).toEqual({ kind: "searching" });
   });
 
-  it("adds to the notebook picked from a name search", () => {
+  it("adds to the lab notebook picked from a name search", () => {
     expect(
       notebookPickerState({
         query: name,
@@ -66,7 +66,7 @@ describe("notebookPickerState", () => {
     ).toEqual({ kind: "existing", notebook: LIVE });
   });
 
-  it("picks the notebook that has a pasted link's page", () => {
+  it("picks the lab notebook that has a pasted link's page", () => {
     expect(
       notebookPickerState({
         query: link,
@@ -76,7 +76,7 @@ describe("notebookPickerState", () => {
     ).toEqual({ kind: "existing", notebook: LIVE });
   });
 
-  it("offers to restore a deleted notebook that has the page", () => {
+  it("offers to restore a deleted lab notebook that has the page", () => {
     expect(
       notebookPickerState({
         query: link,
@@ -86,7 +86,7 @@ describe("notebookPickerState", () => {
     ).toEqual({ kind: "restore", notebook: DELETED });
   });
 
-  it("offers to create a notebook for a page no notebook has", () => {
+  it("offers to create a lab notebook for a page no lab notebook has", () => {
     expect(
       notebookPickerState({
         query: link,
@@ -115,7 +115,7 @@ describe("notebookPickerState", () => {
 });
 
 describe("runsAlreadyIn", () => {
-  it("counts the runs already in the notebook", () => {
+  it("counts the runs already in the lab notebook", () => {
     const runNotebookIds = [[LIVE.id], [], [DELETED.id, LIVE.id]];
     expect(runsAlreadyIn(runNotebookIds, LIVE.id)).toBe(2);
     expect(runsAlreadyIn(runNotebookIds, DELETED.id)).toBe(1);

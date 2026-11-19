@@ -143,7 +143,7 @@ export function RunsTable({
                   />
                 </TableCell>
                 <TableCell>
-                  <NotebookLinksCell notebooks={row.notebooks} />
+                  <NotebookLinksCell notebooks={row.lab_notebooks} />
                 </TableCell>
                 <RunTimeCells row={row} />
               </TableRow>

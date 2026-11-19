@@ -86,13 +86,13 @@ export const runListQuery = z.object({
       description:
         "Derived run status. Several values (repeated, or comma-separated) match any of them. `pending` is deprecated: it matches `waiting_upload` and `not_uploaded`, and no run reports it.",
     }),
-  has_notebook: z.enum(["true", "false"]).optional().openapi({
+  has_lab_notebook: z.enum(["true", "false"]).optional().openapi({
     description:
-      "`true` lists only runs in at least one lab notebook; `false` lists only runs in none. Deleted notebooks don't count.",
+      "`true` lists only runs in at least one lab notebook; `false` lists only runs in none. Deleted lab notebooks don't count.",
   }),
-  notebook_id: z.string().optional().openapi({
+  lab_notebook_id: z.string().optional().openapi({
     description:
-      "Lists only runs in this lab notebook. A deleted notebook still lists its runs. A blank value is ignored, and an ID that matches no notebook matches no runs.",
+      "Lists only runs in this lab notebook. A deleted lab notebook still lists its runs. A blank value is ignored, and an ID that matches no lab notebook matches no runs.",
   }),
   metadata_key: z
     .string()
@@ -146,16 +146,18 @@ export const runNotebook = z
     id: z.string().uuid(),
     name: z.string(),
     url: z.string().openapi({
-      description: "The notebook's page, ready to open.",
+      description: "The lab notebook's page, ready to open.",
     }),
     url_key: notebookUrlKey,
-    linked_at: isoDateTime.describe("When the run was added to the notebook."),
+    linked_at: isoDateTime.describe(
+      "When the run was added to the lab notebook."
+    ),
     // At most one of `linked_by` and `linked_by_token` is set: the person or
     // token that added the run. Both are null once that person is deleted.
     linked_by: notebookUser.nullable(),
     linked_by_token: tokenActor.nullable(),
   })
-  .openapi("RunNotebook");
+  .openapi("RunLabNotebook");
 
 export const runCreated = z
   .object({
@@ -236,7 +238,7 @@ export const runDetail = z
     deleted_by_token: tokenActor.nullable(),
     metadata: metadataObject.nullable(),
     attributions: z.array(attribution),
-    notebooks: z.array(runNotebook).openapi({
+    lab_notebooks: z.array(runNotebook).openapi({
       description:
         "The run's lab notebooks, in the order the run was added to them.",
     }),
@@ -288,7 +290,7 @@ export const runListItem = z
     error_messages: z.array(z.string()),
     attributions: z.array(attribution),
     comment_count: z.number().int(),
-    notebooks: z.array(runNotebook).openapi({
+    lab_notebooks: z.array(runNotebook).openapi({
       description:
         "The run's lab notebooks, in the order the run was added to them.",
     }),

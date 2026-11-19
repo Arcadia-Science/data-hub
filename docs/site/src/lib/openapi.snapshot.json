@@ -30,7 +30,7 @@
       "description": "Instrument runs, comments, attributions, uploads, and search"
     },
     {
-      "name": "Notebooks",
+      "name": "Lab Notebooks",
       "description": "Lab notebooks and the runs in them"
     },
     {
@@ -513,10 +513,10 @@
           "comment_count": {
             "type": "integer"
           },
-          "notebooks": {
+          "lab_notebooks": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/RunNotebook"
+              "$ref": "#/components/schemas/RunLabNotebook"
             },
             "description": "The run's lab notebooks, in the order the run was added to them."
           }
@@ -548,7 +548,7 @@
           "error_messages",
           "attributions",
           "comment_count",
-          "notebooks"
+          "lab_notebooks"
         ]
       },
       "RunAttribution": {
@@ -577,7 +577,7 @@
           "avatarUrl"
         ]
       },
-      "RunNotebook": {
+      "RunLabNotebook": {
         "type": "object",
         "properties": {
           "id": {
@@ -589,7 +589,7 @@
           },
           "url": {
             "type": "string",
-            "description": "The notebook's page, ready to open."
+            "description": "The lab notebook's page, ready to open."
           },
           "url_key": {
             "type": "string",
@@ -598,7 +598,7 @@
           "linked_at": {
             "type": "string",
             "format": "date-time",
-            "description": "When the run was added to the notebook."
+            "description": "When the run was added to the lab notebook."
           },
           "linked_by": {
             "type": [
@@ -773,10 +773,10 @@
               "$ref": "#/components/schemas/RunAttribution"
             }
           },
-          "notebooks": {
+          "lab_notebooks": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/RunNotebook"
+              "$ref": "#/components/schemas/RunLabNotebook"
             },
             "description": "The run's lab notebooks, in the order the run was added to them."
           },
@@ -802,7 +802,7 @@
           "deleted_by_token",
           "metadata",
           "attributions",
-          "notebooks",
+          "lab_notebooks",
           "files"
         ]
       },
@@ -1258,7 +1258,7 @@
           "edited_at"
         ]
       },
-      "Notebook": {
+      "LabNotebook": {
         "type": "object",
         "properties": {
           "id": {
@@ -1267,7 +1267,7 @@
           },
           "url": {
             "type": "string",
-            "description": "The notebook's page, ready to open."
+            "description": "The lab notebook's page, ready to open."
           },
           "url_key": {
             "type": "string",
@@ -1313,7 +1313,7 @@
           },
           "run_count": {
             "type": "integer",
-            "description": "How many runs are in the notebook. Deleted runs don't count."
+            "description": "How many runs are in the lab notebook. Deleted runs don't count."
           },
           "instrument_count": {
             "type": "integer",
@@ -1325,7 +1325,7 @@
               "null"
             ],
             "format": "date-time",
-            "description": "When the newest run started: its acquired time, or its created time when that is missing. Null when the notebook has no runs."
+            "description": "When the newest run started: its acquired time, or its created time when that is missing. Null when the lab notebook has no runs."
           },
           "created_at": {
             "type": "string",
@@ -1460,13 +1460,13 @@
           "deleted_by_token"
         ]
       },
-      "NotebookRunsAdded": {
+      "LabNotebookRunsAdded": {
         "type": [
           "object",
           "null"
         ],
         "properties": {
-          "notebook_id": {
+          "lab_notebook_id": {
             "type": "string",
             "format": "uuid"
           },
@@ -1486,7 +1486,7 @@
                   "type": "string",
                   "enum": [
                     "added",
-                    "already_in_notebook",
+                    "already_in_lab_notebook",
                     "run_deleted",
                     "limit_reached",
                     "not_found"
@@ -1499,7 +1499,7 @@
                 "outcome"
               ]
             },
-            "description": "One outcome per run, in the order sent. `already_in_notebook`: the run was in the notebook already. `run_deleted`: the run is deleted. `limit_reached`: the run is already in 20 notebooks, the most allowed, counting deleted ones. `not_found`: there is no such run."
+            "description": "One outcome per run, in the order sent. `already_in_lab_notebook`: the run was in the lab notebook already. `run_deleted`: the run is deleted. `limit_reached`: the run is already in 20 lab notebooks, the most allowed, counting deleted ones. `not_found`: there is no such run."
           },
           "counts": {
             "type": "object",
@@ -1507,7 +1507,7 @@
               "added": {
                 "type": "integer"
               },
-              "already_in_notebook": {
+              "already_in_lab_notebook": {
                 "type": "integer"
               },
               "run_deleted": {
@@ -1522,7 +1522,7 @@
             },
             "required": [
               "added",
-              "already_in_notebook",
+              "already_in_lab_notebook",
               "run_deleted",
               "limit_reached",
               "not_found"
@@ -1530,16 +1530,16 @@
           }
         },
         "required": [
-          "notebook_id",
+          "lab_notebook_id",
           "results",
           "counts"
         ],
         "description": "What happened to each run sent in `runs`. Null when none were."
       },
-      "NotebookRunsRemoved": {
+      "LabNotebookRunsRemoved": {
         "type": "object",
         "properties": {
-          "notebook_id": {
+          "lab_notebook_id": {
             "type": "string",
             "format": "uuid"
           },
@@ -1559,7 +1559,7 @@
                   "type": "string",
                   "enum": [
                     "removed",
-                    "not_in_notebook",
+                    "not_in_lab_notebook",
                     "run_deleted",
                     "not_found"
                   ]
@@ -1571,7 +1571,7 @@
                 "outcome"
               ]
             },
-            "description": "One outcome per run, in the order sent. `not_in_notebook`: the run wasn't in the notebook. `run_deleted`: the run is deleted. `not_found`: there is no such run."
+            "description": "One outcome per run, in the order sent. `not_in_lab_notebook`: the run wasn't in the lab notebook. `run_deleted`: the run is deleted. `not_found`: there is no such run."
           },
           "counts": {
             "type": "object",
@@ -1579,7 +1579,7 @@
               "removed": {
                 "type": "integer"
               },
-              "not_in_notebook": {
+              "not_in_lab_notebook": {
                 "type": "integer"
               },
               "run_deleted": {
@@ -1591,14 +1591,14 @@
             },
             "required": [
               "removed",
-              "not_in_notebook",
+              "not_in_lab_notebook",
               "run_deleted",
               "not_found"
             ]
           }
         },
         "required": [
-          "notebook_id",
+          "lab_notebook_id",
           "results",
           "counts"
         ]
@@ -2686,21 +2686,21 @@
                 "true",
                 "false"
               ],
-              "description": "`true` lists only runs in at least one lab notebook; `false` lists only runs in none. Deleted notebooks don't count."
+              "description": "`true` lists only runs in at least one lab notebook; `false` lists only runs in none. Deleted lab notebooks don't count."
             },
             "required": false,
-            "description": "`true` lists only runs in at least one lab notebook; `false` lists only runs in none. Deleted notebooks don't count.",
-            "name": "has_notebook",
+            "description": "`true` lists only runs in at least one lab notebook; `false` lists only runs in none. Deleted lab notebooks don't count.",
+            "name": "has_lab_notebook",
             "in": "query"
           },
           {
             "schema": {
               "type": "string",
-              "description": "Lists only runs in this lab notebook. A deleted notebook still lists its runs. A blank value is ignored, and an ID that matches no notebook matches no runs."
+              "description": "Lists only runs in this lab notebook. A deleted lab notebook still lists its runs. A blank value is ignored, and an ID that matches no lab notebook matches no runs."
             },
             "required": false,
-            "description": "Lists only runs in this lab notebook. A deleted notebook still lists its runs. A blank value is ignored, and an ID that matches no notebook matches no runs.",
-            "name": "notebook_id",
+            "description": "Lists only runs in this lab notebook. A deleted lab notebook still lists its runs. A blank value is ignored, and an ID that matches no lab notebook matches no runs.",
+            "name": "lab_notebook_id",
             "in": "query"
           },
           {
@@ -3005,21 +3005,21 @@
                 "true",
                 "false"
               ],
-              "description": "`true` lists only runs in at least one lab notebook; `false` lists only runs in none. Deleted notebooks don't count."
+              "description": "`true` lists only runs in at least one lab notebook; `false` lists only runs in none. Deleted lab notebooks don't count."
             },
             "required": false,
-            "description": "`true` lists only runs in at least one lab notebook; `false` lists only runs in none. Deleted notebooks don't count.",
-            "name": "has_notebook",
+            "description": "`true` lists only runs in at least one lab notebook; `false` lists only runs in none. Deleted lab notebooks don't count.",
+            "name": "has_lab_notebook",
             "in": "query"
           },
           {
             "schema": {
               "type": "string",
-              "description": "Lists only runs in this lab notebook. A deleted notebook still lists its runs. A blank value is ignored, and an ID that matches no notebook matches no runs."
+              "description": "Lists only runs in this lab notebook. A deleted lab notebook still lists its runs. A blank value is ignored, and an ID that matches no lab notebook matches no runs."
             },
             "required": false,
-            "description": "Lists only runs in this lab notebook. A deleted notebook still lists its runs. A blank value is ignored, and an ID that matches no notebook matches no runs.",
-            "name": "notebook_id",
+            "description": "Lists only runs in this lab notebook. A deleted lab notebook still lists its runs. A blank value is ignored, and an ID that matches no lab notebook matches no runs.",
+            "name": "lab_notebook_id",
             "in": "query"
           },
           {
@@ -5279,13 +5279,13 @@
         }
       }
     },
-    "/notebooks": {
+    "/lab-notebooks": {
       "get": {
-        "operationId": "listNotebooks",
+        "operationId": "listLabNotebooks",
         "summary": "List lab notebooks",
-        "description": "Requires scope `runs:read`. To list a notebook's runs, filter a run list by `notebook_id`.",
+        "description": "Requires scope `runs:read`. To list a lab notebook's runs, filter a run list by `lab_notebook_id`.",
         "tags": [
-          "Notebooks"
+          "Lab Notebooks"
         ],
         "security": [
           {
@@ -5296,20 +5296,20 @@
           {
             "schema": {
               "type": "string",
-              "description": "Text in a notebook's name, description, or link, ignoring case. A pasted link, with or without `https://`, matches only the notebook for that page."
+              "description": "Text in a lab notebook's name, description, or link, ignoring case. A pasted link, with or without `https://`, matches only the lab notebook for that page."
             },
             "required": false,
-            "description": "Text in a notebook's name, description, or link, ignoring case. A pasted link, with or without `https://`, matches only the notebook for that page.",
+            "description": "Text in a lab notebook's name, description, or link, ignoring case. A pasted link, with or without `https://`, matches only the lab notebook for that page.",
             "name": "q",
             "in": "query"
           },
           {
             "schema": {
               "type": "string",
-              "description": "Lists only notebooks this user owns."
+              "description": "Lists only lab notebooks this user owns."
             },
             "required": false,
-            "description": "Lists only notebooks this user owns.",
+            "description": "Lists only lab notebooks this user owns.",
             "name": "owner_id",
             "in": "query"
           },
@@ -5320,10 +5320,10 @@
                 "true",
                 "false"
               ],
-              "description": "`true` lists deleted notebooks too."
+              "description": "`true` lists deleted lab notebooks too."
             },
             "required": false,
-            "description": "`true` lists deleted notebooks too.",
+            "description": "`true` lists deleted lab notebooks too.",
             "name": "include_deleted",
             "in": "query"
           },
@@ -5381,7 +5381,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Paginated notebooks.",
+            "description": "Paginated lab notebooks.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5390,7 +5390,7 @@
                     "data": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/components/schemas/Notebook"
+                        "$ref": "#/components/schemas/LabNotebook"
                       }
                     },
                     "pagination": {
@@ -5478,11 +5478,11 @@
         }
       },
       "post": {
-        "operationId": "createNotebook",
+        "operationId": "createLabNotebook",
         "summary": "Create a lab notebook",
-        "description": "Requires scope `notebooks:write`. A notebook is one page, such as a Notion page. Send `runs` to add runs in the same request; each one gets its own outcome, as in `POST /notebooks/{notebookId}/runs`. Returns 409 when another notebook already has the page, deleted ones included: `details.notebook_id` names that notebook and `details.deleted` says whether it is deleted. Restore a deleted one instead. Returns 400 when `owner_id` names no user. A token that registered a watcher gets 403. It may only add its own instrument's runs to a notebook and remove them.",
+        "description": "Requires scope `lab-notebooks:write`. A lab notebook is one page, such as a Notion page. Send `runs` to add runs in the same request; each one gets its own outcome, as in `POST /lab-notebooks/{labNotebookId}/runs`. Returns 409 when another lab notebook already has the page, deleted ones included: `details.lab_notebook_id` names that lab notebook and `details.deleted` says whether it is deleted. Restore a deleted one instead. Returns 400 when `owner_id` names no user. A token that registered a watcher gets 403. It may only add its own instrument's runs to a lab notebook and remove them.",
         "tags": [
-          "Notebooks"
+          "Lab Notebooks"
         ],
         "security": [
           {
@@ -5519,7 +5519,7 @@
                       "null"
                     ],
                     "minLength": 1,
-                    "description": "The user who owns the notebook. Left out or null, it has no owner. `\"me\"` means the signed-in person, so a token can't use it."
+                    "description": "The user who owns the lab notebook. Left out or null, it has no owner. `\"me\"` means the signed-in person, so a token can't use it."
                   },
                   "runs": {
                     "type": "array",
@@ -5541,7 +5541,7 @@
                       ]
                     },
                     "maxItems": 100,
-                    "description": "Runs to add as the notebook is created, at most 100. They can belong to different instruments."
+                    "description": "Runs to add as the lab notebook is created, at most 100. They can belong to different instruments."
                   }
                 },
                 "required": [
@@ -5554,21 +5554,21 @@
         },
         "responses": {
           "201": {
-            "description": "Created notebook.",
+            "description": "Created lab notebook.",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "notebook": {
-                      "$ref": "#/components/schemas/Notebook"
+                    "lab_notebook": {
+                      "$ref": "#/components/schemas/LabNotebook"
                     },
                     "runs": {
-                      "$ref": "#/components/schemas/NotebookRunsAdded"
+                      "$ref": "#/components/schemas/LabNotebookRunsAdded"
                     }
                   },
                   "required": [
-                    "notebook",
+                    "lab_notebook",
                     "runs"
                   ]
                 }
@@ -5628,13 +5628,13 @@
         }
       }
     },
-    "/notebooks/{notebookId}": {
+    "/lab-notebooks/{labNotebookId}": {
       "get": {
-        "operationId": "getNotebook",
+        "operationId": "getLabNotebook",
         "summary": "Get a lab notebook",
-        "description": "Requires scope `runs:read`. Deleted notebooks are returned too, with `deleted_at` set.",
+        "description": "Requires scope `runs:read`. Deleted lab notebooks are returned too, with `deleted_at` set.",
         "tags": [
-          "Notebooks"
+          "Lab Notebooks"
         ],
         "security": [
           {
@@ -5649,17 +5649,17 @@
               "example": "9b2c4e1a-7d3f-4a5b-8c6d-0e1f2a3b4c5d"
             },
             "required": true,
-            "name": "notebookId",
+            "name": "labNotebookId",
             "in": "path"
           }
         ],
         "responses": {
           "200": {
-            "description": "Notebook.",
+            "description": "Lab notebook.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Notebook"
+                  "$ref": "#/components/schemas/LabNotebook"
                 }
               }
             }
@@ -5717,11 +5717,11 @@
         }
       },
       "patch": {
-        "operationId": "updateNotebook",
+        "operationId": "updateLabNotebook",
         "summary": "Edit a lab notebook",
-        "description": "Requires scope `notebooks:write`. Fields left out stay as they are. Returns 409 when another notebook already has the page, deleted ones included: `details.notebook_id` names that notebook and `details.deleted` says whether it is deleted. Restore a deleted one instead. Returns 400 when `owner_id` names no user, and 409 when the notebook is deleted. A token that registered a watcher gets 403. It may only add its own instrument's runs to a notebook and remove them.",
+        "description": "Requires scope `lab-notebooks:write`. Fields left out stay as they are. Returns 409 when another lab notebook already has the page, deleted ones included: `details.lab_notebook_id` names that lab notebook and `details.deleted` says whether it is deleted. Restore a deleted one instead. Returns 400 when `owner_id` names no user, and 409 when the lab notebook is deleted. A token that registered a watcher gets 403. It may only add its own instrument's runs to a lab notebook and remove them.",
         "tags": [
-          "Notebooks"
+          "Lab Notebooks"
         ],
         "security": [
           {
@@ -5736,7 +5736,7 @@
               "example": "9b2c4e1a-7d3f-4a5b-8c6d-0e1f2a3b4c5d"
             },
             "required": true,
-            "name": "notebookId",
+            "name": "labNotebookId",
             "in": "path"
           }
         ],
@@ -5771,7 +5771,7 @@
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 2048,
-                    "description": "A new link. It must point to a page no other notebook has, deleted ones included."
+                    "description": "A new link. It must point to a page no other lab notebook has, deleted ones included."
                   }
                 }
               }
@@ -5780,11 +5780,11 @@
         },
         "responses": {
           "200": {
-            "description": "Updated notebook.",
+            "description": "Updated lab notebook.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Notebook"
+                  "$ref": "#/components/schemas/LabNotebook"
                 }
               }
             }
@@ -5842,11 +5842,11 @@
         }
       },
       "delete": {
-        "operationId": "deleteNotebook",
+        "operationId": "deleteLabNotebook",
         "summary": "Delete a lab notebook",
-        "description": "Requires scope `notebooks:write`. Marks the notebook deleted. Its runs keep their place in it, so restoring the notebook brings them back. Until then, runs don't list it and `has_notebook` doesn't count it. Returns 409 when it is already deleted. A token that registered a watcher gets 403. It may only add its own instrument's runs to a notebook and remove them.",
+        "description": "Requires scope `lab-notebooks:write`. Marks the lab notebook deleted. Its runs keep their place in it, so restoring the lab notebook brings them back. Until then, runs don't list it and `has_lab_notebook` doesn't count it. Returns 409 when it is already deleted. A token that registered a watcher gets 403. It may only add its own instrument's runs to a lab notebook and remove them.",
         "tags": [
-          "Notebooks"
+          "Lab Notebooks"
         ],
         "security": [
           {
@@ -5861,17 +5861,17 @@
               "example": "9b2c4e1a-7d3f-4a5b-8c6d-0e1f2a3b4c5d"
             },
             "required": true,
-            "name": "notebookId",
+            "name": "labNotebookId",
             "in": "path"
           }
         ],
         "responses": {
           "200": {
-            "description": "Deleted notebook.",
+            "description": "Deleted lab notebook.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Notebook"
+                  "$ref": "#/components/schemas/LabNotebook"
                 }
               }
             }
@@ -5929,13 +5929,13 @@
         }
       }
     },
-    "/notebooks/{notebookId}/restore": {
+    "/lab-notebooks/{labNotebookId}/restore": {
       "post": {
-        "operationId": "restoreNotebook",
+        "operationId": "restoreLabNotebook",
         "summary": "Restore a lab notebook",
-        "description": "Requires scope `notebooks:write`. Brings back a deleted notebook with the runs it had. Returns 409 when it isn't deleted. A token that registered a watcher gets 403. It may only add its own instrument's runs to a notebook and remove them.",
+        "description": "Requires scope `lab-notebooks:write`. Brings back a deleted lab notebook with the runs it had. Returns 409 when it isn't deleted. A token that registered a watcher gets 403. It may only add its own instrument's runs to a lab notebook and remove them.",
         "tags": [
-          "Notebooks"
+          "Lab Notebooks"
         ],
         "security": [
           {
@@ -5950,17 +5950,17 @@
               "example": "9b2c4e1a-7d3f-4a5b-8c6d-0e1f2a3b4c5d"
             },
             "required": true,
-            "name": "notebookId",
+            "name": "labNotebookId",
             "in": "path"
           }
         ],
         "responses": {
           "200": {
-            "description": "Restored notebook.",
+            "description": "Restored lab notebook.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Notebook"
+                  "$ref": "#/components/schemas/LabNotebook"
                 }
               }
             }
@@ -6018,13 +6018,13 @@
         }
       }
     },
-    "/notebooks/{notebookId}/runs": {
+    "/lab-notebooks/{labNotebookId}/runs": {
       "post": {
-        "operationId": "addRunsToNotebook",
+        "operationId": "addRunsToLabNotebook",
         "summary": "Add runs to a lab notebook",
-        "description": "Requires scope `notebooks:write`. Reports an outcome for each run instead of failing the whole request. Runs already in the notebook stay as they are. Returns 409 when the notebook is deleted. A token that registered a watcher gets 403 for the whole request when any listed run is on an instrument whose active watcher it didn't register.",
+        "description": "Requires scope `lab-notebooks:write`. Reports an outcome for each run instead of failing the whole request. Runs already in the lab notebook stay as they are. Returns 409 when the lab notebook is deleted. A token that registered a watcher gets 403 for the whole request when any listed run is on an instrument whose active watcher it didn't register.",
         "tags": [
-          "Notebooks"
+          "Lab Notebooks"
         ],
         "security": [
           {
@@ -6039,7 +6039,7 @@
               "example": "9b2c4e1a-7d3f-4a5b-8c6d-0e1f2a3b4c5d"
             },
             "required": true,
-            "name": "notebookId",
+            "name": "labNotebookId",
             "in": "path"
           }
         ],
@@ -6086,7 +6086,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NotebookRunsAdded"
+                  "$ref": "#/components/schemas/LabNotebookRunsAdded"
                 }
               }
             }
@@ -6144,13 +6144,13 @@
         }
       }
     },
-    "/notebooks/{notebookId}/runs/remove": {
+    "/lab-notebooks/{labNotebookId}/runs/remove": {
       "post": {
-        "operationId": "removeRunsFromNotebook",
+        "operationId": "removeRunsFromLabNotebook",
         "summary": "Remove runs from a lab notebook",
-        "description": "Requires scope `notebooks:write`. Reports an outcome for each run instead of failing the whole request. The notebook stays, even with no runs left. Returns 409 when the notebook is deleted. A POST rather than a DELETE with a body, which some proxies and clients drop. A token that registered a watcher gets 403 for the whole request when any listed run is on an instrument whose active watcher it didn't register.",
+        "description": "Requires scope `lab-notebooks:write`. Reports an outcome for each run instead of failing the whole request. The lab notebook stays, even with no runs left. Returns 409 when the lab notebook is deleted. A POST rather than a DELETE with a body, which some proxies and clients drop. A token that registered a watcher gets 403 for the whole request when any listed run is on an instrument whose active watcher it didn't register.",
         "tags": [
-          "Notebooks"
+          "Lab Notebooks"
         ],
         "security": [
           {
@@ -6165,7 +6165,7 @@
               "example": "9b2c4e1a-7d3f-4a5b-8c6d-0e1f2a3b4c5d"
             },
             "required": true,
-            "name": "notebookId",
+            "name": "labNotebookId",
             "in": "path"
           }
         ],
@@ -6212,7 +6212,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NotebookRunsRemoved"
+                  "$ref": "#/components/schemas/LabNotebookRunsRemoved"
                 }
               }
             }

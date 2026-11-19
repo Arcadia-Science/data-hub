@@ -25,18 +25,18 @@ import {
 
 // End-to-end tests for lab notebooks:
 //
-//   - GET/POST /api/v1/notebooks
-//   - GET/PATCH/DELETE /api/v1/notebooks/:notebookId
-//   - POST /api/v1/notebooks/:notebookId/restore
-//   - POST /api/v1/notebooks/:notebookId/runs (add runs)
-//   - POST /api/v1/notebooks/:notebookId/runs/remove
-//   - the `notebooks` field and the `has_notebook` and `notebook_id` filters
+//   - GET/POST /api/v1/lab-notebooks
+//   - GET/PATCH/DELETE /api/v1/lab-notebooks/:notebookId
+//   - POST /api/v1/lab-notebooks/:notebookId/restore
+//   - POST /api/v1/lab-notebooks/:notebookId/runs (add runs)
+//   - POST /api/v1/lab-notebooks/:notebookId/runs/remove
+//   - the `notebooks` field and the `has_lab_notebook` and `lab_notebook_id` filters
 //     on the run responses
 //
 // A notebook is one page. Only one notebook, deleted or not, can hold a page,
 // where "same page" ignores the scheme, `www.`, tracking parameters, the
 // fragment, and for Notion, the page title. Reads need `runs:read` and writes
-// need `notebooks:write`. A watcher's token may only add or remove its own
+// need `lab-notebooks:write`. A watcher's token may only add or remove its own
 // instrument's runs.
 
 const A = "notebooks-a";
@@ -64,7 +64,7 @@ function ref(runId: string, instrumentId = A): RunRef {
 }
 
 function notebookPath(id: string, suffix = ""): string {
-  return `/api/v1/notebooks/${id}${suffix}`;
+  return `/api/v1/lab-notebooks/${id}${suffix}`;
 }
 
 function runPath(runId: string, instrumentId = A): string {
@@ -126,7 +126,7 @@ describe("Lab notebooks API", () => {
   }
 
   function postNotebook(body: unknown, as: As = { token }) {
-    return call("/api/v1/notebooks", "POST", body, as);
+    return call("/api/v1/lab-notebooks", "POST", body, as);
   }
 
   async function createNotebook(body: unknown, as: As = { token }) {
@@ -157,7 +157,7 @@ describe("Lab notebooks API", () => {
   async function runNotebooks(runId: string, instrumentId = A) {
     const res = await api(runPath(runId, instrumentId), { token });
     expect(res.status).toBe(200);
-    return runDetail.parse(await res.json()).notebooks;
+    return runDetail.parse(await res.json()).lab_notebooks;
   }
 
   async function listNotebooks(
@@ -165,7 +165,7 @@ describe("Lab notebooks API", () => {
     as: As = { token }
   ) {
     const res = await call(
-      `/api/v1/notebooks?${new URLSearchParams(params)}`,
+      `/api/v1/lab-notebooks?${new URLSearchParams(params)}`,
       "GET",
       undefined,
       as
@@ -191,7 +191,7 @@ describe("Lab notebooks API", () => {
     await resetDb();
 
     ({ token, tokenId, userId } = await seedTestUser({
-      tokenName: "Notebook Bot",
+      tokenName: "Lab notebook Bot",
     }));
     cookie = await seedSessionCookie(userId);
     ({ token: otherToken, tokenId: otherTokenId } = await seedTestUser({
@@ -220,7 +220,7 @@ describe("Lab notebooks API", () => {
   // -------------------------------------------------------------------------
 
   describe("creating", () => {
-    it("creates an empty notebook, trimming the name and dropping a blank description", async () => {
+    it("creates an empty lab notebook, trimming the name and dropping a blank description", async () => {
       const url = `${notionUrl("Heat-stress-day-1", 1)}?pvs=4`;
       const created = await createNotebook({
         url,
@@ -228,7 +228,7 @@ describe("Lab notebooks API", () => {
         description: "   ",
       });
       expect(created.runs).toBeNull();
-      expect(created.notebook).toMatchObject({
+      expect(created.lab_notebook).toMatchObject({
         url,
         url_key: `notion:${notionId(1)}`,
         name: "Heat stress day 1",
@@ -239,12 +239,12 @@ describe("Lab notebooks API", () => {
         last_run_at: null,
         deleted_at: null,
         created_by: null,
-        created_by_token: { id: tokenId, name: "Notebook Bot" },
-        updated_by_token: { id: tokenId, name: "Notebook Bot" },
+        created_by_token: { id: tokenId, name: "Lab notebook Bot" },
+        updated_by_token: { id: tokenId, name: "Lab notebook Bot" },
       });
     });
 
-    it("creates a notebook with runs across instruments, with an outcome for each run", async () => {
+    it("creates a lab notebook with runs across instruments, with an outcome for each run", async () => {
       await createRun("create-a", A, "2026-02-01T09:00:00Z");
       await createRun("create-b", B, "2026-02-03T09:00:00Z");
       await createRun("create-deleted");
@@ -278,13 +278,13 @@ describe("Lab notebooks API", () => {
       ]);
       expect(created.runs?.counts).toEqual({
         added: 2,
-        already_in_notebook: 0,
+        already_in_lab_notebook: 0,
         run_deleted: 1,
         limit_reached: 0,
         not_found: 1,
       });
-      expect(created.runs?.notebook_id).toBe(created.notebook.id);
-      expect(created.notebook).toMatchObject({
+      expect(created.runs?.lab_notebook_id).toBe(created.lab_notebook.id);
+      expect(created.lab_notebook).toMatchObject({
         name: "Gel ladder",
         description: "Ladder for every gel",
         owner: { id: ownerId, displayName: "Olive Owner" },
@@ -296,8 +296,8 @@ describe("Lab notebooks API", () => {
       });
     });
 
-    it("refuses a page another notebook has, even under another title, and names that notebook", async () => {
-      const { notebook: first } = await createNotebook({
+    it("refuses a page another lab notebook has, even under another title, and names that lab notebook", async () => {
+      const { lab_notebook: first } = await createNotebook({
         url: notionUrl("Old-title", 2),
         name: "Osmotic stress",
       });
@@ -311,7 +311,7 @@ describe("Lab notebooks API", () => {
       const liveBody = await live.json();
       expect(liveBody.error.code).toBe("CONFLICT");
       expect(liveBody.error.details).toEqual({
-        notebook_id: first.id,
+        lab_notebook_id: first.id,
         deleted: false,
       });
 
@@ -322,7 +322,7 @@ describe("Lab notebooks API", () => {
       expect(deleted.status).toBe(409);
       const deletedBody = await deleted.json();
       expect(deletedBody.error.details).toEqual({
-        notebook_id: first.id,
+        lab_notebook_id: first.id,
         deleted: true,
       });
       expect(deletedBody.error.message).toMatch(/Restore/);
@@ -376,8 +376,10 @@ describe("Lab notebooks API", () => {
         NOTEBOOK_RUNS_PER_REQUEST_MAX
       );
 
-      expect((await addRuns(created.notebook.id, runs)).status).toBe(400);
-      expect((await removeRuns(created.notebook.id, runs)).status).toBe(400);
+      expect((await addRuns(created.lab_notebook.id, runs)).status).toBe(400);
+      expect((await removeRuns(created.lab_notebook.id, runs)).status).toBe(
+        400
+      );
     });
   });
 
@@ -407,27 +409,27 @@ describe("Lab notebooks API", () => {
           owner_id: listOwnerId,
           runs: [ref("zephyr-1")],
         })
-      ).notebook.id;
+      ).lab_notebook.id;
       plates = (
         await createNotebook({
           url: notionUrl("Zephyr-plates", 3),
           name: "Plate reader zephyr",
           runs: [ref("zephyr-2a"), ref("zephyr-2b", B)],
         })
-      ).notebook.id;
+      ).lab_notebook.id;
       strains = (
         await createNotebook({
           url: "https://example.com/eln/strains",
           name: "Unrelated name",
           description: "Notes on zephyr strains",
         })
-      ).notebook.id;
+      ).lab_notebook.id;
       gone = (
         await createNotebook({
           url: "https://example.com/eln/zephyr-4",
           name: "Deleted zephyr",
         })
-      ).notebook.id;
+      ).lab_notebook.id;
       await deleteNotebook(gone);
     });
 
@@ -446,7 +448,7 @@ describe("Lab notebooks API", () => {
       expect(await listedIds({ q: "zephyr strains" })).toEqual([strains]);
     });
 
-    it("matches a pasted link only to the notebook for that page", async () => {
+    it("matches a pasted link only to the lab notebook for that page", async () => {
       expect(
         await listedIds({
           q: `https://notion.so/Another-title-${notionId(3)}?pvs=4`,
@@ -466,14 +468,14 @@ describe("Lab notebooks API", () => {
 
     it("matches dotted text by name, not only as a link", async () => {
       // "assay.final" could also be a link without its `https://`.
-      const { notebook } = await createNotebook({
+      const { lab_notebook: notebook } = await createNotebook({
         url: "https://example.com/eln/dotted",
         name: "Plate assay.final",
       });
       expect(await listedIds({ q: "assay.final" })).toEqual([notebook.id]);
     });
 
-    it("lists deleted notebooks only with include_deleted", async () => {
+    it("lists deleted lab notebooks only with include_deleted", async () => {
       const all = await listNotebooks({ q: "zephyr", include_deleted: "true" });
       expect(all.pagination.total).toBe(4);
       const deleted = all.data.find((n) => n.id === gone);
@@ -548,7 +550,7 @@ describe("Lab notebooks API", () => {
       ];
       for (const params of cases) {
         const res = await call(
-          `/api/v1/notebooks?${new URLSearchParams(params)}`,
+          `/api/v1/lab-notebooks?${new URLSearchParams(params)}`,
           "GET"
         );
         expect(res.status).toBe(400);
@@ -577,7 +579,7 @@ describe("Lab notebooks API", () => {
       expect(second.data.map((n) => n.id)).toEqual([growth]);
     });
 
-    it("gets one notebook, deleted or not, and 404s for anything else", async () => {
+    it("gets one lab notebook, deleted or not, and 404s for anything else", async () => {
       const listed = await listNotebooks({ q: "zephyr growth" });
       expect(await getNotebook(growth)).toEqual(listed.data[0]);
       expect((await getNotebook(gone)).deleted_at).not.toBeNull();
@@ -594,9 +596,9 @@ describe("Lab notebooks API", () => {
   // -------------------------------------------------------------------------
 
   describe("editing", () => {
-    it("renames a notebook and records who changed it", async () => {
+    it("renames a lab notebook and records who changed it", async () => {
       await createRun("rename-run");
-      const { notebook } = await createNotebook({
+      const { lab_notebook: notebook } = await createNotebook({
         url: "https://example.com/eln/rename",
         name: "Before",
         runs: [ref("rename-run")],
@@ -621,7 +623,7 @@ describe("Lab notebooks API", () => {
     });
 
     it("sets and clears the description and owner", async () => {
-      const { notebook } = await createNotebook({
+      const { lab_notebook: notebook } = await createNotebook({
         url: "https://example.com/eln/clearing",
         name: "Clearing",
         description: "Day 1",
@@ -649,7 +651,7 @@ describe("Lab notebooks API", () => {
     });
 
     it('makes the signed-in person the owner with owner_id "me", but not for a token', async () => {
-      const { notebook } = await createNotebook(
+      const { lab_notebook: notebook } = await createNotebook(
         { url: "https://example.com/eln/mine", name: "Mine", owner_id: "me" },
         { cookie }
       );
@@ -685,7 +687,7 @@ describe("Lab notebooks API", () => {
 
     it("changes the link, and keeps its own page under another spelling", async () => {
       await createRun("relink-run");
-      const { notebook } = await createNotebook({
+      const { lab_notebook: notebook } = await createNotebook({
         url: notionUrl("Gel-ladder", 4),
         name: "Gel ladder",
         runs: [ref("relink-run")],
@@ -714,12 +716,12 @@ describe("Lab notebooks API", () => {
       await createNotebook({ url: notionUrl("Gel-ladder", 4), name: "Reused" });
     });
 
-    it("refuses a link another notebook has", async () => {
-      const { notebook: first } = await createNotebook({
+    it("refuses a link another lab notebook has", async () => {
+      const { lab_notebook: first } = await createNotebook({
         url: "https://example.com/eln/clash-a",
         name: "Clash A",
       });
-      const { notebook: second } = await createNotebook({
+      const { lab_notebook: second } = await createNotebook({
         url: "https://example.com/eln/clash-b",
         name: "Clash B",
       });
@@ -729,7 +731,7 @@ describe("Lab notebooks API", () => {
       });
       expect(res.status).toBe(409);
       expect((await res.json()).error.details).toEqual({
-        notebook_id: first.id,
+        lab_notebook_id: first.id,
         deleted: false,
       });
       expect((await getNotebook(second.id)).url).toBe(
@@ -737,8 +739,8 @@ describe("Lab notebooks API", () => {
       );
     });
 
-    it("refuses an unknown owner, an empty edit, and a deleted or missing notebook", async () => {
-      const { notebook } = await createNotebook({
+    it("refuses an unknown owner, an empty edit, and a deleted or missing lab notebook", async () => {
+      const { lab_notebook: notebook } = await createNotebook({
         url: "https://example.com/eln/edit-refusals",
         name: "Edit refusals",
       });
@@ -768,16 +770,16 @@ describe("Lab notebooks API", () => {
   // -------------------------------------------------------------------------
 
   describe("deleting and restoring", () => {
-    it("hides a deleted notebook from its runs and brings it back on restore", async () => {
+    it("hides a deleted lab notebook from its runs and brings it back on restore", async () => {
       await createRun("life-in", LIFECYCLE);
       await createRun("life-bare", LIFECYCLE);
-      const { notebook } = await createNotebook({
+      const { lab_notebook: notebook } = await createNotebook({
         url: "https://example.com/eln/lifecycle",
         name: "Lifecycle",
         runs: [ref("life-in", LIFECYCLE)],
       });
       const runs = `/api/v1/instruments/${LIFECYCLE}/runs`;
-      expect(await listRunIds(runs, { has_notebook: "true" })).toEqual([
+      expect(await listRunIds(runs, { has_lab_notebook: "true" })).toEqual([
         "life-in",
       ]);
 
@@ -790,8 +792,8 @@ describe("Lab notebooks API", () => {
       expect(deleted.run_count).toBe(1);
 
       expect(await runNotebooks("life-in", LIFECYCLE)).toEqual([]);
-      expect(await listRunIds(runs, { has_notebook: "true" })).toEqual([]);
-      expect(await listRunIds(runs, { has_notebook: "false" })).toEqual([
+      expect(await listRunIds(runs, { has_lab_notebook: "true" })).toEqual([]);
+      expect(await listRunIds(runs, { has_lab_notebook: "false" })).toEqual([
         "life-bare",
         "life-in",
       ]);
@@ -799,11 +801,11 @@ describe("Lab notebooks API", () => {
       // though the run itself no longer lists the notebook.
       const inNotebook = runListResponse.parse(
         await (
-          await api(`${runs}?notebook_id=${notebook.id}`, { token })
+          await api(`${runs}?lab_notebook_id=${notebook.id}`, { token })
         ).json()
       );
       expect(inNotebook.data.map((run) => run.run_id)).toEqual(["life-in"]);
-      expect(inNotebook.data[0].notebooks).toEqual([]);
+      expect(inNotebook.data[0].lab_notebooks).toEqual([]);
       expect(
         (await listNotebooks({ q: "Lifecycle" })).data.map((n) => n.id)
       ).toEqual([]);
@@ -824,14 +826,14 @@ describe("Lab notebooks API", () => {
       expect(
         (await runNotebooks("life-in", LIFECYCLE)).map((n) => n.id)
       ).toEqual([notebook.id]);
-      expect(await listRunIds(runs, { has_notebook: "true" })).toEqual([
+      expect(await listRunIds(runs, { has_lab_notebook: "true" })).toEqual([
         "life-in",
       ]);
     });
 
-    it("refuses to delete twice, restore a live notebook, or change a deleted one's runs", async () => {
+    it("refuses to delete twice, restore a live lab notebook, or change a deleted one's runs", async () => {
       await createRun("life-locked", LIFECYCLE);
-      const { notebook } = await createNotebook({
+      const { lab_notebook: notebook } = await createNotebook({
         url: "https://example.com/eln/lifecycle-locked",
         name: "Locked",
         runs: [ref("life-locked", LIFECYCLE)],
@@ -872,7 +874,7 @@ describe("Lab notebooks API", () => {
       await createRun("add-deleted");
       await createRun("add-other", B);
       await deleteRun("add-deleted");
-      const { notebook } = await createNotebook({
+      const { lab_notebook: notebook } = await createNotebook({
         url: "https://example.com/eln/adding",
         name: "Adding",
         runs: [ref("add-in")],
@@ -887,17 +889,17 @@ describe("Lab notebooks API", () => {
       ]);
       expect(res.status).toBe(200);
       const body = notebookRunsAdded.parse(await res.json());
-      expect(body.notebook_id).toBe(notebook.id);
+      expect(body.lab_notebook_id).toBe(notebook.id);
       expect(body.results.map((r) => [r.run_id, r.outcome])).toEqual([
         ["add-new", "added"],
-        ["add-in", "already_in_notebook"],
+        ["add-in", "already_in_lab_notebook"],
         ["add-deleted", "run_deleted"],
         ["add-missing", "not_found"],
         ["add-other", "added"],
       ]);
       expect(body.counts).toEqual({
         added: 2,
-        already_in_notebook: 1,
+        already_in_lab_notebook: 1,
         run_deleted: 1,
         limit_reached: 0,
         not_found: 1,
@@ -911,11 +913,11 @@ describe("Lab notebooks API", () => {
       expect(linked.id).toBe(notebook.id);
       expect(linked.linked_by_token).toEqual({
         id: tokenId,
-        name: "Notebook Bot",
+        name: "Lab notebook Bot",
       });
     });
 
-    it(`stops a run at ${NOTEBOOKS_PER_RUN_MAX} notebooks, deleted ones included`, async () => {
+    it(`stops a run at ${NOTEBOOKS_PER_RUN_MAX} lab notebooks, deleted ones included`, async () => {
       await createRun("add-full");
       const ids: string[] = [];
       for (let i = 0; i < NOTEBOOKS_PER_RUN_MAX; i += 1) {
@@ -925,12 +927,12 @@ describe("Lab notebooks API", () => {
           runs: [ref("add-full")],
         });
         expect(created.runs?.results[0].outcome).toBe("added");
-        ids.push(created.notebook.id);
+        ids.push(created.lab_notebook.id);
       }
       // A deleted notebook keeps its runs for a restore, so it still counts.
       await deleteNotebook(ids[0]);
 
-      const { notebook } = await createNotebook({
+      const { lab_notebook: notebook } = await createNotebook({
         url: "https://example.com/eln/full-extra",
         name: "One too many",
       });
@@ -944,14 +946,14 @@ describe("Lab notebooks API", () => {
         runs: [ref("add-full")],
       });
       expect(onCreate.runs?.results[0].outcome).toBe("limit_reached");
-      expect(onCreate.notebook.run_count).toBe(0);
+      expect(onCreate.lab_notebook.run_count).toBe(0);
     });
 
-    it("reports an outcome for each run removed, and keeps an emptied notebook", async () => {
+    it("reports an outcome for each run removed, and keeps an emptied lab notebook", async () => {
       for (const runId of ["rm-a", "rm-b", "rm-out", "rm-deleted"]) {
         await createRun(runId);
       }
-      const { notebook } = await createNotebook({
+      const { lab_notebook: notebook } = await createNotebook({
         url: "https://example.com/eln/removing",
         name: "Removing",
         runs: [ref("rm-a"), ref("rm-b"), ref("rm-deleted")],
@@ -968,13 +970,13 @@ describe("Lab notebooks API", () => {
       const body = notebookRunsRemoved.parse(await res.json());
       expect(body.results.map((r) => [r.run_id, r.outcome])).toEqual([
         ["rm-a", "removed"],
-        ["rm-out", "not_in_notebook"],
+        ["rm-out", "not_in_lab_notebook"],
         ["rm-deleted", "run_deleted"],
         ["rm-missing", "not_found"],
       ]);
       expect(body.counts).toEqual({
         removed: 1,
-        not_in_notebook: 1,
+        not_in_lab_notebook: 1,
         run_deleted: 1,
         not_found: 1,
       });
@@ -989,14 +991,14 @@ describe("Lab notebooks API", () => {
       expect(emptied.run_count).toBe(0);
     });
 
-    it("404s for an unknown notebook and 400s for no runs", async () => {
+    it("404s for an unknown lab notebook and 400s for no runs", async () => {
       await createRun("add-nowhere");
       for (const id of [crypto.randomUUID(), "not-a-uuid"]) {
         expect((await addRuns(id, [ref("add-nowhere")])).status).toBe(404);
         expect((await removeRuns(id, [ref("add-nowhere")])).status).toBe(404);
       }
 
-      const { notebook } = await createNotebook({
+      const { lab_notebook: notebook } = await createNotebook({
         url: "https://example.com/eln/no-runs",
         name: "No runs",
       });
@@ -1007,7 +1009,7 @@ describe("Lab notebooks API", () => {
       ).toBe(400);
     });
 
-    it("bumps a run's updated time when it joins or leaves a notebook, but not when the notebook changes", async () => {
+    it("bumps a run's updated time when it joins or leaves a lab notebook, but not when the lab notebook changes", async () => {
       await createRun("touch-run");
       const updatedAt = async (): Promise<string> =>
         runDetail.parse(
@@ -1015,7 +1017,7 @@ describe("Lab notebooks API", () => {
         ).updated_at;
 
       const before = await updatedAt();
-      const { notebook } = await createNotebook({
+      const { lab_notebook: notebook } = await createNotebook({
         url: "https://example.com/eln/touch",
         name: "Touch",
         runs: [ref("touch-run")],
@@ -1037,8 +1039,8 @@ describe("Lab notebooks API", () => {
   // Runs and their notebooks
   // -------------------------------------------------------------------------
 
-  describe("runs and their notebooks", () => {
-    it("lists a run's notebooks in run detail, oldest first", async () => {
+  describe("runs and their lab notebooks", () => {
+    it("lists a run's lab notebooks in run detail, oldest first", async () => {
       await createRun("detail-run");
       const first = await createNotebook(
         {
@@ -1053,13 +1055,13 @@ describe("Lab notebooks API", () => {
         name: "Detail two",
       });
       expect(
-        (await addRuns(second.notebook.id, [ref("detail-run")])).status
+        (await addRuns(second.lab_notebook.id, [ref("detail-run")])).status
       ).toBe(200);
 
       const listed = await runNotebooks("detail-run");
       expect(listed.map((n) => n.name)).toEqual(["Detail one", "Detail two"]);
       expect(listed[0]).toMatchObject({
-        id: first.notebook.id,
+        id: first.lab_notebook.id,
         url: "https://example.com/eln/detail-1",
         url_key: "example.com/eln/detail-1",
         linked_by: { id: userId },
@@ -1068,16 +1070,16 @@ describe("Lab notebooks API", () => {
       expect(listed[1].linked_by).toBeNull();
       expect(listed[1].linked_by_token).toEqual({
         id: tokenId,
-        name: "Notebook Bot",
+        name: "Lab notebook Bot",
       });
     });
 
-    it("filters both run lists by has_notebook and notebook_id", async () => {
+    it("filters both run lists by has_lab_notebook and lab_notebook_id", async () => {
       for (const runId of ["f-in", "f-bare", "f-deleted-nb", "f-deleted-run"]) {
         await createRun(runId, FILTER);
       }
       await createRun("f-in-b", B);
-      const { notebook: x } = await createNotebook({
+      const { lab_notebook: x } = await createNotebook({
         url: "https://example.com/eln/filter-x",
         name: "Filter X",
         runs: [
@@ -1086,7 +1088,7 @@ describe("Lab notebooks API", () => {
           ref("f-deleted-run", FILTER),
         ],
       });
-      const { notebook: y } = await createNotebook({
+      const { lab_notebook: y } = await createNotebook({
         url: "https://example.com/eln/filter-y",
         name: "Filter Y",
         runs: [ref("f-deleted-nb", FILTER)],
@@ -1097,63 +1099,63 @@ describe("Lab notebooks API", () => {
       const perInstrument = `/api/v1/instruments/${FILTER}/runs`;
       const everywhere = "/api/v1/instrument-runs";
 
-      // A deleted notebook doesn't count for `has_notebook`.
-      expect(await listRunIds(perInstrument, { has_notebook: "true" })).toEqual(
-        ["f-in"]
-      );
+      // A deleted notebook doesn't count for `has_lab_notebook`.
       expect(
-        await listRunIds(perInstrument, { has_notebook: "false" })
+        await listRunIds(perInstrument, { has_lab_notebook: "true" })
+      ).toEqual(["f-in"]);
+      expect(
+        await listRunIds(perInstrument, { has_lab_notebook: "false" })
       ).toEqual(["f-bare", "f-deleted-nb"]);
       expect(
         await listRunIds(everywhere, {
           instrument_id: FILTER,
-          has_notebook: "true",
+          has_lab_notebook: "true",
         })
       ).toEqual(["f-in"]);
 
-      expect(await listRunIds(perInstrument, { notebook_id: x.id })).toEqual([
-        "f-in",
-      ]);
+      expect(
+        await listRunIds(perInstrument, { lab_notebook_id: x.id })
+      ).toEqual(["f-in"]);
       expect(
         await listRunIds(perInstrument, {
-          notebook_id: x.id,
+          lab_notebook_id: x.id,
           include_deleted: "true",
         })
       ).toEqual(["f-deleted-run", "f-in"]);
-      expect(await listRunIds(everywhere, { notebook_id: x.id })).toEqual([
+      expect(await listRunIds(everywhere, { lab_notebook_id: x.id })).toEqual([
         "f-in",
         "f-in-b",
       ]);
       // A deleted notebook still lists its runs.
-      expect(await listRunIds(everywhere, { notebook_id: y.id })).toEqual([
+      expect(await listRunIds(everywhere, { lab_notebook_id: y.id })).toEqual([
         "f-deleted-nb",
       ]);
       // An ID that is no notebook's matches nothing; a blank one is ignored.
       for (const notebookId of [crypto.randomUUID(), "not-a-uuid"]) {
         expect(
-          await listRunIds(everywhere, { notebook_id: notebookId })
+          await listRunIds(everywhere, { lab_notebook_id: notebookId })
         ).toEqual([]);
       }
-      expect(await listRunIds(perInstrument, { notebook_id: " " })).toEqual([
-        "f-bare",
-        "f-deleted-nb",
-        "f-in",
-      ]);
+      expect(await listRunIds(perInstrument, { lab_notebook_id: " " })).toEqual(
+        ["f-bare", "f-deleted-nb", "f-in"]
+      );
 
       // Each run lists its live notebooks.
       const listed = runListResponse.parse(
-        await (await api(`${everywhere}?notebook_id=${x.id}`, { token })).json()
+        await (
+          await api(`${everywhere}?lab_notebook_id=${x.id}`, { token })
+        ).json()
       );
       for (const run of listed.data) {
-        expect(run.notebooks.map((n) => [n.id, n.name])).toEqual([
+        expect(run.lab_notebooks.map((n) => [n.id, n.name])).toEqual([
           [x.id, "Filter X"],
         ]);
       }
     });
 
-    it("finds runs in global search by a pasted link or a notebook's name, but not through a deleted notebook", async () => {
+    it("finds runs in global search by a pasted link or a lab notebook's name, but not through a deleted lab notebook", async () => {
       await createRun("search-linked");
-      const { notebook } = await createNotebook({
+      const { lab_notebook: notebook } = await createNotebook({
         url: notionUrl("Cardamom-osmotic-stress", 5),
         name: "Cardamom osmotic stress",
         runs: [ref("search-linked")],
@@ -1192,9 +1194,9 @@ describe("Lab notebooks API", () => {
   // -------------------------------------------------------------------------
 
   describe("scopes", () => {
-    it("lets runs:read list and read notebooks, but not change them", async () => {
+    it("lets runs:read list and read lab notebooks, but not change them", async () => {
       await createRun("scope-run");
-      const { notebook } = await createNotebook({
+      const { lab_notebook: notebook } = await createNotebook({
         url: "https://example.com/eln/scopes",
         name: "Scopes",
       });
@@ -1208,7 +1210,7 @@ describe("Lab notebooks API", () => {
 
       const writes: [string, "POST" | "PATCH" | "DELETE", unknown][] = [
         [
-          "/api/v1/notebooks",
+          "/api/v1/lab-notebooks",
           "POST",
           { url: "https://example.com/eln/scopes-2", name: "Nope" },
         ],
@@ -1230,14 +1232,14 @@ describe("Lab notebooks API", () => {
         const res = await call(path, method, body, readOnly);
         expect(res.status).toBe(403);
         expect((await res.json()).error.message).toMatch(
-          /missing required scope: notebooks:write/
+          /missing required scope: lab-notebooks:write/
         );
       }
 
       const { token: writeOnly } = await seedTestUser({
-        scopes: ["notebooks:write"],
+        scopes: ["lab-notebooks:write"],
       });
-      const res = await call("/api/v1/notebooks", "GET", undefined, {
+      const res = await call("/api/v1/lab-notebooks", "GET", undefined, {
         token: writeOnly,
       });
       expect(res.status).toBe(403);
@@ -1262,7 +1264,7 @@ describe("Lab notebooks API", () => {
         as
       );
       expect(created.runs?.counts.added).toBe(1);
-      const id = created.notebook.id;
+      const id = created.lab_notebook.id;
       expect(
         (await call(notebookPath(id), "PATCH", { name: "Legacy 2" }, as)).status
       ).toBe(200);
@@ -1283,7 +1285,7 @@ describe("Lab notebooks API", () => {
 
     beforeAll(async () => {
       ({ token: watcherToken } = await seedTestUser({
-        scopes: ["runs:read", "watchers:report", "notebooks:write"],
+        scopes: ["runs:read", "watchers:report", "lab-notebooks:write"],
       }));
       const registered = await api("/api/v1/watchers/register", {
         method: "POST",
@@ -1298,14 +1300,14 @@ describe("Lab notebooks API", () => {
         url: "https://example.com/eln/watcher",
         name: "Watcher target",
       });
-      notebookId = created.notebook.id;
+      notebookId = created.lab_notebook.id;
     });
 
-    it("can't create, edit, delete, or restore a notebook", async () => {
+    it("can't create, edit, delete, or restore a lab notebook", async () => {
       const as = { token: watcherToken };
       const requests: [string, "POST" | "PATCH" | "DELETE", unknown][] = [
         [
-          "/api/v1/notebooks",
+          "/api/v1/lab-notebooks",
           "POST",
           { url: "https://example.com/eln/watcher-2", name: "From a lab PC" },
         ],
@@ -1318,7 +1320,7 @@ describe("Lab notebooks API", () => {
         expect(res.status).toBe(403);
         const error = (await res.json()).error;
         expect(error.code).toBe("FORBIDDEN");
-        expect(error.message).toMatch(/can't create or change notebooks/);
+        expect(error.message).toMatch(/can't create or change lab notebooks/);
       }
 
       const unchanged = await getNotebook(notebookId);

@@ -64,7 +64,7 @@ function saveErrorMessage(error: unknown): string {
 }
 
 /**
- * The run page's "Lab notebooks" section: the notebooks the run is in, with
+ * The run page's "Lab Notebooks" section: the notebooks the run is in, with
  * an inline picker to add it to another. Each change goes to the API and
  * then refreshes the page; the list shows the change right away and falls
  * back if the request fails.
@@ -163,7 +163,7 @@ export function RunNotebookLinksSection({
             }).catch(() => null);
             if (!res?.ok) {
               toast.error(
-                "The run was added to the notebook, but marking you as having run it didn't work. Try again from Ran By."
+                "The run was added to the lab notebook, but marking you as having run it didn't work. Try again from Ran By."
               );
             }
           }
@@ -184,7 +184,7 @@ export function RunNotebookLinksSection({
       const result = await removeRunsFromNotebook(notebook.id, [run]);
       const outcome = result.results[0]?.outcome;
       if (outcome === "run_deleted" || outcome === "not_found") {
-        toast.error("Couldn't remove the run from the notebook.");
+        toast.error("Couldn't remove the run from the lab notebook.");
         return false;
       }
       return true;
@@ -193,7 +193,7 @@ export function RunNotebookLinksSection({
       if (error instanceof NotebookRequestError && error.status === 404) {
         return true;
       }
-      toast.error("Couldn't remove the run from the notebook. Try again?");
+      toast.error("Couldn't remove the run from the lab notebook. Try again?");
       return false;
     } finally {
       router.refresh();
@@ -203,7 +203,7 @@ export function RunNotebookLinksSection({
   const showAddButton = !(isDeleted || adding);
 
   return (
-    <section aria-label="Lab notebooks" className="flex flex-col gap-2">
+    <section aria-label="Lab Notebooks" className="flex flex-col gap-2">
       <RunSectionHeading
         actions={
           showAddButton ? (
@@ -215,12 +215,12 @@ export function RunNotebookLinksSection({
               variant="outline"
             >
               <Plus data-icon="inline-start" />
-              Add to notebook
+              Add to lab notebook
             </Button>
           ) : undefined
         }
         countLabel={optimistic.length > 0 ? optimistic.length : undefined}
-        title="Lab notebooks"
+        title="Lab Notebooks"
       />
       <Card className="gap-0 py-0">
         {adding ? (

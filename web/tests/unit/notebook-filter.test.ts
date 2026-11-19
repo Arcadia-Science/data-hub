@@ -14,36 +14,42 @@ const NOTEBOOK_C = "00000000-0000-4000-8000-00000000000c";
 describe("readNotebookFilter", () => {
   it("reads every filter the menu can set", () => {
     expect(
-      readNotebookFilter({ has_notebook: null, notebook_id: null })
+      readNotebookFilter({ has_lab_notebook: null, lab_notebook_id: null })
     ).toEqual({ kind: "all" });
     expect(
-      readNotebookFilter({ has_notebook: "true", notebook_id: null })
-    ).toEqual({ kind: "has_notebook" });
+      readNotebookFilter({ has_lab_notebook: "true", lab_notebook_id: null })
+    ).toEqual({ kind: "has_lab_notebook" });
     expect(
-      readNotebookFilter({ has_notebook: "false", notebook_id: null })
+      readNotebookFilter({ has_lab_notebook: "false", lab_notebook_id: null })
     ).toEqual({ kind: "no_notebook" });
     expect(
-      readNotebookFilter({ has_notebook: null, notebook_id: NOTEBOOK_A })
+      readNotebookFilter({
+        has_lab_notebook: null,
+        lab_notebook_id: NOTEBOOK_A,
+      })
     ).toEqual({ kind: "notebook", id: NOTEBOOK_A });
   });
 
-  it("shows the notebook as picked when a hand-edited URL sets both", () => {
+  it("shows the lab notebook as picked when a hand-edited URL sets both", () => {
     expect(
-      readNotebookFilter({ has_notebook: "false", notebook_id: NOTEBOOK_A })
+      readNotebookFilter({
+        has_lab_notebook: "false",
+        lab_notebook_id: NOTEBOOK_A,
+      })
     ).toEqual({ kind: "notebook", id: NOTEBOOK_A });
   });
 
-  it("ignores a blank notebook ID", () => {
+  it("ignores a blank lab notebook ID", () => {
     expect(
-      readNotebookFilter({ has_notebook: "true", notebook_id: "  " })
-    ).toEqual({ kind: "has_notebook" });
+      readNotebookFilter({ has_lab_notebook: "true", lab_notebook_id: "  " })
+    ).toEqual({ kind: "has_lab_notebook" });
   });
 });
 
 describe("notebookFilterParams", () => {
   it.each<NotebookFilter>([
     { kind: "all" },
-    { kind: "has_notebook" },
+    { kind: "has_lab_notebook" },
     { kind: "no_notebook" },
     { kind: "notebook", id: NOTEBOOK_B },
   ])("round-trips $kind through the URL params", (filter) => {
@@ -52,16 +58,16 @@ describe("notebookFilterParams", () => {
 
   it("clears the param the filter doesn't use", () => {
     expect(notebookFilterParams({ kind: "notebook", id: NOTEBOOK_B })).toEqual({
-      has_notebook: null,
-      notebook_id: NOTEBOOK_B,
+      has_lab_notebook: null,
+      lab_notebook_id: NOTEBOOK_B,
     });
     expect(notebookFilterParams({ kind: "no_notebook" })).toEqual({
-      has_notebook: "false",
-      notebook_id: null,
+      has_lab_notebook: "false",
+      lab_notebook_id: null,
     });
     expect(notebookFilterParams({ kind: "all" })).toEqual({
-      has_notebook: null,
-      notebook_id: null,
+      has_lab_notebook: null,
+      lab_notebook_id: null,
     });
   });
 });
@@ -73,7 +79,7 @@ describe("narrowNotebookOptions", () => {
     { id: NOTEBOOK_C, name: "Heat shock follow-up", runCount: 1 },
   ];
 
-  it("keeps every notebook for blank text", () => {
+  it("keeps every lab notebook for blank text", () => {
     expect(narrowNotebookOptions(options, "  ")).toEqual(options);
   });
 
@@ -93,7 +99,7 @@ describe("matchingNotebookFirst", () => {
     { id: NOTEBOOK_C },
   ];
 
-  it("moves the filtered notebook to the front and keeps the rest in order", () => {
+  it("moves the filtered lab notebook to the front and keeps the rest in order", () => {
     expect(
       matchingNotebookFirst(notebooks, NOTEBOOK_C).map((n) => n.id)
     ).toEqual([NOTEBOOK_C, NOTEBOOK_A, NOTEBOOK_B]);

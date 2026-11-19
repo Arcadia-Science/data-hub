@@ -37,7 +37,7 @@ export const mcpNotebookSchema = z.object({
   updated_at: isoDateTime,
   updated_by: mcpNotebookUserSchema.nullable(),
   updated_by_token: mcpActorTokenSchema.nullable(),
-  // Set while the notebook is deleted. restore_notebook clears them.
+  // Set while the notebook is deleted. restore_lab_notebook clears them.
   deleted_at: isoDateTime.nullable(),
   deleted_by: mcpNotebookUserSchema.nullable(),
   deleted_by_token: mcpActorTokenSchema.nullable(),
@@ -67,7 +67,7 @@ export const restoreNotebookOutputSchema = mcpNotebookSchema;
 
 const ADD_OUTCOMES = [
   "added",
-  "already_in_notebook",
+  "already_in_lab_notebook",
   "run_deleted",
   "limit_reached",
   "not_found",
@@ -75,13 +75,13 @@ const ADD_OUTCOMES = [
 
 const REMOVE_OUTCOMES = [
   "removed",
-  "not_in_notebook",
+  "not_in_lab_notebook",
   "run_deleted",
   "not_found",
 ] as const satisfies readonly RemoveRunOutcome[];
 
 export const addRunsToNotebookOutputSchema = z.object({
-  notebookId: z.string(),
+  labNotebookId: z.string(),
   instrumentId: z.string(),
   // One entry per run, in the order given.
   results: z.array(
@@ -89,7 +89,7 @@ export const addRunsToNotebookOutputSchema = z.object({
   ),
   counts: z.object({
     added: z.number().int(),
-    already_in_notebook: z.number().int(),
+    already_in_lab_notebook: z.number().int(),
     run_deleted: z.number().int(),
     limit_reached: z.number().int(),
     not_found: z.number().int(),
@@ -97,7 +97,7 @@ export const addRunsToNotebookOutputSchema = z.object({
 });
 
 export const removeRunsFromNotebookOutputSchema = z.object({
-  notebookId: z.string(),
+  labNotebookId: z.string(),
   instrumentId: z.string(),
   // One entry per run, in the order given.
   results: z.array(
@@ -105,14 +105,14 @@ export const removeRunsFromNotebookOutputSchema = z.object({
   ),
   counts: z.object({
     removed: z.number().int(),
-    not_in_notebook: z.number().int(),
+    not_in_lab_notebook: z.number().int(),
     run_deleted: z.number().int(),
     not_found: z.number().int(),
   }),
 });
 
 export const createNotebookOutputSchema = z.object({
-  notebook: mcpNotebookSchema,
+  labNotebook: mcpNotebookSchema,
   // The runs passed in, or null when none were.
   runs: addRunsToNotebookOutputSchema.nullable(),
 });

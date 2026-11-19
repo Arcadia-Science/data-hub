@@ -126,7 +126,7 @@ function countOutcomes<O extends string>(
 
 export interface NotebookRunsWire<O extends string> {
   counts: Record<O, number>;
-  notebook_id: string;
+  lab_notebook_id: string;
   results: Array<{ instrument_id: string; outcome: O; run_id: string }>;
 }
 
@@ -135,7 +135,7 @@ export function runOutcomesToWire<O extends string>(
   result: RunOutcomes<O>
 ): NotebookRunsWire<O> {
   return {
-    notebook_id: result.notebookId,
+    lab_notebook_id: result.notebookId,
     results: result.results.map((entry) => ({
       instrument_id: entry.instrumentId,
       run_id: entry.runId,

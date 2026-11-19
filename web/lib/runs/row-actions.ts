@@ -100,7 +100,7 @@ export function runRowToRef(row: RunRow): RunRef {
     caps: computeRunCaps(row),
     stats: computeRunStats(row),
     unclaimed: isUnclaimedRun(row),
-    notebooks: row.notebooks.map((notebook) => ({
+    notebooks: row.lab_notebooks.map((notebook) => ({
       id: notebook.id,
       name: notebook.name,
       url: notebook.url,

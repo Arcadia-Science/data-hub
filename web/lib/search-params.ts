@@ -38,13 +38,13 @@ export const parseAsRunStatuses = createParser<RunStatus[]>({
 });
 
 // "Lab Notebook" column filter: runs in at least one notebook or in none
-// (`has_notebook`), or runs in one notebook, by its ID (`notebook_id`). The
+// (`has_lab_notebook`), or runs in one notebook, by its ID (`lab_notebook_id`). The
 // column's menu sets one of them at a time.
 export const HAS_NOTEBOOK_VALUES = ["true", "false"] as const;
 
 export const notebookFilterSearchParams = {
-  has_notebook: parseAsStringLiteral(HAS_NOTEBOOK_VALUES),
-  notebook_id: parseAsString,
+  has_lab_notebook: parseAsStringLiteral(HAS_NOTEBOOK_VALUES),
+  lab_notebook_id: parseAsString,
 };
 
 // Shared by the dashboard, a member's runs page, and every instrument page.
@@ -234,8 +234,8 @@ export function hasActiveFilters(params: {
   include_deleted: boolean;
   status: RunStatus[];
   ran_by: string | null;
-  has_notebook: string | null;
-  notebook_id: string | null;
+  has_lab_notebook: string | null;
+  lab_notebook_id: string | null;
 }): boolean {
   return (
     params.search !== "" ||
@@ -245,8 +245,8 @@ export function hasActiveFilters(params: {
     params.include_deleted ||
     params.status.length > 0 ||
     params.ran_by !== null ||
-    params.has_notebook !== null ||
-    params.notebook_id !== null
+    params.has_lab_notebook !== null ||
+    params.lab_notebook_id !== null
   );
 }
 
@@ -274,8 +274,8 @@ export const INSTRUMENT_NULLABLE_FILTER_KEYS = [
   "aunty_temperature",
   "aunty_ramp_rate",
   "ran_by",
-  "has_notebook",
-  "notebook_id",
+  "has_lab_notebook",
+  "lab_notebook_id",
 ] as const;
 
 type InstrumentFilterParams = {

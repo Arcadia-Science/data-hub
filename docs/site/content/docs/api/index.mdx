@@ -66,7 +66,7 @@ A token acts under its own name, not as a person, so responses name the token wh
 
 - A comment posted by a token has `user: null` and a `token` object with the token’s `id` and `name`. A comment posted by a person has `token: null`.
 - A run deleted by a token has `deleted_by_token` set, alongside `deleted_at`.
-- A lab notebook created, last edited, or deleted by a token has `created_by_token`, `updated_by_token`, or `deleted_by_token` set, and the matching person field null. A run added to a notebook by a token has `linked_by_token` set and `linked_by` null.
+- A lab notebook created, last edited, or deleted by a token has `created_by_token`, `updated_by_token`, or `deleted_by_token` set, and the matching person field null. A run added to a lab notebook by a token has `linked_by_token` set and `linked_by` null.
 
 Read both fields when you display who did something. See [How a token acts](/docs/manage-tokens#how-a-token-acts).
 

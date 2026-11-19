@@ -16,7 +16,7 @@ const DOCUMENT_TAGS = [
     name: "Runs",
     description: "Instrument runs, comments, attributions, uploads, and search",
   },
-  { name: "Notebooks", description: "Lab notebooks and the runs in them" },
+  { name: "Lab Notebooks", description: "Lab notebooks and the runs in them" },
   { name: "Files", description: "Run files, downloads, and reprocessing" },
   { name: "Watchers", description: "Watcher registration and telemetry" },
   { name: "Archive", description: "Run archive builds" },

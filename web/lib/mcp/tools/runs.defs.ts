@@ -95,17 +95,17 @@ export const searchRunsTool = {
       .describe(
         'Filter by attributor. Pass a user id, the literal "me" for the authenticated token owner, or "unattributed" for runs with no attributions. Use get_me for your user id, or list_run_attributors to discover colleagues.'
       ),
-    hasNotebook: z
+    hasLabNotebook: z
       .boolean()
       .optional()
       .describe(
-        "true: only runs in at least one lab notebook. false: only runs in none. Deleted notebooks don't count."
+        "true: only runs in at least one lab notebook. false: only runs in none. Deleted lab notebooks don't count."
       ),
-    notebookId: z
+    labNotebookId: z
       .string()
       .optional()
       .describe(
-        "Only runs in this lab notebook, on any instrument. Find the id with list_notebooks. Works for a deleted notebook too."
+        "Only runs in this lab notebook, on any instrument. Find the id with list_lab_notebooks. Works for a deleted lab notebook too."
       ),
     status: z
       .array(z.enum([...RUN_STATUS_VALUES, DEPRECATED_PENDING_RUN_STATUS]))
@@ -123,7 +123,7 @@ export const getRunTool = {
   scope: "runs:read",
   title: "Get Run",
   description:
-    "Get details for a specific instrument run by its natural key (instrument ID + run ID). Returns metadata, timestamps, instrument info, attributions, and lab notebooks (notebooks) by default. Pass include to attach the first page of files, comments, and/or a failure_summary without extra tool calls. To show the interactive report (plate maps, spectra, images) or a bounded processed-CSV sample, call get_run_report for the same run.",
+    "Get details for a specific instrument run by its natural key (instrument ID + run ID). Returns metadata, timestamps, instrument info, attributions, and lab notebooks by default. Pass include to attach the first page of files, comments, and/or a failure_summary without extra tool calls. To show the interactive report (plate maps, spectra, images) or a bounded processed-CSV sample, call get_run_report for the same run.",
   outputSchema: getRunOutputSchema,
   inputSchema: {
     instrumentId: z.string().describe("Instrument identifier"),

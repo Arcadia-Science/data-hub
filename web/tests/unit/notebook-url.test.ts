@@ -153,7 +153,7 @@ describe("notebookNameFromUrl", () => {
   });
 });
 
-describe("notebook form schemas", () => {
+describe("lab notebook form schemas", () => {
   it("accepts and trims an http link", () => {
     expect(notebookLinkUrlSchema.parse(" https://example.com/a ")).toBe(
       "https://example.com/a"

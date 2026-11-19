@@ -57,7 +57,7 @@ export const SCOPE_METADATA: Record<Scope, ScopeMeta> = {
       "Post run comments as this token, and edit or delete the ones it posted.",
     destructive: false,
   },
-  "notebooks:write": {
+  "lab-notebooks:write": {
     label: "Manage lab notebooks",
     description:
       "Create, edit, delete, and restore lab notebooks, and add runs to them or remove runs from them.",

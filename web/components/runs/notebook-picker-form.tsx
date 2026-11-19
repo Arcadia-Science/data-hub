@@ -116,13 +116,13 @@ function statusText(
       case "lookup_failed":
         return "Couldn't look up this page.";
       case "create":
-        return "No notebook has this page yet.";
+        return "No lab notebook has this page yet.";
       default:
         return "";
     }
   }
   if (lookup.status === "failed") {
-    return "Couldn't load notebooks.";
+    return "Couldn't load lab notebooks.";
   }
   if (lookup.status === "loading") {
     return shownCount === 0 ? "Searching…" : "";
@@ -131,8 +131,8 @@ function statusText(
     return "";
   }
   return query.text
-    ? "No notebooks match. Paste a link to a page to create one."
-    : "No notebooks yet. Paste a link to a page to create one.";
+    ? "No lab notebooks match. Paste a link to a page to create one."
+    : "No lab notebooks yet. Paste a link to a page to create one.";
 }
 
 /**
@@ -239,8 +239,8 @@ export function NotebookPickerForm({
       case "searching":
         setError(
           input.trim()
-            ? "Pick a notebook from the list, or paste a link to its page."
-            : "Find a notebook by name, or paste a link to its page."
+            ? "Pick a lab notebook from the list, or paste a link to its page."
+            : "Find a lab notebook by name, or paste a link to its page."
         );
         searchRef.current?.focus();
         return null;
@@ -254,8 +254,8 @@ export function NotebookPickerForm({
         if (alreadyIn === runCount) {
           setError(
             runCount === 1
-              ? "This run is already in this notebook."
-              : "These runs are already in this notebook."
+              ? "This run is already in this lab notebook."
+              : "These runs are already in this lab notebook."
           );
           return null;
         }
@@ -329,7 +329,7 @@ export function NotebookPickerForm({
     note = `“${state.notebook.name}” is deleted. Restoring it brings back the runs it had and adds ${theseRuns}.`;
   }
 
-  let submitLabel = "Add to notebook";
+  let submitLabel = "Add to lab notebook";
   if (state.kind === "create") {
     submitLabel = "Create and add";
   } else if (state.kind === "restore") {
@@ -357,14 +357,14 @@ export function NotebookPickerForm({
         <Field data-invalid={error !== null}>
           {/* The box's accessible name comes from the command menu's own
               label, which has the same text. */}
-          <FieldTitle aria-hidden="true">Notebook</FieldTitle>
+          <FieldTitle aria-hidden="true">Lab notebook</FieldTitle>
           <CommandPrimitive
             className={cn(
               "flex flex-col overflow-hidden rounded-md border border-input bg-background shadow-xs transition-[color,box-shadow] focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50 dark:bg-input/30",
               error !== null &&
                 "border-destructive ring-3 ring-destructive/20 dark:border-destructive/50 dark:ring-destructive/40"
             )}
-            label="Notebook"
+            label="Lab notebook"
             loop
             onValueChange={setHighlighted}
             shouldFilter={false}
@@ -487,7 +487,7 @@ export function NotebookPickerForm({
               value={name}
             />
             <FieldDescription id={`${id}-name-hint`}>
-              The page is new to Data Hub, so it becomes a new notebook with
+              The page is new to Data Hub, so it becomes a new lab notebook with
               this name.
             </FieldDescription>
             {nameError ? <FieldError>{nameError}</FieldError> : null}

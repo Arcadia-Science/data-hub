@@ -9,18 +9,18 @@ import { restoreNotebook } from "@/lib/api/notebooks";
 import { refuseWatcherTokenAdmin } from "@/lib/api/watchers";
 
 interface RouteContext {
-  params: Promise<{ notebookId: string }>;
+  params: Promise<{ labNotebookId: string }>;
 }
 
 // ---------------------------------------------------------------------------
-// POST /api/v1/notebooks/:notebookId/restore
+// POST /api/v1/lab-notebooks/:labNotebookId/restore
 //
 // Bring back a deleted notebook with the runs it had. 409 when it isn't
 // deleted.
 // ---------------------------------------------------------------------------
 
 export async function POST(request: NextRequest, { params }: RouteContext) {
-  const authResult = await authorize(request, "notebooks:write");
+  const authResult = await authorize(request, "lab-notebooks:write");
   if (authResult instanceof Response) {
     return authResult;
   }
@@ -33,7 +33,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     return refused;
   }
 
-  const { notebookId } = await params;
+  const { labNotebookId: notebookId } = await params;
   const result = await restoreNotebook({
     id: notebookId,
     actor: actorRefFromAuth(authResult),

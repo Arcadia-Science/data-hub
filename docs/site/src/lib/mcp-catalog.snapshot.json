@@ -12,7 +12,7 @@
     "runs": "Runs",
     "attribution": "Run attribution",
     "comments": "Comments",
-    "notebooks": "Lab notebooks",
+    "lab_notebooks": "Lab Notebooks",
     "files": "Files",
     "watchers": "Watchers",
     "discovery": "Discovery",
@@ -980,12 +980,12 @@
             "description": "Filter by attributor. Pass a user id, the literal \"me\" for the authenticated token owner, or \"unattributed\" for runs with no attributions. Use get_me for your user id, or list_run_attributors to discover colleagues.",
             "type": "string"
           },
-          "hasNotebook": {
-            "description": "true: only runs in at least one lab notebook. false: only runs in none. Deleted notebooks don't count.",
+          "hasLabNotebook": {
+            "description": "true: only runs in at least one lab notebook. false: only runs in none. Deleted lab notebooks don't count.",
             "type": "boolean"
           },
-          "notebookId": {
-            "description": "Only runs in this lab notebook, on any instrument. Find the id with list_notebooks. Works for a deleted notebook too.",
+          "labNotebookId": {
+            "description": "Only runs in this lab notebook, on any instrument. Find the id with list_lab_notebooks. Works for a deleted lab notebook too.",
             "type": "string"
           },
           "status": {
@@ -1210,7 +1210,7 @@
                   "minimum": -9007199254740991,
                   "maximum": 9007199254740991
                 },
-                "notebooks": {
+                "lab_notebooks": {
                   "type": "array",
                   "items": {
                     "type": "object",
@@ -1332,7 +1332,7 @@
                 "error_messages",
                 "attributions",
                 "comment_count",
-                "notebooks"
+                "lab_notebooks"
               ],
               "additionalProperties": false
             }
@@ -1380,7 +1380,7 @@
     {
       "name": "get_run",
       "title": "Get Run",
-      "description": "Get details for a specific instrument run by its natural key (instrument ID + run ID). Returns metadata, timestamps, instrument info, attributions, and lab notebooks (notebooks) by default. Pass include to attach the first page of files, comments, and/or a failure_summary without extra tool calls. To show the interactive report (plate maps, spectra, images) or a bounded processed-CSV sample, call get_run_report for the same run.",
+      "description": "Get details for a specific instrument run by its natural key (instrument ID + run ID). Returns metadata, timestamps, instrument info, attributions, and lab notebooks by default. Pass include to attach the first page of files, comments, and/or a failure_summary without extra tool calls. To show the interactive report (plate maps, spectra, images) or a bounded processed-CSV sample, call get_run_report for the same run.",
       "group": "runs",
       "scope": "runs:read",
       "annotations": {
@@ -1605,7 +1605,7 @@
               "additionalProperties": false
             }
           },
-          "notebooks": {
+          "labNotebooks": {
             "type": "array",
             "items": {
               "type": "object",
@@ -2025,7 +2025,7 @@
           "deletedByUser",
           "deletedByToken",
           "attributions",
-          "notebooks"
+          "labNotebooks"
         ],
         "additionalProperties": false
       }
@@ -3719,10 +3719,10 @@
       }
     },
     {
-      "name": "list_notebooks",
-      "title": "List Notebooks",
-      "description": "List lab notebooks. A notebook is one lab notebook page (Notion, Google Docs, or any http or https page) with a name, and it can hold runs from any instrument. Search by name, description, or a pasted link; a link finds only the notebook for that page. Each notebook has its run count, instrument count, and last run. List a notebook's runs with search_runs notebookId.",
-      "group": "notebooks",
+      "name": "list_lab_notebooks",
+      "title": "List Lab Notebooks",
+      "description": "List lab notebooks. A lab notebook is one page (Notion, Google Docs, or any http or https page) with a name, and it can hold runs from any instrument. Search by name, description, or a pasted link; a link finds only the lab notebook for that page. Each lab notebook has its run count, instrument count, and last run. List a lab notebook's runs with search_runs labNotebookId.",
+      "group": "lab_notebooks",
       "scope": "runs:read",
       "annotations": {
         "readOnlyHint": true
@@ -3732,19 +3732,19 @@
         "type": "object",
         "properties": {
           "query": {
-            "description": "A name, part of a description, or a pasted notebook link",
+            "description": "A name, part of a description, or a pasted lab notebook link",
             "type": "string"
           },
           "ownerId": {
-            "description": "Only notebooks owned by this user: a user id, or \"me\" for the signed-in user",
+            "description": "Only lab notebooks owned by this user: a user id, or \"me\" for the signed-in user",
             "type": "string"
           },
           "includeDeleted": {
-            "description": "Include deleted notebooks (default: false)",
+            "description": "Include deleted lab notebooks (default: false)",
             "type": "boolean"
           },
           "sort": {
-            "description": "Sort field (default: last_run, when the notebook's newest run started)",
+            "description": "Sort field (default: last_run, when the lab notebook's newest run started)",
             "type": "string",
             "enum": [
               "last_run",
@@ -4119,10 +4119,10 @@
       }
     },
     {
-      "name": "get_notebook",
-      "title": "Get Notebook",
-      "description": "Get one lab notebook by id: its page link, name, description, owner, run count, instrument count, last run, and who created, changed, or deleted it. Deleted notebooks are returned too, with deleted_at set. List its runs with search_runs notebookId.",
-      "group": "notebooks",
+      "name": "get_lab_notebook",
+      "title": "Get Lab Notebook",
+      "description": "Get one lab notebook by id: its page link, name, description, owner, run count, instrument count, last run, and who created, changed, or deleted it. Deleted lab notebooks are returned too, with deleted_at set. List its runs with search_runs labNotebookId.",
+      "group": "lab_notebooks",
       "scope": "runs:read",
       "annotations": {
         "readOnlyHint": true
@@ -4131,13 +4131,13 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
         "properties": {
-          "notebookId": {
+          "labNotebookId": {
             "type": "string",
-            "description": "The notebook's id, from list_notebooks or a run's notebooks"
+            "description": "The lab notebook's id, from list_lab_notebooks or a run's lab notebooks"
           }
         },
         "required": [
-          "notebookId"
+          "labNotebookId"
         ],
         "additionalProperties": false
       },
@@ -4439,11 +4439,11 @@
       }
     },
     {
-      "name": "create_notebook",
-      "title": "Create Notebook",
-      "description": "Create a lab notebook for one page, and optionally add up to 100 runs from one instrument to it. Each page can have only one notebook, deleted ones included. If the page already has one, this fails with that notebook's id: add runs to it with add_runs_to_notebook instead, after restore_notebook when it is deleted. Search first with list_notebooks and the link when unsure. The owner stays empty unless you pass ownerId. Acts as the signed-in user. Adding runs doesn't record who ran them; call claim_runs for that.",
-      "group": "notebooks",
-      "scope": "notebooks:write",
+      "name": "create_lab_notebook",
+      "title": "Create Lab Notebook",
+      "description": "Create a lab notebook for one page, and optionally add up to 100 runs from one instrument to it. Each page can have only one lab notebook, deleted ones included. If the page already has one, this fails with that lab notebook's id: add runs to it with add_runs_to_lab_notebook instead, after restore_lab_notebook when it is deleted. Search first with list_lab_notebooks and the link when unsure. The owner stays empty unless you pass ownerId. Acts as the signed-in user. Adding runs doesn't record who ran them; call claim_runs for that.",
+      "group": "lab_notebooks",
+      "scope": "lab-notebooks:write",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -4457,13 +4457,13 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 2048,
-            "description": "The notebook page's http or https URL"
+            "description": "The lab notebook page's http or https URL"
           },
           "name": {
             "type": "string",
             "minLength": 1,
             "maxLength": 200,
-            "description": "The notebook's name, usually the page's title"
+            "description": "The lab notebook's name, usually the page's title"
           },
           "description": {
             "description": "Optional description",
@@ -4471,7 +4471,7 @@
             "maxLength": 2000
           },
           "ownerId": {
-            "description": "The person responsible for the notebook: a user id, or \"me\" for the signed-in user. Leave out for no owner. global_search with scope users finds a colleague's id.",
+            "description": "The person responsible for the lab notebook: a user id, or \"me\" for the signed-in user. Leave out for no owner. global_search with scope users finds a colleague's id.",
             "type": "string"
           },
           "instrumentId": {
@@ -4498,7 +4498,7 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
         "properties": {
-          "notebook": {
+          "labNotebook": {
             "type": "object",
             "properties": {
               "id": {
@@ -4798,7 +4798,7 @@
               {
                 "type": "object",
                 "properties": {
-                  "notebookId": {
+                  "labNotebookId": {
                     "type": "string"
                   },
                   "instrumentId": {
@@ -4816,7 +4816,7 @@
                           "type": "string",
                           "enum": [
                             "added",
-                            "already_in_notebook",
+                            "already_in_lab_notebook",
                             "run_deleted",
                             "limit_reached",
                             "not_found"
@@ -4838,7 +4838,7 @@
                         "minimum": -9007199254740991,
                         "maximum": 9007199254740991
                       },
-                      "already_in_notebook": {
+                      "already_in_lab_notebook": {
                         "type": "integer",
                         "minimum": -9007199254740991,
                         "maximum": 9007199254740991
@@ -4861,7 +4861,7 @@
                     },
                     "required": [
                       "added",
-                      "already_in_notebook",
+                      "already_in_lab_notebook",
                       "run_deleted",
                       "limit_reached",
                       "not_found"
@@ -4870,7 +4870,7 @@
                   }
                 },
                 "required": [
-                  "notebookId",
+                  "labNotebookId",
                   "instrumentId",
                   "results",
                   "counts"
@@ -4884,18 +4884,18 @@
           }
         },
         "required": [
-          "notebook",
+          "labNotebook",
           "runs"
         ],
         "additionalProperties": false
       }
     },
     {
-      "name": "update_notebook",
-      "title": "Update Notebook",
-      "description": "Change a lab notebook's name, description, owner, or page link. Leave a field out to keep it; pass null for description or ownerId to clear it. A new link must point to a page no other notebook has. A deleted notebook can't change until it is restored.",
-      "group": "notebooks",
-      "scope": "notebooks:write",
+      "name": "update_lab_notebook",
+      "title": "Update Lab Notebook",
+      "description": "Change a lab notebook's name, description, owner, or page link. Leave a field out to keep it; pass null for description or ownerId to clear it. A new link must point to a page no other lab notebook has. A deleted lab notebook can't change until it is restored.",
+      "group": "lab_notebooks",
+      "scope": "lab-notebooks:write",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -4905,9 +4905,9 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
         "properties": {
-          "notebookId": {
+          "labNotebookId": {
             "type": "string",
-            "description": "The notebook's id, from list_notebooks or a run's notebooks"
+            "description": "The lab notebook's id, from list_lab_notebooks or a run's lab notebooks"
           },
           "name": {
             "description": "New name",
@@ -4942,7 +4942,7 @@
           }
         },
         "required": [
-          "notebookId"
+          "labNotebookId"
         ],
         "additionalProperties": false
       },
@@ -5244,11 +5244,11 @@
       }
     },
     {
-      "name": "delete_notebook",
-      "title": "Delete Notebook",
-      "description": "Delete a lab notebook. Its runs stop listing it, but it keeps them, so restore_notebook brings it back with the same runs. Confirm with the user first, and say how many runs it holds (run_count from get_notebook).",
-      "group": "notebooks",
-      "scope": "notebooks:write",
+      "name": "delete_lab_notebook",
+      "title": "Delete Lab Notebook",
+      "description": "Delete a lab notebook. Its runs stop listing it, but it keeps them, so restore_lab_notebook brings it back with the same runs. Confirm with the user first, and say how many runs it holds (run_count from get_lab_notebook).",
+      "group": "lab_notebooks",
+      "scope": "lab-notebooks:write",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -5258,13 +5258,13 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
         "properties": {
-          "notebookId": {
+          "labNotebookId": {
             "type": "string",
-            "description": "The notebook's id, from list_notebooks or a run's notebooks"
+            "description": "The lab notebook's id, from list_lab_notebooks or a run's lab notebooks"
           }
         },
         "required": [
-          "notebookId"
+          "labNotebookId"
         ],
         "additionalProperties": false
       },
@@ -5566,11 +5566,11 @@
       }
     },
     {
-      "name": "restore_notebook",
-      "title": "Restore Notebook",
-      "description": "Bring back a deleted lab notebook with the runs it had. Find deleted notebooks with list_notebooks includeDeleted.",
-      "group": "notebooks",
-      "scope": "notebooks:write",
+      "name": "restore_lab_notebook",
+      "title": "Restore Lab Notebook",
+      "description": "Bring back a deleted lab notebook with the runs it had. Find deleted lab notebooks with list_lab_notebooks includeDeleted.",
+      "group": "lab_notebooks",
+      "scope": "lab-notebooks:write",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -5580,13 +5580,13 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
         "properties": {
-          "notebookId": {
+          "labNotebookId": {
             "type": "string",
-            "description": "The notebook's id, from list_notebooks or a run's notebooks"
+            "description": "The lab notebook's id, from list_lab_notebooks or a run's lab notebooks"
           }
         },
         "required": [
-          "notebookId"
+          "labNotebookId"
         ],
         "additionalProperties": false
       },
@@ -5888,11 +5888,11 @@
       }
     },
     {
-      "name": "add_runs_to_notebook",
-      "title": "Add Runs to Notebook",
-      "description": "Add up to 100 runs from one instrument to a lab notebook, and report an outcome for each. Runs already in it stay as they are, and deleted or missing runs are skipped. To link runs to a page, find its notebook with list_notebooks and the link, or make one with create_notebook. Acts as the signed-in user. Adding runs doesn't record who ran them; call claim_runs for that.",
-      "group": "notebooks",
-      "scope": "notebooks:write",
+      "name": "add_runs_to_lab_notebook",
+      "title": "Add Runs to Lab Notebook",
+      "description": "Add up to 100 runs from one instrument to a lab notebook, and report an outcome for each. Runs already in it stay as they are, and deleted or missing runs are skipped. To link runs to a page, find its lab notebook with list_lab_notebooks and the link, or make one with create_lab_notebook. Acts as the signed-in user. Adding runs doesn't record who ran them; call claim_runs for that.",
+      "group": "lab_notebooks",
+      "scope": "lab-notebooks:write",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -5902,9 +5902,9 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
         "properties": {
-          "notebookId": {
+          "labNotebookId": {
             "type": "string",
-            "description": "The notebook's id, from list_notebooks or a run's notebooks"
+            "description": "The lab notebook's id, from list_lab_notebooks or a run's lab notebooks"
           },
           "instrumentId": {
             "type": "string",
@@ -5921,7 +5921,7 @@
           }
         },
         "required": [
-          "notebookId",
+          "labNotebookId",
           "instrumentId",
           "runIds"
         ],
@@ -5931,7 +5931,7 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
         "properties": {
-          "notebookId": {
+          "labNotebookId": {
             "type": "string"
           },
           "instrumentId": {
@@ -5949,7 +5949,7 @@
                   "type": "string",
                   "enum": [
                     "added",
-                    "already_in_notebook",
+                    "already_in_lab_notebook",
                     "run_deleted",
                     "limit_reached",
                     "not_found"
@@ -5971,7 +5971,7 @@
                 "minimum": -9007199254740991,
                 "maximum": 9007199254740991
               },
-              "already_in_notebook": {
+              "already_in_lab_notebook": {
                 "type": "integer",
                 "minimum": -9007199254740991,
                 "maximum": 9007199254740991
@@ -5994,7 +5994,7 @@
             },
             "required": [
               "added",
-              "already_in_notebook",
+              "already_in_lab_notebook",
               "run_deleted",
               "limit_reached",
               "not_found"
@@ -6003,7 +6003,7 @@
           }
         },
         "required": [
-          "notebookId",
+          "labNotebookId",
           "instrumentId",
           "results",
           "counts"
@@ -6012,11 +6012,11 @@
       }
     },
     {
-      "name": "remove_runs_from_notebook",
-      "title": "Remove Runs from Notebook",
-      "description": "Remove up to 100 runs from one instrument from a lab notebook, and report an outcome for each. The notebook stays, even when it has no runs left.",
-      "group": "notebooks",
-      "scope": "notebooks:write",
+      "name": "remove_runs_from_lab_notebook",
+      "title": "Remove Runs from Lab Notebook",
+      "description": "Remove up to 100 runs from one instrument from a lab notebook, and report an outcome for each. The lab notebook stays, even when it has no runs left.",
+      "group": "lab_notebooks",
+      "scope": "lab-notebooks:write",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -6026,9 +6026,9 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
         "properties": {
-          "notebookId": {
+          "labNotebookId": {
             "type": "string",
-            "description": "The notebook's id, from list_notebooks or a run's notebooks"
+            "description": "The lab notebook's id, from list_lab_notebooks or a run's lab notebooks"
           },
           "instrumentId": {
             "type": "string",
@@ -6045,7 +6045,7 @@
           }
         },
         "required": [
-          "notebookId",
+          "labNotebookId",
           "instrumentId",
           "runIds"
         ],
@@ -6055,7 +6055,7 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
         "properties": {
-          "notebookId": {
+          "labNotebookId": {
             "type": "string"
           },
           "instrumentId": {
@@ -6073,7 +6073,7 @@
                   "type": "string",
                   "enum": [
                     "removed",
-                    "not_in_notebook",
+                    "not_in_lab_notebook",
                     "run_deleted",
                     "not_found"
                   ]
@@ -6094,7 +6094,7 @@
                 "minimum": -9007199254740991,
                 "maximum": 9007199254740991
               },
-              "not_in_notebook": {
+              "not_in_lab_notebook": {
                 "type": "integer",
                 "minimum": -9007199254740991,
                 "maximum": 9007199254740991
@@ -6112,7 +6112,7 @@
             },
             "required": [
               "removed",
-              "not_in_notebook",
+              "not_in_lab_notebook",
               "run_deleted",
               "not_found"
             ],
@@ -6120,7 +6120,7 @@
           }
         },
         "required": [
-          "notebookId",
+          "labNotebookId",
           "instrumentId",
           "results",
           "counts"
@@ -8146,7 +8146,7 @@
     {
       "name": "global_search",
       "title": "Global Search",
-      "description": "Fuzzy search across runs, files, instruments, users, and comments (same backend as the UI ⌘K palette). Prefer this over search_runs when the query may match a filename, instrument display name, attributor name, user, comment body, or a lab notebook's name or link. A pasted notebook URL finds the runs in that page's notebook, ignoring http vs. https, www., the query string, and the fragment. A run found through a notebook has matchedNotebook; pass its id to get_notebook or to search_runs notebookId. The users scope returns workspace member names/emails to any authenticated caller (no row-level member privacy). Use search_runs for date/status/metadata filters. Queries shorter than 2 characters are rejected.",
+      "description": "Fuzzy search across runs, files, instruments, users, and comments (same backend as the UI ⌘K palette). Prefer this over search_runs when the query may match a filename, instrument display name, attributor name, user, comment body, or a lab notebook's name or link. A pasted lab notebook URL finds the runs in that page's lab notebook, ignoring http vs. https, www., the query string, and the fragment. A run found through a lab notebook has matchedNotebook; pass its id to get_lab_notebook or to search_runs notebookId. The users scope returns workspace member names/emails to any authenticated caller (no row-level member privacy). Use search_runs for date/status/metadata filters. Queries shorter than 2 characters are rejected.",
       "group": "discovery",
       "scope": "runs:read",
       "annotations": {

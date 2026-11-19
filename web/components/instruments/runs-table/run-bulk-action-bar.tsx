@@ -100,7 +100,7 @@ export function RunBulkActionBar() {
   const anyInNotebook = refs.some((ref) => ref.notebooks.length > 0);
   // The notebook endpoints take at most this many runs per request.
   const tooManyToLink = refs.length > NOTEBOOK_RUNS_PER_REQUEST_MAX;
-  const tooManyReason = `Select at most ${NOTEBOOK_RUNS_PER_REQUEST_MAX} runs to change notebooks at once.`;
+  const tooManyReason = `Select at most ${NOTEBOOK_RUNS_PER_REQUEST_MAX} runs to change lab notebooks at once.`;
 
   function runAttribution(method: AttributionMethod, label: string) {
     startTransition(async () => {
@@ -235,7 +235,7 @@ export function RunBulkActionBar() {
                 variant="outline"
               >
                 <NotebookPen className="size-3.5" />
-                Add to notebook
+                Add to lab notebook
               </DisabledReasonButton>
             ) : (
               <Button
@@ -247,7 +247,7 @@ export function RunBulkActionBar() {
                 variant="outline"
               >
                 <NotebookPen className="size-3.5" />
-                Add to notebook
+                Add to lab notebook
               </Button>
             ))}
 
@@ -259,7 +259,7 @@ export function RunBulkActionBar() {
                 size="sm"
                 variant="outline"
               >
-                Remove from notebook
+                Remove from lab notebook
               </DisabledReasonButton>
             ) : (
               <Button
@@ -269,7 +269,7 @@ export function RunBulkActionBar() {
                 type="button"
                 variant="outline"
               >
-                Remove from notebook
+                Remove from lab notebook
               </Button>
             ))}
 

@@ -11,7 +11,7 @@
 -- - owner: the person attributed to the most of the page's live runs, ties
 --   going to whoever ran the most recent of the tied runs. None when no live
 --   run has an attribution.
--- Tokens that carried `runs:link` carry `notebooks:write` instead.
+-- Tokens that carried `runs:link` carry `lab-notebooks:write` instead.
 CREATE TABLE "notebooks" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"url" text NOT NULL,
@@ -187,7 +187,7 @@ ALTER TABLE "run_notebook_links" DROP COLUMN "updated_by_token";--> statement-br
 UPDATE "personal_access_tokens"
 SET "scopes" = ARRAY(
 	SELECT DISTINCT "scope"
-	FROM unnest(array_replace("scopes", 'runs:link', 'notebooks:write')) AS "scope"
+	FROM unnest(array_replace("scopes", 'runs:link', 'lab-notebooks:write')) AS "scope"
 	ORDER BY "scope"
 )
 WHERE 'runs:link' = ANY("scopes");

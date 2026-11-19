@@ -25,14 +25,14 @@ const NOTEBOOK_SORT_VALUES = [
 ] as const satisfies readonly NotebookSort[];
 const ADD_RUN_OUTCOME_VALUES = [
   "added",
-  "already_in_notebook",
+  "already_in_lab_notebook",
   "run_deleted",
   "limit_reached",
   "not_found",
 ] as const satisfies readonly AddRunOutcome[];
 const REMOVE_RUN_OUTCOME_VALUES = [
   "removed",
-  "not_in_notebook",
+  "not_in_lab_notebook",
   "run_deleted",
   "not_found",
 ] as const satisfies readonly RemoveRunOutcome[];
@@ -47,7 +47,7 @@ export const notebook = z
   .object({
     id: z.string().uuid(),
     url: z.string().openapi({
-      description: "The notebook's page, ready to open.",
+      description: "The lab notebook's page, ready to open.",
     }),
     url_key: notebookUrlKey,
     name: z.string(),
@@ -55,7 +55,7 @@ export const notebook = z
     owner: notebookUser.nullable(),
     run_count: z.number().int().openapi({
       description:
-        "How many runs are in the notebook. Deleted runs don't count.",
+        "How many runs are in the lab notebook. Deleted runs don't count.",
     }),
     instrument_count: z.number().int().openapi({
       description: "How many instruments those runs come from.",
@@ -63,7 +63,7 @@ export const notebook = z
     last_run_at: isoDateTime
       .nullable()
       .describe(
-        "When the newest run started: its acquired time, or its created time when that is missing. Null when the notebook has no runs."
+        "When the newest run started: its acquired time, or its created time when that is missing. Null when the lab notebook has no runs."
       ),
     created_at: isoDateTime,
     // At most one of each `*_by` and `*_by_token` pair is set: a person or a
@@ -77,7 +77,7 @@ export const notebook = z
     deleted_by: notebookUser.nullable(),
     deleted_by_token: tokenActor.nullable(),
   })
-  .openapi("Notebook");
+  .openapi("LabNotebook");
 
 export const notebookListResponse = z.object({
   data: z.array(notebook),
@@ -94,7 +94,7 @@ const count = z.number().int();
 
 export const notebookRunsAdded = z
   .object({
-    notebook_id: z.string().uuid(),
+    lab_notebook_id: z.string().uuid(),
     results: z
       .array(
         z.object({
@@ -103,21 +103,21 @@ export const notebookRunsAdded = z
         })
       )
       .openapi({
-        description: `One outcome per run, in the order sent. \`already_in_notebook\`: the run was in the notebook already. \`run_deleted\`: the run is deleted. \`limit_reached\`: the run is already in ${NOTEBOOKS_PER_RUN_MAX} notebooks, the most allowed, counting deleted ones. \`not_found\`: there is no such run.`,
+        description: `One outcome per run, in the order sent. \`already_in_lab_notebook\`: the run was in the lab notebook already. \`run_deleted\`: the run is deleted. \`limit_reached\`: the run is already in ${NOTEBOOKS_PER_RUN_MAX} lab notebooks, the most allowed, counting deleted ones. \`not_found\`: there is no such run.`,
       }),
     counts: z.object({
       added: count,
-      already_in_notebook: count,
+      already_in_lab_notebook: count,
       run_deleted: count,
       limit_reached: count,
       not_found: count,
     }),
   })
-  .openapi("NotebookRunsAdded");
+  .openapi("LabNotebookRunsAdded");
 
 export const notebookRunsRemoved = z
   .object({
-    notebook_id: z.string().uuid(),
+    lab_notebook_id: z.string().uuid(),
     results: z
       .array(
         z.object({
@@ -127,19 +127,19 @@ export const notebookRunsRemoved = z
       )
       .openapi({
         description:
-          "One outcome per run, in the order sent. `not_in_notebook`: the run wasn't in the notebook. `run_deleted`: the run is deleted. `not_found`: there is no such run.",
+          "One outcome per run, in the order sent. `not_in_lab_notebook`: the run wasn't in the lab notebook. `run_deleted`: the run is deleted. `not_found`: there is no such run.",
       }),
     counts: z.object({
       removed: count,
-      not_in_notebook: count,
+      not_in_lab_notebook: count,
       run_deleted: count,
       not_found: count,
     }),
   })
-  .openapi("NotebookRunsRemoved");
+  .openapi("LabNotebookRunsRemoved");
 
 export const notebookCreated = z.object({
-  notebook,
+  lab_notebook: notebook,
   runs: notebookRunsAdded.nullable().openapi({
     description:
       "What happened to each run sent in `runs`. Null when none were.",
@@ -153,13 +153,13 @@ export const notebookCreated = z.object({
 export const notebookListQuery = z.object({
   q: z.string().optional().openapi({
     description:
-      "Text in a notebook's name, description, or link, ignoring case. A pasted link, with or without `https://`, matches only the notebook for that page.",
+      "Text in a lab notebook's name, description, or link, ignoring case. A pasted link, with or without `https://`, matches only the lab notebook for that page.",
   }),
   owner_id: z.string().optional().openapi({
-    description: "Lists only notebooks this user owns.",
+    description: "Lists only lab notebooks this user owns.",
   }),
   include_deleted: z.enum(["true", "false"]).optional().openapi({
-    description: "`true` lists deleted notebooks too.",
+    description: "`true` lists deleted lab notebooks too.",
   }),
   sort: z.enum(NOTEBOOK_SORT_VALUES).optional().openapi({
     description:
@@ -198,10 +198,10 @@ export const createNotebookBody = z.object({
   }),
   owner_id: z.string().min(1).nullable().optional().openapi({
     description:
-      'The user who owns the notebook. Left out or null, it has no owner. `"me"` means the signed-in person, so a token can\'t use it.',
+      'The user who owns the lab notebook. Left out or null, it has no owner. `"me"` means the signed-in person, so a token can\'t use it.',
   }),
   runs: notebookRunRefs.optional().openapi({
-    description: `Runs to add as the notebook is created, at most ${NOTEBOOK_RUNS_PER_REQUEST_MAX}. They can belong to different instruments.`,
+    description: `Runs to add as the lab notebook is created, at most ${NOTEBOOK_RUNS_PER_REQUEST_MAX}. They can belong to different instruments.`,
   }),
 });
 
@@ -217,7 +217,7 @@ export const updateNotebookBody = z
     }),
     url: notebookLinkUrlSchema.optional().openapi({
       description:
-        "A new link. It must point to a page no other notebook has, deleted ones included.",
+        "A new link. It must point to a page no other lab notebook has, deleted ones included.",
     }),
   })
   .refine(

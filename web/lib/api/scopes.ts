@@ -13,7 +13,7 @@ export const ALL_SCOPES = [
   "runs:reprocess",
   "runs:upload",
   "runs:comment",
-  "notebooks:write",
+  "lab-notebooks:write",
   "files:read",
   "files:create",
   "files:update",
@@ -62,10 +62,10 @@ export const LEGACY_SCOPE_EXPANSIONS: Record<string, readonly Scope[]> = {
 // migration that renames it has run, so `hasScope` reads it as the new one.
 // Unlike the legacy scopes above, a renamed scope keeps its full meaning on a
 // token that registered a watcher.
-// - `runs:link` became `notebooks:write` when notebooks got their own table
+// - `runs:link` became `lab-notebooks:write` when notebooks got their own table
 //   (migration 0072_lab_notebooks).
 export const RENAMED_SCOPES: Record<string, Scope> = {
-  "runs:link": "notebooks:write",
+  "runs:link": "lab-notebooks:write",
 };
 
 // Shape required by `hasScope`. We intentionally avoid importing the full

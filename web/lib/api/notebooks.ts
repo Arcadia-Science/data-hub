@@ -44,7 +44,7 @@ import {
 // through these functions, so the rules live in one place:
 // - A notebook is one page. Only one notebook, deleted or not, can hold a
 //   page (`url_key`), so linking a page always finds the same notebook.
-// - Any signed-in person, or a token with `notebooks:write`, can create,
+// - Any signed-in person, or a token with `lab-notebooks:write`, can create,
 //   edit, delete, or restore a notebook and add or remove its runs.
 // - Deleting a notebook sets `deleted_at` and keeps its run links, so
 //   restoring it brings them back. A deleted notebook can't change until it
@@ -118,8 +118,8 @@ function failure(
   return { ok: false, status, code, message, ...(details && { details }) };
 }
 
-const NOTEBOOK_NOT_FOUND = "Notebook not found";
-const NOTEBOOK_DELETED = "This notebook is deleted. Restore it first.";
+const NOTEBOOK_NOT_FOUND = "Lab notebook not found";
+const NOTEBOOK_DELETED = "This lab notebook is deleted. Restore it first.";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -603,10 +603,10 @@ function pageTaken(existing: {
   deletedAt: Date | null;
 }): NotebookError {
   const message = existing.deletedAt
-    ? `The deleted notebook "${existing.name}" already has this page. Restore it instead.`
-    : `The notebook "${existing.name}" already has this page.`;
+    ? `The deleted lab notebook "${existing.name}" already has this page. Restore it instead.`
+    : `The lab notebook "${existing.name}" already has this page.`;
   return failure(409, message, {
-    notebook_id: existing.id,
+    lab_notebook_id: existing.id,
     deleted: existing.deletedAt !== null,
   });
 }
@@ -664,7 +664,7 @@ export interface CreateNotebookResult {
 /**
  * Creates a notebook for a page, and adds runs to it in the same
  * transaction when any are given. 409 when a notebook, deleted or not,
- * already has the page: `details.notebook_id` names it and `details.deleted`
+ * already has the page: `details.lab_notebook_id` names it and `details.deleted`
  * says whether it is deleted.
  */
 export async function createNotebook(input: {
@@ -800,7 +800,7 @@ export async function deleteNotebook(input: {
       const locked = await lockLiveNotebook(tx, input.id);
       if (isError(locked)) {
         return locked.status === 409
-          ? failure(409, "This notebook is already deleted")
+          ? failure(409, "This lab notebook is already deleted")
           : locked;
       }
       await tx
@@ -838,7 +838,7 @@ export async function restoreNotebook(input: {
         return failure(404, NOTEBOOK_NOT_FOUND);
       }
       if (!row.deletedAt) {
-        return failure(409, "This notebook isn't deleted");
+        return failure(409, "This lab notebook isn't deleted");
       }
       await tx
         .update(notebooks)
@@ -869,20 +869,20 @@ export interface RunKey {
 
 export type AddRunOutcome =
   | "added"
-  | "already_in_notebook"
+  | "already_in_lab_notebook"
   | "run_deleted"
   | "limit_reached"
   | "not_found";
 
 export type RemoveRunOutcome =
   | "removed"
-  | "not_in_notebook"
+  | "not_in_lab_notebook"
   | "run_deleted"
   | "not_found";
 
 export const ADD_RUN_OUTCOMES: readonly AddRunOutcome[] = [
   "added",
-  "already_in_notebook",
+  "already_in_lab_notebook",
   "run_deleted",
   "limit_reached",
   "not_found",
@@ -890,7 +890,7 @@ export const ADD_RUN_OUTCOMES: readonly AddRunOutcome[] = [
 
 export const REMOVE_RUN_OUTCOMES: readonly RemoveRunOutcome[] = [
   "removed",
-  "not_in_notebook",
+  "not_in_lab_notebook",
   "run_deleted",
   "not_found",
 ];
@@ -996,7 +996,7 @@ async function addRunsInTransaction(
     } else if (row.deletedAt) {
       outcome = "run_deleted";
     } else if (alreadyIn.has(row.id)) {
-      outcome = "already_in_notebook";
+      outcome = "already_in_lab_notebook";
     } else if ((counts.get(row.id) ?? 0) >= NOTEBOOKS_PER_RUN_MAX) {
       outcome = "limit_reached";
     }
@@ -1093,7 +1093,7 @@ export async function removeRunsFromNotebook(input: {
     }
     const results = runs.map((run) => {
       const row = locked.get(runKeyString(run));
-      let outcome: RemoveRunOutcome = "not_in_notebook";
+      let outcome: RemoveRunOutcome = "not_in_lab_notebook";
       if (!row) {
         outcome = "not_found";
       } else if (row.deletedAt) {

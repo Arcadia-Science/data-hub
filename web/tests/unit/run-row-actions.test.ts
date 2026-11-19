@@ -41,7 +41,7 @@ const BASE: RunRow = {
   error_messages: [],
   comment_count: 0,
   attributions: [],
-  notebooks: [],
+  lab_notebooks: [],
 };
 
 function row(overrides: Partial<RunRow>): RunRow {
@@ -207,11 +207,11 @@ describe("runRowToRef unclaimed", () => {
 
 // The bulk dialogs name and count notebooks across the selection from these
 // refs, so they need each notebook's ID, name, and link.
-describe("runRowToRef notebooks", () => {
-  it("keeps each notebook's ID, name, and link, in the row's order", () => {
+describe("runRowToRef lab notebooks", () => {
+  it("keeps each lab notebook's ID, name, and link, in the row's order", () => {
     const ref = runRowToRef(
       row({
-        notebooks: [
+        lab_notebooks: [
           {
             id: "00000000-0000-4000-8000-0000000000a1",
             name: "Heat stress day 1",

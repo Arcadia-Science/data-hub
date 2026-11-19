@@ -94,7 +94,8 @@ export function AddToNotebookDialog({
       const inNotebook = new Set(
         result.results
           .filter(
-            (r) => r.outcome === "added" || r.outcome === "already_in_notebook"
+            (r) =>
+              r.outcome === "added" || r.outcome === "already_in_lab_notebook"
           )
           .map((r) =>
             runKey({ instrumentId: r.instrument_id, runId: r.run_id })
@@ -121,10 +122,10 @@ export function AddToNotebookDialog({
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent {...returnFocus}>
         <DialogHeader>
-          <DialogTitle>Add {runsLabel(count)} to a notebook</DialogTitle>
+          <DialogTitle>Add {runsLabel(count)} to a lab notebook</DialogTitle>
           <DialogDescription>
-            Find a notebook by name, or paste a link to its page. Runs already
-            in the notebook are skipped.
+            Find a lab notebook by name, or paste a link to its page. Runs
+            already in the lab notebook are skipped.
           </DialogDescription>
         </DialogHeader>
         {open ? (
@@ -246,10 +247,13 @@ export function RemoveFromNotebooksDialog({
     <Dialog onOpenChange={handleOpenChange} open={open}>
       <DialogContent {...returnFocus}>
         <DialogHeader>
-          <DialogTitle>Remove {runsLabel(count)} from notebooks</DialogTitle>
+          <DialogTitle>
+            Remove {runsLabel(count)} from lab notebooks
+          </DialogTitle>
           <DialogDescription>
-            Choose the notebooks to take the selected runs out of. Their other
-            notebooks stay, and the notebooks themselves aren't changed.
+            Choose the lab notebooks to take the selected runs out of. Their
+            other lab notebooks stay, and the lab notebooks themselves aren't
+            changed.
           </DialogDescription>
         </DialogHeader>
         <ul className="flex max-h-72 flex-col overflow-y-auto">

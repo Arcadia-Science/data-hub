@@ -2,7 +2,7 @@ import type { AuthResult } from "@/lib/api/auth";
 import { apiError, VALIDATION_ERROR } from "@/lib/api/errors";
 import type { RunKey } from "@/lib/api/notebooks";
 
-// Shared by the REST routes under `/api/v1/notebooks`.
+// Shared by the REST routes under `/api/v1/lab-notebooks`.
 
 /**
  * The 403 message for a token that registered a watcher, on the routes that
@@ -11,7 +11,7 @@ import type { RunKey } from "@/lib/api/notebooks";
  * runs. Each route passes it to `refuseWatcherTokenAdmin`.
  */
 export const WATCHER_TOKEN_NOTEBOOK_REFUSAL =
-  "A watcher's token can't create or change notebooks";
+  "A watcher's token can't create or change lab notebooks";
 
 /** The runs a request body names, as the notebooks service takes them. */
 export function runKeysFromBody(

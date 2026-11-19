@@ -18,11 +18,11 @@ import { refuseWatcherTokenAdmin } from "@/lib/api/watchers";
 import { blankToNull } from "@/lib/notebook-links/url";
 
 interface RouteContext {
-  params: Promise<{ notebookId: string }>;
+  params: Promise<{ labNotebookId: string }>;
 }
 
 // ---------------------------------------------------------------------------
-// GET /api/v1/notebooks/:notebookId
+// GET /api/v1/lab-notebooks/:labNotebookId
 //
 // One notebook, deleted or not.
 // ---------------------------------------------------------------------------
@@ -33,17 +33,17 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
     return authResult;
   }
 
-  const { notebookId } = await params;
+  const { labNotebookId: notebookId } = await params;
   const notebook = await getNotebook(notebookId);
   if (!notebook) {
-    return apiError(404, NOT_FOUND, "Notebook not found");
+    return apiError(404, NOT_FOUND, "Lab notebook not found");
   }
 
   return Response.json(notebookToWire(notebook));
 }
 
 // ---------------------------------------------------------------------------
-// PATCH /api/v1/notebooks/:notebookId
+// PATCH /api/v1/lab-notebooks/:labNotebookId
 //
 // Edit a notebook. Body: { name?, description?, owner_id?, url? }. Fields
 // left out stay as they are; a null or blank description, or a null owner,
@@ -52,7 +52,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
 // ---------------------------------------------------------------------------
 
 export async function PATCH(request: NextRequest, { params }: RouteContext) {
-  const authResult = await authorize(request, "notebooks:write");
+  const authResult = await authorize(request, "lab-notebooks:write");
   if (authResult instanceof Response) {
     return authResult;
   }
@@ -75,7 +75,7 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
     return ownerId;
   }
 
-  const { notebookId } = await params;
+  const { labNotebookId: notebookId } = await params;
   const result = await updateNotebook({
     id: notebookId,
     name: payload.name,
@@ -97,14 +97,14 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
 }
 
 // ---------------------------------------------------------------------------
-// DELETE /api/v1/notebooks/:notebookId
+// DELETE /api/v1/lab-notebooks/:labNotebookId
 //
 // Mark a notebook deleted. Its runs keep their place in it, so restoring it
 // brings them back. 409 when it is already deleted.
 // ---------------------------------------------------------------------------
 
 export async function DELETE(request: NextRequest, { params }: RouteContext) {
-  const authResult = await authorize(request, "notebooks:write");
+  const authResult = await authorize(request, "lab-notebooks:write");
   if (authResult instanceof Response) {
     return authResult;
   }
@@ -117,7 +117,7 @@ export async function DELETE(request: NextRequest, { params }: RouteContext) {
     return refused;
   }
 
-  const { notebookId } = await params;
+  const { labNotebookId: notebookId } = await params;
   const result = await deleteNotebook({
     id: notebookId,
     actor: actorRefFromAuth(authResult),

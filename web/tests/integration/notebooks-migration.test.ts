@@ -202,7 +202,7 @@ describe("migration 0072_lab_notebooks", () => {
     expect(doc.ownerId).toBeNull();
   });
 
-  it("renames runs:link to notebooks:write on stored tokens", async () => {
+  it("renames runs:link to lab-notebooks:write on stored tokens", async () => {
     const tokens = await getTestDb()
       .select({
         id: personalAccessTokens.id,
@@ -210,7 +210,10 @@ describe("migration 0072_lab_notebooks", () => {
       })
       .from(personalAccessTokens);
     const byId = new Map(tokens.map((token) => [token.id, token.scopes]));
-    expect(byId.get(scriptTokenId)).toEqual(["notebooks:write", "runs:read"]);
+    expect(byId.get(scriptTokenId)).toEqual([
+      "lab-notebooks:write",
+      "runs:read",
+    ]);
     expect(byId.get(readerTokenId)).toEqual(["runs:read"]);
   });
 });

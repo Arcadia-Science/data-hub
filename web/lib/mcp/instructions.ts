@@ -19,7 +19,7 @@ the entries. Leave out its query to list changes by date.
 
 Writes act as the signed-in user and need the write scope, or fail with
 "Token is missing required scope: write"; ask the user to re-authorize
-instead of retrying. Confirm before deleting (a run, comment, or notebook),
+instead of retrying. Confirm before deleting (a run, comment, or lab notebook),
 dismissing, unclaiming, reprocessing, cancelling queued files, or changing a
 watcher's config.
 
@@ -34,8 +34,8 @@ the instrument PC (often a renamed folder) before requesting them again.
 
 Tool routing:
 - global_search for filenames, instrument names, users, or comments.
-- Notebooks: list_notebooks by name or link, then search_runs notebookId
-  for its runs.
+- Lab notebooks: list_lab_notebooks by name or link, then search_runs
+  labNotebookId.
 - search_runs for date, status, or metadata filters; ranBy="me" for my runs.
 - Metadata filter values: get_instrument_filter_options.
 - get_run_report for results; get_run is metadata only.

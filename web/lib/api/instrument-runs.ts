@@ -815,7 +815,7 @@ export async function buildRunListQuery(filters: RunListFilters) {
     ...row,
     attributions: attributionsByRun.get(row.id) ?? [],
     comment_count: commentCountsByRun.get(row.id) ?? 0,
-    notebooks: (notebooksByRun.get(row.id) ?? []).map(runNotebookToWire),
+    lab_notebooks: (notebooksByRun.get(row.id) ?? []).map(runNotebookToWire),
   }));
 
   return {

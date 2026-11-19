@@ -38,7 +38,7 @@ export interface RunRef {
   runId: string;
 }
 
-const NOTEBOOKS_URL = "/api/v1/notebooks";
+const NOTEBOOKS_URL = "/api/v1/lab-notebooks";
 
 function notebookUrl(notebookId: string): string {
   return `${NOTEBOOKS_URL}/${encodeURIComponent(notebookId)}`;
@@ -53,7 +53,7 @@ async function send<T>(url: string, init: RequestInit): Promise<T> {
     return (await res.json()) as T;
   }
   const body = (await res.json().catch(() => null)) as {
-    error?: { details?: { notebook_id?: unknown; deleted?: unknown } };
+    error?: { details?: { lab_notebook_id?: unknown; deleted?: unknown } };
   } | null;
   const details = body?.error?.details;
   throw new NotebookRequestError(
@@ -61,7 +61,9 @@ async function send<T>(url: string, init: RequestInit): Promise<T> {
     apiErrorMessage(body, "Request failed"),
     {
       notebookId:
-        typeof details?.notebook_id === "string" ? details.notebook_id : null,
+        typeof details?.lab_notebook_id === "string"
+          ? details.lab_notebook_id
+          : null,
       deleted: details?.deleted === true,
     }
   );
@@ -113,7 +115,7 @@ export function createNotebook(input: {
   ownedByMe: boolean;
   runs: readonly RunRef[];
   url: string;
-}): Promise<{ notebook: NotebookWire; runs: AddRunsWire | null }> {
+}): Promise<{ lab_notebook: NotebookWire; runs: AddRunsWire | null }> {
   return send(NOTEBOOKS_URL, {
     method: "POST",
     body: JSON.stringify({
@@ -180,18 +182,18 @@ export async function addRunsToPick(
       runs,
     });
     const notebook = {
-      id: created.notebook.id,
-      name: created.notebook.name,
-      url: created.notebook.url,
+      id: created.lab_notebook.id,
+      name: created.lab_notebook.name,
+      url: created.lab_notebook.url,
     };
     return {
       notebook,
       result: created.runs ?? {
-        notebook_id: notebook.id,
+        lab_notebook_id: notebook.id,
         results: [],
         counts: {
           added: 0,
-          already_in_notebook: 0,
+          already_in_lab_notebook: 0,
           run_deleted: 0,
           limit_reached: 0,
           not_found: 0,

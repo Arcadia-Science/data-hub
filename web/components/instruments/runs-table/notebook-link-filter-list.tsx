@@ -40,14 +40,14 @@ export function NotebookLinkFilterList({
       {/* Radix focuses a popover's contents once, when it opens. On the first
           open only the loading placeholder exists then, so ask for focus here. */}
       <CommandInput
-        aria-label="Search notebooks"
+        aria-label="Search lab notebooks"
         autoFocus
         onValueChange={setQuery}
-        placeholder="Search notebooks…"
+        placeholder="Search lab notebooks…"
         value={query}
       />
       <CommandList className="max-h-none">
-        <CommandEmpty>No matching notebooks.</CommandEmpty>
+        <CommandEmpty>No matching lab notebooks.</CommandEmpty>
         {text ? null : (
           <>
             <CommandGroup>
@@ -62,18 +62,18 @@ export function NotebookLinkFilterList({
             <CommandSeparator />
             <CommandGroup>
               <FilterItem
-                checked={filter.kind === "has_notebook"}
-                onSelect={() => onSelect({ kind: "has_notebook" })}
-                value="has_notebook"
+                checked={filter.kind === "has_lab_notebook"}
+                onSelect={() => onSelect({ kind: "has_lab_notebook" })}
+                value="has_lab_notebook"
               >
-                In any notebook
+                In any lab notebook
               </FilterItem>
               <FilterItem
                 checked={filter.kind === "no_notebook"}
                 onSelect={() => onSelect({ kind: "no_notebook" })}
                 value="no_notebook"
               >
-                In no notebook
+                In no lab notebook
               </FilterItem>
             </CommandGroup>
           </>

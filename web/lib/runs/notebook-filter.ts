@@ -1,19 +1,19 @@
 // The "Lab Notebook" column filter in the runs tables: every run, runs in any
 // notebook, runs in none, or runs in one notebook picked by ID. The URL holds
-// it in `has_notebook` and `notebook_id` (see `notebookFilterSearchParams`).
+// it in `has_lab_notebook` and `lab_notebook_id` (see `notebookFilterSearchParams`).
 // The menu lists the notebooks from `getNotebookFilterOptions`.
 
 /** What the "Lab Notebook" column is filtered to. */
 export type NotebookFilter =
   | { kind: "all" }
-  | { kind: "has_notebook" }
+  | { kind: "has_lab_notebook" }
   | { kind: "no_notebook" }
   | { kind: "notebook"; id: string };
 
 /** The URL params that hold a {@link NotebookFilter}. */
 export interface NotebookFilterParams {
-  has_notebook: "true" | "false" | null;
-  notebook_id: string | null;
+  has_lab_notebook: "true" | "false" | null;
+  lab_notebook_id: string | null;
 }
 
 /**
@@ -23,14 +23,14 @@ export interface NotebookFilterParams {
 export function readNotebookFilter(
   params: NotebookFilterParams
 ): NotebookFilter {
-  const id = params.notebook_id?.trim();
+  const id = params.lab_notebook_id?.trim();
   if (id) {
     return { kind: "notebook", id };
   }
-  if (params.has_notebook === "true") {
-    return { kind: "has_notebook" };
+  if (params.has_lab_notebook === "true") {
+    return { kind: "has_lab_notebook" };
   }
-  if (params.has_notebook === "false") {
+  if (params.has_lab_notebook === "false") {
     return { kind: "no_notebook" };
   }
   return { kind: "all" };
@@ -40,15 +40,15 @@ export function readNotebookFilter(
 export function notebookFilterParams(
   filter: NotebookFilter
 ): NotebookFilterParams {
-  let hasNotebook: NotebookFilterParams["has_notebook"] = null;
-  if (filter.kind === "has_notebook") {
+  let hasNotebook: NotebookFilterParams["has_lab_notebook"] = null;
+  if (filter.kind === "has_lab_notebook") {
     hasNotebook = "true";
   } else if (filter.kind === "no_notebook") {
     hasNotebook = "false";
   }
   return {
-    has_notebook: hasNotebook,
-    notebook_id: filter.kind === "notebook" ? filter.id : null,
+    has_lab_notebook: hasNotebook,
+    lab_notebook_id: filter.kind === "notebook" ? filter.id : null,
   };
 }
 

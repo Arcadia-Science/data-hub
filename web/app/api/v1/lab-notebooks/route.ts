@@ -32,7 +32,7 @@ function isNotebookSort(value: string): value is NotebookSort {
 }
 
 // ---------------------------------------------------------------------------
-// GET /api/v1/notebooks
+// GET /api/v1/lab-notebooks
 //
 // Lab notebooks, a page at a time. `q` matches text in a name, description,
 // or link; a pasted link matches only the notebook for that page. Deleted
@@ -90,17 +90,17 @@ export async function GET(request: NextRequest) {
 }
 
 // ---------------------------------------------------------------------------
-// POST /api/v1/notebooks
+// POST /api/v1/lab-notebooks
 //
 // Create a notebook for a page. Body: { url, name, description?, owner_id?,
 // runs? }. Runs given here are added in the same transaction, with an
 // outcome for each. 409 when another notebook, deleted or not, already has
-// the page: `details.notebook_id` names it and `details.deleted` says whether
+// the page: `details.lab_notebook_id` names it and `details.deleted` says whether
 // it is deleted.
 // ---------------------------------------------------------------------------
 
 export async function POST(request: NextRequest) {
-  const authResult = await authorize(request, "notebooks:write");
+  const authResult = await authorize(request, "lab-notebooks:write");
   if (authResult instanceof Response) {
     return authResult;
   }
@@ -144,7 +144,7 @@ export async function POST(request: NextRequest) {
   });
 
   return Response.json(
-    { notebook: notebookToWire(result.value.notebook), runs },
+    { lab_notebook: notebookToWire(result.value.notebook), runs },
     { status: 201 }
   );
 }

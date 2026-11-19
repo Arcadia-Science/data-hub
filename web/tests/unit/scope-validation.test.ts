@@ -156,25 +156,32 @@ describe("hasScope", () => {
     // other resources.
     expect(hasScope({ scopes: ["runs:write"] }, "runs:read")).toBe(false);
     expect(hasScope({ scopes: ["runs:write"] }, "files:create")).toBe(false);
-    // `notebooks:write` came after the split, so old tokens don't pick it up.
-    expect(hasScope({ scopes: ["runs:write"] }, "notebooks:write")).toBe(false);
+    // `lab-notebooks:write` came after the split, so old tokens don't pick it up.
+    expect(hasScope({ scopes: ["runs:write"] }, "lab-notebooks:write")).toBe(
+      false
+    );
   });
 
-  it("offers notebooks:write on new tokens without implying comments", () => {
-    const result = validateRequestedScopes(["runs:read", "notebooks:write"]);
+  it("offers lab-notebooks:write on new tokens without implying comments", () => {
+    const result = validateRequestedScopes([
+      "runs:read",
+      "lab-notebooks:write",
+    ]);
     expect(result.ok).toBe(true);
-    expect(hasScope({ scopes: ["notebooks:write"] }, "runs:comment")).toBe(
+    expect(hasScope({ scopes: ["lab-notebooks:write"] }, "runs:comment")).toBe(
       false
     );
-    expect(hasScope({ scopes: ["runs:comment"] }, "notebooks:write")).toBe(
+    expect(hasScope({ scopes: ["runs:comment"] }, "lab-notebooks:write")).toBe(
       false
     );
   });
 
-  // `runs:link` was renamed `notebooks:write`. A token stored before the
+  // `runs:link` was renamed `lab-notebooks:write`. A token stored before the
   // rename keeps working, but new tokens can't ask for the old name.
-  it("reads a stored runs:link as notebooks:write", () => {
-    expect(hasScope({ scopes: ["runs:link"] }, "notebooks:write")).toBe(true);
+  it("reads a stored runs:link as lab-notebooks:write", () => {
+    expect(hasScope({ scopes: ["runs:link"] }, "lab-notebooks:write")).toBe(
+      true
+    );
     expect(hasScope({ scopes: ["runs:link"] }, "runs:read")).toBe(false);
     expect(validateRequestedScopes(["runs:link"]).ok).toBe(false);
   });

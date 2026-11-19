@@ -112,8 +112,8 @@ export function registerRunTools(server: McpServer) {
         includeDeleted: args.includeDeleted ?? false,
         ...metadataFilters,
         ranBy,
-        hasNotebook: args.hasNotebook,
-        ...parseNotebookIdParam(args.notebookId ?? null),
+        hasNotebook: args.hasLabNotebook,
+        ...parseNotebookIdParam(args.labNotebookId ?? null),
         statuses: args.status ? expandRunStatusFilters(args.status) : undefined,
       });
       return structuredResult(result);
@@ -142,7 +142,7 @@ export function registerRunTools(server: McpServer) {
 
       const tasks: Promise<void>[] = [
         listNotebooksForRun(run.id).then((notebooks) => {
-          payload.notebooks = notebooks.map(runNotebookToWire);
+          payload.labNotebooks = notebooks.map(runNotebookToWire);
         }),
       ];
       if (extras.has("files")) {

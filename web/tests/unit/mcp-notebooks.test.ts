@@ -145,9 +145,9 @@ beforeEach(() => {
   });
 });
 
-describe("list_notebooks", () => {
-  it("lists notebooks without write access, with a page of 20 by default", async () => {
-    const result = await tool("list_notebooks")({ query: "heat" }, readCtx);
+describe("list_lab_notebooks", () => {
+  it("lists lab notebooks without write access, with a page of 20 by default", async () => {
+    const result = await tool("list_lab_notebooks")({ query: "heat" }, readCtx);
 
     expect(result.isError).toBeFalsy();
     expect(listNotebooks).toHaveBeenCalledWith({
@@ -168,7 +168,7 @@ describe("list_notebooks", () => {
   });
 
   it('reads ownerId "me" as the signed-in user', async () => {
-    await tool("list_notebooks")({ ownerId: "me" }, readCtx);
+    await tool("list_lab_notebooks")({ ownerId: "me" }, readCtx);
 
     expect(listNotebooks).toHaveBeenCalledWith(
       expect.objectContaining({ ownerId: "user-1" })
@@ -176,12 +176,12 @@ describe("list_notebooks", () => {
   });
 });
 
-describe("get_notebook", () => {
-  it("says when there is no notebook with that id", async () => {
+describe("get_lab_notebook", () => {
+  it("says when there is no lab notebook with that id", async () => {
     getNotebook.mockResolvedValueOnce(null);
 
-    const result = await tool("get_notebook")(
-      { notebookId: OTHER_ID },
+    const result = await tool("get_lab_notebook")(
+      { labNotebookId: OTHER_ID },
       readCtx
     );
 
@@ -190,9 +190,9 @@ describe("get_notebook", () => {
   });
 });
 
-describe("create_notebook", () => {
+describe("create_lab_notebook", () => {
   it("creates as the signed-in user, never as an argument, and leaves the owner empty", async () => {
-    const result = await tool("create_notebook")(
+    const result = await tool("create_lab_notebook")(
       {
         url: NOTEBOOK.url,
         name: "Heat stress",
@@ -212,7 +212,7 @@ describe("create_notebook", () => {
       actor: ACTOR,
     });
     expect(result.structuredContent).toMatchObject({
-      notebook: { id: NOTEBOOK_ID },
+      labNotebook: { id: NOTEBOOK_ID },
       runs: null,
     });
   });
@@ -229,7 +229,7 @@ describe("create_notebook", () => {
       },
     });
 
-    const result = await tool("create_notebook")(
+    const result = await tool("create_lab_notebook")(
       {
         url: NOTEBOOK.url,
         name: "Heat stress",
@@ -248,16 +248,16 @@ describe("create_notebook", () => {
     );
     expect(result.structuredContent).toMatchObject({
       runs: {
-        notebookId: NOTEBOOK_ID,
+        labNotebookId: NOTEBOOK_ID,
         instrumentId: "inst",
         results: [{ runId: "RUN1", outcome: "added" }],
-        counts: { added: 1, already_in_notebook: 0, not_found: 0 },
+        counts: { added: 1, already_in_lab_notebook: 0, not_found: 0 },
       },
     });
   });
 
   it("refuses runIds without an instrument", async () => {
-    const result = await tool("create_notebook")(
+    const result = await tool("create_lab_notebook")(
       { url: NOTEBOOK.url, name: "Heat stress", runIds: ["RUN1"] },
       writeCtx
     );
@@ -267,7 +267,7 @@ describe("create_notebook", () => {
   });
 
   it("refuses a session without the write scope", async () => {
-    const result = await tool("create_notebook")(
+    const result = await tool("create_lab_notebook")(
       { url: NOTEBOOK.url, name: "Heat stress" },
       readCtx
     );
@@ -277,52 +277,52 @@ describe("create_notebook", () => {
     expect(createNotebook).not.toHaveBeenCalled();
   });
 
-  it("names the notebook that already has the page and how to add runs to it", async () => {
+  it("names the lab notebook that already has the page and how to add runs to it", async () => {
     createNotebook.mockResolvedValueOnce({
       ok: false,
       status: 409,
       code: "CONFLICT",
-      message: 'The notebook "Heat stress" already has this page.',
-      details: { notebook_id: OTHER_ID, deleted: false },
+      message: 'The lab notebook "Heat stress" already has this page.',
+      details: { lab_notebook_id: OTHER_ID, deleted: false },
     });
 
-    const result = await tool("create_notebook")(
+    const result = await tool("create_lab_notebook")(
       { url: NOTEBOOK.url, name: "Heat stress, again" },
       writeCtx
     );
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toBe(
-      `The notebook "Heat stress" already has this page. Notebook id: ${OTHER_ID}. Add runs to it with add_runs_to_notebook.`
+      `The lab notebook "Heat stress" already has this page. Lab notebook id: ${OTHER_ID}. Add runs to it with add_runs_to_lab_notebook.`
     );
   });
 
-  it("says to restore a deleted notebook that already has the page", async () => {
+  it("says to restore a deleted lab notebook that already has the page", async () => {
     createNotebook.mockResolvedValueOnce({
       ok: false,
       status: 409,
       code: "CONFLICT",
       message:
-        'The deleted notebook "Heat stress" already has this page. Restore it instead.',
-      details: { notebook_id: OTHER_ID, deleted: true },
+        'The deleted lab notebook "Heat stress" already has this page. Restore it instead.',
+      details: { lab_notebook_id: OTHER_ID, deleted: true },
     });
 
-    const result = await tool("create_notebook")(
+    const result = await tool("create_lab_notebook")(
       { url: NOTEBOOK.url, name: "Heat stress" },
       writeCtx
     );
 
-    expect(result.content[0].text).toContain(`Notebook id: ${OTHER_ID}.`);
+    expect(result.content[0].text).toContain(`Lab notebook id: ${OTHER_ID}.`);
     expect(result.content[0].text).toContain(
-      "Call restore_notebook, then add_runs_to_notebook."
+      "Call restore_lab_notebook, then add_runs_to_lab_notebook."
     );
   });
 });
 
-describe("update_notebook", () => {
+describe("update_lab_notebook", () => {
   it("clears the description and owner when they are null, and keeps what is left out", async () => {
-    await tool("update_notebook")(
-      { notebookId: NOTEBOOK_ID, description: null, ownerId: null },
+    await tool("update_lab_notebook")(
+      { labNotebookId: NOTEBOOK_ID, description: null, ownerId: null },
       writeCtx
     );
 
@@ -337,8 +337,8 @@ describe("update_notebook", () => {
   });
 
   it('reads a blank description as none and ownerId "me" as the signed-in user', async () => {
-    await tool("update_notebook")(
-      { notebookId: NOTEBOOK_ID, description: "", ownerId: "me" },
+    await tool("update_lab_notebook")(
+      { labNotebookId: NOTEBOOK_ID, description: "", ownerId: "me" },
       writeCtx
     );
 
@@ -348,8 +348,8 @@ describe("update_notebook", () => {
   });
 
   it("asks for a change when every field is left out", async () => {
-    const result = await tool("update_notebook")(
-      { notebookId: NOTEBOOK_ID },
+    const result = await tool("update_lab_notebook")(
+      { labNotebookId: NOTEBOOK_ID },
       writeCtx
     );
 
@@ -357,30 +357,30 @@ describe("update_notebook", () => {
     expect(updateNotebook).not.toHaveBeenCalled();
   });
 
-  it("names the notebook that already has the new page", async () => {
+  it("names the lab notebook that already has the new page", async () => {
     updateNotebook.mockResolvedValueOnce({
       ok: false,
       status: 409,
       code: "CONFLICT",
-      message: 'The notebook "Yeast growth" already has this page.',
-      details: { notebook_id: OTHER_ID, deleted: false },
+      message: 'The lab notebook "Yeast growth" already has this page.',
+      details: { lab_notebook_id: OTHER_ID, deleted: false },
     });
 
-    const result = await tool("update_notebook")(
-      { notebookId: NOTEBOOK_ID, url: "https://example.com/eln/5" },
+    const result = await tool("update_lab_notebook")(
+      { labNotebookId: NOTEBOOK_ID, url: "https://example.com/eln/5" },
       writeCtx
     );
 
     expect(result.content[0].text).toBe(
-      `The notebook "Yeast growth" already has this page. Notebook id: ${OTHER_ID}.`
+      `The lab notebook "Yeast growth" already has this page. Lab notebook id: ${OTHER_ID}.`
     );
   });
 });
 
-describe("delete_notebook and restore_notebook", () => {
-  it("delete acts as the signed-in user and returns the deleted notebook", async () => {
-    const result = await tool("delete_notebook")(
-      { notebookId: NOTEBOOK_ID },
+describe("delete_lab_notebook and restore_lab_notebook", () => {
+  it("delete acts as the signed-in user and returns the deleted lab notebook", async () => {
+    const result = await tool("delete_lab_notebook")(
+      { labNotebookId: NOTEBOOK_ID },
       writeCtx
     );
 
@@ -395,8 +395,8 @@ describe("delete_notebook and restore_notebook", () => {
   });
 
   it("delete refuses a session without the write scope", async () => {
-    const result = await tool("delete_notebook")(
-      { notebookId: NOTEBOOK_ID },
+    const result = await tool("delete_lab_notebook")(
+      { labNotebookId: NOTEBOOK_ID },
       readCtx
     );
 
@@ -409,11 +409,11 @@ describe("delete_notebook and restore_notebook", () => {
       ok: false,
       status: 409,
       code: "CONFLICT",
-      message: "This notebook isn't deleted",
+      message: "This lab notebook isn't deleted",
     });
 
-    const result = await tool("restore_notebook")(
-      { notebookId: NOTEBOOK_ID },
+    const result = await tool("restore_lab_notebook")(
+      { labNotebookId: NOTEBOOK_ID },
       writeCtx
     );
 
@@ -422,15 +422,15 @@ describe("delete_notebook and restore_notebook", () => {
       actor: ACTOR,
     });
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toBe("This notebook isn't deleted");
+    expect(result.content[0].text).toBe("This lab notebook isn't deleted");
   });
 });
 
-describe("add_runs_to_notebook and remove_runs_from_notebook", () => {
+describe("add_runs_to_lab_notebook and remove_runs_from_lab_notebook", () => {
   it("adds every named run as the signed-in user and counts the outcomes", async () => {
-    const result = await tool("add_runs_to_notebook")(
+    const result = await tool("add_runs_to_lab_notebook")(
       {
-        notebookId: NOTEBOOK_ID,
+        labNotebookId: NOTEBOOK_ID,
         instrumentId: "inst",
         runIds: ["RUN1", "RUN2"],
       },
@@ -446,7 +446,7 @@ describe("add_runs_to_notebook and remove_runs_from_notebook", () => {
       actor: ACTOR,
     });
     expect(result.structuredContent).toEqual({
-      notebookId: NOTEBOOK_ID,
+      labNotebookId: NOTEBOOK_ID,
       instrumentId: "inst",
       results: [
         { runId: "RUN1", outcome: "added" },
@@ -454,7 +454,7 @@ describe("add_runs_to_notebook and remove_runs_from_notebook", () => {
       ],
       counts: {
         added: 1,
-        already_in_notebook: 0,
+        already_in_lab_notebook: 0,
         run_deleted: 0,
         limit_reached: 0,
         not_found: 1,
@@ -463,8 +463,8 @@ describe("add_runs_to_notebook and remove_runs_from_notebook", () => {
   });
 
   it("removes every named run and counts the outcomes", async () => {
-    const result = await tool("remove_runs_from_notebook")(
-      { notebookId: NOTEBOOK_ID, instrumentId: "inst", runIds: ["RUN1"] },
+    const result = await tool("remove_runs_from_lab_notebook")(
+      { labNotebookId: NOTEBOOK_ID, instrumentId: "inst", runIds: ["RUN1"] },
       writeCtx
     );
 
@@ -474,13 +474,13 @@ describe("add_runs_to_notebook and remove_runs_from_notebook", () => {
     });
     expect(result.structuredContent).toMatchObject({
       results: [{ runId: "RUN1", outcome: "removed" }],
-      counts: { removed: 1, not_in_notebook: 0 },
+      counts: { removed: 1, not_in_lab_notebook: 0 },
     });
   });
 
   it("remove refuses a session without the write scope", async () => {
-    const result = await tool("remove_runs_from_notebook")(
-      { notebookId: NOTEBOOK_ID, instrumentId: "inst", runIds: ["RUN1"] },
+    const result = await tool("remove_runs_from_lab_notebook")(
+      { labNotebookId: NOTEBOOK_ID, instrumentId: "inst", runIds: ["RUN1"] },
       readCtx
     );
 

@@ -111,7 +111,7 @@ export function NotebookLinkRow({
                 }}
                 variant="destructive"
               >
-                Remove from notebook
+                Remove from lab notebook
               </DropdownMenuItem>
             </>
           )}
@@ -119,11 +119,11 @@ export function NotebookLinkRow({
       </DropdownMenu>
       <ConfirmDialog
         confirmLabel="Remove"
-        description={`This run will no longer be in “${notebook.name}”. The notebook and its page aren't changed.`}
+        description={`This run will no longer be in “${notebook.name}”. The lab notebook and its page aren't changed.`}
         onConfirm={onRemove}
         onOpenChange={setRemoveOpen}
         open={removeOpen}
-        title="Remove this run from the notebook?"
+        title="Remove this run from the lab notebook?"
         variant="destructive"
       />
     </div>

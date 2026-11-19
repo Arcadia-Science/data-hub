@@ -100,7 +100,7 @@ export const searchRunsListItemSchema = z.object({
   error_messages: z.array(z.string()),
   attributions: z.array(mcpActorUserSchema),
   comment_count: z.number().int(),
-  notebooks: z.array(mcpRunNotebookSchema),
+  lab_notebooks: z.array(mcpRunNotebookSchema),
 });
 
 export const searchRunsOutputSchema = z.object({
@@ -125,7 +125,7 @@ export const getRunOutputSchema = z.object({
   deletedByUser: mcpActorUserSchema.nullable(),
   deletedByToken: mcpActorTokenSchema.nullable(),
   attributions: z.array(mcpActorUserSchema),
-  notebooks: z.array(mcpRunNotebookSchema),
+  labNotebooks: z.array(mcpRunNotebookSchema),
   files: z.array(mcpRunFileSchema).optional(),
   filesPagination: paginationSchema.optional(),
   comments: z.array(mcpRunCommentSchema).optional(),

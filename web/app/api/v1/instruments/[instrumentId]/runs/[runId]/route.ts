@@ -110,7 +110,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
     deleted_by_token: actorToken(run.deletedBy),
     metadata: run.metadata,
     attributions: run.attributions,
-    notebooks: runNotebooks.map(runNotebookToWire),
+    lab_notebooks: runNotebooks.map(runNotebookToWire),
     files: filesWithUrls,
   });
 }
