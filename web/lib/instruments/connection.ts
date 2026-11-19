@@ -27,6 +27,9 @@ export const CONNECTION_REASONS = [
   "folder_missing",
   // No heartbeat for 5 minutes, or no return from a restart within 15.
   "unresponsive",
+  // The watcher registered but sent no heartbeat within 15 minutes of its
+  // registration, or of the instrument's confirmation if that came later.
+  "never_checked_in",
   // Someone stopped the watcher, with no restart or update reason.
   "stopped",
   // The instrument has never had a watcher.
@@ -124,7 +127,7 @@ export interface InstrumentWatcher {
 /** What `computeConnection` needs of a watcher. */
 export type ConnectionWatcher = Pick<
   InstrumentWatcher,
-  "status" | "statusReason"
+  "lastHeartbeatAt" | "status" | "statusReason"
 >;
 
 /**
@@ -154,7 +157,15 @@ export function computeConnection(
     case "waiting":
       return { state: "offline", reason: "folder_missing" };
     case "stale":
-      return { state: "offline", reason: "unresponsive" };
+      // A watcher that never sent a heartbeat is a `registered` one past its
+      // time limit: it was set up but never started, or can't reach Data Hub.
+      return {
+        state: "offline",
+        reason:
+          watcher.lastHeartbeatAt === null
+            ? "never_checked_in"
+            : "unresponsive",
+      };
     case "stopped":
       // The effective status is `stopped` for a restart only inside its 15
       // minutes. After that it reads `stale`, which is the case above.
@@ -175,12 +186,13 @@ export type InstrumentBadgeState = "pending" | "retired" | ConnectionState;
  * 1. Instrument status is pending: Pending.
  * 2. Instrument status is inactive: Retired.
  * 3. No current watcher: Offline.
- * 4. Watcher is registered, with no heartbeat yet: Connecting.
+ * 4. Watcher is registered, with no heartbeat yet, and 15 minutes haven't
+ *    passed since it registered or the instrument was confirmed: Connecting.
  * 5. Watcher stopped for a Windows restart or an automatic update, and 15
  *    minutes haven't passed: Restarting.
  * 6. Watcher is watching, with a heartbeat inside 5 minutes: Online.
- * 7. Anything else (unresponsive, stopped by someone, waiting for its
- *    folder): Offline.
+ * 7. Anything else (unresponsive, never checked in, stopped by someone,
+ *    waiting for its folder): Offline.
  *
  * Rows 3 to 7 are the connection's state, which `computeConnection` decides.
  */

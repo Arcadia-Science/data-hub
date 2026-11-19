@@ -103,6 +103,7 @@ const ACTIONS: Record<
     member: [SEE_DETAILS],
   },
   unresponsive: { admin: [SEE_DETAILS], member: [SEE_DETAILS] },
+  never_checked_in: { admin: [SEE_DETAILS], member: [SEE_DETAILS] },
   stopped: { admin: [SEE_DETAILS], member: [SEE_DETAILS] },
   no_watcher: { admin: ["connect_watcher"], member: [] },
   deregistered: { admin: ["connect_watcher"], member: [] },
@@ -128,6 +129,14 @@ function unresponsiveBody(
     : "";
   return [
     `The watcher for this instrument hasn't checked in${since}. New files won't appear here until it's back.`,
+  ];
+}
+
+function neverCheckedInBody(hostname: string | null): ProblemNoticeBodyPart[] {
+  return [
+    "The watcher",
+    ...(hostname ? [" on ", { code: hostname }] : []),
+    " was set up but has never checked in. New files won't appear until the watcher service is running on that PC and can reach Data Hub.",
   ];
 }
 
@@ -157,13 +166,14 @@ function deregisteredBody(
  * The notice for an instrument that can't receive new files, or null when it
  * shouldn't show one. The connection's reason picks it:
  *
- * | Reason         | Title                                        | Admin actions              | Members     |
- * | -------------- | -------------------------------------------- | -------------------------- | ----------- |
- * | folder_missing | New files aren't being picked up             | Change folder, See details | See details |
- * | unresponsive   | The watcher isn't checking in                | See details                | See details |
- * | stopped        | Uploads from this instrument are paused      | See details                | See details |
- * | no_watcher     | This instrument isn't connected to a watcher | Connect a watcher          | none        |
- * | deregistered   | This instrument isn't connected to a watcher | Connect a watcher          | none        |
+ * | Reason           | Title                                        | Admin actions              | Members     |
+ * | ---------------- | -------------------------------------------- | -------------------------- | ----------- |
+ * | folder_missing   | New files aren't being picked up             | Change folder, See details | See details |
+ * | unresponsive     | The watcher isn't checking in                | See details                | See details |
+ * | never_checked_in | The watcher never checked in                 | See details                | See details |
+ * | stopped          | Uploads from this instrument are paused      | See details                | See details |
+ * | no_watcher       | This instrument isn't connected to a watcher | Connect a watcher          | none        |
+ * | deregistered     | This instrument isn't connected to a watcher | Connect a watcher          | none        |
  *
  * It needs the instrument's own status because Pending and Retired win over
  * the connection: a retired instrument has no watcher and isn't in trouble.
@@ -193,6 +203,12 @@ export function instrumentProblemNotice(
       return {
         title: "The watcher isn't checking in",
         body: unresponsiveBody(watcher?.lastHeartbeatAt ?? null, timeZone, now),
+        actions,
+      };
+    case "never_checked_in":
+      return {
+        title: "The watcher never checked in",
+        body: neverCheckedInBody(watcher?.hostname ?? null),
         actions,
       };
     case "stopped":

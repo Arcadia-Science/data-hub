@@ -411,6 +411,16 @@ export const instruments = pgTable(
       .notNull()
       .defaultNow()
       .$onUpdate(() => new Date()),
+    // When an admin confirmed the instrument (its status went from `pending`
+    // to `active`). NULL for an instrument that was never pending, and for
+    // one confirmed before this column existed. A watcher can't start until
+    // its instrument is confirmed, so a `registered` watcher's first check-in
+    // is due `FIRST_CHECK_IN_GRACE_MS` after the later of its registration and
+    // this (see `computeEffectiveStatus`).
+    confirmedAt: timestamp("confirmed_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
     // When the instrument was retired (status set to `inactive`). NULL while
     // active/pending; cleared again on reactivation. Distinct from `updatedAt`,
     // which any edit bumps.

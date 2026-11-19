@@ -106,7 +106,7 @@ export const instrumentConnection = z
     state: z
       .enum(CONNECTION_STATES)
       .describe(
-        "`online`: the watcher checked in within 5 minutes. `restarting`: the watcher stopped for a Windows restart or an automatic update less than 15 minutes ago. `connecting`: the watcher registered and hasn't sent a heartbeat yet. `offline`: anything else. The instrument's own status plays no part: a pending instrument can be `online`."
+        "`online`: the watcher checked in within 5 minutes. `restarting`: the watcher stopped for a Windows restart or an automatic update less than 15 minutes ago. `connecting`: the watcher registered and hasn't sent a heartbeat yet, for up to 15 minutes after it registered or the instrument was confirmed; after that the instrument is `offline` with reason `never_checked_in`. `offline`: anything else. The instrument's own status plays no part: a pending instrument can be `online`."
       ),
     reason: z
       .enum(CONNECTION_REASONS)

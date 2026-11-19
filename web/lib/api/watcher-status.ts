@@ -45,9 +45,25 @@ export const UPLOAD_REQUEST_REVERT_GRACE_MS = 15 * 60 * 1000;
 // mirror, `effectiveStatusCondition` in `lib/api/watchers.ts`, uses it too.
 export const STALE_THRESHOLD_MS = 5 * 60 * 1000;
 
+// A `registered` watcher reads `stale` once this long has passed since it was
+// registered, or since its instrument was confirmed if that came later, with
+// no check-in. The watcher sends its first heartbeat as soon as it starts, so
+// this leaves time to start the service after confirming. The SQL mirror,
+// `effectiveStatusCondition` in `lib/api/watchers.ts`, uses it too.
+export const FIRST_CHECK_IN_GRACE_MS = 15 * 60 * 1000;
+
 export interface WatcherLike {
+  /** When the watcher registered. */
+  createdAt: Date;
   /** Set when the watcher was deregistered. */
   deletedAt: Date | null;
+  /**
+   * When its instrument was confirmed. Null for an instrument that was never
+   * pending, or one confirmed before Data Hub recorded it.
+   */
+  instrumentConfirmedAt: Date | null;
+  /** Its instrument's status: `pending`, `active` or `inactive`. */
+  instrumentStatus: string | null;
   lastHeartbeatAt: Date | null;
   status: string;
   /** Why the watcher is `waiting`, or why it `stopped` for a restart. */
@@ -71,7 +87,11 @@ export type EffectiveStatus = (typeof EFFECTIVE_STATUSES)[number];
  *
  * - Deregistered: always `stopped`. It can no longer send heartbeats, so
  *   staleness is moot, whatever it reported last.
- * - `registered`: no heartbeat yet, so it is exempt from staleness checks.
+ * - `registered`: no check-in yet. It reads `stale` once
+ *   `FIRST_CHECK_IN_GRACE_MS` has passed since the latest of its registration,
+ *   its instrument's confirmation and its last heartbeat. While its instrument
+ *   is pending it stays `registered`, because the watcher won't start until an
+ *   admin confirms the instrument.
  * - `watching` and `waiting`: `stale` once the last heartbeat is more than
  *   `STALE_THRESHOLD_MS` old, or missing.
  * - `stopped` for a restart (see `RESTART_STOP_REASONS`): the watcher is
@@ -89,7 +109,17 @@ export function computeEffectiveStatus(
   }
 
   if (watcher.status === "registered") {
-    return "registered";
+    if (watcher.instrumentStatus === "pending") {
+      return "registered";
+    }
+    const dueFrom = Math.max(
+      watcher.createdAt.getTime(),
+      watcher.instrumentConfirmedAt?.getTime() ?? Number.NEGATIVE_INFINITY,
+      watcher.lastHeartbeatAt?.getTime() ?? Number.NEGATIVE_INFINITY
+    );
+    return now.getTime() - dueFrom > FIRST_CHECK_IN_GRACE_MS
+      ? "stale"
+      : "registered";
   }
 
   const age = watcher.lastHeartbeatAt

@@ -3,7 +3,8 @@
 Code: ``heartbeat.py`` (``HeartbeatLoop``, ``WatcherCounters``); server side
 ``app/api/v1/watchers/[watcherId]/heartbeat`` and ``lib/api/watchers.ts``
 (``computeEffectiveStatus``, which adds ``stale`` after five minutes without a heartbeat,
-except for a watcher that stopped cleanly). The suite ages ``last_heartbeat_at`` instead of
+except for a watcher that stopped cleanly, and 15 minutes after a registration with no
+check-in). The suite ages ``last_heartbeat_at`` instead of
 waiting for the server's timers.
 """
 
@@ -22,9 +23,11 @@ TRANSITIONS: tuple[Transition, ...] = (
     ),
     covered(
         MACHINE,
-        "watcher.registered->never_stale",
-        "A watcher that has never sent a heartbeat stays `registered` however old its "
-        "timestamps are, because that status is exempt from staleness.",
+        "watcher.registered->stale",
+        "A watcher that has never sent a heartbeat stays `registered` for 15 minutes after it "
+        "registered, or after its instrument was confirmed, however old its heartbeat "
+        "timestamp is. Past them it reads `stale` while its stored status stays `registered`. "
+        "While its instrument is pending it stays `registered`, because it can't start.",
     ),
     covered(
         MACHINE,
@@ -79,9 +82,10 @@ TRANSITIONS: tuple[Transition, ...] = (
         "watcher.list->stale_filtered",
         "The watcher list's `status=stale` filter returns exactly the watchers that read "
         "`stale`: a running watcher whose last heartbeat is over five minutes old, or "
-        "missing once the watcher has started, each with status `stale`. Not a stopped one, "
-        "or a `registered` one however old its row is. The other filters list a watcher "
-        "under its own status.",
+        "missing once the watcher has started, or a `registered` one that hasn't checked in "
+        "15 minutes after it registered, each with status `stale`. Not a stopped one, or a "
+        "`registered` one inside its 15 minutes. The other filters list a watcher under its "
+        "own status.",
     ),
     covered(
         MACHINE,

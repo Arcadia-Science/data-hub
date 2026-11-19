@@ -99,6 +99,32 @@ describe("instrumentProblemNotice by reason", () => {
     );
   });
 
+  it("never_checked_in names the computer and what to check, for admins and members", () => {
+    for (const isAdmin of [true, false]) {
+      const n = notice({
+        connection: offline("never_checked_in"),
+        isAdmin,
+        watcher: { ...WATCHER, lastHeartbeatAt: null },
+      });
+      expect(n?.title).toBe("The watcher never checked in");
+      expect(n && bodyText(n)).toBe(
+        "The watcher on LAB-PC-01 was set up but has never checked in. New files won't appear until the watcher service is running on that PC and can reach Data Hub."
+      );
+      expect(n?.body).toContainEqual({ code: "LAB-PC-01" });
+      expect(n?.actions).toEqual(["see_details"]);
+    }
+  });
+
+  it("never_checked_in still reads when the computer isn't known", () => {
+    const n = notice({
+      connection: offline("never_checked_in"),
+      watcher: { ...WATCHER, hostname: null, lastHeartbeatAt: null },
+    });
+    expect(n && bodyText(n)).toBe(
+      "The watcher was set up but has never checked in. New files won't appear until the watcher service is running on that PC and can reach Data Hub."
+    );
+  });
+
   it("stopped names the computer, for admins and members", () => {
     for (const isAdmin of [true, false]) {
       const n = notice({ connection: offline("stopped"), isAdmin });

@@ -138,7 +138,17 @@ describe("Instruments API", () => {
   // PATCH /api/v1/instruments/:instrumentId
   // -------------------------------------------------------------------------
 
+  async function confirmedAtOf(id: string): Promise<Date | null> {
+    const [row] = await getTestDb()
+      .select({ confirmedAt: instruments.confirmedAt })
+      .from(instruments)
+      .where(eq(instruments.id, id));
+    return row.confirmedAt;
+  }
+
   it("PATCH /api/v1/instruments/:id updates status", async () => {
+    expect(await confirmedAtOf("test-instrument")).toBeNull();
+    const before = Date.now();
     const res = await api("/api/v1/instruments/test-instrument", {
       method: "PATCH",
       token,
@@ -148,6 +158,24 @@ describe("Instruments API", () => {
     const data = await res.json();
     expect(data.status).toBe("active");
     instrumentRecord.parse(data);
+    // Confirming a pending instrument records when.
+    const confirmedAt = await confirmedAtOf("test-instrument");
+    expect(confirmedAt?.getTime()).toBeGreaterThanOrEqual(before - 1000);
+    expect(data).not.toHaveProperty("confirmed_at");
+  });
+
+  it("PATCH /api/v1/instruments/:id keeps confirmed_at when an active instrument changes", async () => {
+    const confirmedAt = await confirmedAtOf("test-instrument");
+    expect(confirmedAt).not.toBeNull();
+    for (const body of [{ status: "active" }, { display_name: "Same" }]) {
+      const res = await api("/api/v1/instruments/test-instrument", {
+        method: "PATCH",
+        token,
+        body,
+      });
+      expect(res.status).toBe(200);
+    }
+    expect(await confirmedAtOf("test-instrument")).toEqual(confirmedAt);
   });
 
   it("PATCH /api/v1/instruments/:id updates display_name", async () => {
@@ -216,6 +244,8 @@ describe("Instruments API: watcher and connection", () => {
     deregistered?: boolean;
     hostname?: string;
     reason?: string | null;
+    /** How long ago the watcher registered. Default: 30 days. */
+    registeredAgeMs?: number;
     status?: "registered" | "watching" | "stopped" | "waiting";
   }
 
@@ -242,7 +272,9 @@ describe("Instruments API: watcher and connection", () => {
           lastHeartbeatAt: ageMs === null ? null : new Date(Date.now() - ageMs),
           configYaml: w.configYaml === undefined ? CONFIG_YAML : w.configYaml,
           // Deregistered rows are older than the live one, newest last.
-          createdAt: new Date(Date.now() - 30 * DAY + index * 1000),
+          createdAt: new Date(
+            Date.now() - (w.registeredAgeMs ?? 30 * DAY) + index * 1000
+          ),
           deletedAt: w.deregistered ? new Date(Date.now() - DAY + index) : null,
         })
         .returning({ id: watchers.id });
@@ -373,8 +405,18 @@ describe("Instruments API: watcher and connection", () => {
     {
       id: "conn-connecting",
       name: "a watcher with no heartbeat yet is connecting",
-      watcher: { status: "registered", ageMs: null },
+      watcher: { status: "registered", ageMs: null, registeredAgeMs: MINUTE },
       expected: { state: "connecting", reason: null },
+    },
+    {
+      id: "conn-never-checked-in",
+      name: "a watcher with no heartbeat 20 minutes after registering never checked in",
+      watcher: {
+        status: "registered",
+        ageMs: null,
+        registeredAgeMs: 20 * MINUTE,
+      },
+      expected: { state: "offline", reason: "never_checked_in" },
     },
     {
       id: "conn-update-1m",
@@ -433,6 +475,8 @@ describe("Instruments API: watcher and connection", () => {
   });
 
   it("reports the connection of a pending instrument, and leaves its badge to the status", async () => {
+    // Its watcher registered 30 days ago, but can't start until the
+    // instrument is confirmed, so it is still connecting.
     await seed(
       "pending-with-watcher",
       [{ status: "registered", ageMs: null }],
@@ -441,6 +485,34 @@ describe("Instruments API: watcher and connection", () => {
     const data = await restDetail("pending-with-watcher");
     expect(data.status).toBe("pending");
     expect(data.connection).toEqual({ state: "connecting", reason: null });
+  });
+
+  it("gives a watcher 15 minutes to check in from when its instrument is confirmed", async () => {
+    await seed(
+      "confirmed-late",
+      [{ status: "registered", ageMs: null }],
+      "pending"
+    );
+    const res = await api("/api/v1/instruments/confirmed-late", {
+      method: "PATCH",
+      token,
+      body: { status: "active" },
+    });
+    expect(res.status).toBe(200);
+    const data = await restDetail("confirmed-late");
+    expect(data.status).toBe("active");
+    expect(data.connection).toEqual({ state: "connecting", reason: null });
+
+    // Twenty minutes after the confirmation, it never checked in.
+    await getTestDb()
+      .update(instruments)
+      .set({ confirmedAt: new Date(Date.now() - 20 * MINUTE) })
+      .where(eq(instruments.id, "confirmed-late"));
+    const later = await restDetail("confirmed-late");
+    expect(later.connection).toEqual({
+      state: "offline",
+      reason: "never_checked_in",
+    });
   });
 
   it("lists the other instruments on the same computer, ignoring case and deregistered watchers", async () => {

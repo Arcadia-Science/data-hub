@@ -47,7 +47,11 @@ export async function GET(
   }
 
   const [instrument] = await db
-    .select({ displayName: instruments.displayName })
+    .select({
+      displayName: instruments.displayName,
+      status: instruments.status,
+      confirmedAt: instruments.confirmedAt,
+    })
     .from(instruments)
     .where(eq(instruments.id, watcher.instrumentId))
     .limit(1);
@@ -62,7 +66,11 @@ export async function GET(
     config_yaml: watcher.configYaml,
     config_revision: watcher.configRevision,
     applied_config_revision: watcher.appliedConfigRevision,
-    status: computeEffectiveStatus(watcher),
+    status: computeEffectiveStatus({
+      ...watcher,
+      instrumentStatus: instrument?.status ?? null,
+      instrumentConfirmedAt: instrument?.confirmedAt ?? null,
+    }),
     status_reason: watcher.statusReason,
     last_heartbeat_at: watcher.lastHeartbeatAt,
     created_at: watcher.createdAt,
