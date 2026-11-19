@@ -571,6 +571,67 @@ describe("Run notebook links API", () => {
     ]);
     expect(await runIds({ notebookLinkSearch: "yeast" })).toEqual(["names-1"]);
     expect(await runIds({ notebookLinkSearch: "pombe" })).toEqual([]);
+
+    // Both REST run lists take the same filters as query parameters, with
+    // only the `runs:read` scope.
+    const listed = async (path: string, params: Record<string, string>) => {
+      const res = await api(`${path}?${new URLSearchParams(params)}`, {
+        token: readOnlyToken,
+      });
+      expect(res.status).toBe(200);
+      const body = runListResponse.parse(await res.json());
+      return body.data.map((run) => run.run_id).sort();
+    };
+    const instrumentRuns = `/api/v1/instruments/${listInstrument}/runs`;
+
+    expect(
+      await listed(instrumentRuns, {
+        notebook_link_name: "Growth curve method",
+      })
+    ).toEqual(["names-1", "names-2"]);
+    // An exact name matches case; text a name contains doesn't.
+    expect(
+      await listed(instrumentRuns, {
+        notebook_link_name: "growth curve method",
+      })
+    ).toEqual([]);
+    expect(
+      await listed(instrumentRuns, { notebook_link_search: "GROWTH" })
+    ).toEqual(["names-1", "names-2", "names-3"]);
+    // With both, one link has to match both: names-1 has a link by the name
+    // and another containing "yeast", but no single link does both.
+    expect(
+      await listed(instrumentRuns, {
+        notebook_link_name: "Growth curve method",
+        notebook_link_search: "yeast",
+      })
+    ).toEqual([]);
+    expect(
+      await listed(instrumentRuns, {
+        notebook_link_name: "Growth curve method",
+        include_deleted: "true",
+      })
+    ).toEqual(["names-1", "names-2", "names-gone"]);
+    // A blank value doesn't filter.
+    expect(
+      await listed(instrumentRuns, {
+        notebook_link_name: " ",
+        notebook_link_search: "",
+      })
+    ).toEqual(["names-1", "names-2", "names-3"]);
+
+    expect(
+      await listed("/api/v1/instrument-runs", {
+        instrument_id: listInstrument,
+        notebook_link_name: "notion.so › Plate growth",
+      })
+    ).toEqual(["names-3"]);
+    expect(
+      await listed("/api/v1/instrument-runs", {
+        instrument_id: listInstrument,
+        notebook_link_search: "yeast",
+      })
+    ).toEqual(["names-1"]);
   });
 
   it("finds runs in global search by a pasted copy of a link's URL", async () => {

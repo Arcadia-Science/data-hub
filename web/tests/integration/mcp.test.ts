@@ -14,7 +14,7 @@ import {
 } from "@/tests/integration/helpers";
 
 /** Bump when adding/removing an MCP tool so the change shows up in review. */
-const EXPECTED_MCP_TOOL_COUNT = 45;
+const EXPECTED_MCP_TOOL_COUNT = 46;
 
 function jsonRpc(method: string, params: unknown = {}, id = 1) {
   return {
@@ -189,6 +189,7 @@ describe("MCP Server (HTTP)", () => {
     expect(toolNames).toContain("claim_run");
     expect(toolNames).toContain("unclaim_run");
     expect(toolNames).toContain("list_run_attributors");
+    expect(toolNames).toContain("list_notebook_link_names");
     expect(toolNames).toContain("global_search");
     expect(toolNames).toContain("get_me");
     expect(toolNames).toContain("list_run_comments");
@@ -1503,5 +1504,75 @@ describe("MCP Server (HTTP)", () => {
       runIds: [runId],
       url: "https://example.com/eln/two",
     });
+  });
+
+  it("search_runs filters by a link's name, and list_notebook_link_names counts them", async () => {
+    const namesInstrument = "mcp-link-names";
+    const db = getTestDb();
+    await db.insert(schema.instruments).values({
+      id: namesInstrument,
+      displayName: "MCP Link Names",
+      status: "active",
+    });
+    await db.insert(schema.instrumentRuns).values(
+      ["names-a", "names-b", "names-c"].map((id) => ({
+        instrumentId: namesInstrument,
+        runId: id,
+        source: "lambda" as const,
+      }))
+    );
+    const add = async (runIds: string[], url: string, label?: string) => {
+      const result = await callTool("add_notebook_link", {
+        instrumentId: namesInstrument,
+        runIds,
+        url,
+        label,
+      });
+      expect(result.isError).toBeFalsy();
+    };
+    await add(
+      ["names-a", "names-b"],
+      "https://example.com/eln/1",
+      "Growth curve method"
+    );
+    await add(["names-c"], "https://example.com/eln/yeast-growth");
+
+    const names = JSON.parse(
+      (
+        await callTool("list_notebook_link_names", {
+          instrumentId: namesInstrument,
+        })
+      ).content[0].text
+    );
+    expect(names).toEqual({
+      names: [
+        { name: "Growth curve method", runCount: 2 },
+        { name: "example.com › yeast growth", runCount: 1 },
+      ],
+    });
+
+    const runIds = async (args: Record<string, unknown>) => {
+      const result = await callTool("search_runs", {
+        instrumentId: namesInstrument,
+        ...args,
+      });
+      expect(result.isError).toBeFalsy();
+      return JSON.parse(result.content[0].text)
+        .data.map((run: { run_id: string }) => run.run_id)
+        .sort();
+    };
+    expect(await runIds({ notebookLinkName: "Growth curve method" })).toEqual([
+      "names-a",
+      "names-b",
+    ]);
+    expect(await runIds({ notebookLinkName: "growth curve method" })).toEqual(
+      []
+    );
+    expect(await runIds({ notebookLinkSearch: "GROWTH" })).toEqual([
+      "names-a",
+      "names-b",
+      "names-c",
+    ]);
+    expect(await runIds({ notebookLinkSearch: "yeast" })).toEqual(["names-c"]);
   });
 });

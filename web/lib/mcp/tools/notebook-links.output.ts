@@ -58,6 +58,16 @@ export const addNotebookLinkOutputSchema = z.object({
 
 export const updateNotebookLinkOutputSchema = mcpNotebookLinkSchema;
 
+export const listNotebookLinkNamesOutputSchema = z.object({
+  // Most-used first, then by name.
+  names: z.array(
+    z.object({
+      name: z.string(),
+      runCount: z.number().int(),
+    })
+  ),
+});
+
 export const removeNotebookLinkOutputSchema = z.object({
   instrumentId: z.string(),
   urlKey: z.string(),

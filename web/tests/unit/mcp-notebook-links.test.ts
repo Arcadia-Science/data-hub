@@ -9,11 +9,13 @@ const {
   lookupRunByNaturalKey,
   bulkAddNotebookLink,
   bulkRemoveNotebookLinks,
+  getNotebookLinkNameOptions,
   updateNotebookLink,
 } = vi.hoisted(() => ({
   lookupRunByNaturalKey: vi.fn(),
   bulkAddNotebookLink: vi.fn(),
   bulkRemoveNotebookLinks: vi.fn(),
+  getNotebookLinkNameOptions: vi.fn(),
   updateNotebookLink: vi.fn(),
 }));
 
@@ -25,6 +27,7 @@ vi.mock("@/lib/api/run-notebook-links", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api/run-notebook-links")>()),
   bulkAddNotebookLink,
   bulkRemoveNotebookLinks,
+  getNotebookLinkNameOptions,
   updateNotebookLink,
 }));
 
@@ -109,6 +112,42 @@ beforeEach(() => {
     },
   });
   updateNotebookLink.mockResolvedValue({ ok: true, value: LINK });
+  getNotebookLinkNameOptions.mockResolvedValue({
+    names: [
+      { name: "Growth curve method", runCount: 2 },
+      { name: "example.com › 4", runCount: 1 },
+    ],
+    sharedRuns: [[0, 1]],
+  });
+});
+
+describe("list_notebook_link_names", () => {
+  it("lists the names and run counts for one instrument, without write access", async () => {
+    const result = await tool("list_notebook_link_names")(
+      { instrumentId: "inst" },
+      ctxWith(["read"])
+    );
+
+    expect(result.isError).toBeFalsy();
+    expect(getNotebookLinkNameOptions).toHaveBeenCalledWith({
+      instrumentId: "inst",
+    });
+    // `sharedRuns` is only for the web menu's counts, so it stays out.
+    expect(result.structuredContent).toEqual({
+      names: [
+        { name: "Growth curve method", runCount: 2 },
+        { name: "example.com › 4", runCount: 1 },
+      ],
+    });
+  });
+
+  it("counts every instrument when instrumentId is left out", async () => {
+    await tool("list_notebook_link_names")({}, ctxWith(["read"]));
+
+    expect(getNotebookLinkNameOptions).toHaveBeenCalledWith({
+      instrumentId: undefined,
+    });
+  });
 });
 
 describe("add_notebook_link", () => {

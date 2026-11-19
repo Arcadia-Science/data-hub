@@ -681,6 +681,10 @@ vi.mock("@/lib/api/run-comments", () => ({
 
 vi.mock("@/lib/api/run-notebook-links", () => ({
   listNotebookLinksForRun: vi.fn().mockResolvedValue([]),
+  getNotebookLinkNameOptions: vi.fn().mockResolvedValue({
+    names: [{ name: "Growth curve method", runCount: 2 }],
+    sharedRuns: [],
+  }),
   bulkAddNotebookLink: vi.fn(),
   bulkRemoveNotebookLinks: vi.fn(),
   updateNotebookLink: vi.fn(),
@@ -930,6 +934,12 @@ describe("MCP Protocol (in-memory)", () => {
     expect(searchRuns?.inputSchema.properties).toHaveProperty(
       "auntyExperimentType"
     );
+    expect(searchRuns?.inputSchema.properties).toHaveProperty(
+      "notebookLinkName"
+    );
+    expect(searchRuns?.inputSchema.properties).toHaveProperty(
+      "notebookLinkSearch"
+    );
 
     const globalSearch = tools.find((t) => t.name === "global_search");
     expect(globalSearch?.inputSchema.properties).toHaveProperty("query");
@@ -937,7 +947,7 @@ describe("MCP Protocol (in-memory)", () => {
 
   it("every registered tool advertises outputSchema", async () => {
     const { tools } = await client.listTools();
-    expect(tools).toHaveLength(45);
+    expect(tools).toHaveLength(46);
     for (const tool of tools) {
       const schema = tool.outputSchema as
         | { type?: string; oneOf?: unknown; anyOf?: unknown }
@@ -1123,6 +1133,37 @@ describe("MCP Protocol (in-memory)", () => {
         auntyRampRate: "1",
       })
     );
+  });
+
+  it("search_runs forwards the lab notebook link name filters", async () => {
+    const { buildRunListQuery } = await import("@/lib/api/instrument-runs");
+    vi.mocked(buildRunListQuery).mockClear();
+    await client.callTool({
+      name: "search_runs",
+      arguments: {
+        notebookLinkName: "Growth curve method",
+        notebookLinkSearch: " growth ",
+      },
+    });
+    expect(buildRunListQuery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        notebookLinkName: "Growth curve method",
+        notebookLinkSearch: "growth",
+      })
+    );
+  });
+
+  it("search_runs ignores blank lab notebook link name filters", async () => {
+    const { buildRunListQuery } = await import("@/lib/api/instrument-runs");
+    vi.mocked(buildRunListQuery).mockClear();
+    await client.callTool({
+      name: "search_runs",
+      arguments: { notebookLinkName: "  ", notebookLinkSearch: "" },
+    });
+    const filters = vi.mocked(buildRunListQuery).mock.calls[0]?.[0];
+    expect(filters).toBeDefined();
+    expect(filters).not.toHaveProperty("notebookLinkName");
+    expect(filters).not.toHaveProperty("notebookLinkSearch");
   });
 
   it('search_runs rejects ranBy="me" without auth', async () => {
@@ -2037,6 +2078,18 @@ describe("MCP Protocol (in-memory)", () => {
     };
     expect(parsed).toEqual({
       attributors: [{ userId: "u-1", displayName: "Alice" }],
+    });
+    expectStructuredMatchesText(result);
+  });
+
+  it("list_notebook_link_names returns the names with run counts", async () => {
+    const result = await client.callTool({
+      name: "list_notebook_link_names",
+      arguments: { instrumentId: "test-plate-reader" },
+    });
+    expect(result.isError).toBeFalsy();
+    expect(parseText(result.content)).toEqual({
+      names: [{ name: "Growth curve method", runCount: 2 }],
     });
     expectStructuredMatchesText(result);
   });

@@ -8,6 +8,7 @@ import {
 import {
   bulkAddNotebookLink,
   bulkRemoveNotebookLinks,
+  getNotebookLinkNameOptions,
   type NotebookLinkError,
   updateNotebookLink,
 } from "@/lib/api/run-notebook-links";
@@ -21,6 +22,7 @@ import {
 import { blankLabelToNull } from "@/lib/notebook-links/url";
 import {
   addNotebookLinkTool,
+  listNotebookLinkNamesTool,
   removeNotebookLinkTool,
   updateNotebookLinkTool,
 } from "./notebook-links.defs";
@@ -37,6 +39,15 @@ function linkError(error: NotebookLinkError) {
 }
 
 export function registerNotebookLinkTools(server: McpServer) {
+  server.registerTool(
+    listNotebookLinkNamesTool.name,
+    toolRegistrationConfig(listNotebookLinkNamesTool),
+    async ({ instrumentId }) => {
+      const { names } = await getNotebookLinkNameOptions({ instrumentId });
+      return structuredResult({ names });
+    }
+  );
+
   server.registerTool(
     addNotebookLinkTool.name,
     toolRegistrationConfig(addNotebookLinkTool),

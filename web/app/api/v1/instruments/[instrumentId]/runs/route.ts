@@ -19,6 +19,7 @@ import { parseRunMetadataFilters } from "@/lib/api/run-metadata-filters";
 import {
   parseHasNotebookLinkParam,
   parseIntParam,
+  parseNotebookLinkNameParams,
   parseRunStatusParam,
 } from "@/lib/api/validators";
 import { watcherClientFrom } from "@/lib/api/watcher-compat";
@@ -260,6 +261,10 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
     hasNotebookLink: parseHasNotebookLinkParam(
       searchParams.get("has_notebook_link")
     ),
+    ...parseNotebookLinkNameParams({
+      name: searchParams.get("notebook_link_name"),
+      search: searchParams.get("notebook_link_search"),
+    }),
     statuses: parseRunStatusParam(searchParams),
     ...parseRunMetadataFilters(searchParams),
   });

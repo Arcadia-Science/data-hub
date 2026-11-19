@@ -7,6 +7,7 @@ import {
 } from "@/lib/notebook-links/url";
 import {
   addNotebookLinkOutputSchema,
+  listNotebookLinkNamesOutputSchema,
   removeNotebookLinkOutputSchema,
   updateNotebookLinkOutputSchema,
 } from "./notebook-links.output";
@@ -90,7 +91,25 @@ export const removeNotebookLinkTool = {
   },
 } as const satisfies McpToolDef;
 
+export const listNotebookLinkNamesTool = {
+  name: "list_notebook_link_names",
+  group: "notebook_links",
+  scope: "runs:read",
+  title: "List Notebook Link Names",
+  description:
+    "List the names of the lab notebook links on runs, with how many runs have a link by each name, most-used first. A link's name is its display_name: its label, or a name worked out from its URL when it has no label. Deleted runs don't count. Pass a name to search_runs as notebookLinkName to list those runs.",
+  outputSchema: listNotebookLinkNamesOutputSchema,
+  inputSchema: {
+    instrumentId: z
+      .string()
+      .optional()
+      .describe("Only count runs on this instrument. Leave out for all."),
+  },
+  annotations: { readOnlyHint: true },
+} as const satisfies McpToolDef;
+
 export const NOTEBOOK_LINK_TOOL_DEFS = [
+  listNotebookLinkNamesTool,
   addNotebookLinkTool,
   updateNotebookLinkTool,
   removeNotebookLinkTool,

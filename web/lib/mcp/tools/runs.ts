@@ -32,6 +32,7 @@ import { notebookLinkToWire } from "@/lib/api/run-notebook-link-wire";
 import { listNotebookLinksForRun } from "@/lib/api/run-notebook-links";
 import { buildRunReport, getRunFailureSummary } from "@/lib/api/run-reports";
 import { requestAllRunUploads, requestRunUploads } from "@/lib/api/run-uploads";
+import { parseNotebookLinkNameParams } from "@/lib/api/validators";
 import { toolRegistrationConfig } from "@/lib/mcp/catalog/register";
 import {
   errorResult,
@@ -112,6 +113,10 @@ export function registerRunTools(server: McpServer) {
         ...metadataFilters,
         ranBy,
         hasNotebookLink: args.hasNotebookLink,
+        ...parseNotebookLinkNameParams({
+          name: args.notebookLinkName ?? null,
+          search: args.notebookLinkSearch ?? null,
+        }),
         statuses: args.status ? expandRunStatusFilters(args.status) : undefined,
       });
       return structuredResult(result);

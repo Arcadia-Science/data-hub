@@ -34,7 +34,7 @@ export const searchRunsTool = {
   scope: "runs:read",
   title: "Search Runs",
   description:
-    "Search instrument runs with filtering, pagination, and sorting. Each run lists its lab notebook links. Supports run status, has-notebook-link, and instrument-metadata filters (plate reader, gel-doc, qPCR, Hina microscope, Epson scanner, Aunty). Prefer global_search when the query may match filenames, instrument names, or attributor names rather than run IDs. Discover valid metadata filter values via get_instrument_filter_options or datahub://instruments/{id}/filter-options.",
+    "Search instrument runs with filtering, pagination, and sorting. Each run lists its lab notebook links. Supports run status, lab notebook link, and instrument-metadata filters (plate reader, gel-doc, qPCR, Hina microscope, Epson scanner, Aunty). Prefer global_search when the query may match filenames, instrument names, or attributor names rather than run IDs. Discover valid metadata filter values via get_instrument_filter_options or datahub://instruments/{id}/filter-options.",
   outputSchema: searchRunsOutputSchema,
   inputSchema: {
     instrumentId: z
@@ -100,6 +100,18 @@ export const searchRunsTool = {
       .optional()
       .describe(
         "true: only runs with at least one lab notebook link. false: only runs with none."
+      ),
+    notebookLinkName: z
+      .string()
+      .optional()
+      .describe(
+        "Only runs with a lab notebook link named exactly this, matching case. A link's name is its display_name: its label, or a name worked out from its URL when it has no label. list_notebook_link_names lists the names."
+      ),
+    notebookLinkSearch: z
+      .string()
+      .optional()
+      .describe(
+        "Only runs with a lab notebook link whose name (display_name) contains this text, ignoring case."
       ),
     status: z
       .array(z.enum([...RUN_STATUS_VALUES, DEPRECATED_PENDING_RUN_STATUS]))
