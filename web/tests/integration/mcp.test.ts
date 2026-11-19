@@ -1429,17 +1429,22 @@ describe("MCP Server (HTTP)", () => {
     ]);
     expect(linked.data[0].lab_notebooks).toHaveLength(1);
 
+    // A pasted link finds the notebook, and not its runs.
     const found = parseResult(
       await callTool("global_search", {
         query: `notion.so/Renamed-${pageId}?pvs=4`,
-        scope: "runs",
       })
     );
-    expect(found.runs[0]).toMatchObject({
-      runId,
-      matchReason: "notebook_link",
-      matchedNotebook: { id: notebook.id, name: "Heat stress" },
-    });
+    expect(found.lab_notebooks).toEqual([
+      {
+        type: "lab_notebook",
+        id: notebook.id,
+        name: "Heat stress",
+        url: notebook.url,
+        runCount: 1,
+      },
+    ]);
+    expect(found.runs).toEqual([]);
 
     const listed = parseResult(
       await callTool("list_lab_notebooks", { query: `notion.so/${pageId}` })

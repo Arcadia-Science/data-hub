@@ -11,6 +11,7 @@ import {
 } from "drizzle-orm";
 import { type ActorToken, actorUser, resolveActor } from "@/lib/api/actor";
 import { getInstrumentListWithCounts } from "@/lib/api/instruments";
+import { notebookQueryCondition, notebookStats } from "@/lib/api/notebooks";
 import { db } from "@/lib/db";
 import {
   files,
@@ -20,7 +21,6 @@ import {
   personalAccessTokens,
   runAttributions,
   runComments,
-  runNotebookLinks,
   users,
 } from "@/lib/db/schema";
 import {
@@ -41,6 +41,7 @@ import { MIN_QUERY_LENGTH } from "@/lib/search-constants";
 export type SearchScope =
   | "all"
   | "runs"
+  | "lab_notebooks"
   | "files"
   | "instruments"
   | "users"
@@ -53,15 +54,10 @@ const ALL_TAB_PER_GROUP = 5;
 const SCOPED_LIMIT = 25;
 
 // Why a run surfaced. `run_id` is the run's own title (highest relevance);
-// `notebook_link` means one of its lab notebooks matched by name or link, for
-// example a pasted notebook URL; `file` means a contained filename matched (drives the
-// "Contains …" line); `instrument`/`ran_by` are secondary metadata matches.
-export type RunMatchReason =
-  | "run_id"
-  | "notebook_link"
-  | "file"
-  | "instrument"
-  | "ran_by";
+// `file` means a contained filename matched (drives the "Contains …" line);
+// `instrument`/`ran_by` are secondary metadata matches. Runs don't match
+// through their lab notebooks: the notebook shows in the Notebooks group.
+export type RunMatchReason = "run_id" | "file" | "instrument" | "ran_by";
 
 export interface SearchRunResult {
   acquiredAt: string | null;
@@ -72,16 +68,23 @@ export interface SearchRunResult {
   instrumentName: string;
   // Set only when `matchReason` is "file" — an example matching filename.
   matchedFilename: string | null;
-  // Set only when `matchReason` is "notebook_link" — the notebook that matched.
-  matchedNotebook: {
-    id: string;
-    name: string;
-    url: string;
-  } | null;
   matchReason: RunMatchReason;
   runId: string;
   totalSizeBytes: number;
   type: "run";
+}
+
+// A lab notebook, matched by its name or description, or by a pasted link
+// to its page.
+export interface SearchNotebookResult {
+  id: string;
+  name: string;
+  // How many live (not deleted) runs are in the notebook, however many
+  // results the search shows.
+  runCount: number;
+  type: "lab_notebook";
+  // The notebook's own page, such as its Notion page.
+  url: string;
 }
 
 export interface SearchFileResult {
@@ -151,6 +154,7 @@ export interface GlobalSearchResult {
     comments: number;
     files: number;
     instruments: number;
+    lab_notebooks: number;
     runs: number;
     // Sum of the *visible* (capped) results — this is the "N results for …"
     // figure the header shows, matching what the user actually sees.
@@ -159,6 +163,7 @@ export interface GlobalSearchResult {
   };
   files: SearchFileResult[];
   instruments: SearchInstrumentResult[];
+  lab_notebooks: SearchNotebookResult[];
   runs: SearchRunResult[];
   users: SearchUserResult[];
 }
@@ -180,45 +185,23 @@ async function searchRuns(
   const substring = `%${escaped}%`;
   const prefix = `${escaped}%`;
 
-  // A query that looks like a URL is also compared by its same-page key, so
-  // a pasted link finds runs whose notebook's saved copy differs in `www.`,
-  // query string, fragment, or (for Notion) page title. Deleted notebooks
-  // don't match.
-  const urlKey = notebookSearchKey(query);
-  const notebookPredicate = urlKey
-    ? sql`(n.name ilike ${substring} or n.url ilike ${substring} or n.url_key ilike ${`%${escapeLike(urlKey)}%`})`
-    : sql`(n.name ilike ${substring} or n.url ilike ${substring})`;
-  const runNotebooks = sql`${runNotebookLinks} l join ${notebooks} n on n.id = l.notebook_id and n.deleted_at is null`;
-  const exactLinkMatch = urlKey
-    ? sql`exists (select 1 from ${runNotebooks} where l.run_id = ${instrumentRuns.id} and n.url_key = ${urlKey})`
-    : sql`false`;
-
-  // A run matches on its own id, one of its notebooks, its instrument's
-  // name, a contained (active) filename, or an attributed user's name/email.
-  const linkMatch = sql<boolean>`exists (select 1 from ${runNotebooks} where l.run_id = ${instrumentRuns.id} and ${notebookPredicate})`;
+  // A run matches on its own id, its instrument's name, a contained (active)
+  // filename, or an attributed user's name/email.
   const fileMatch = sql<boolean>`exists (select 1 from ${files} f where f.instrument_run_id = ${instrumentRuns.id} and f.deleted_at is null and f.filename ilike ${substring})`;
   const ranByMatch = sql<boolean>`exists (select 1 from ${runAttributions} ra join ${users} u on u.id = ra.user_id where ra.run_id = ${instrumentRuns.id} and (u.name ilike ${substring} or u.email ilike ${substring}))`;
 
   const matchCondition = or(
     ilike(instrumentRuns.runId, substring),
     ilike(instruments.displayName, substring),
-    linkMatch,
     fileMatch,
     ranByMatch
   ) as SQL;
 
   const where = and(isNull(instrumentRuns.deletedAt), matchCondition);
 
-  // Relevance: a pasted URL that names the same page as one of the run's
-  // notebooks ranks first; then a prefix hit on the run id (the title), then any
-  // run-id substring hit, then a metadata-only match; recency breaks ties.
-  const relevance = sql<number>`case when ${exactLinkMatch} then 3 when ${instrumentRuns.runId} ilike ${prefix} then 2 when ${instrumentRuns.runId} ilike ${substring} then 1 else 0 end`;
-
-  // The notebook to show for a notebook match: a same-page match first, then
-  // the one the run was added to first.
-  const matchedNotebookOrder = urlKey
-    ? sql`order by (n.url_key = ${urlKey}) desc, l.created_at, l.id`
-    : sql`order by l.created_at, l.id`;
+  // Relevance: a prefix hit on the run id (the title), then any run-id
+  // substring hit, then a metadata-only match; recency breaks ties.
+  const relevance = sql<number>`case when ${instrumentRuns.runId} ilike ${prefix} then 2 when ${instrumentRuns.runId} ilike ${substring} then 1 else 0 end`;
 
   const rows = await db
     .select({
@@ -234,12 +217,6 @@ async function searchRuns(
       matchedRunId: sql<boolean>`bool_or(${instrumentRuns.runId} ilike ${substring})`,
       matchedInstrument: sql<boolean>`bool_or(${instruments.displayName} ilike ${substring})`,
       matchedFile: sql<boolean>`bool_or(${fileMatch})`,
-      matchedLink: sql<boolean>`bool_or(${linkMatch})`,
-      matchedNotebook: sql<{
-        id: string;
-        name: string;
-        url: string;
-      } | null>`(select json_build_object('id', n.id, 'name', n.name, 'url', n.url) from ${runNotebooks} where l.run_id = ${instrumentRuns.id} and ${notebookPredicate} ${matchedNotebookOrder} limit 1)`,
       matchedFilename: sql<
         string | null
       >`(select f.filename from ${files} f where f.instrument_run_id = ${instrumentRuns.id} and f.deleted_at is null and f.filename ilike ${substring} order by f.filename limit 1)`,
@@ -259,14 +236,11 @@ async function searchRuns(
     .limit(limit);
 
   return rows.map((row) => {
-    // Precedence: title match first, then a notebook (a pasted URL is a
-    // deliberate lookup), then a nested-file match (worth its own
-    // "Contains …" line), then instrument, then attribution.
+    // Precedence: title match first, then a nested-file match (worth its
+    // own "Contains …" line), then instrument, then attribution.
     let matchReason: RunMatchReason;
     if (row.matchedRunId) {
       matchReason = "run_id";
-    } else if (row.matchedLink) {
-      matchReason = "notebook_link";
     } else if (row.matchedFile) {
       matchReason = "file";
     } else if (row.matchedInstrument) {
@@ -286,10 +260,67 @@ async function searchRuns(
       totalSizeBytes: Number(row.totalSizeBytes),
       matchReason,
       matchedFilename: matchReason === "file" ? row.matchedFilename : null,
-      matchedNotebook:
-        matchReason === "notebook_link" ? row.matchedNotebook : null,
     };
   });
+}
+
+// A notebook matches by name or description. A pasted link (with `://`)
+// matches only the notebook for that page, compared by the same-page key
+// (`notebookUrlKey`), so the scheme, `www.`, tracking parameters, the
+// fragment, and a Notion page's title don't matter. Text like
+// "notion.so/abc" matches either way. Deleted notebooks don't match.
+async function searchNotebooks(
+  query: string,
+  limit: number
+): Promise<SearchNotebookResult[]> {
+  const escaped = escapeLike(query);
+  const substring = `%${escaped}%`;
+  const prefix = `${escaped}%`;
+  // Part of a link counts too, so a bare Notion page ID finds its notebook,
+  // the way the Notebooks list matches.
+  const match = notebookQueryCondition(
+    query,
+    or(
+      ilike(notebooks.name, substring),
+      ilike(notebooks.description, substring),
+      ilike(notebooks.url, substring)
+    ) as SQL
+  );
+
+  // Relevance: the notebook for a pasted page, then a prefix hit on the
+  // name. Ties go to the notebook with the newest run.
+  const urlKey = notebookSearchKey(query);
+  const pageMatch = urlKey ? sql`${notebooks.urlKey} = ${urlKey}` : sql`false`;
+  const relevance = sql<number>`case when ${pageMatch} then 2 when ${notebooks.name} ilike ${prefix} then 1 else 0 end`;
+
+  // The run count comes from every live run in the notebook, so it isn't
+  // held to the result cap.
+  const stats = notebookStats();
+  const rows = await db
+    .select({
+      id: notebooks.id,
+      name: notebooks.name,
+      url: notebooks.url,
+      runCount: stats.runCount,
+    })
+    .from(notebooks)
+    .leftJoin(stats, eq(stats.notebookId, notebooks.id))
+    .where(and(isNull(notebooks.deletedAt), match))
+    .orderBy(
+      desc(relevance),
+      sql`${stats.lastRunAt} desc nulls last`,
+      asc(sql`lower(${notebooks.name})`),
+      asc(notebooks.id)
+    )
+    .limit(limit);
+
+  return rows.map((row) => ({
+    type: "lab_notebook" as const,
+    id: row.id,
+    name: row.name,
+    url: row.url,
+    runCount: row.runCount ?? 0,
+  }));
 }
 
 async function searchFiles(
@@ -499,12 +530,14 @@ async function searchComments(
 function emptyResult(): GlobalSearchResult {
   return {
     runs: [],
+    lab_notebooks: [],
     files: [],
     instruments: [],
     users: [],
     comments: [],
     counts: {
       runs: 0,
+      lab_notebooks: 0,
       files: 0,
       instruments: 0,
       users: 0,
@@ -527,52 +560,55 @@ export async function globalSearch({
     return emptyResult();
   }
 
-  const runLimit =
-    scope === "all" ? ALL_TAB_PER_GROUP : scope === "runs" ? SCOPED_LIMIT : 0;
-  const fileLimit =
-    scope === "all" ? ALL_TAB_PER_GROUP : scope === "files" ? SCOPED_LIMIT : 0;
-  const instrumentLimit =
-    scope === "all"
-      ? ALL_TAB_PER_GROUP
-      : scope === "instruments"
-        ? SCOPED_LIMIT
-        : 0;
-  const userLimit =
-    scope === "all" ? ALL_TAB_PER_GROUP : scope === "users" ? SCOPED_LIMIT : 0;
-  const commentLimit =
-    scope === "all"
-      ? ALL_TAB_PER_GROUP
-      : scope === "comments"
-        ? SCOPED_LIMIT
-        : 0;
+  // How many results a group gets: a few of each on "All", more on its own
+  // tab, and none on another group's tab.
+  const limitFor = (group: Exclude<SearchScope, "all">): number => {
+    if (scope === "all") {
+      return ALL_TAB_PER_GROUP;
+    }
+    return scope === group ? SCOPED_LIMIT : 0;
+  };
+  const searchGroup = <T>(
+    group: Exclude<SearchScope, "all">,
+    search: (query: string, limit: number) => Promise<T[]>
+  ): Promise<T[]> => {
+    const limit = limitFor(group);
+    return limit > 0 ? search(trimmed, limit) : Promise.resolve([]);
+  };
 
-  const [runs, filesResult, instrumentsResult, usersResult, commentsResult] =
-    await Promise.all([
-      runLimit > 0 ? searchRuns(trimmed, runLimit) : Promise.resolve([]),
-      fileLimit > 0 ? searchFiles(trimmed, fileLimit) : Promise.resolve([]),
-      instrumentLimit > 0
-        ? searchInstruments(trimmed, instrumentLimit)
-        : Promise.resolve([]),
-      userLimit > 0 ? searchUsers(trimmed, userLimit) : Promise.resolve([]),
-      commentLimit > 0
-        ? searchComments(trimmed, commentLimit)
-        : Promise.resolve([]),
-    ]);
+  const [
+    runs,
+    notebooksResult,
+    filesResult,
+    instrumentsResult,
+    usersResult,
+    commentsResult,
+  ] = await Promise.all([
+    searchGroup("runs", searchRuns),
+    searchGroup("lab_notebooks", searchNotebooks),
+    searchGroup("files", searchFiles),
+    searchGroup("instruments", searchInstruments),
+    searchGroup("users", searchUsers),
+    searchGroup("comments", searchComments),
+  ]);
 
   return {
     runs,
+    lab_notebooks: notebooksResult,
     files: filesResult,
     instruments: instrumentsResult,
     users: usersResult,
     comments: commentsResult,
     counts: {
       runs: runs.length,
+      lab_notebooks: notebooksResult.length,
       files: filesResult.length,
       instruments: instrumentsResult.length,
       users: usersResult.length,
       comments: commentsResult.length,
       total:
         runs.length +
+        notebooksResult.length +
         filesResult.length +
         instrumentsResult.length +
         usersResult.length +

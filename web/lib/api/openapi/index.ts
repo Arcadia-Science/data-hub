@@ -65,6 +65,7 @@ export {
   uploadQueued,
   uploadUrlResponse,
 } from "./schemas/runs";
+export { searchResponse } from "./schemas/search";
 export {
   createWatcherConfigRevisionBody,
   heartbeatBody,

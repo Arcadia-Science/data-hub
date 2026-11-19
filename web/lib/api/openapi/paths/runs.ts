@@ -177,7 +177,7 @@ registry.registerPath({
   path: "/search",
   operationId: "search",
   summary: "Search Data Hub",
-  description: scoped("runs:read"),
+  description: `${scoped("runs:read")} Searches runs, lab notebooks, files, instruments, users, and comments, with up to 5 results in each group, or up to 25 when \`scope\` names one group. A pasted lab notebook link returns only the lab notebook for that page, and runs don't match through their lab notebooks. List a lab notebook's runs with \`GET /instrument-runs?lab_notebook_id=…\`.`,
   tags: tag,
   security: bearerSecurity,
   request: { query: searchQuery },

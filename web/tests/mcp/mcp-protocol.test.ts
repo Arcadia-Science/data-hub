@@ -389,12 +389,14 @@ vi.mock("@/lib/api/dashboard", () => ({
 vi.mock("@/lib/api/search", () => ({
   globalSearch: vi.fn().mockResolvedValue({
     runs: [],
+    lab_notebooks: [],
     files: [],
     instruments: [],
     users: [],
     comments: [],
     counts: {
       runs: 0,
+      lab_notebooks: 0,
       files: 0,
       instruments: 0,
       users: 0,
@@ -1009,6 +1011,9 @@ describe("MCP Protocol (in-memory)", () => {
 
     const globalSearch = tools.find((t) => t.name === "global_search");
     expect(globalSearch?.inputSchema.properties).toHaveProperty("query");
+    expect(globalSearch?.inputSchema.properties?.scope).toMatchObject({
+      enum: expect.arrayContaining(["lab_notebooks"]),
+    });
   });
 
   it("every registered tool advertises outputSchema", async () => {
@@ -1252,6 +1257,7 @@ describe("MCP Protocol (in-memory)", () => {
       counts: { total: number };
     };
     expect(parsed).toHaveProperty("runs");
+    expect(parsed).toHaveProperty("lab_notebooks");
     expect(parsed).toHaveProperty("files");
     expect(parsed).toHaveProperty("instruments");
     expect(parsed).toHaveProperty("users");
