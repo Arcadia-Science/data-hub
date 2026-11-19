@@ -23,12 +23,13 @@ import {
 } from "@/components/runs/run-metadata-badges";
 import { type Actor, resolveActor } from "@/lib/api/actor";
 import { escapeLikePattern } from "@/lib/api/like-pattern";
-import { getCommentCountsByRunIds } from "@/lib/api/run-comments";
-import { notebookLinkToWire } from "@/lib/api/run-notebook-link-wire";
+import { runNotebookToWire } from "@/lib/api/notebook-wire";
 import {
-  getNotebookLinksByRunIds,
-  notebookLinkCondition,
-} from "@/lib/api/run-notebook-links";
+  getNotebooksByRunIds,
+  hasNotebookCondition,
+  inNotebookCondition,
+} from "@/lib/api/notebooks";
+import { getCommentCountsByRunIds } from "@/lib/api/run-comments";
 import { db } from "@/lib/db";
 import type { InstrumentType } from "@/lib/db/schema";
 import {
@@ -340,10 +341,13 @@ import type { RunMetadataFilterArgs } from "@/lib/api/run-metadata-filters";
 interface RunListFilters extends RunMetadataFilterArgs {
   dateFrom?: string;
   dateTo?: string;
-  // True lists only runs with a lab notebook link; false only runs without.
-  hasNotebookLink?: boolean;
+  // True lists only runs in at least one lab notebook; false only runs in
+  // none. Deleted notebooks don't count.
+  hasNotebook?: boolean;
   includeDeleted: boolean;
   instrumentId?: string | string[];
+  // Lists only runs in this lab notebook.
+  notebookId?: string;
   order?: string;
   page: number;
   perPage: number;
@@ -662,8 +666,11 @@ export async function buildRunListQuery(filters: RunListFilters) {
     );
   }
 
-  if (filters.hasNotebookLink !== undefined) {
-    conditions.push(notebookLinkCondition(filters.hasNotebookLink));
+  if (filters.hasNotebook !== undefined) {
+    conditions.push(hasNotebookCondition(filters.hasNotebook));
+  }
+  if (filters.notebookId !== undefined) {
+    conditions.push(inNotebookCondition(filters.notebookId));
   }
 
   if (filters.statuses && filters.statuses.length > 0) {
@@ -795,22 +802,20 @@ export async function buildRunListQuery(filters: RunListFilters) {
     .limit(perPage)
     .offset(offset);
 
-  // Attributions, comment counts, and notebook links stay off the files
+  // Attributions, comment counts, and notebooks stay off the files
   // left-join so extra rows cannot multiply the file aggregates above.
   const runIds = rows.map((r) => r.id);
-  const [attributionsByRun, commentCountsByRun, notebookLinksByRun] =
+  const [attributionsByRun, commentCountsByRun, notebooksByRun] =
     await Promise.all([
       getAttributionsByRunIds(runIds),
       getCommentCountsByRunIds(runIds),
-      getNotebookLinksByRunIds(runIds),
+      getNotebooksByRunIds(runIds),
     ]);
   const data = rows.map((row) => ({
     ...row,
     attributions: attributionsByRun.get(row.id) ?? [],
     comment_count: commentCountsByRun.get(row.id) ?? 0,
-    notebook_links: (notebookLinksByRun.get(row.id) ?? []).map(
-      notebookLinkToWire
-    ),
+    lab_notebooks: (notebooksByRun.get(row.id) ?? []).map(runNotebookToWire),
   }));
 
   return {

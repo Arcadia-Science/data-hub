@@ -68,9 +68,9 @@ export function parseRunStatusParam(
   return seen.size > 0 ? [...seen] : undefined;
 }
 
-// `has_notebook_link=true` or `false`. Anything else, or no parameter, means
+// `has_lab_notebook=true` or `false`. Anything else, or no parameter, means
 // "don't filter".
-export function parseHasNotebookLinkParam(
+export function parseHasNotebookParam(
   value: string | null
 ): boolean | undefined {
   if (value === "true") {
@@ -80,4 +80,13 @@ export function parseHasNotebookLinkParam(
     return false;
   }
   return;
+}
+
+// `lab_notebook_id`: runs in that lab notebook. A missing or blank value means
+// "don't filter".
+export function parseNotebookIdParam(value: string | null): {
+  notebookId?: string;
+} {
+  const notebookId = value?.trim();
+  return notebookId ? { notebookId } : {};
 }

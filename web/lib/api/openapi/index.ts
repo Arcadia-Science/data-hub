@@ -28,23 +28,25 @@ export {
   patchInstrumentBody,
 } from "./schemas/instruments";
 export {
+  createNotebookBody,
+  notebook,
+  notebookCreated,
+  notebookListResponse,
+  notebookRunsAdded,
+  notebookRunsBody,
+  notebookRunsRemoved,
+  updateNotebookBody,
+} from "./schemas/notebooks";
+export {
   dispatchNotificationsBody,
   dispatchNotificationsResult,
 } from "./schemas/notifications";
 export {
   attributionsResponse,
-  bulkAddNotebookLinkBody,
-  bulkAddNotebookLinkResult,
-  bulkRemoveNotebookLinksBody,
-  bulkRemoveNotebookLinksResult,
   commentBody,
   commentDeleted,
   commentsListResponse,
-  createNotebookLinkBody,
   createRunBody,
-  notebookLink,
-  notebookLinkDeleted,
-  notebookLinksListResponse,
   patchRunBody,
   reportItemsResponse,
   requestUploadBody,
@@ -54,15 +56,16 @@ export {
   runDeleted,
   runDetail,
   runListResponse,
+  runNotebook,
   runQueuedCancelled,
   runReprocessed,
   runRestored,
   runUpdated,
-  updateNotebookLinkBody,
   uploadAllQueued,
   uploadQueued,
   uploadUrlResponse,
 } from "./schemas/runs";
+export { searchResponse } from "./schemas/search";
 export {
   createWatcherConfigRevisionBody,
   heartbeatBody,

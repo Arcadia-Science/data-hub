@@ -38,10 +38,17 @@ import {
 } from "@/lib/api/instrument-runs";
 import { getInstrumentById } from "@/lib/api/instruments";
 import {
+  getNotebookFilterOptions,
+  type NotebookFilterOption,
+} from "@/lib/api/notebooks";
+import {
   getPreferences,
   listInstrumentSubscriptions,
 } from "@/lib/api/notifications";
-import { parseHasNotebookLinkParam } from "@/lib/api/validators";
+import {
+  parseHasNotebookParam,
+  parseNotebookIdParam,
+} from "@/lib/api/validators";
 import { auth } from "@/lib/auth";
 import {
   hasActiveInstrumentFilters,
@@ -90,6 +97,7 @@ function renderRunsTableVariant(
   filterOptions: InstrumentFilterOptionsByType,
   data: RunRow[],
   instrumentId: string,
+  notebookOptions: NotebookFilterOption[],
   ranByOptions: RanByOption[]
 ) {
   switch (filterOptions.kind) {
@@ -99,6 +107,7 @@ function renderRunsTableVariant(
           data={data}
           filterOptions={filterOptions.options}
           instrumentId={instrumentId}
+          notebookOptions={notebookOptions}
           ranByOptions={ranByOptions}
         />
       );
@@ -108,6 +117,7 @@ function renderRunsTableVariant(
           data={data}
           filterOptions={filterOptions.options}
           instrumentId={instrumentId}
+          notebookOptions={notebookOptions}
           ranByOptions={ranByOptions}
         />
       );
@@ -117,6 +127,7 @@ function renderRunsTableVariant(
           data={data}
           filterOptions={filterOptions.options}
           instrumentId={instrumentId}
+          notebookOptions={notebookOptions}
           ranByOptions={ranByOptions}
         />
       );
@@ -126,6 +137,7 @@ function renderRunsTableVariant(
           data={data}
           filterOptions={filterOptions.options}
           instrumentId={instrumentId}
+          notebookOptions={notebookOptions}
           ranByOptions={ranByOptions}
         />
       );
@@ -135,6 +147,7 @@ function renderRunsTableVariant(
           data={data}
           filterOptions={filterOptions.options}
           instrumentId={instrumentId}
+          notebookOptions={notebookOptions}
           ranByOptions={ranByOptions}
         />
       );
@@ -144,6 +157,7 @@ function renderRunsTableVariant(
           data={data}
           filterOptions={filterOptions.options}
           instrumentId={instrumentId}
+          notebookOptions={notebookOptions}
           ranByOptions={ranByOptions}
         />
       );
@@ -152,6 +166,7 @@ function renderRunsTableVariant(
         <DefaultRunsTable
           data={data}
           instrumentId={instrumentId}
+          notebookOptions={notebookOptions}
           ranByOptions={ranByOptions}
         />
       );
@@ -306,41 +321,44 @@ async function InstrumentRunsSection({
 
   // Paginated runs plus the per-instrument filter options and attribution
   // dropdown options are independent once we know the instrument type.
-  const [runResult, filterOptions, ranByUsers] = await Promise.all([
-    buildRunListQuery({
-      instrumentId,
-      search: filters.search || undefined,
-      dateFrom: filters.date_from ?? undefined,
-      dateTo: filters.date_to ?? undefined,
-      page: filters.page,
-      perPage: filters.per_page,
-      includeDeleted: filters.include_deleted,
-      wavelength: filters.wavelength ?? undefined,
-      measurementMode: filters.measurement_mode ?? undefined,
-      measurementType: filters.measurement_type ?? undefined,
-      captureType: filters.capture_type ?? undefined,
-      imagingMode: filters.imaging_mode ?? undefined,
-      gelWavelength: filters.gel_wavelength ?? undefined,
-      gelColor: filters.gel_color ?? undefined,
-      dyeChannel: filters.dye_channel ?? undefined,
-      hinaChannel: filters.hina_channel ?? undefined,
-      hinaDimension: filters.hina_dimension ?? undefined,
-      hinaSize: filters.hina_size ?? undefined,
-      dpi: filters.dpi ?? undefined,
-      colorMode: filters.color_mode ?? undefined,
-      auntyExperimentType: filters.aunty_experiment_type ?? undefined,
-      auntyAnalysisMode: filters.aunty_analysis_mode ?? undefined,
-      auntyTemperature: filters.aunty_temperature ?? undefined,
-      auntyRampRate: filters.aunty_ramp_rate ?? undefined,
-      ranBy: filters.ran_by ?? undefined,
-      hasNotebookLink: parseHasNotebookLinkParam(filters.has_notebook_link),
-      statuses: filters.status.length > 0 ? filters.status : undefined,
-      sort: filters.sort,
-      order: filters.order,
-    }),
-    getInstrumentFilterOptions(instrument.instrumentType, instrumentId),
-    getRanByFilterOptions(instrumentId),
-  ]);
+  const [runResult, filterOptions, ranByUsers, notebookOptions] =
+    await Promise.all([
+      buildRunListQuery({
+        instrumentId,
+        search: filters.search || undefined,
+        dateFrom: filters.date_from ?? undefined,
+        dateTo: filters.date_to ?? undefined,
+        page: filters.page,
+        perPage: filters.per_page,
+        includeDeleted: filters.include_deleted,
+        wavelength: filters.wavelength ?? undefined,
+        measurementMode: filters.measurement_mode ?? undefined,
+        measurementType: filters.measurement_type ?? undefined,
+        captureType: filters.capture_type ?? undefined,
+        imagingMode: filters.imaging_mode ?? undefined,
+        gelWavelength: filters.gel_wavelength ?? undefined,
+        gelColor: filters.gel_color ?? undefined,
+        dyeChannel: filters.dye_channel ?? undefined,
+        hinaChannel: filters.hina_channel ?? undefined,
+        hinaDimension: filters.hina_dimension ?? undefined,
+        hinaSize: filters.hina_size ?? undefined,
+        dpi: filters.dpi ?? undefined,
+        colorMode: filters.color_mode ?? undefined,
+        auntyExperimentType: filters.aunty_experiment_type ?? undefined,
+        auntyAnalysisMode: filters.aunty_analysis_mode ?? undefined,
+        auntyTemperature: filters.aunty_temperature ?? undefined,
+        auntyRampRate: filters.aunty_ramp_rate ?? undefined,
+        ranBy: filters.ran_by ?? undefined,
+        hasNotebook: parseHasNotebookParam(filters.has_lab_notebook),
+        ...parseNotebookIdParam(filters.lab_notebook_id),
+        statuses: filters.status.length > 0 ? filters.status : undefined,
+        sort: filters.sort,
+        order: filters.order,
+      }),
+      getInstrumentFilterOptions(instrument.instrumentType, instrumentId),
+      getRanByFilterOptions(instrumentId),
+      getNotebookFilterOptions({ instrumentId }),
+    ]);
 
   const hasFilters = hasActiveInstrumentFilters(filters);
 
@@ -373,6 +391,7 @@ async function InstrumentRunsSection({
                 filterOptions,
                 runResult.data,
                 instrumentId,
+                notebookOptions,
                 ranByOptions
               )}
             </InstrumentRunsTableShell>

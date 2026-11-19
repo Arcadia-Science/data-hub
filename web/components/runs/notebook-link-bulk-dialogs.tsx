@@ -6,9 +6,9 @@ import { useId, useState, useTransition } from "react";
 import { toast } from "sonner";
 import type { RunRef } from "@/components/instruments/runs-table/run-selection-provider";
 import {
-  NotebookLinkForm,
-  type NotebookLinkFormValues,
-} from "@/components/runs/notebook-link-form";
+  NotebookPickerForm,
+  type NotebookPickerValues,
+} from "@/components/runs/notebook-picker-form";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -20,24 +20,28 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useReturnFocus } from "@/hooks/use-return-focus";
-import {
-  NOTEBOOK_LINK_BULK_URLS_MAX,
-  notebookUrlKey,
-} from "@/lib/notebook-links/url";
 import { fanOutAttribution } from "@/lib/runs/attribution-requests";
 import {
-  bulkAddNotebookLink,
-  bulkRemoveNotebookLinks,
-  NotebookLinkRequestError,
-} from "@/lib/runs/notebook-link-requests";
+  addRunsSummary,
+  notebooksOfRuns,
+  removeRunsSummary,
+  runsLabel,
+} from "@/lib/runs/notebook-outcomes";
+import {
+  addRunsToPick,
+  type NotebookPick,
+  NotebookRequestError,
+  removeRunsFromNotebook,
+} from "@/lib/runs/notebook-requests";
+import { settleWithConcurrency } from "@/lib/runs/settle-with-concurrency";
+
+// Removing runs from several notebooks sends one request per notebook, this
+// many at a time.
+const REMOVE_REQUEST_CONCURRENCY = 4;
 
 /** The URL without its scheme, which every link shares. */
 function shortUrl(url: string): string {
   return url.replace(/^https?:\/\//, "");
-}
-
-function runs(count: number): string {
-  return `${count} ${count === 1 ? "run" : "runs"}`;
 }
 
 function runKey(run: { instrumentId: string; runId: string }): string {
@@ -45,10 +49,11 @@ function runKey(run: { instrumentId: string; runId: string }): string {
 }
 
 /**
- * Adds one notebook link to every selected run. Runs that already link to
- * the page are skipped, and the dialog says how many before you save.
+ * Adds every selected run to one notebook, picked by name or by a pasted
+ * link. Runs already in the notebook are skipped, and the picker says how
+ * many before you save.
  */
-export function AddNotebookLinkDialog({
+export function AddToNotebookDialog({
   open,
   onOpenChange,
   runRefs,
@@ -63,55 +68,34 @@ export function AddNotebookLinkDialog({
   const returnFocus = useReturnFocus();
   const count = runRefs.length;
 
-  function alreadyLinked(url: string): number {
-    const key = notebookUrlKey(url);
-    if (!key) {
-      return 0;
-    }
-    return runRefs.filter((ref) =>
-      ref.notebookLinks.some((link) => link.urlKey === key)
-    ).length;
-  }
-
   async function handleSave(
-    values: NotebookLinkFormValues
+    pick: NotebookPick,
+    values: NotebookPickerValues
   ): Promise<string | null> {
-    let result: Awaited<ReturnType<typeof bulkAddNotebookLink>>;
+    let saved: Awaited<ReturnType<typeof addRunsToPick>>;
     try {
-      result = await bulkAddNotebookLink(runRefs, {
-        url: values.url,
-        label: values.label,
-      });
+      saved = await addRunsToPick(pick, runRefs);
     } catch (error) {
-      return error instanceof NotebookLinkRequestError && error.status === 400
+      return error instanceof NotebookRequestError &&
+        (error.status === 400 || error.status === 409)
         ? error.message
-        : "Couldn't add the link. Try again?";
+        : "Couldn't add the runs. Try again?";
     }
 
-    const { added, already_linked, limit_reached, not_found, run_deleted } =
-      result.counts;
-    const parts = [`Added to ${runs(added)}.`];
-    if (already_linked > 0) {
-      parts.push(`${runs(already_linked)} already had it.`);
-    }
-    if (limit_reached > 0) {
-      parts.push(`${runs(limit_reached)} already had the most links allowed.`);
-    }
-    if (not_found + run_deleted > 0) {
-      parts.push(`${runs(not_found + run_deleted)} couldn't be changed.`);
-    }
-    const message = parts.join(" ");
-    if (limit_reached + not_found + run_deleted > 0) {
-      toast.warning(message);
+    const { notebook, result } = saved;
+    const summary = addRunsSummary(notebook.name, result.counts);
+    if (summary.tone === "warning") {
+      toast.warning(summary.message);
     } else {
-      toast.success(message);
+      toast.success(summary.message);
     }
 
     if (values.claim) {
-      const linked = new Set(
+      const inNotebook = new Set(
         result.results
           .filter(
-            (r) => r.outcome === "added" || r.outcome === "already_linked"
+            (r) =>
+              r.outcome === "added" || r.outcome === "already_in_lab_notebook"
           )
           .map((r) =>
             runKey({ instrumentId: r.instrument_id, runId: r.run_id })
@@ -119,11 +103,11 @@ export function AddNotebookLinkDialog({
       );
       const { failed } = await fanOutAttribution(
         "PUT",
-        runRefs.filter((ref) => linked.has(runKey(ref)))
+        runRefs.filter((ref) => inNotebook.has(runKey(ref)))
       );
       if (failed > 0) {
         toast.error(
-          `Couldn't mark you as having run ${runs(failed)}. Try "I ran these" again.`
+          `Couldn't mark you as having run ${runsLabel(failed)}. Try "I ran these" again.`
         );
       }
     }
@@ -138,26 +122,20 @@ export function AddNotebookLinkDialog({
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent {...returnFocus}>
         <DialogHeader>
-          <DialogTitle>Add a notebook link to {runs(count)}</DialogTitle>
+          <DialogTitle>Add {runsLabel(count)} to a lab notebook</DialogTitle>
           <DialogDescription>
-            Runs that already link to this page are skipped.
+            Find a lab notebook by name, or paste a link to its page. Runs
+            already in the lab notebook are skipped.
           </DialogDescription>
         </DialogHeader>
         {open ? (
-          <NotebookLinkForm
+          <NotebookPickerForm
             claimLabel={count === 1 ? "I ran this run" : "I ran these runs"}
-            note={(url) => {
-              const existing = alreadyLinked(url);
-              return existing > 0 ? (
-                <p className="rounded-md bg-muted px-3 py-2 text-muted-foreground text-sm">
-                  {existing} of the {runs(count)} already{" "}
-                  {existing === 1 ? "has" : "have"} this link.
-                </p>
-              ) : null;
-            }}
             onCancel={() => onOpenChange(false)}
             onSave={handleSave}
-            variant="add"
+            runNotebookIds={runRefs.map((ref) =>
+              ref.notebooks.map((notebook) => notebook.id)
+            )}
           />
         ) : null}
       </DialogContent>
@@ -165,38 +143,11 @@ export function AddNotebookLinkDialog({
   );
 }
 
-interface DistinctLink {
-  displayName: string;
-  runCount: number;
-  url: string;
-  urlKey: string;
-}
-
-function distinctLinks(runRefs: RunRef[]): DistinctLink[] {
-  const byKey = new Map<string, DistinctLink>();
-  for (const ref of runRefs) {
-    for (const link of ref.notebookLinks) {
-      const entry = byKey.get(link.urlKey);
-      if (entry) {
-        entry.runCount += 1;
-      } else {
-        byKey.set(link.urlKey, {
-          urlKey: link.urlKey,
-          url: link.url,
-          displayName: link.displayName,
-          runCount: 1,
-        });
-      }
-    }
-  }
-  return [...byKey.values()].sort((a, b) => b.runCount - a.runCount);
-}
-
 /**
- * Lists the distinct notebook links on the selected runs, with how many runs
- * have each, and removes the ones you tick from every selected run.
+ * Lists the notebooks the selected runs are in, with how many of the runs
+ * are in each, and takes the selected runs out of the ones you tick.
  */
-export function RemoveNotebookLinksDialog({
+export function RemoveFromNotebooksDialog({
   open,
   onOpenChange,
   runRefs,
@@ -213,20 +164,19 @@ export function RemoveNotebookLinksDialog({
   const [chosen, setChosen] = useState<ReadonlySet<string>>(new Set());
   const [isPending, startTransition] = useTransition();
 
-  const links = distinctLinks(runRefs);
+  const notebooks = notebooksOfRuns(runRefs);
   const count = runRefs.length;
   const affected = runRefs.filter((ref) =>
-    ref.notebookLinks.some((link) => chosen.has(link.urlKey))
+    ref.notebooks.some((notebook) => chosen.has(notebook.id))
   ).length;
-  const tooMany = chosen.size > NOTEBOOK_LINK_BULK_URLS_MAX;
 
-  function toggle(urlKey: string, checked: boolean) {
+  function toggle(notebookId: string, checked: boolean) {
     setChosen((prev) => {
       const next = new Set(prev);
       if (checked) {
-        next.add(urlKey);
+        next.add(notebookId);
       } else {
-        next.delete(urlKey);
+        next.delete(notebookId);
       }
       return next;
     });
@@ -243,16 +193,48 @@ export function RemoveNotebookLinksDialog({
   }
 
   function handleRemove() {
-    const urls = links
-      .filter((link) => chosen.has(link.urlKey))
-      .map((link) => link.url);
+    const targets = notebooks.filter((notebook) => chosen.has(notebook.id));
     startTransition(async () => {
-      try {
-        const result = await bulkRemoveNotebookLinks(runRefs, urls);
-        toast.success(`Removed links from ${runs(result.counts.removed)}.`);
-      } catch {
-        toast.error("Couldn't remove the links. Try again?");
+      // Each notebook gets only the selected runs that are in it.
+      const results = await settleWithConcurrency(
+        targets,
+        REMOVE_REQUEST_CONCURRENCY,
+        (notebook) =>
+          removeRunsFromNotebook(
+            notebook.id,
+            runRefs.filter((ref) =>
+              ref.notebooks.some((entry) => entry.id === notebook.id)
+            )
+          )
+      );
+      const removedRuns = new Set<string>();
+      let failedNotebooks = 0;
+      for (const settled of results) {
+        if (settled.status === "rejected") {
+          failedNotebooks += 1;
+          continue;
+        }
+        for (const r of settled.value.results) {
+          if (r.outcome === "removed") {
+            removedRuns.add(
+              runKey({ instrumentId: r.instrument_id, runId: r.run_id })
+            );
+          }
+        }
+      }
+      const summary = removeRunsSummary({
+        failedNotebooks,
+        notebookNames: targets.map((notebook) => notebook.name),
+        removedRuns: removedRuns.size,
+      });
+      if (summary.tone === "error") {
+        toast.error(summary.message);
         return;
+      }
+      if (summary.tone === "warning") {
+        toast.warning(summary.message);
+      } else {
+        toast.success(summary.message);
       }
       setChosen(new Set());
       onOpenChange(false);
@@ -265,46 +247,45 @@ export function RemoveNotebookLinksDialog({
     <Dialog onOpenChange={handleOpenChange} open={open}>
       <DialogContent {...returnFocus}>
         <DialogHeader>
-          <DialogTitle>Remove notebook links from {runs(count)}</DialogTitle>
+          <DialogTitle>
+            Remove {runsLabel(count)} from lab notebooks
+          </DialogTitle>
           <DialogDescription>
-            Choose the links to remove. Other links stay, and the pages
-            themselves aren't changed.
+            Choose the lab notebooks to take the selected runs out of. Their
+            other lab notebooks stay, and the lab notebooks themselves aren't
+            changed.
           </DialogDescription>
         </DialogHeader>
         <ul className="flex max-h-72 flex-col overflow-y-auto">
-          {links.map((link, index) => {
+          {notebooks.map((notebook, index) => {
             const checkboxId = `${id}-${index}`;
             return (
               <li
                 className="flex items-start gap-3 border-t py-2.5 first:border-t-0"
-                key={link.urlKey}
+                key={notebook.id}
               >
                 <Checkbox
-                  checked={chosen.has(link.urlKey)}
+                  checked={chosen.has(notebook.id)}
                   className="mt-0.5"
                   disabled={isPending}
                   id={checkboxId}
                   onCheckedChange={(checked) =>
-                    toggle(link.urlKey, checked === true)
+                    toggle(notebook.id, checked === true)
                   }
                 />
                 <label className="flex min-w-0 flex-col" htmlFor={checkboxId}>
                   <span className="truncate font-medium text-sm">
-                    {link.displayName}
+                    {notebook.name}
                   </span>
                   <span className="truncate text-muted-foreground text-xs">
-                    {shortUrl(link.url)} · on {link.runCount} of {runs(count)}
+                    {shortUrl(notebook.url)} · has {notebook.runCount} of{" "}
+                    {runsLabel(count)}
                   </span>
                 </label>
               </li>
             );
           })}
         </ul>
-        {tooMany ? (
-          <p className="text-destructive text-sm">
-            Remove at most {NOTEBOOK_LINK_BULK_URLS_MAX} links at a time.
-          </p>
-        ) : null}
         <DialogFooter>
           <Button
             disabled={isPending}
@@ -315,7 +296,7 @@ export function RemoveNotebookLinksDialog({
             Cancel
           </Button>
           <Button
-            disabled={isPending || chosen.size === 0 || tooMany}
+            disabled={isPending || chosen.size === 0}
             onClick={handleRemove}
             type="button"
             variant="destructive"
@@ -323,7 +304,7 @@ export function RemoveNotebookLinksDialog({
             {isPending ? (
               <Loader2 className="animate-spin" data-icon="inline-start" />
             ) : null}
-            {affected > 0 ? `Remove from ${runs(affected)}` : "Remove"}
+            {affected > 0 ? `Remove ${runsLabel(affected)}` : "Remove"}
           </Button>
         </DialogFooter>
       </DialogContent>

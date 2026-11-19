@@ -7,6 +7,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import type { NotebookFilterOption } from "@/lib/api/notebooks";
 import { runRowToRef } from "@/lib/runs/row-actions";
 import { cn, formatBytes } from "@/lib/utils";
 
@@ -16,10 +17,8 @@ import {
   type FilterOption,
   type InstrumentFilterParamKey,
 } from "./filterable-column-header";
-import {
-  NOTEBOOK_LINK_FILTER_OPTIONS,
-  NotebookLinksCell,
-} from "./notebook-links-cell";
+import { NotebookLinkColumnHeader } from "./notebook-link-column-header";
+import { NotebookLinksCell } from "./notebook-links-cell";
 import { RanByCell } from "./ran-by-cell";
 import { RawFileColumnHeader } from "./raw-file-column-header";
 import { RunIdCell } from "./run-id-cell";
@@ -42,18 +41,20 @@ export interface MetadataColumn {
 /**
  * The runs table every instrument shares: a checkbox, the run ID, file count
  * and size, then the instrument's own metadata columns, then who ran it, its
- * lab notebook links, and when. An instrument's table passes only its metadata columns, so a new
+ * lab notebooks, and when. An instrument's table passes only its metadata columns, so a new
  * shared column or a fix to row selection happens here once.
  */
 export function RunRowsTable({
   columns = [],
   data,
   instrumentId,
+  notebookOptions,
   ranByOptions,
 }: {
   columns?: MetadataColumn[];
   data: RunRow[];
   instrumentId: string;
+  notebookOptions: NotebookFilterOption[];
   ranByOptions: { value: string; label: string }[];
 }) {
   const runRefs = data.map(runRowToRef);
@@ -85,11 +86,7 @@ export function RunRowsTable({
             />
           </TableHead>
           <TableHead>
-            <FilterableColumnHeader
-              label="Lab Notebook"
-              options={NOTEBOOK_LINK_FILTER_OPTIONS}
-              paramKey="has_notebook_link"
-            />
+            <NotebookLinkColumnHeader options={notebookOptions} />
           </TableHead>
           <RunTimeHeads />
         </TableRow>
@@ -127,7 +124,7 @@ export function RunRowsTable({
                 />
               </TableCell>
               <TableCell>
-                <NotebookLinksCell links={row.notebook_links} />
+                <NotebookLinksCell notebooks={row.lab_notebooks} />
               </TableCell>
               <RunTimeCells row={row} />
             </TableRow>

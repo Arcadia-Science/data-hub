@@ -19,11 +19,16 @@ describe("MCP server instructions", () => {
     expect(MCP_SERVER_INSTRUCTIONS).toContain("search_changelog");
   });
 
-  it("asks clients to confirm before reprocessing or cancelling queued files", () => {
+  it("asks clients to confirm before deleting a lab notebook, reprocessing, or cancelling queued files", () => {
     const oneLine = MCP_SERVER_INSTRUCTIONS.replace(/\s+/g, " ");
     expect(oneLine).toContain(
-      "Confirm before deleting, dismissing, unclaiming, reprocessing, cancelling queued files, or changing a watcher's config."
+      "Confirm before deleting (a run, comment, or lab notebook), dismissing, unclaiming, reprocessing, cancelling queued files, or changing a watcher's config."
     );
+  });
+
+  it("sends lab notebook questions to the lab notebook tools", () => {
+    expect(MCP_SERVER_INSTRUCTIONS).toContain("list_lab_notebooks");
+    expect(MCP_SERVER_INSTRUCTIONS).toContain("labNotebookId");
   });
 
   it("names the feedback tools the server registers", () => {

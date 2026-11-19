@@ -46,7 +46,7 @@ Fetch the OpenAPI document (no auth required):
 curl https://datahub.example.com/api/v1/openapi.json
 ```
 
-The document covers the integrator surface: instruments, runs, comments, lab notebook links, files, watchers, archive jobs, search, and `POST /notifications/dispatch`. Routes that only the dashboard uses are left out: `/tokens`, `/users`, `/feedback`, `/settings/*`, and the notification inbox. The MCP transport is documented separately.
+The document covers the integrator surface: instruments, runs, comments, lab notebooks, files, watchers, archive jobs, search, and `POST /notifications/dispatch`. Routes that only the dashboard uses are left out: `/tokens`, `/users`, `/feedback`, `/settings/*`, and the notification inbox. The MCP transport is documented separately.
 
 ## Instruments and their watcher [#instrument-connection]
 
@@ -66,7 +66,7 @@ A token acts under its own name, not as a person, so responses name the token wh
 
 - A comment posted by a token has `user: null` and a `token` object with the token’s `id` and `name`. A comment posted by a person has `token: null`.
 - A run deleted by a token has `deleted_by_token` set, alongside `deleted_at`.
-- A lab notebook link added or last edited by a token has `created_by_token` or `updated_by_token` set, and `created_by` or `updated_by` null.
+- A lab notebook created, last edited, or deleted by a token has `created_by_token`, `updated_by_token`, or `deleted_by_token` set, and the matching person field null. A run added to a lab notebook by a token has `linked_by_token` set and `linked_by` null.
 
 Read both fields when you display who did something. See [How a token acts](/docs/manage-tokens#how-a-token-acts).
 
@@ -85,7 +85,7 @@ Responses include pagination metadata such as `page`, `per_page`, `total`, and `
 
 Run report items page by index instead, with `offset` and `limit` (max 200). Their responses return `offset`, `limit`, and `total`.
 
-Run search also supports filters (instrument, date range, attribution via `ranBy`, and instrument-specific metadata). Exact query parameters are on each generated operation page in the sidebar under this **API** section.
+Run search also supports filters (instrument, date range, attribution via `ran_by`, lab notebooks, and instrument-specific metadata). Exact query parameters are on each generated operation page in the sidebar under this **API** section.
 
 ## Error responses [#error-responses]
 

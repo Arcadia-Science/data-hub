@@ -24,22 +24,23 @@ const searchRunResultSchema = z.object({
   createdAt: isoDateTime,
   fileCount: z.number().int(),
   totalSizeBytes: z.number(),
-  matchReason: z.enum([
-    "run_id",
-    "notebook_link",
-    "file",
-    "instrument",
-    "ran_by",
-  ]),
+  matchReason: z.enum(["run_id", "file", "instrument", "ran_by"]),
   matchedFilename: z.string().nullable(),
-  // Set when `matchReason` is "notebook_link".
-  matchedNotebookLink: z
-    .object({
-      url: z.string(),
-      label: z.string().nullable(),
-      displayName: z.string(),
-    })
-    .nullable(),
+});
+
+const searchNotebookResultSchema = z.object({
+  type: z.literal("lab_notebook"),
+  id: z.string(),
+  name: z.string(),
+  url: z
+    .string()
+    .describe("The lab notebook's own page, such as its Notion page."),
+  runCount: z
+    .number()
+    .int()
+    .describe(
+      "Live runs in the lab notebook, not held to the result cap. List them with search_runs labNotebookId."
+    ),
 });
 
 const searchFileResultSchema = z.object({
@@ -96,12 +97,14 @@ const searchCommentResultSchema = z.object({
 /** Grouped result from `globalSearch` (dates already ISO strings). */
 export const globalSearchOutputSchema = z.object({
   runs: z.array(searchRunResultSchema),
+  lab_notebooks: z.array(searchNotebookResultSchema),
   files: z.array(searchFileResultSchema),
   instruments: z.array(searchInstrumentResultSchema),
   users: z.array(searchUserResultSchema),
   comments: z.array(searchCommentResultSchema),
   counts: z.object({
     runs: z.number().int(),
+    lab_notebooks: z.number().int(),
     files: z.number().int(),
     instruments: z.number().int(),
     users: z.number().int(),

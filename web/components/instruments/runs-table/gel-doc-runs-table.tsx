@@ -6,6 +6,7 @@ import {
   TruncatedBadges,
 } from "@/components/runs/metadata-badges";
 import type { GelDocFilterOptions } from "@/lib/api/instrument-runs";
+import type { NotebookFilterOption } from "@/lib/api/notebooks";
 import {
   buildWavelengthColorMap,
   CAPTURE_TYPE_COLORS,
@@ -19,11 +20,13 @@ export function GelDocRunsTable({
   data,
   instrumentId,
   filterOptions,
+  notebookOptions,
   ranByOptions,
 }: {
   data: RunRow[];
   instrumentId: string;
   filterOptions: GelDocFilterOptions;
+  notebookOptions: NotebookFilterOption[];
   ranByOptions: { value: string; label: string }[];
 }) {
   const allWavelengths = data.flatMap((row) =>
@@ -105,6 +108,7 @@ export function GelDocRunsTable({
       columns={columns}
       data={data}
       instrumentId={instrumentId}
+      notebookOptions={notebookOptions}
       ranByOptions={ranByOptions}
     />
   );

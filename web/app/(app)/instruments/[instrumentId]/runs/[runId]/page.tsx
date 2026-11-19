@@ -27,11 +27,11 @@ import {
   type RunDetail,
 } from "@/lib/api/instrument-runs";
 import { getInstrumentById } from "@/lib/api/instruments";
+import { runNotebookToWire } from "@/lib/api/notebook-wire";
+import { listNotebooksForRun } from "@/lib/api/notebooks";
 import { getReportItemsPage } from "@/lib/api/report-items";
 import { listCommentsForRun } from "@/lib/api/run-comments";
 import { readRunIdParam } from "@/lib/api/run-id-param";
-import { notebookLinkToWire } from "@/lib/api/run-notebook-link-wire";
-import { listNotebookLinksForRun } from "@/lib/api/run-notebook-links";
 import { auth } from "@/lib/auth";
 import { formatDateLong } from "@/lib/date";
 import {
@@ -196,7 +196,7 @@ async function RunDetailContentBody({
     wellData,
     auntyPlate,
     qpcrMeltingPlate,
-    notebookLinks,
+    notebooks,
   ] = await Promise.all([
     buildRunFilesQuery(run.id, {
       page: filters.files_page,
@@ -229,7 +229,7 @@ async function RunDetailContentBody({
     reportFilesPromise.then((rf) =>
       isQpcr ? getQpcrMeltingPlateData(rf) : Promise.resolve(null)
     ),
-    listNotebookLinksForRun(run.id),
+    listNotebooksForRun(run.id),
   ]);
 
   // The upload buttons and the offline notice follow the instrument badge, so
@@ -276,13 +276,13 @@ async function RunDetailContentBody({
             filesDownloadableCount={filesPage.downloadableCount}
             filesPagination={filesPage.pagination}
             instrumentId={instrumentId}
-            notebookLinksSlot={
+            notebooksSlot={
               <RunNotebookLinksSection
                 attributions={run.attributions}
                 instrumentId={run.instrumentId}
                 isDeleted={run.deletedAt !== null}
                 key={`${run.instrumentId}:${run.runId}`}
-                links={notebookLinks.map(notebookLinkToWire)}
+                notebooks={notebooks.map(runNotebookToWire)}
                 runId={run.runId}
               />
             }

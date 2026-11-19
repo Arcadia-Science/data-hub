@@ -17,11 +17,11 @@ call search_docs, then read_doc on the best match, and link the page in your
 answer. Questions about what changed, or when: call search_changelog and link
 the entries. Leave out its query to list changes by date.
 
-Writes need the write scope and otherwise fail with "Token is missing required
-scope: write"; ask the user to re-authorize instead of retrying. Confirm before
-deleting, dismissing, unclaiming, reprocessing, cancelling queued files, or
-changing a watcher's config.
-Claims, comments, and notebook links always act as the signed-in user.
+Writes act as the signed-in user and need the write scope, or fail with
+"Token is missing required scope: write"; ask the user to re-authorize
+instead of retrying. Confirm before deleting (a run, comment, or lab notebook),
+dismissing, unclaiming, reprocessing, cancelling queued files, or changing a
+watcher's config.
 
 Dates: dateFrom/dateTo are inclusive UTC days, matched on a run's acquired
 time, or its created time when that is missing. The dashboard uses the
@@ -33,8 +33,9 @@ Upload-failed files say why in errorMessage (list_run_files); fix that on
 the instrument PC (often a renamed folder) before requesting them again.
 
 Tool routing:
-- global_search for filenames, instrument names, users, comments, or a
-  pasted notebook URL.
+- global_search for filenames, instrument names, users, or comments.
+- Lab notebooks: list_lab_notebooks by name or link, then search_runs
+  labNotebookId.
 - search_runs for date, status, or metadata filters; ranBy="me" for my runs.
 - Metadata filter values: get_instrument_filter_options.
 - get_run_report for results; get_run is metadata only.

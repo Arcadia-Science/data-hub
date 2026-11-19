@@ -9,6 +9,7 @@ import {
   Image as ImageIcon,
   type LucideIcon,
   MessageSquare,
+  NotebookText,
 } from "lucide-react";
 import { InstrumentBadgePill } from "@/components/instruments/instrument-badge";
 import { Highlight } from "@/components/search/highlight";
@@ -19,6 +20,7 @@ import type {
   SearchCommentResult,
   SearchFileResult,
   SearchInstrumentResult,
+  SearchNotebookResult,
   SearchRunResult,
   SearchUserResult,
 } from "@/lib/api/search";
@@ -125,15 +127,25 @@ export function SearchRunRow({
           </span>
         </span>
       ) : null}
-      {result.matchReason === "notebook_link" && result.matchedNotebookLink ? (
-        <span className="block truncate text-muted-foreground text-xs">
-          Lab notebook:{" "}
-          <Highlight
-            query={query}
-            text={result.matchedNotebookLink.displayName}
-          />
-        </span>
-      ) : null}
+    </ResultRowShell>
+  );
+}
+
+export function SearchNotebookRow({
+  result,
+  query,
+}: {
+  result: SearchNotebookResult;
+  query: string;
+}) {
+  return (
+    <ResultRowShell
+      leading={<ResultRowIcon icon={NotebookText} />}
+      stat={`${result.runCount} ${result.runCount === 1 ? "run" : "runs"}`}
+    >
+      <span className="block truncate font-medium text-sm">
+        <Highlight query={query} text={result.name} />
+      </span>
     </ResultRowShell>
   );
 }

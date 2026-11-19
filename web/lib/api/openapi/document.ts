@@ -3,6 +3,7 @@ import { registry } from "./registry";
 import "./paths/meta";
 import "./paths/instruments";
 import "./paths/runs";
+import "./paths/notebooks";
 import "./paths/files";
 import "./paths/watchers";
 import "./paths/archive";
@@ -15,6 +16,7 @@ const DOCUMENT_TAGS = [
     name: "Runs",
     description: "Instrument runs, comments, attributions, uploads, and search",
   },
+  { name: "Lab Notebooks", description: "Lab notebooks and the runs in them" },
   { name: "Files", description: "Run files, downloads, and reprocessing" },
   { name: "Watchers", description: "Watcher registration and telemetry" },
   { name: "Archive", description: "Run archive builds" },

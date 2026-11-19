@@ -53,7 +53,7 @@ const {
     total_size_bytes: 1234,
     error_messages: [] as string[],
     comment_count: 0,
-    notebook_links: [],
+    lab_notebooks: [],
     attributions: [] as Array<{
       userId: string;
       displayName: string;
@@ -389,12 +389,14 @@ vi.mock("@/lib/api/dashboard", () => ({
 vi.mock("@/lib/api/search", () => ({
   globalSearch: vi.fn().mockResolvedValue({
     runs: [],
+    lab_notebooks: [],
     files: [],
     instruments: [],
     users: [],
     comments: [],
     counts: {
       runs: 0,
+      lab_notebooks: 0,
       files: 0,
       instruments: 0,
       users: 0,
@@ -679,12 +681,66 @@ vi.mock("@/lib/api/run-comments", () => ({
   }),
 }));
 
-vi.mock("@/lib/api/run-notebook-links", () => ({
-  listNotebookLinksForRun: vi.fn().mockResolvedValue([]),
-  bulkAddNotebookLink: vi.fn(),
-  bulkRemoveNotebookLinks: vi.fn(),
-  updateNotebookLink: vi.fn(),
-}));
+vi.mock("@/lib/api/notebooks", () => {
+  const notebook = {
+    id: "33333333-3333-4333-a333-333333333333",
+    url: "https://example.com/eln/growth",
+    urlKey: "example.com/eln/growth",
+    name: "Growth curve method",
+    description: null,
+    owner: {
+      userId: "u-1",
+      displayName: "Alice",
+      initials: "A",
+      avatarUrl: null,
+    },
+    runCount: 2,
+    instrumentCount: 1,
+    lastRunAt: new Date("2025-01-01T00:00:00.000Z"),
+    createdAt: new Date("2025-01-01T00:00:00.000Z"),
+    createdBy: null,
+    updatedAt: new Date("2025-01-01T00:00:00.000Z"),
+    updatedBy: {
+      kind: "token",
+      token: { id: "t-1", name: "Lab script", revoked: false },
+    },
+    deletedAt: null,
+    deletedBy: null,
+  };
+  return {
+    ADD_RUN_OUTCOMES: [
+      "added",
+      "already_in_lab_notebook",
+      "run_deleted",
+      "limit_reached",
+      "not_found",
+    ],
+    REMOVE_RUN_OUTCOMES: [
+      "removed",
+      "not_in_lab_notebook",
+      "run_deleted",
+      "not_found",
+    ],
+    listNotebooksForRun: vi.fn().mockResolvedValue([]),
+    listNotebooks: vi.fn().mockResolvedValue({
+      notebooks: [notebook],
+      total: 1,
+      page: 1,
+      perPage: 20,
+    }),
+    getNotebook: vi
+      .fn()
+      .mockImplementation((id: string) =>
+        id === notebook.id ? notebook : null
+      ),
+    createNotebook: vi.fn(),
+    updateNotebook: vi.fn(),
+    deleteNotebook: vi.fn(),
+    restoreNotebook: vi.fn(),
+    addRunsToNotebook: vi.fn(),
+    removeRunsFromNotebook: vi.fn(),
+  };
+});
 
 vi.mock("@/lib/api/notifications", () => ({
   notifyComment: vi.fn().mockResolvedValue(undefined),
@@ -789,9 +845,12 @@ describe("MCP Protocol (in-memory)", () => {
     "dismiss_file",
     "send_feedback",
     "update_watcher_config",
-    "add_notebook_link",
-    "update_notebook_link",
-    "remove_notebook_link",
+    "create_lab_notebook",
+    "update_lab_notebook",
+    "delete_lab_notebook",
+    "restore_lab_notebook",
+    "add_runs_to_lab_notebook",
+    "remove_runs_from_lab_notebook",
   ]);
 
   it("registers all expected tools", async () => {
@@ -930,14 +989,36 @@ describe("MCP Protocol (in-memory)", () => {
     expect(searchRuns?.inputSchema.properties).toHaveProperty(
       "auntyExperimentType"
     );
+    expect(searchRuns?.inputSchema.properties).toHaveProperty("hasLabNotebook");
+    expect(searchRuns?.inputSchema.properties).toHaveProperty("labNotebookId");
+    expect(searchRuns?.inputSchema.properties).not.toHaveProperty(
+      "notebookLinkName"
+    );
+
+    // Notebook writes act as the signed-in user, so none takes a user id.
+    // ownerId names who the notebook belongs to, not who is writing.
+    for (const name of [
+      "create_lab_notebook",
+      "update_lab_notebook",
+      "delete_lab_notebook",
+      "restore_lab_notebook",
+      "add_runs_to_lab_notebook",
+      "remove_runs_from_lab_notebook",
+    ]) {
+      const tool = tools.find((t) => t.name === name);
+      expect(tool?.inputSchema.properties, name).not.toHaveProperty("userId");
+    }
 
     const globalSearch = tools.find((t) => t.name === "global_search");
     expect(globalSearch?.inputSchema.properties).toHaveProperty("query");
+    expect(globalSearch?.inputSchema.properties?.scope).toMatchObject({
+      enum: expect.arrayContaining(["lab_notebooks"]),
+    });
   });
 
   it("every registered tool advertises outputSchema", async () => {
     const { tools } = await client.listTools();
-    expect(tools).toHaveLength(45);
+    expect(tools).toHaveLength(50);
     for (const tool of tools) {
       const schema = tool.outputSchema as
         | { type?: string; oneOf?: unknown; anyOf?: unknown }
@@ -1125,6 +1206,36 @@ describe("MCP Protocol (in-memory)", () => {
     );
   });
 
+  it("search_runs forwards the lab notebook filters", async () => {
+    const { buildRunListQuery } = await import("@/lib/api/instrument-runs");
+    vi.mocked(buildRunListQuery).mockClear();
+    await client.callTool({
+      name: "search_runs",
+      arguments: {
+        hasLabNotebook: true,
+        labNotebookId: " 33333333-3333-4333-a333-333333333333 ",
+      },
+    });
+    expect(buildRunListQuery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        hasNotebook: true,
+        notebookId: "33333333-3333-4333-a333-333333333333",
+      })
+    );
+  });
+
+  it("search_runs ignores a blank labNotebookId", async () => {
+    const { buildRunListQuery } = await import("@/lib/api/instrument-runs");
+    vi.mocked(buildRunListQuery).mockClear();
+    await client.callTool({
+      name: "search_runs",
+      arguments: { labNotebookId: "  " },
+    });
+    const filters = vi.mocked(buildRunListQuery).mock.calls[0]?.[0];
+    expect(filters).toBeDefined();
+    expect(filters).not.toHaveProperty("notebookId");
+  });
+
   it('search_runs rejects ranBy="me" without auth', async () => {
     const result = await client.callTool({
       name: "search_runs",
@@ -1146,6 +1257,7 @@ describe("MCP Protocol (in-memory)", () => {
       counts: { total: number };
     };
     expect(parsed).toHaveProperty("runs");
+    expect(parsed).toHaveProperty("lab_notebooks");
     expect(parsed).toHaveProperty("files");
     expect(parsed).toHaveProperty("instruments");
     expect(parsed).toHaveProperty("users");
@@ -2038,6 +2150,118 @@ describe("MCP Protocol (in-memory)", () => {
     expect(parsed).toEqual({
       attributors: [{ userId: "u-1", displayName: "Alice" }],
     });
+    expectStructuredMatchesText(result);
+  });
+
+  it("list_lab_notebooks returns lab notebooks in the REST shape with pagination", async () => {
+    const { listNotebooks } = await import("@/lib/api/notebooks");
+    vi.mocked(listNotebooks).mockClear();
+    const result = await client.callTool({
+      name: "list_lab_notebooks",
+      arguments: { query: "growth", sort: "name" },
+    });
+    expect(result.isError).toBeFalsy();
+    expect(listNotebooks).toHaveBeenCalledWith(
+      expect.objectContaining({ query: "growth", sort: "name", perPage: 20 })
+    );
+    const parsed = parseText(result.content) as {
+      data: Record<string, unknown>[];
+      pagination: unknown;
+    };
+    expect(parsed.data[0]).toMatchObject({
+      id: "33333333-3333-4333-a333-333333333333",
+      name: "Growth curve method",
+      run_count: 2,
+      owner: { id: "u-1", displayName: "Alice" },
+      updated_by: null,
+      updated_by_token: { id: "t-1", name: "Lab script" },
+    });
+    expect(parsed.pagination).toEqual({
+      page: 1,
+      per_page: 20,
+      total: 1,
+      total_pages: 1,
+    });
+    expectStructuredMatchesText(result);
+  });
+
+  it('list_lab_notebooks rejects ownerId="me" without auth', async () => {
+    const result = await client.callTool({
+      name: "list_lab_notebooks",
+      arguments: { ownerId: "me" },
+    });
+    expect(result.isError).toBe(true);
+    const text = (result.content as Array<{ type: string; text: string }>)[0]
+      ?.text;
+    expect(text).toContain('ownerId="me"');
+  });
+
+  it("get_lab_notebook returns one lab notebook, or an error when there is none", async () => {
+    const found = await client.callTool({
+      name: "get_lab_notebook",
+      arguments: { labNotebookId: "33333333-3333-4333-a333-333333333333" },
+    });
+    expect(found.isError).toBeFalsy();
+    expect(parseText(found.content)).toMatchObject({
+      name: "Growth curve method",
+      deleted_at: null,
+    });
+    expectStructuredMatchesText(found);
+
+    const missing = await client.callTool({
+      name: "get_lab_notebook",
+      arguments: { labNotebookId: "not-a-notebook" },
+    });
+    expect(missing.isError).toBe(true);
+    const text = (missing.content as Array<{ type: string; text: string }>)[0]
+      ?.text;
+    expect(text).toContain("not found");
+  });
+
+  it("get_run lists the run's lab notebooks", async () => {
+    const { listNotebooksForRun } = await import("@/lib/api/notebooks");
+    vi.mocked(listNotebooksForRun).mockResolvedValueOnce([
+      {
+        id: "33333333-3333-4333-a333-333333333333",
+        runId: MOCK_RUN_UUID_1,
+        name: "Growth curve method",
+        url: "https://example.com/eln/growth",
+        urlKey: "example.com/eln/growth",
+        linkedAt: new Date("2025-01-02T00:00:00.000Z"),
+        linkedBy: {
+          kind: "user",
+          user: {
+            userId: "u-1",
+            displayName: "Alice",
+            initials: "A",
+            avatarUrl: null,
+          },
+        },
+      },
+    ]);
+    const result = await client.callTool({
+      name: "get_run",
+      arguments: { instrumentId: "test-plate-reader", runId: "run-1" },
+    });
+    expect(result.isError).toBeFalsy();
+    const parsed = parseText(result.content) as Record<string, unknown>;
+    expect(parsed).not.toHaveProperty("notebookLinks");
+    expect(parsed.labNotebooks).toEqual([
+      {
+        id: "33333333-3333-4333-a333-333333333333",
+        name: "Growth curve method",
+        url: "https://example.com/eln/growth",
+        url_key: "example.com/eln/growth",
+        linked_at: "2025-01-02T00:00:00.000Z",
+        linked_by: {
+          id: "u-1",
+          displayName: "Alice",
+          initials: "A",
+          avatarUrl: null,
+        },
+        linked_by_token: null,
+      },
+    ]);
     expectStructuredMatchesText(result);
   });
 

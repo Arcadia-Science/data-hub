@@ -6,6 +6,7 @@ import {
   TruncatedBadges,
 } from "@/components/runs/metadata-badges";
 import type { PlateReaderFilterOptions } from "@/lib/api/instrument-runs";
+import type { NotebookFilterOption } from "@/lib/api/notebooks";
 import {
   buildWavelengthColorMap,
   MEASUREMENT_MODE_COLORS,
@@ -18,11 +19,13 @@ export function PlateReaderRunsTable({
   data,
   instrumentId,
   filterOptions,
+  notebookOptions,
   ranByOptions,
 }: {
   data: RunRow[];
   instrumentId: string;
   filterOptions: PlateReaderFilterOptions;
+  notebookOptions: NotebookFilterOption[];
   ranByOptions: { value: string; label: string }[];
 }) {
   const wavelengthColors = buildWavelengthColorMap(filterOptions.wavelengths);
@@ -83,6 +86,7 @@ export function PlateReaderRunsTable({
       columns={columns}
       data={data}
       instrumentId={instrumentId}
+      notebookOptions={notebookOptions}
       ranByOptions={ranByOptions}
     />
   );

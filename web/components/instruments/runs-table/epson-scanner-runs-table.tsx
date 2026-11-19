@@ -3,6 +3,7 @@ import {
   MetadataFieldBadge,
 } from "@/components/runs/metadata-badges";
 import type { EpsonScannerFilterOptions } from "@/lib/api/instrument-runs";
+import type { NotebookFilterOption } from "@/lib/api/notebooks";
 import {
   COLOR_MODE_COLORS,
   DPI_COLORS,
@@ -25,11 +26,13 @@ export function EpsonScannerRunsTable({
   data,
   instrumentId,
   filterOptions,
+  notebookOptions,
   ranByOptions,
 }: {
   data: RunRow[];
   instrumentId: string;
   filterOptions: EpsonScannerFilterOptions;
+  notebookOptions: NotebookFilterOption[];
   ranByOptions: { value: string; label: string }[];
 }) {
   const columns: MetadataColumn[] = [
@@ -72,6 +75,7 @@ export function EpsonScannerRunsTable({
       columns={columns}
       data={data}
       instrumentId={instrumentId}
+      notebookOptions={notebookOptions}
       ranByOptions={ranByOptions}
     />
   );

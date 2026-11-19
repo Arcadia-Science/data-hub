@@ -239,6 +239,10 @@ export async function startDevServer(options: {
     NEXT_PUBLIC_DOCS_BASE_URL: "https://datahub.arcadiascience.com",
     LOCAL_S3_MIRROR: MIRROR_DIR,
     S3_RAW_DATA_BUCKET: "test-raw-data-bucket",
+    // The Lambda CLI that processes the seeded fixtures registers its
+    // processed files in its default bucket, and the API only accepts them
+    // there.
+    S3_PROCESSED_BUCKET: "test-processed-data-bucket",
     AWS_ACCESS_KEY_ID: "docs-screenshots",
     AWS_SECRET_ACCESS_KEY: "docs-screenshots",
     AWS_REGION: "us-east-1",

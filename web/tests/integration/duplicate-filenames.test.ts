@@ -10,6 +10,7 @@ import {
   resetDb,
   seedTestUser,
 } from "@/tests/integration/helpers";
+import { TEST_RAW_BUCKET } from "@/tests/integration/test-buckets";
 
 const instrumentId = "duplicate-filename-instrument";
 const watcherHeaders = { [WATCHER_VERSION_HEADER]: "1.1.0" };
@@ -611,7 +612,7 @@ describe("same-named files from different folders", () => {
       await dismissAll(runId);
 
       const lambdaBody = {
-        s3_bucket: "test-bucket",
+        s3_bucket: TEST_RAW_BUCKET,
         s3_key: `${instrumentId}/${runId}/result.csv`,
         filename: "result.csv",
         size_bytes: 40,
@@ -683,7 +684,7 @@ describe("same-named files from different folders", () => {
           method: "POST",
           token,
           body: {
-            s3_bucket: "test-bucket",
+            s3_bucket: TEST_RAW_BUCKET,
             s3_key: uploadBody.s3_key,
             filename: taggedName,
             size_bytes: 900,

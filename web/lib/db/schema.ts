@@ -1439,34 +1439,36 @@ export const runAttributions = pgTable(
   ]
 );
 
-// Links from a run to the lab notebook pages for its experiment (Notion,
-// Benchling, Google Docs, or any other http or https page). Any signed-in
-// person, or a token with `runs:link`, can add, edit, or remove them. Removed
-// links are deleted outright; there is no history to keep them for.
+// Lab notebooks: one row per notebook page (Notion, Benchling, Google Docs,
+// or any other http or https page). A notebook groups the runs linked to it,
+// across instruments. Any signed-in person, or a token with
+// `notebooks:write`, can create, edit, delete, or restore one. Deleting sets
+// `deleted_at` and keeps the run links, so restoring brings them back.
 // The URL rules and limits live in `lib/notebook-links/url.ts`.
-export const runNotebookLinks = pgTable(
-  "run_notebook_links",
+export const notebooks = pgTable(
+  "notebooks",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    runId: uuid("run_id")
-      .notNull()
-      .references(() => instrumentRuns.id, { onDelete: "cascade" }),
     // The link as people open it, query string and fragment kept.
     url: text("url").notNull(),
-    // Two links with the same key point to the same page, so a run can't
-    // hold both. Built by `notebookUrlKey`; rows must be recomputed if those
-    // rules change.
+    // Two links with the same key point to the same page, so only one
+    // notebook, deleted or not, can hold a page. Built by `notebookUrlKey`;
+    // rows must be recomputed if those rules change.
     urlKey: text("url_key").notNull(),
-    // Optional name for the link. NULL shows a name worked out from the URL.
-    label: text("label"),
+    name: text("name").notNull(),
+    description: text("description"),
+    // The person responsible for the notebook. Optional; anyone can change it.
+    ownerId: text("owner_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
     createdAt: timestamp("created_at", {
       withTimezone: true,
       mode: "date",
     })
       .notNull()
       .defaultNow(),
-    // Who added the link: a person, or a personal access token. At most one
-    // is set; both are NULL once the person who added it is deleted.
+    // Who created the notebook: a person, or a personal access token. At
+    // most one is set; both are NULL once the person is deleted.
     createdBy: text("created_by").references(() => users.id, {
       onDelete: "set null",
     }),
@@ -1481,11 +1483,79 @@ export const runNotebookLinks = pgTable(
       .notNull()
       .defaultNow()
       .$onUpdate(() => new Date()),
-    // Who last changed the link. Set to the creator when the link is added.
+    // Who last changed the notebook. Set to the creator when it is created.
     updatedBy: text("updated_by").references(() => users.id, {
       onDelete: "set null",
     }),
     updatedByToken: uuid("updated_by_token").references(
+      () => personalAccessTokens.id,
+      { onDelete: "restrict" }
+    ),
+    deletedAt: timestamp("deleted_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
+    deletedBy: text("deleted_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    deletedByToken: uuid("deleted_by_token").references(
+      () => personalAccessTokens.id,
+      { onDelete: "restrict" }
+    ),
+  },
+  (notebook) => [
+    check(
+      "notebooks_one_creator",
+      sql`num_nonnulls(${notebook.createdBy}, ${notebook.createdByToken}) <= 1`
+    ),
+    check(
+      "notebooks_one_updater",
+      sql`num_nonnulls(${notebook.updatedBy}, ${notebook.updatedByToken}) <= 1`
+    ),
+    check(
+      "notebooks_one_deleter",
+      sql`num_nonnulls(${notebook.deletedBy}, ${notebook.deletedByToken}) <= 1`
+    ),
+    unique("uq_notebooks_url_key").on(notebook.urlKey),
+    index("idx_notebooks_owner_id").on(notebook.ownerId),
+    // Trigram GIN indexes backing `ilike '%…%'` in search and the
+    // Notebooks list. Require `pg_trgm` (created in migration 0029).
+    index("idx_notebooks_name_trgm").using(
+      "gin",
+      sql`${notebook.name} gin_trgm_ops`
+    ),
+    index("idx_notebooks_url_key_trgm").using(
+      "gin",
+      sql`${notebook.urlKey} gin_trgm_ops`
+    ),
+  ]
+);
+
+// Which runs belong to which notebooks. A run can be in several notebooks and
+// a notebook can hold runs from any instrument. Removing a run from a
+// notebook deletes its row outright; there is no history to keep it for.
+export const runNotebookLinks = pgTable(
+  "run_notebook_links",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => instrumentRuns.id, { onDelete: "cascade" }),
+    notebookId: uuid("notebook_id")
+      .notNull()
+      .references(() => notebooks.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "date",
+    })
+      .notNull()
+      .defaultNow(),
+    // Who added the run to the notebook: a person, or a personal access
+    // token. At most one is set; both are NULL once the person is deleted.
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdByToken: uuid("created_by_token").references(
       () => personalAccessTokens.id,
       { onDelete: "restrict" }
     ),
@@ -1495,26 +1565,13 @@ export const runNotebookLinks = pgTable(
       "run_notebook_links_one_creator",
       sql`num_nonnulls(${link.createdBy}, ${link.createdByToken}) <= 1`
     ),
-    check(
-      "run_notebook_links_one_updater",
-      sql`num_nonnulls(${link.updatedBy}, ${link.updatedByToken}) <= 1`
-    ),
-    // Also serves per-run lookups and the has-link filter, through its
+    // Also serves per-run lookups and the has-notebook filter, through its
     // leading `run_id` column.
-    unique("uq_run_notebook_links_run_id_url_key").on(link.runId, link.urlKey),
-    // Trigram GIN indexes backing global-search `ilike '%…%'` on links.
-    // Require `pg_trgm` (created in migration 0029).
-    index("idx_run_notebook_links_url_key_trgm").using(
-      "gin",
-      sql`${link.urlKey} gin_trgm_ops`
+    unique("uq_run_notebook_links_run_id_notebook_id").on(
+      link.runId,
+      link.notebookId
     ),
-    index("idx_run_notebook_links_url_trgm").using(
-      "gin",
-      sql`${link.url} gin_trgm_ops`
-    ),
-    index("idx_run_notebook_links_label_trgm")
-      .using("gin", sql`${link.label} gin_trgm_ops`)
-      .where(sql`${link.label} is not null`),
+    index("idx_run_notebook_links_notebook_id").on(link.notebookId),
   ]
 );
 

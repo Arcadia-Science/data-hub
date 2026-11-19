@@ -132,7 +132,9 @@ class IntegrationEnv:
     token the cron routes accept, and ``auth_secret`` is the key that signs
     session cookies (see ``seed_admin_session``). ``raw_bucket`` is the name of the
     raw-data bucket the server was started with, which is the first folder under
-    ``s3_mirror_root`` that an uploaded file lands in.
+    ``s3_mirror_root`` that an uploaded file lands in. ``processed_bucket`` is the
+    processed bucket's name. ``POST …/runs/:runId/files`` only accepts a file in
+    the bucket for its category, so a test that registers files uses these two.
     """
 
     base_url: str
@@ -143,6 +145,7 @@ class IntegrationEnv:
     cron_secret: str
     auth_secret: str
     raw_bucket: str
+    processed_bucket: str
 
 
 @dataclass(frozen=True)
@@ -483,6 +486,7 @@ def _build_server_env(
             "AWS_SECRET_ACCESS_KEY": base_env.get("AWS_SECRET_ACCESS_KEY", "test-secret"),
             "AWS_REGION": base_env.get("AWS_REGION", "us-east-1"),
             "S3_RAW_DATA_BUCKET": base_env.get("S3_RAW_DATA_BUCKET", "data-hub-test-raw"),
+            "S3_PROCESSED_BUCKET": base_env.get("S3_PROCESSED_BUCKET", "data-hub-test-processed"),
             # `next start` is production, so LOCAL_S3_MIRROR stays off. This
             # stand-in lets multipart tests run without AWS. The small threshold
             # is test-only; production leaves these unset.
@@ -801,6 +805,7 @@ def start_test_server() -> Generator[IntegrationEnv, None, None]:
             cron_secret=CRON_SECRET,
             auth_secret=AUTH_SECRET,
             raw_bucket=server_env["S3_RAW_DATA_BUCKET"],
+            processed_bucket=server_env["S3_PROCESSED_BUCKET"],
         )
     finally:
         _terminate_process_tree(server_proc)

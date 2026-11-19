@@ -41,7 +41,7 @@ registry.registerPath({
   path: "/instruments/{instrumentId}/runs/{runId}/files",
   operationId: "createRunFile",
   summary: "Create a run file record",
-  description: `Requires scope \`files:create\`. PAT only; browser sessions are rejected. ${WATCHER_TOKEN_OWN_INSTRUMENT}`,
+  description: `Requires scope \`files:create\`. PAT only; browser sessions are rejected. ${WATCHER_TOKEN_OWN_INSTRUMENT} The location must be the file's own: \`s3_key\` must be \`<instrumentId>/<runId>/<filename>\`, using the run ID as stored, \`filename\` can't contain \`/\`, and \`s3_bucket\` must be Data Hub's raw bucket for a \`raw\` file or its processed bucket for a \`processed\` one. Any other location gets \`400\`. \`409\` means the run is deleted, or another file already uses that key or path.`,
   tags: ["Files"],
   security: bearerSecurity,
   request: { params: runParams, body: body(createFileBody) },

@@ -18,6 +18,7 @@ import psycopg2
 import pytest
 import requests
 
+from data_hub_lambda.api_client import ApiError, DataHubClient
 from data_hub_lambda.handler import lambda_handler
 from data_hub_shared.testing import IntegrationEnv
 
@@ -176,7 +177,8 @@ class TestSpectraMaxHappyPath:
         mock_s3_upload.assert_called_once()
         upload_dest = mock_s3_upload.call_args[0][1]
         assert upload_dest == (
-            f"s3://test-processed-bucket/spectramax-id3-plate-reader/{run_id}/{run_id}_raw_well_data.csv"
+            f"s3://{integration_env.processed_bucket}/spectramax-id3-plate-reader/"
+            f"{run_id}/{run_id}_raw_well_data.csv"
         )
 
 
@@ -240,7 +242,9 @@ class TestAzure600GelDocHappyPath:
         # The pipeline uploads the contrast-enhanced PNG to the processed bucket.
         mock_s3_upload.assert_called_once()
         upload_dest = mock_s3_upload.call_args[0][1]
-        assert upload_dest == f"s3://test-processed-bucket/azure-600-gel-doc/{run_id}/{run_id}.png"
+        assert upload_dest == (
+            f"s3://{integration_env.processed_bucket}/azure-600-gel-doc/{run_id}/{run_id}.png"
+        )
 
 
 # ------------------------------------------------------------------
@@ -285,7 +289,7 @@ class TestHinaTimelapse:
         assert run["metadata"]["dimensions"] == ["TIMELAPSE"]
 
         uploaded = {call.args[1] for call in mock_s3_upload.call_args_list}
-        prefix = f"s3://test-processed-bucket/hina-microscope/{run_id}"
+        prefix = f"s3://{integration_env.processed_bucket}/hina-microscope/{run_id}"
         assert uploaded == {
             f"{prefix}/well_A1.jpg",
             f"{prefix}/well_A1.mp4",
@@ -360,8 +364,9 @@ class TestDishCamHappyPath:
         assert names == {"dishcam-test.mp4", "dishcam-test.jpg"}
 
         uploaded = {call.args[1] for call in mock_s3_upload.call_args_list}
-        assert f"s3://test-processed-bucket/dishcam/{run_id}/dishcam-test.mp4" in uploaded
-        assert f"s3://test-processed-bucket/dishcam/{run_id}/dishcam-test.jpg" in uploaded
+        prefix = f"s3://{integration_env.processed_bucket}/dishcam/{run_id}"
+        assert f"{prefix}/dishcam-test.mp4" in uploaded
+        assert f"{prefix}/dishcam-test.jpg" in uploaded
 
     @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg is not on PATH")
     def test_run_json_encodes_every_tiff(
@@ -856,6 +861,50 @@ class TestFunctionUrlInvocation:
         result = lambda_handler(event, mock_context)
 
         assert result == {"statusCode": 400, "body": "Invalid JSON body"}
+
+
+# ------------------------------------------------------------------
+# The server only stores a file's own S3 location
+# ------------------------------------------------------------------
+
+
+class TestFileLocationCheck:
+    """`create_file` is refused when the key isn't the run's own.
+
+    Download links are signed for whatever location a file row holds, so the
+    server only accepts `<instrument>/<run>/<filename>` in the bucket for the
+    file's category. The happy-path classes above show every processor's real
+    calls pass; this shows a key under another instrument doesn't.
+    """
+
+    def test_key_under_another_instrument_is_refused(
+        self,
+        integration_env: IntegrationEnv,
+    ) -> None:
+        client = DataHubClient(
+            base_url=f"{integration_env.base_url}/api/v1",
+            api_key=integration_env.api_token,
+        )
+        run_id = "Experiment_20260601"
+        client.ensure_run("azure-cielo-qpcr", run_id)
+
+        with pytest.raises(ApiError) as exc_info:
+            client.create_file(
+                "azure-cielo-qpcr",
+                run_id,
+                s3_bucket=integration_env.raw_bucket,
+                s3_key=f"hina-microscope/{run_id}/stolen.nd2",
+                filename="stolen.nd2",
+            )
+
+        assert exc_info.value.status_code == 400
+        assert exc_info.value.message == (f"s3_key must be 'azure-cielo-qpcr/{run_id}/stolen.nd2'")
+        run = _api_get(
+            integration_env.base_url,
+            integration_env.api_token,
+            f"/api/v1/instruments/azure-cielo-qpcr/runs/{run_id}",
+        )
+        assert run["files"] == []
 
 
 # ------------------------------------------------------------------

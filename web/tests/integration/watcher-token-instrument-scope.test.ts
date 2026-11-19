@@ -7,6 +7,7 @@ import {
   files,
   instrumentRuns,
   instruments,
+  notebooks,
   runComments,
   runNotebookLinks,
   watchers,
@@ -19,6 +20,7 @@ import {
   seedSessionCookie,
   seedTestUser,
 } from "@/tests/integration/helpers";
+import { TEST_RAW_BUCKET } from "@/tests/integration/test-buckets";
 
 // Every write route that names an instrument, run, file or archive job lets a
 // watcher's token act only on its own instrument. The watcher tokens here
@@ -30,13 +32,12 @@ const A = "scope-instr-a";
 const B = "scope-instr-b";
 const RUN = "scope-run";
 const RUN_PATH = `/api/v1/instruments/${A}/runs/${RUN}`;
-const LINK_URL = "https://example.com/eln/scope-1";
 
 interface Fixture {
   commentId: string;
   fileId: number;
   jobId: string;
-  linkId: string;
+  notebookId: string;
   userId: string;
 }
 
@@ -84,7 +85,7 @@ const ROUTES: RouteCase[] = [
     method: "POST",
     path: () => `${RUN_PATH}/files`,
     body: () => ({
-      s3_bucket: "test-bucket",
+      s3_bucket: TEST_RAW_BUCKET,
       s3_key: `${A}/${RUN}/injected.csv`,
       filename: "injected.csv",
     }),
@@ -112,25 +113,10 @@ const ROUTES: RouteCase[] = [
     body: () => ({ body: "edited" }),
   },
   {
-    name: "add a notebook link",
+    name: "add a run to a lab notebook",
     method: "POST",
-    path: () => `${RUN_PATH}/notebook-links`,
-    body: () => ({ url: "https://example.com/eln/scope-2" }),
-  },
-  {
-    name: "edit a notebook link",
-    method: "PATCH",
-    path: (f) => `${RUN_PATH}/notebook-links/${f.linkId}`,
-    body: () => ({ label: "edited" }),
-  },
-  {
-    name: "add notebook links in bulk",
-    method: "POST",
-    path: () => "/api/v1/instrument-runs/notebook-links",
-    body: () => ({
-      runs: [{ instrument_id: A, run_id: RUN }],
-      url: "https://example.com/eln/scope-3",
-    }),
+    path: (f) => `/api/v1/lab-notebooks/${f.notebookId}/runs`,
+    body: () => ({ runs: [{ instrument_id: A, run_id: RUN }] }),
   },
   {
     name: "send a notification about a run",
@@ -182,18 +168,10 @@ const ROUTES: RouteCase[] = [
     body: () => ({ upload_id: "scope-upload" }),
   },
   {
-    name: "remove notebook links in bulk",
+    name: "remove a run from a lab notebook",
     method: "POST",
-    path: () => "/api/v1/instrument-runs/notebook-links/remove",
-    body: () => ({
-      runs: [{ instrument_id: A, run_id: RUN }],
-      urls: ["https://example.com/eln/scope-3"],
-    }),
-  },
-  {
-    name: "remove a notebook link",
-    method: "DELETE",
-    path: (f) => `${RUN_PATH}/notebook-links/${f.linkId}`,
+    path: (f) => `/api/v1/lab-notebooks/${f.notebookId}/runs/remove`,
+    body: () => ({ runs: [{ instrument_id: A, run_id: RUN }] }),
   },
   {
     name: "delete a comment",
@@ -220,7 +198,7 @@ const ROUTES: RouteCase[] = [
 // The 403 this change adds, told apart from a missing scope, which is also a
 // 403.
 const OWNERSHIP_REFUSAL =
-  /not authorized for this (instrument|file's instrument)|can't change instruments|can't remove or reconfigure watchers/;
+  /not authorized for this (instrument|file's instrument)|can't change instruments|can't remove or reconfigure watchers|can't create or change lab notebooks/;
 
 async function expectOwnershipRefusal(res: Response) {
   expect(res.status).toBe(403);
@@ -351,12 +329,24 @@ describe("a watcher's token writes only to its own instrument", () => {
       body: { body: "from A" },
     });
     expect(comment.status).toBe(201);
-    const link = await api(`${RUN_PATH}/notebook-links`, {
+    // A watcher's token can't create a notebook, but it can add its own
+    // instrument's run to one.
+    const notebook = await api("/api/v1/lab-notebooks", {
+      method: "POST",
+      token: unboundToken,
+      body: {
+        url: "https://example.com/eln/scope-1",
+        name: "Scope lab notebook",
+      },
+    });
+    expect(notebook.status).toBe(201);
+    const notebookId = (await notebook.json()).lab_notebook.id as string;
+    const added = await api(`/api/v1/lab-notebooks/${notebookId}/runs`, {
       method: "POST",
       token: tokenA,
-      body: { url: LINK_URL },
+      body: { runs: [{ instrument_id: A, run_id: RUN }] },
     });
-    expect(link.status).toBe(201);
+    expect(added.status).toBe(200);
     const [job] = await db
       .insert(archiveJobs)
       .values({ instrumentRunId: run.id, fingerprint: "scope" })
@@ -366,7 +356,7 @@ describe("a watcher's token writes only to its own instrument", () => {
       commentId: (await comment.json()).id,
       fileId: file.id,
       jobId: job.id,
-      linkId: (await link.json()).id,
+      notebookId,
       userId,
     };
     before = await snapshotInstrumentA();
@@ -440,8 +430,8 @@ describe("a watcher's token writes only to its own instrument", () => {
     expect(uploaded.status).toBe(200);
   });
 
-  it("refuses a bulk notebook-link request that names a run on another instrument", async () => {
-    const res = await api("/api/v1/instrument-runs/notebook-links", {
+  it("refuses adding runs to a lab notebook when one is on another instrument", async () => {
+    const res = await api(`/api/v1/lab-notebooks/${fixture.notebookId}/runs`, {
       method: "POST",
       token: tokenA,
       body: {
@@ -449,10 +439,42 @@ describe("a watcher's token writes only to its own instrument", () => {
           { instrument_id: A, run_id: RUN },
           { instrument_id: B, run_id: RUN },
         ],
-        url: "https://example.com/eln/scope-4",
       },
     });
     await expectOwnershipRefusal(res);
+  });
+
+  it("refuses every watcher token on lab notebook create, edit, delete and restore", async () => {
+    const notebookPath = `/api/v1/lab-notebooks/${fixture.notebookId}`;
+    const adminRoutes: {
+      body?: unknown;
+      method: "DELETE" | "PATCH" | "POST";
+      path: string;
+    }[] = [
+      {
+        method: "POST",
+        path: "/api/v1/lab-notebooks",
+        body: { url: "https://example.com/eln/scope-2", name: "From a PC" },
+      },
+      { method: "PATCH", path: notebookPath, body: { name: "Renamed" } },
+      { method: "DELETE", path: notebookPath },
+      { method: "POST", path: `${notebookPath}/restore` },
+    ];
+    for (const token of [tokenA, tokenB]) {
+      for (const route of adminRoutes) {
+        const res = await api(route.path, {
+          method: route.method,
+          token,
+          body: route.body,
+        });
+        await expectOwnershipRefusal(res);
+      }
+    }
+    const [row] = await getTestDb()
+      .select({ name: notebooks.name, deletedAt: notebooks.deletedAt })
+      .from(notebooks)
+      .where(eq(notebooks.id, fixture.notebookId));
+    expect(row).toEqual({ name: "Scope lab notebook", deletedAt: null });
   });
 
   it("refuses every watcher token on PATCH /instruments/:id, its own instrument included", async () => {

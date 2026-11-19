@@ -12,6 +12,7 @@ import {
 import { dispatchQueuedFiles } from "@/lib/api/file-reprocessing";
 import { dismissFile } from "@/lib/api/files";
 import { patchFileBody, readJsonBody } from "@/lib/api/openapi";
+import { runFileS3Key } from "@/lib/api/run-file-location";
 import { touchRuns } from "@/lib/api/touch-runs";
 import {
   UPLOAD_ARRIVED_RESET,
@@ -188,7 +189,11 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
         );
       }
       updates.s3Bucket = bucket;
-      updates.s3Key = `${parentRun.instrumentId}/${parentRun.runId}/${file.filename}`;
+      updates.s3Key = runFileS3Key(
+        parentRun.instrumentId,
+        parentRun.runId,
+        file.filename
+      );
     }
     // The bytes arrived: a failure reason or an auto-upload mark from before no
     // longer applies.

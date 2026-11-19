@@ -15,7 +15,8 @@ const noDashboardFilters = {
   include_deleted: false,
   status: [],
   ran_by: null,
-  has_notebook_link: null,
+  has_lab_notebook: null,
+  lab_notebook_id: null,
 };
 
 describe("hasActiveFilters", () => {
@@ -38,7 +39,13 @@ describe("hasActiveFilters", () => {
       true
     );
     expect(
-      hasActiveFilters({ ...noDashboardFilters, has_notebook_link: "false" })
+      hasActiveFilters({ ...noDashboardFilters, has_lab_notebook: "false" })
+    ).toBe(true);
+    expect(
+      hasActiveFilters({
+        ...noDashboardFilters,
+        lab_notebook_id: "00000000-0000-4000-8000-000000000001",
+      })
     ).toBe(true);
     expect(
       hasActiveFilters({ ...noDashboardFilters, date_from: "2026-10-01" })

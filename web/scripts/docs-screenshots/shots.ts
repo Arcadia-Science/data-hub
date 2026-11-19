@@ -103,7 +103,7 @@ export const SHOTS: Shot[] = [
     ready: (page) => waitFor(page, "Recent instrument runs"),
     steps: async ({ page }) => {
       await page.keyboard.press("Control+k");
-      const input = page.getByPlaceholder(/Search runs, files/);
+      const input = page.getByPlaceholder(/Search or paste a notebook link/);
       await input.fill("colony");
       await waitFor(page, /results for "colony"/);
     },

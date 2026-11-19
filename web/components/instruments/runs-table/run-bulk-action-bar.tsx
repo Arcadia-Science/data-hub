@@ -13,8 +13,8 @@ import { toast } from "sonner";
 import { DisabledReasonButton } from "@/components/disabled-reason-button";
 import { DeleteRunsDialog } from "@/components/runs/delete-runs-dialog";
 import {
-  AddNotebookLinkDialog,
-  RemoveNotebookLinksDialog,
+  AddToNotebookDialog,
+  RemoveFromNotebooksDialog,
 } from "@/components/runs/notebook-link-bulk-dialogs";
 import { ReprocessRunsDialog } from "@/components/runs/reprocess-runs-dialog";
 import { Button } from "@/components/ui/button";
@@ -26,12 +26,14 @@ import {
 } from "@/components/ui/tooltip";
 import { useArchiveDownload } from "@/hooks/use-archive-download";
 import { useClaimPrompt } from "@/hooks/use-claim-prompt";
-import { NOTEBOOK_LINK_BULK_RUNS_MAX } from "@/lib/notebook-links/url";
+import { NOTEBOOK_RUNS_PER_REQUEST_MAX } from "@/lib/notebook-links/url";
 import { buildArchiveHref } from "@/lib/runs/archive-href";
 import {
   type AttributionMethod,
   fanOutAttribution,
 } from "@/lib/runs/attribution-requests";
+import { removeRunsSummary } from "@/lib/runs/notebook-outcomes";
+import { removeRunsFromNotebook } from "@/lib/runs/notebook-requests";
 import { cn } from "@/lib/utils";
 
 import { type RunRef, useRunSelection } from "./run-selection-provider";
@@ -80,7 +82,19 @@ async function fanOutUpload(
   return { ok, failed, filesQueued };
 }
 
-export function RunBulkActionBar() {
+/** The notebook whose page the runs table is on. */
+export interface BulkBarNotebook {
+  deleted: boolean;
+  id: string;
+  name: string;
+}
+
+/**
+ * On a notebook's page (`notebook`), "Remove from this notebook" takes the
+ * selected runs out of it in one request, and "Add to another notebook"
+ * replaces "Add to notebook".
+ */
+export function RunBulkActionBar({ notebook }: { notebook?: BulkBarNotebook }) {
   const { state, actions, meta } = useRunSelection();
   const router = useRouter();
   const { actions: archiveActions } = useArchiveDownload();
@@ -89,18 +103,28 @@ export function RunBulkActionBar() {
   const [isPending, startTransition] = useTransition();
   const [reprocessOpen, setReprocessOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const [addLinkOpen, setAddLinkOpen] = useState(false);
-  const [removeLinksOpen, setRemoveLinksOpen] = useState(false);
+  const [addToNotebookOpen, setAddToNotebookOpen] = useState(false);
+  const [removeFromNotebooksOpen, setRemoveFromNotebooksOpen] = useState(false);
 
   if (meta.count === 0) {
     return null;
   }
 
   const refs = Array.from(state.selected.values());
-  const anyLinked = refs.some((ref) => ref.notebookLinks.length > 0);
-  // The bulk endpoints take at most this many runs per request.
-  const tooManyToLink = refs.length > NOTEBOOK_LINK_BULK_RUNS_MAX;
-  const tooManyReason = `Select at most ${NOTEBOOK_LINK_BULK_RUNS_MAX} runs to change notebook links at once.`;
+  const anyInNotebook = refs.some((ref) => ref.notebooks.length > 0);
+  // The notebook endpoints take at most this many runs per request.
+  const tooManyToLink = refs.length > NOTEBOOK_RUNS_PER_REQUEST_MAX;
+  const tooManyReason = `Select at most ${NOTEBOOK_RUNS_PER_REQUEST_MAX} runs to change lab notebooks at once.`;
+  const addLabel = notebook
+    ? "Add to another lab notebook"
+    : "Add to lab notebook";
+  // A deleted notebook's runs can't change until it's restored.
+  let removeFromThisReason: string | null = null;
+  if (notebook?.deleted) {
+    removeFromThisReason = "Restore this lab notebook to change its runs.";
+  } else if (tooManyToLink) {
+    removeFromThisReason = tooManyReason;
+  }
 
   function runAttribution(method: AttributionMethod, label: string) {
     startTransition(async () => {
@@ -116,6 +140,27 @@ export function RunBulkActionBar() {
           `${label} ${ok} ${ok === 1 ? "run" : "runs"}, ${failed} failed.`
         );
       }
+      actions.clear();
+      router.refresh();
+    });
+  }
+
+  function removeFromThisNotebook(target: BulkBarNotebook) {
+    startTransition(async () => {
+      let removed: number;
+      try {
+        const result = await removeRunsFromNotebook(target.id, refs);
+        removed = result.counts.removed;
+      } catch {
+        toast.error(`Couldn't remove runs from “${target.name}”. Try again?`);
+        return;
+      }
+      const summary = removeRunsSummary({
+        failedNotebooks: 0,
+        notebookNames: [target.name],
+        removedRuns: removed,
+      });
+      toast.success(summary.message);
       actions.clear();
       router.refresh();
     });
@@ -235,41 +280,50 @@ export function RunBulkActionBar() {
                 variant="outline"
               >
                 <NotebookPen className="size-3.5" />
-                Add notebook link
+                {addLabel}
               </DisabledReasonButton>
             ) : (
               <Button
                 className="gap-1.5"
                 disabled={isPending}
-                onClick={() => setAddLinkOpen(true)}
+                onClick={() => setAddToNotebookOpen(true)}
                 size="sm"
                 type="button"
                 variant="outline"
               >
                 <NotebookPen className="size-3.5" />
-                Add notebook link
+                {addLabel}
               </Button>
             ))}
 
+          {meta.allCanLink && notebook ? (
+            <RemoveFromThisNotebookButton
+              disabled={isPending}
+              disabledReason={removeFromThisReason}
+              onClick={() => removeFromThisNotebook(notebook)}
+            />
+          ) : null}
+
           {meta.allCanLink &&
-            anyLinked &&
+            !notebook &&
+            anyInNotebook &&
             (tooManyToLink ? (
               <DisabledReasonButton
                 reason={tooManyReason}
                 size="sm"
                 variant="outline"
               >
-                Remove notebook link
+                Remove from lab notebook
               </DisabledReasonButton>
             ) : (
               <Button
                 disabled={isPending}
-                onClick={() => setRemoveLinksOpen(true)}
+                onClick={() => setRemoveFromNotebooksOpen(true)}
                 size="sm"
                 type="button"
                 variant="outline"
               >
-                Remove notebook link
+                Remove from lab notebook
               </Button>
             ))}
 
@@ -362,18 +416,48 @@ export function RunBulkActionBar() {
         open={deleteOpen}
         runs={deleteTargets}
       />
-      <AddNotebookLinkDialog
+      <AddToNotebookDialog
         onComplete={() => actions.clear()}
-        onOpenChange={setAddLinkOpen}
-        open={addLinkOpen}
+        onOpenChange={setAddToNotebookOpen}
+        open={addToNotebookOpen}
         runRefs={refs}
       />
-      <RemoveNotebookLinksDialog
+      <RemoveFromNotebooksDialog
         onComplete={() => actions.clear()}
-        onOpenChange={setRemoveLinksOpen}
-        open={removeLinksOpen}
+        onOpenChange={setRemoveFromNotebooksOpen}
+        open={removeFromNotebooksOpen}
         runRefs={refs}
       />
     </>
+  );
+}
+
+function RemoveFromThisNotebookButton({
+  disabled,
+  disabledReason,
+  onClick,
+}: {
+  disabled: boolean;
+  // Why the button can't be used, or null when it can.
+  disabledReason: string | null;
+  onClick: () => void;
+}) {
+  if (disabledReason) {
+    return (
+      <DisabledReasonButton reason={disabledReason} size="sm" variant="outline">
+        Remove from this lab notebook
+      </DisabledReasonButton>
+    );
+  }
+  return (
+    <Button
+      disabled={disabled}
+      onClick={onClick}
+      size="sm"
+      type="button"
+      variant="outline"
+    >
+      Remove from this lab notebook
+    </Button>
   );
 }

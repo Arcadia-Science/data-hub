@@ -214,7 +214,7 @@ The AWS stack you just deployed exposes the outputs the web app needs to reach i
 | `AWS_ROLE_ARN` | `WebAppRoleArn` stack output | Lets the web app generate presigned S3 URLs and SigV4-sign Lambda Function URL invocations via OIDC federation. |
 | `LAMBDA_FUNCTION_URL` | `DataHubFunctionUrl` stack output | The Lambda Function URL for manual reprocessing and archive builds. |
 
-The S3 bucket names default to `arcadia-data-hub-raw-<env>` and `arcadia-data-hub-archives-<env>`; override `S3_RAW_DATA_BUCKET` and `S3_ARCHIVES_BUCKET` in Vercel only if your stack uses different names. Also set `S3_PROCESSED_BUCKET` to `arcadia-data-hub-processed-<env>`: presigned download URLs come from each file row's own bucket, so nothing else needs it, but the MCP Apps run report has to name every origin in its content security policy and processed artifacts are most of what it renders. Redeploy the web app (or push a commit) so it picks up the new variables.
+The S3 bucket names default to `arcadia-data-hub-raw-<env>` and `arcadia-data-hub-archives-<env>`; override `S3_RAW_DATA_BUCKET` and `S3_ARCHIVES_BUCKET` in Vercel only if your stack uses different names. Also set `S3_PROCESSED_BUCKET` to `arcadia-data-hub-processed-<env>`. The Lambda registers each processed artifact through the API, which only accepts one in this bucket. The MCP Apps run report also has to name every origin in its content security policy, and processed artifacts are most of what it renders. Redeploy the web app (or push a commit) so it picks up the new variables.
 
 ### Set up Linear
 

@@ -17,8 +17,9 @@ import { createRunBody, readJsonBody } from "@/lib/api/openapi";
 import { recordDetectedFiles } from "@/lib/api/run-file-identity";
 import { parseRunMetadataFilters } from "@/lib/api/run-metadata-filters";
 import {
-  parseHasNotebookLinkParam,
+  parseHasNotebookParam,
   parseIntParam,
+  parseNotebookIdParam,
   parseRunStatusParam,
 } from "@/lib/api/validators";
 import { watcherClientFrom } from "@/lib/api/watcher-compat";
@@ -257,9 +258,8 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
     }),
     includeDeleted: searchParams.get("include_deleted") === "true",
     ranBy: searchParams.get("ran_by") ?? undefined,
-    hasNotebookLink: parseHasNotebookLinkParam(
-      searchParams.get("has_notebook_link")
-    ),
+    hasNotebook: parseHasNotebookParam(searchParams.get("has_lab_notebook")),
+    ...parseNotebookIdParam(searchParams.get("lab_notebook_id")),
     statuses: parseRunStatusParam(searchParams),
     ...parseRunMetadataFilters(searchParams),
   });

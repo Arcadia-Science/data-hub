@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/sidebar";
 import { trackEvent } from "@/lib/analytics/track";
 import { countUnread } from "@/lib/api/notifications";
-import { getSidebarInstruments } from "@/lib/api/sidebar";
+import { getSidebarInstruments, getSidebarNotebooks } from "@/lib/api/sidebar";
 import { auth, authInstance } from "@/lib/auth";
 import { listChangelogEntries } from "@/lib/changelog/entries";
 import { groupChangelogByDate } from "@/lib/changelog/group";
@@ -60,9 +60,16 @@ export default async function AppLayout({
   // A failed feedback check only hides the Feedback menu item. It reads
   // columns that a new feedback package version can add, and the app can
   // deploy before the migration that adds them has run.
-  const [instruments, initialUnreadCount, timeZone, feedbackEnabled] = session
+  const [
+    instruments,
+    notebooks,
+    initialUnreadCount,
+    timeZone,
+    feedbackEnabled,
+  ] = session
     ? await Promise.all([
         getSidebarInstruments(),
+        getSidebarNotebooks(),
         countUnread(session.user.id),
         getViewerTimeZone(),
         feedback.isConfigured().catch((error) => {
@@ -70,7 +77,7 @@ export default async function AppLayout({
           return false;
         }),
       ])
-    : [[], 0, "UTC", false];
+    : [[], [], 0, "UTC", false];
   const changelogSections = session
     ? groupChangelogByDate(listChangelogEntries(), timeZone)
     : [];
@@ -113,6 +120,7 @@ export default async function AppLayout({
                 </a>
                 <AppSidebar
                   instruments={instruments}
+                  notebooks={notebooks}
                   session={session}
                   signOutAction={async () => {
                     "use server";

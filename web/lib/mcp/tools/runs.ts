@@ -14,6 +14,8 @@ import {
   normalizeRunId,
   type RunAttribution,
 } from "@/lib/api/instrument-runs";
+import { runNotebookToWire } from "@/lib/api/notebook-wire";
+import { listNotebooksForRun } from "@/lib/api/notebooks";
 import { claimRuns, unclaimRuns } from "@/lib/api/run-attributions";
 import { commentToWire } from "@/lib/api/run-comment-wire";
 import {
@@ -28,10 +30,9 @@ import {
 } from "@/lib/api/run-comments";
 import { restoreRun, softDeleteRun } from "@/lib/api/run-lifecycle";
 import { pickMetadataFilterArgs } from "@/lib/api/run-metadata-filters";
-import { notebookLinkToWire } from "@/lib/api/run-notebook-link-wire";
-import { listNotebookLinksForRun } from "@/lib/api/run-notebook-links";
 import { buildRunReport, getRunFailureSummary } from "@/lib/api/run-reports";
 import { requestAllRunUploads, requestRunUploads } from "@/lib/api/run-uploads";
+import { parseNotebookIdParam } from "@/lib/api/validators";
 import { toolRegistrationConfig } from "@/lib/mcp/catalog/register";
 import {
   errorResult,
@@ -111,7 +112,8 @@ export function registerRunTools(server: McpServer) {
         includeDeleted: args.includeDeleted ?? false,
         ...metadataFilters,
         ranBy,
-        hasNotebookLink: args.hasNotebookLink,
+        hasNotebook: args.hasLabNotebook,
+        ...parseNotebookIdParam(args.labNotebookId ?? null),
         statuses: args.status ? expandRunStatusFilters(args.status) : undefined,
       });
       return structuredResult(result);
@@ -139,8 +141,8 @@ export function registerRunTools(server: McpServer) {
       };
 
       const tasks: Promise<void>[] = [
-        listNotebookLinksForRun(run.id).then((links) => {
-          payload.notebookLinks = links.map(notebookLinkToWire);
+        listNotebooksForRun(run.id).then((notebooks) => {
+          payload.labNotebooks = notebooks.map(runNotebookToWire);
         }),
       ];
       if (extras.has("files")) {
