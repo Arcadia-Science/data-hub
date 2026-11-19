@@ -589,7 +589,11 @@ interface StatusCase {
   deregistered?: boolean;
   expected: ShownStatus;
   heartbeat: { status: string; status_reason?: string } | null;
+  /** The instrument's status. Default: active, never pending. */
+  instrumentStatus?: "pending" | "active";
   name: string;
+  /** How long ago the watcher registered. Default: now. */
+  registeredAgeMs?: number;
   // What the heartbeat route stores in `status_reason`.
   storedReason: string | null;
 }
@@ -605,9 +609,34 @@ const STATUS_CASES: StatusCase[] = [
     storedReason: null,
   },
   {
-    name: "registered, a day-old timestamp",
+    name: "registered, a day-old heartbeat timestamp",
     heartbeat: null,
     ageMs: DAY_MS,
+    expected: "registered",
+    storedReason: null,
+  },
+  {
+    name: "registered 14 minutes ago, no heartbeat",
+    heartbeat: null,
+    ageMs: null,
+    registeredAgeMs: 14 * MINUTE_MS,
+    expected: "registered",
+    storedReason: null,
+  },
+  {
+    name: "registered 16 minutes ago, no heartbeat",
+    heartbeat: null,
+    ageMs: null,
+    registeredAgeMs: 16 * MINUTE_MS,
+    expected: "stale",
+    storedReason: null,
+  },
+  {
+    name: "registered a day ago for a pending instrument",
+    heartbeat: null,
+    ageMs: null,
+    registeredAgeMs: DAY_MS,
+    instrumentStatus: "pending",
     expected: "registered",
     storedReason: null,
   },
@@ -786,14 +815,15 @@ describe("Watchers API: the status a watcher shows", () => {
 
   async function registerWatcher(
     instrumentId: string,
-    hostname: string
+    hostname: string,
+    instrumentStatus: "pending" | "active" = "active"
   ): Promise<string> {
     await getTestDb()
       .insert(instruments)
       .values({
         id: instrumentId,
         displayName: `Instrument ${instrumentId}`,
-        status: "active",
+        status: instrumentStatus,
       });
     const res = await api("/api/v1/watchers/register", {
       method: "POST",
@@ -869,9 +899,16 @@ describe("Watchers API: the status a watcher shows", () => {
     for (const [index, testCase] of ALL_CASES.entries()) {
       const id = await registerWatcher(
         `shown-status-inst-${index}`,
-        `lab-pc-${index}`
+        `lab-pc-${index}`,
+        testCase.instrumentStatus
       );
       idByCase.set(testCase.name, id);
+      if (testCase.registeredAgeMs !== undefined) {
+        await getTestDb()
+          .update(watchers)
+          .set({ createdAt: new Date(Date.now() - testCase.registeredAgeMs) })
+          .where(eq(watchers.id, id));
+      }
       if (testCase.heartbeat) {
         const res = await sendHeartbeat(id, testCase.heartbeat);
         expect(res.status).toBe(200);

@@ -15,6 +15,7 @@ import {
   AlertDialogMedia,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { apiErrorMessage } from "@/lib/api/errors";
 
 // Sets the instrument back to `active`. The watcher deregistered when it was
 // retired doesn't reconnect: a new one must be set up.
@@ -43,7 +44,7 @@ export function ReactivateInstrumentDialog({
 
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        toast.error(body?.error ?? "Failed to reactivate instrument");
+        toast.error(apiErrorMessage(body, "Failed to reactivate instrument"));
         return;
       }
 

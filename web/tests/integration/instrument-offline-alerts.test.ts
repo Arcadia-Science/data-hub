@@ -343,6 +343,51 @@ describe("Instrument offline alerts", () => {
     expect(warn).toHaveBeenCalledOnce();
   });
 
+  it("alerts a watcher that never checked in, even while unresponsive alerts are paused", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    await subscribe();
+    // Two other watchers went quiet together, which pauses unresponsive alerts.
+    await seedInstrument("offline-alert-quiet-1", "Quiet Reader 1");
+    await seedInstrument("offline-alert-quiet-2", "Quiet Reader 2");
+    await seedWatcher(watching(at(-10)), "offline-alert-quiet-1");
+    await seedWatcher(watching(at(-10)), "offline-alert-quiet-2");
+    // This one registered 20 minutes before T0 and never sent a heartbeat.
+    await getTestDb()
+      .insert(watchers)
+      .values({
+        instrumentId: INSTRUMENT_ID,
+        hostname: "LAB-PC-1",
+        status: "registered",
+        lastHeartbeatAt: null,
+        createdAt: at(-20),
+      });
+
+    expect(await run(T0)).toMatchObject({ paused: true, started: 1 });
+    expect(await alertRow()).toMatchObject({ offlineSince: T0 });
+
+    expect(await run(at(30))).toMatchObject({ paused: true, alerted: 1 });
+    const [row] = await rowsOfType("instrument_offline");
+    expect(row.body).toBe(
+      "The watcher on LAB-PC-1 never checked in after it was set up. New files won't appear until the watcher service is running on that PC."
+    );
+  });
+
+  it("leaves a watcher that registered under 15 minutes ago Connecting, with no clock", async () => {
+    await subscribe();
+    await getTestDb()
+      .insert(watchers)
+      .values({
+        instrumentId: INSTRUMENT_ID,
+        hostname: "LAB-PC-1",
+        status: "registered",
+        lastHeartbeatAt: null,
+        createdAt: at(-14),
+      });
+
+    expect(await run(T0)).toMatchObject({ started: 0 });
+    expect(await alertRow()).toBeNull();
+  });
+
   it("explains a deregistered watcher, told apart from one that never existed", async () => {
     await subscribe();
     await seedWatcher({

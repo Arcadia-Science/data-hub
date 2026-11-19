@@ -234,6 +234,7 @@
                           "enum": [
                             "folder_missing",
                             "unresponsive",
+                            "never_checked_in",
                             "stopped",
                             "no_watcher",
                             "deregistered"
@@ -251,7 +252,7 @@
                     "reason"
                   ],
                   "additionalProperties": false,
-                  "description": "Whether new files can reach Data Hub. `online`: the watcher checked in within 5 minutes. `restarting`: the watcher stopped for a Windows restart or an automatic update less than 15 minutes ago. `connecting`: the watcher registered and hasn't sent a heartbeat yet. `offline`: anything else. This does not take the instrument's status into account: a pending instrument can be `online`."
+                  "description": "Whether new files can reach Data Hub. `online`: the watcher checked in within 5 minutes. `restarting`: the watcher stopped for a Windows restart or an automatic update less than 15 minutes ago. `connecting`: the watcher registered and hasn't sent a heartbeat yet, for up to 15 minutes after it registered or the instrument was confirmed; after that the instrument is `offline` with reason `never_checked_in`. `offline`: anything else. This does not take the instrument's status into account: a pending instrument can be `online`."
                 },
                 "pastWatcherCount": {
                   "type": "integer",
@@ -572,6 +573,7 @@
                     "enum": [
                       "folder_missing",
                       "unresponsive",
+                      "never_checked_in",
                       "stopped",
                       "no_watcher",
                       "deregistered"
@@ -589,7 +591,7 @@
               "reason"
             ],
             "additionalProperties": false,
-            "description": "Whether new files can reach Data Hub. `online`: the watcher checked in within 5 minutes. `restarting`: the watcher stopped for a Windows restart or an automatic update less than 15 minutes ago. `connecting`: the watcher registered and hasn't sent a heartbeat yet. `offline`: anything else. This does not take the instrument's status into account: a pending instrument can be `online`."
+            "description": "Whether new files can reach Data Hub. `online`: the watcher checked in within 5 minutes. `restarting`: the watcher stopped for a Windows restart or an automatic update less than 15 minutes ago. `connecting`: the watcher registered and hasn't sent a heartbeat yet, for up to 15 minutes after it registered or the instrument was confirmed; after that the instrument is `offline` with reason `never_checked_in`. `offline`: anything else. This does not take the instrument's status into account: a pending instrument can be `online`."
           },
           "pastWatcherCount": {
             "type": "integer",
@@ -5332,7 +5334,7 @@
             "type": "boolean"
           },
           "status": {
-            "description": "Filter by effective status. stale is computed, never stored: a watching or waiting watcher with no heartbeat for 5 minutes, or one that stopped for a restart or an automatic update and has sent none for 15 minutes. A stopped watcher otherwise stays stopped, and a deregistered watcher is always stopped.",
+            "description": "Filter by effective status. stale is computed, never stored: a watching or waiting watcher with no heartbeat for 5 minutes, one that stopped for a restart or an automatic update and has sent none for 15 minutes, or a registered one with no first heartbeat 15 minutes after it registered or its instrument was confirmed (a pending instrument's watcher stays registered). A stopped watcher otherwise stays stopped, and a deregistered watcher is always stopped.",
             "type": "string",
             "enum": [
               "registered",
@@ -6765,6 +6767,7 @@
                           "enum": [
                             "folder_missing",
                             "unresponsive",
+                            "never_checked_in",
                             "stopped",
                             "no_watcher",
                             "deregistered"
@@ -6782,7 +6785,7 @@
                     "reason"
                   ],
                   "additionalProperties": false,
-                  "description": "Whether new files can reach Data Hub. `online`: the watcher checked in within 5 minutes. `restarting`: the watcher stopped for a Windows restart or an automatic update less than 15 minutes ago. `connecting`: the watcher registered and hasn't sent a heartbeat yet. `offline`: anything else. This does not take the instrument's status into account: a pending instrument can be `online`."
+                  "description": "Whether new files can reach Data Hub. `online`: the watcher checked in within 5 minutes. `restarting`: the watcher stopped for a Windows restart or an automatic update less than 15 minutes ago. `connecting`: the watcher registered and hasn't sent a heartbeat yet, for up to 15 minutes after it registered or the instrument was confirmed; after that the instrument is `offline` with reason `never_checked_in`. `offline`: anything else. This does not take the instrument's status into account: a pending instrument can be `online`."
                 },
                 "watcherStatus": {
                   "type": "string",
@@ -7189,6 +7192,7 @@
                           "enum": [
                             "folder_missing",
                             "unresponsive",
+                            "never_checked_in",
                             "stopped",
                             "no_watcher",
                             "deregistered"
@@ -7206,7 +7210,7 @@
                     "reason"
                   ],
                   "additionalProperties": false,
-                  "description": "Whether new files can reach Data Hub. `online`: the watcher checked in within 5 minutes. `restarting`: the watcher stopped for a Windows restart or an automatic update less than 15 minutes ago. `connecting`: the watcher registered and hasn't sent a heartbeat yet. `offline`: anything else. This does not take the instrument's status into account: a pending instrument can be `online`."
+                  "description": "Whether new files can reach Data Hub. `online`: the watcher checked in within 5 minutes. `restarting`: the watcher stopped for a Windows restart or an automatic update less than 15 minutes ago. `connecting`: the watcher registered and hasn't sent a heartbeat yet, for up to 15 minutes after it registered or the instrument was confirmed; after that the instrument is `offline` with reason `never_checked_in`. `offline`: anything else. This does not take the instrument's status into account: a pending instrument can be `online`."
                 },
                 "watcherStatus": {
                   "type": "string",

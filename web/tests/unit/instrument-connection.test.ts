@@ -31,8 +31,16 @@ const DAY = 24 * 60 * MINUTE;
 interface StoredWatcher {
   /** `null` is a watcher that never sent a heartbeat. */
   ageMs: number | null;
+  /** How long ago the instrument was confirmed. Default: never pending. */
+  confirmedMsAgo?: number;
   reason?: string | null;
+  /** How long ago the watcher registered. Default: a minute. */
+  registeredMsAgo?: number;
   status: "registered" | "watching" | "stopped" | "waiting";
+}
+
+function ago(ms: number | null | undefined): Date | null {
+  return ms === null || ms === undefined ? null : new Date(NOW.getTime() - ms);
 }
 
 function evaluate(
@@ -40,6 +48,7 @@ function evaluate(
   watcher: StoredWatcher | null,
   pastWatcherCount = 0
 ): { badge: InstrumentBadgeState; connection: Connection } {
+  const lastHeartbeatAt = ago(watcher?.ageMs);
   const connection = computeConnection(
     watcher
       ? {
@@ -47,15 +56,16 @@ function evaluate(
             {
               status: watcher.status,
               statusReason: watcher.reason ?? null,
-              lastHeartbeatAt:
-                watcher.ageMs === null
-                  ? null
-                  : new Date(NOW.getTime() - watcher.ageMs),
+              lastHeartbeatAt,
+              createdAt: ago(watcher.registeredMsAgo ?? MINUTE) ?? NOW,
+              instrumentStatus,
+              instrumentConfirmedAt: ago(watcher.confirmedMsAgo),
               deletedAt: null,
             },
             NOW
           ),
           statusReason: watcher.reason ?? null,
+          lastHeartbeatAt,
         }
       : null,
     pastWatcherCount
@@ -91,6 +101,14 @@ describe("instrument badge table", () => {
       name: "pending instrument with a registered watcher is Pending, not Connecting",
       instrumentStatus: "pending",
       watcher: { status: "registered", ageMs: null },
+      badge: "pending",
+      reason: null,
+    },
+    {
+      row: 1,
+      name: "pending instrument whose watcher registered a month ago is Pending, and still Connecting",
+      instrumentStatus: "pending",
+      watcher: { status: "registered", ageMs: null, registeredMsAgo: 30 * DAY },
       badge: "pending",
       reason: null,
     },
@@ -159,6 +177,31 @@ describe("instrument badge table", () => {
       instrumentStatus: "active",
       watcher: { status: "registered", ageMs: 3 * DAY },
       past: 2,
+      badge: "connecting",
+      reason: null,
+    },
+    {
+      row: 4,
+      name: "registered watcher is Connecting for its first 15 minutes",
+      instrumentStatus: "active",
+      watcher: {
+        status: "registered",
+        ageMs: null,
+        registeredMsAgo: 15 * MINUTE,
+      },
+      badge: "connecting",
+      reason: null,
+    },
+    {
+      row: 4,
+      name: "registered long ago, but the instrument was confirmed 10 minutes ago",
+      instrumentStatus: "active",
+      watcher: {
+        status: "registered",
+        ageMs: null,
+        registeredMsAgo: 2 * DAY,
+        confirmedMsAgo: 10 * MINUTE,
+      },
       badge: "connecting",
       reason: null,
     },
@@ -248,6 +291,31 @@ describe("instrument badge table", () => {
     },
     {
       row: 7,
+      name: "registered 16 minutes ago and never checked in",
+      instrumentStatus: "active",
+      watcher: {
+        status: "registered",
+        ageMs: null,
+        registeredMsAgo: 16 * MINUTE,
+      },
+      badge: "offline",
+      reason: "never_checked_in",
+    },
+    {
+      row: 7,
+      name: "registered long ago, confirmed 20 minutes ago, never checked in",
+      instrumentStatus: "active",
+      watcher: {
+        status: "registered",
+        ageMs: null,
+        registeredMsAgo: 2 * DAY,
+        confirmedMsAgo: 20 * MINUTE,
+      },
+      badge: "offline",
+      reason: "never_checked_in",
+    },
+    {
+      row: 7,
       name: "stopped by someone, a minute ago",
       instrumentStatus: "active",
       watcher: { status: "stopped", reason: null, ageMs: MINUTE },
@@ -317,13 +385,19 @@ describe("instrument badge table", () => {
 describe("computeConnection", () => {
   it("is Online only for a watching watcher", () => {
     expect(
-      computeConnection({ status: "watching", statusReason: null }, 0)
+      computeConnection(
+        { status: "watching", statusReason: null, lastHeartbeatAt: NOW },
+        0
+      )
     ).toEqual({ state: "online", reason: null });
   });
 
   it("is Connecting for a registered watcher", () => {
     expect(
-      computeConnection({ status: "registered", statusReason: null }, 0)
+      computeConnection(
+        { status: "registered", statusReason: null, lastHeartbeatAt: null },
+        0
+      )
     ).toEqual({ state: "connecting", reason: null });
   });
 
@@ -332,22 +406,47 @@ describe("computeConnection", () => {
       SYSTEM_SHUTDOWN_STATUS_REASON,
       AUTO_UPDATE_STATUS_REASON,
     ]) {
-      expect(computeConnection({ status: "stopped", statusReason }, 0)).toEqual(
-        { state: "restarting", reason: null }
-      );
+      expect(
+        computeConnection(
+          { status: "stopped", statusReason, lastHeartbeatAt: NOW },
+          0
+        )
+      ).toEqual({ state: "restarting", reason: null });
     }
   });
 
   it("is offline with a reason for every other status", () => {
     expect(
-      computeConnection({ status: "waiting", statusReason: "D:\\Exports" }, 0)
+      computeConnection(
+        {
+          status: "waiting",
+          statusReason: "D:\\Exports",
+          lastHeartbeatAt: NOW,
+        },
+        0
+      )
     ).toEqual({ state: "offline", reason: "folder_missing" });
     expect(
-      computeConnection({ status: "stale", statusReason: null }, 0)
+      computeConnection(
+        { status: "stale", statusReason: null, lastHeartbeatAt: NOW },
+        0
+      )
     ).toEqual({ state: "offline", reason: "unresponsive" });
     expect(
-      computeConnection({ status: "stopped", statusReason: null }, 0)
+      computeConnection(
+        { status: "stopped", statusReason: null, lastHeartbeatAt: NOW },
+        0
+      )
     ).toEqual({ state: "offline", reason: "stopped" });
+  });
+
+  it("says a stale watcher with no heartbeat at all never checked in", () => {
+    expect(
+      computeConnection(
+        { status: "stale", statusReason: null, lastHeartbeatAt: null },
+        0
+      )
+    ).toEqual({ state: "offline", reason: "never_checked_in" });
   });
 
   it("keeps the restart reason of a stale watcher out of Restarting", () => {
@@ -355,7 +454,11 @@ describe("computeConnection", () => {
     // stored reason.
     expect(
       computeConnection(
-        { status: "stale", statusReason: AUTO_UPDATE_STATUS_REASON },
+        {
+          status: "stale",
+          statusReason: AUTO_UPDATE_STATUS_REASON,
+          lastHeartbeatAt: NOW,
+        },
         0
       )
     ).toEqual({ state: "offline", reason: "unresponsive" });
@@ -374,7 +477,10 @@ describe("computeConnection", () => {
 
   it("ignores the past count when a watcher is active", () => {
     expect(
-      computeConnection({ status: "watching", statusReason: null }, 4)
+      computeConnection(
+        { status: "watching", statusReason: null, lastHeartbeatAt: NOW },
+        4
+      )
     ).toEqual({ state: "online", reason: null });
   });
 });

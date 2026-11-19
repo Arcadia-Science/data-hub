@@ -491,6 +491,20 @@
       "when": 1794958287635,
       "tag": "0069_instrument_offline_notifications",
       "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1795054871569,
+      "tag": "0070_instrument_confirmed_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1795057971942,
+      "tag": "0071_narrow_watcher_token_legacy_scopes",
+      "breakpoints": true
     }
   ]
 }

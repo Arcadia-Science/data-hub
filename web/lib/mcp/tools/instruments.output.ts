@@ -73,7 +73,7 @@ export const instrumentConnectionSchema = z
       .describe("Why the instrument is offline. Null in every other state."),
   })
   .describe(
-    "Whether new files can reach Data Hub. `online`: the watcher checked in within 5 minutes. `restarting`: the watcher stopped for a Windows restart or an automatic update less than 15 minutes ago. `connecting`: the watcher registered and hasn't sent a heartbeat yet. `offline`: anything else. This does not take the instrument's status into account: a pending instrument can be `online`."
+    "Whether new files can reach Data Hub. `online`: the watcher checked in within 5 minutes. `restarting`: the watcher stopped for a Windows restart or an automatic update less than 15 minutes ago. `connecting`: the watcher registered and hasn't sent a heartbeat yet, for up to 15 minutes after it registered or the instrument was confirmed; after that the instrument is `offline` with reason `never_checked_in`. `offline`: anything else. This does not take the instrument's status into account: a pending instrument can be `online`."
   );
 
 const pastWatcherCountSchema = z

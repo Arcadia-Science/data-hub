@@ -3,12 +3,14 @@
 The watcher sends a heartbeat every few seconds (2 s in this suite). The server stores each
 one, keeps the newest status on the watcher row, and answers ``GET /watchers/:id`` with the
 *effective* status, which turns a running watcher that has been silent for five minutes into
-``stale``. A watcher that stopped cleanly stays ``stopped`` however old its last heartbeat
-is. (One that stopped for a Windows restart or an update turns ``stale`` after 15 minutes.
-A test here can't make a watcher send the mark for that, so the integration tests of the web
-app cover it.) The suite never waits for those five minutes: it ages
-``last_heartbeat_at`` in the database, after it has made sure the running watcher can't
-refresh it (a fault on ``/heartbeat``, a 426, or a stopped watcher).
+``stale``. A watcher that registered and never checked in turns ``stale`` 15 minutes after it
+registered, or after its instrument was confirmed. A watcher that stopped cleanly stays
+``stopped`` however old its last heartbeat is. (One that stopped for a Windows restart or an
+update turns ``stale`` after 15 minutes. A test here can't make a watcher send the mark for
+that, so the integration tests of the web app cover it.) The suite never waits for those
+minutes: it ages ``last_heartbeat_at``, or the registration, in the database, after it has
+made sure the running watcher can't refresh it (a fault on ``/heartbeat``, a 426, or a
+stopped watcher).
 """
 
 from __future__ import annotations
@@ -25,6 +27,7 @@ from e2e_support.factory import WatcherFactory
 from e2e_support.files import SMALL, write_run
 from e2e_support.proxy_helpers import silence_heartbeats
 from e2e_support.server import (
+    FIRST_CHECK_IN_MINUTES,
     STALE_AFTER_MINUTES,
     SWEEP_GRACE_MINUTES,
     HeartbeatRow,
@@ -124,21 +127,33 @@ def test_first_heartbeat_makes_the_watcher_watching_and_each_tick_is_recorded(
     assert all(gap >= 1.5 for gap in gaps), gaps
 
 
-@pytest.mark.covers("watcher.registered->never_stale")
-def test_a_watcher_that_never_checked_in_stays_registered_however_old_its_timestamps(
-    watcher: WatcherFactory, server: ServerView
+@pytest.mark.covers("watcher.registered->stale")
+def test_a_watcher_that_never_checked_in_reads_stale_15_minutes_after_it_registered(
+    watcher: WatcherFactory, server: ServerView, instrument_id: str
 ) -> None:
     pc = watcher()
 
     assert server.effective_status(pc.watcher_id) == "registered"
-    # Whatever `last_heartbeat_at` holds, six minutes, a day or nothing, the watcher is still
-    # `registered`: the exemption doesn't depend on the timestamp.
+    # Whatever `last_heartbeat_at` holds, six minutes, a day or nothing, a watcher that just
+    # registered is still `registered`: its clock runs from the registration.
     server.age_past_stale(pc.watcher_id)
     assert server.watcher(pc.watcher_id).status == "registered"
     assert server.effective_status(pc.watcher_id) == "registered"
     server.age_heartbeat(pc.watcher_id, 24 * 60)
     assert server.effective_status(pc.watcher_id) == "registered"
     server.clear_heartbeat(pc.watcher_id)
+    assert server.effective_status(pc.watcher_id) == "registered"
+
+    # Inside its 15 minutes it is still `registered`; past them it reads `stale`, while the
+    # stored status stays `registered`.
+    server.age_registration(pc.watcher_id, FIRST_CHECK_IN_MINUTES - 1)
+    assert server.effective_status(pc.watcher_id) == "registered"
+    server.age_registration(pc.watcher_id, FIRST_CHECK_IN_MINUTES + 1)
+    assert server.effective_status(pc.watcher_id) == "stale"
+    assert server.watcher(pc.watcher_id).status == "registered"
+
+    # A watcher can't start while its instrument is pending, so it has no limit then.
+    server.set_instrument_status(instrument_id, "pending")
     assert server.effective_status(pc.watcher_id) == "registered"
 
 
@@ -271,8 +286,8 @@ def test_the_watcher_list_filters_stale_watchers_by_the_age_of_their_heartbeat(
         stopped.watcher_id: "stopped",
         never.watcher_id: "registered",
     }
-    # The others are listed under their own status. A watcher that never checked in has no
-    # heartbeat to be old, and is not stale.
+    # The others are listed under their own status. A watcher that registered moments ago and
+    # never checked in is inside its 15 minutes, and is not stale.
     assert shown("watching").get(online.watcher_id) == "watching"
     assert shown("stopped") == {stopped.watcher_id: "stopped"}
     assert shown("registered") == {never.watcher_id: "registered"}
@@ -281,6 +296,11 @@ def test_the_watcher_list_filters_stale_watchers_by_the_age_of_their_heartbeat(
     server.clear_heartbeat(silent.watcher_id)
     assert shown("stale") == {silent.watcher_id: "stale"}
     assert server.effective_status(silent.watcher_id) == "stale"
+
+    # So is one that registered more than 15 minutes ago and never checked in.
+    server.age_registration(never.watcher_id, FIRST_CHECK_IN_MINUTES + 1)
+    assert shown("stale") == {silent.watcher_id: "stale", never.watcher_id: "stale"}
+    assert shown("registered") == {}
 
 
 @pytest.mark.covers(

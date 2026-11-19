@@ -15,6 +15,7 @@ import {
   AlertDialogMedia,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { apiErrorMessage } from "@/lib/api/errors";
 import { cn } from "@/lib/utils";
 
 // Sets the instrument to `inactive` (shown as "Retired"); the server always
@@ -51,7 +52,7 @@ export function RetireInstrumentDialog({
 
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        toast.error(body?.error ?? "Failed to retire instrument");
+        toast.error(apiErrorMessage(body, "Failed to retire instrument"));
         return;
       }
 

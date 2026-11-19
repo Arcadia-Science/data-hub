@@ -93,18 +93,22 @@ describe("the table from a stored watcher", () => {
     }
   ): InstrumentBadgeState {
     const reason = watcher.reason ?? null;
+    const lastHeartbeatAt = new Date(NOW.getTime() - watcher.ageMs);
     const status = computeEffectiveStatus(
       {
         status: watcher.status,
         statusReason: reason,
-        lastHeartbeatAt: new Date(NOW.getTime() - watcher.ageMs),
+        lastHeartbeatAt,
+        createdAt: new Date(NOW.getTime() - 60 * MINUTE),
+        instrumentStatus,
+        instrumentConfirmedAt: null,
         deletedAt: null,
       },
       NOW
     );
     return instrumentBadgeState(
       instrumentStatus,
-      computeConnection({ status, statusReason: reason }, 0)
+      computeConnection({ status, statusReason: reason, lastHeartbeatAt }, 0)
     );
   }
 
