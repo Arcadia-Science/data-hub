@@ -682,6 +682,7 @@ def test_server_env_uses_stub_aws_settings_unless_the_caller_has_its_own() -> No
     assert stubbed["AWS_SECRET_ACCESS_KEY"] == "test-secret"
     assert stubbed["AWS_REGION"] == "us-east-1"
     assert stubbed["S3_RAW_DATA_BUCKET"] == "data-hub-test-raw"
+    assert stubbed["S3_PROCESSED_BUCKET"] == "data-hub-test-processed"
 
     inherited = _server_env(
         {
@@ -689,12 +690,14 @@ def test_server_env_uses_stub_aws_settings_unless_the_caller_has_its_own() -> No
             "AWS_SECRET_ACCESS_KEY": "real-secret",
             "AWS_REGION": "eu-west-1",
             "S3_RAW_DATA_BUCKET": "other-bucket",
+            "S3_PROCESSED_BUCKET": "other-processed-bucket",
         }
     )
     assert inherited["AWS_ACCESS_KEY_ID"] == "real-key"
     assert inherited["AWS_SECRET_ACCESS_KEY"] == "real-secret"
     assert inherited["AWS_REGION"] == "eu-west-1"
     assert inherited["S3_RAW_DATA_BUCKET"] == "other-bucket"
+    assert inherited["S3_PROCESSED_BUCKET"] == "other-processed-bucket"
 
 
 # ---------------------------------------------------------------------------
@@ -712,6 +715,7 @@ def test_integration_env_keeps_the_original_fields_first_and_adds_the_new_ones()
         "cron_secret",
         "auth_secret",
         "raw_bucket",
+        "processed_bucket",
     ]
 
 
@@ -725,6 +729,7 @@ def test_integration_env_is_frozen(tmp_path: Path) -> None:
         cron_secret=CRON_SECRET,
         auth_secret=AUTH_SECRET,
         raw_bucket="data-hub-test-raw",
+        processed_bucket="data-hub-test-processed",
     )
     with pytest.raises(dataclasses.FrozenInstanceError):
         env.base_url = "other"  # pyright: ignore[reportAttributeAccessIssue]

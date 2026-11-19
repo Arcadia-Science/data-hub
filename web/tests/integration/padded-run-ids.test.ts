@@ -19,6 +19,7 @@ import {
   resetDb,
   seedTestUser,
 } from "@/tests/integration/helpers";
+import { TEST_RAW_BUCKET } from "@/tests/integration/test-buckets";
 
 // Creating a run trims its run ID, so ` RUN1 ` is stored as `RUN1`. A watcher
 // whose run ID has a space at either end (a folder named ` RUN1`, or a file
@@ -226,6 +227,42 @@ describe("Run IDs with spaces at the start or end", () => {
       .from(files)
       .where(eq(files.id, fileId));
     expect(row.status).toBe("upload_requested");
+  });
+
+  // The Lambda path stores a file only at its canonical key, which is built
+  // from the stored run ID however the URL spells it.
+  it.each(
+    SPELLINGS
+  )("POST files accepts the key with the stored run ID %s", async (label, runId) => {
+    const filename = `lambda-${label.replace(" ", "-")}.csv`;
+    const res = await api(runPath(runId, "/files"), {
+      method: "POST",
+      token,
+      body: {
+        s3_bucket: TEST_RAW_BUCKET,
+        s3_key: `${instrumentId}/${storedRunId}/${filename}`,
+        filename,
+      },
+    });
+    expect(res.status).toBe(201);
+    expect((await res.json()).instrument_run_id).toBe(await storedRunUuid());
+  });
+
+  it("POST files rejects a key with the spaces kept", async () => {
+    const filename = "lambda-padded-key.csv";
+    const res = await api(runPath(" RUN1 ", "/files"), {
+      method: "POST",
+      token,
+      body: {
+        s3_bucket: TEST_RAW_BUCKET,
+        s3_key: `${instrumentId}/ RUN1 /${filename}`,
+        filename,
+      },
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.message).toBe(
+      `s3_key must be '${instrumentId}/${storedRunId}/${filename}'`
+    );
   });
 
   it.each(

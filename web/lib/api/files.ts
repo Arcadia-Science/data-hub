@@ -1,10 +1,43 @@
 import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { touchRuns } from "@/lib/api/touch-runs";
+import { UPLOAD_ARRIVED_RESET } from "@/lib/api/upload-state";
 import { db } from "@/lib/db";
 import { files, instrumentRuns } from "@/lib/db/schema";
 import { PRE_UPLOAD_FILE_STATUSES } from "@/lib/runs/file-buckets";
 
 export type FileRow = typeof files.$inferSelect;
+
+export type AdoptedFileValues = Pick<
+  typeof files.$inferInsert,
+  "s3Bucket" | "s3Key" | "contentType" | "sizeBytes" | "category" | "uploadedAt"
+>;
+
+// Moves a pre-upload row to `uploaded` at the given S3 location: the Lambda
+// found the file's bytes before the watcher reported them. Returns the updated
+// row, or undefined when the row has left pre-upload or been dismissed since
+// the caller read it.
+//
+// The pre-upload check is part of the write. Between the caller's read and
+// this update, the watcher's PATCH can mark the row uploaded and processing
+// can start. An update keyed on the ID alone would then move the row back to
+// `uploaded` and rewrite a location that is meant to be set only once.
+export async function adoptPreUploadFile(
+  fileId: number,
+  values: AdoptedFileValues
+): Promise<FileRow | undefined> {
+  const [updated] = await db
+    .update(files)
+    .set({ ...values, ...UPLOAD_ARRIVED_RESET, status: "uploaded" })
+    .where(
+      and(
+        eq(files.id, fileId),
+        inArray(files.status, PRE_UPLOAD_FILE_STATUSES),
+        isNull(files.deletedAt)
+      )
+    )
+    .returning();
+  return updated;
+}
 
 // Fetches an active (not soft-deleted) file by numeric ID.
 export async function getActiveFileById(

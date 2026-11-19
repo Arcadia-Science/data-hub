@@ -74,6 +74,17 @@ export function getS3RawDataBucket(): string {
   return bucket;
 }
 
+// Processed bucket holds the artifacts the Lambda derives from raw files. The
+// web app never writes to it; `POST …/runs/:runId/files` checks that a
+// processed file's row names it.
+export function getS3ProcessedBucket(): string {
+  const bucket = process.env.S3_PROCESSED_BUCKET;
+  if (!bucket) {
+    throw new Error("S3_PROCESSED_BUCKET environment variable is not set");
+  }
+  return bucket;
+}
+
 // Archives bucket holds run-zip artifacts built by the Lambda. The web app
 // reads (HEAD + presign) but never writes — Lambda is the only writer.
 export function getS3ArchivesBucket(): string {
