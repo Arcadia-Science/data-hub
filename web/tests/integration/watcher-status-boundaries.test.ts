@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   computeEffectiveStatus,
@@ -15,7 +16,9 @@ vi.mock("@/lib/db", () => ({ db: {} }));
 // `computeEffectiveStatus` (JavaScript) and `effectiveStatusCondition` (SQL)
 // are two copies of one rule. This file runs both on rows placed exactly at the
 // 5-minute and 15-minute limits, and a millisecond either side, with one fixed
-// clock. They must agree, and each row must satisfy exactly one status.
+// clock. For `registered` rows that means the registration and the instrument's
+// confirmation too. They must agree, and each row must satisfy exactly one
+// status.
 
 const NOW = new Date("2026-06-01T12:00:00.000Z");
 const MINUTE_MS = 60 * 1000;
@@ -30,6 +33,7 @@ const ALL_STATUSES: EffectiveStatus[] = [
 ];
 
 type StoredStatus = "registered" | "watching" | "stopped" | "waiting";
+type InstrumentStatus = "pending" | "active" | "inactive";
 
 const STORED: { status: StoredStatus; reason: string | null }[] = [
   { status: "registered", reason: null },
@@ -55,34 +59,96 @@ const AGES: (number | null)[] = [
   null,
 ];
 
-interface Fixture {
+// For `registered` rows: how long ago the watcher registered, and how long ago
+// its instrument was confirmed (`null`: never pending).
+const REGISTRATION_AGES: number[] = [
+  0,
+  15 * MINUTE_MS - 1,
+  15 * MINUTE_MS,
+  15 * MINUTE_MS + 1,
+  DAY_MS,
+];
+const CONFIRMATION_AGES: (number | null)[] = [
+  null,
+  15 * MINUTE_MS - 1,
+  15 * MINUTE_MS,
+  15 * MINUTE_MS + 1,
+];
+const INSTRUMENT_STATUSES: InstrumentStatus[] = [
+  "active",
+  "pending",
+  "inactive",
+];
+
+interface FixtureSpec {
+  /** How old the last heartbeat is, or null for none. */
   ageMs: number | null;
-  deregistered: boolean;
-  key: string;
+  /** How long ago the instrument was confirmed. Default: never pending. */
+  confirmedAgeMs?: number | null;
+  deregistered?: boolean;
+  /** Default: active. */
+  instrumentStatus?: InstrumentStatus;
   reason: string | null;
+  /** How long ago the watcher registered. Default: a minute. */
+  registeredAgeMs?: number;
   status: StoredStatus;
 }
 
-function keyOf(
-  status: string,
-  reason: string | null,
-  ageMs: number | null,
-  deregistered: boolean
-): string {
-  return `${deregistered ? "deregistered " : ""}${status} (${reason ?? "no reason"}), ${ageMs === null ? "no heartbeat" : `${ageMs} ms old`}`;
+type Fixture = Required<FixtureSpec> & { key: string };
+
+function toFixture(spec: FixtureSpec): Fixture {
+  const full = {
+    confirmedAgeMs: null,
+    deregistered: false,
+    instrumentStatus: "active" as const,
+    registeredAgeMs: MINUTE_MS,
+    ...spec,
+  };
+  return { ...full, key: keyOf(full) };
 }
 
-const FIXTURES: Fixture[] = [false, true].flatMap((deregistered) =>
-  STORED.flatMap(({ status, reason }) =>
-    AGES.map((ageMs) => ({
-      status,
-      reason,
-      ageMs,
-      deregistered,
-      key: keyOf(status, reason, ageMs, deregistered),
-    }))
-  )
-);
+function keyOf(spec: FixtureSpec): string {
+  const deregistered = spec.deregistered ? "deregistered " : "";
+  const heartbeat =
+    spec.ageMs === null ? "no heartbeat" : `heartbeat ${spec.ageMs} ms old`;
+  const registered = `registered ${spec.registeredAgeMs ?? MINUTE_MS} ms ago`;
+  const confirmed =
+    spec.confirmedAgeMs == null
+      ? "never pending"
+      : `confirmed ${spec.confirmedAgeMs} ms ago`;
+  return `${deregistered}${spec.status} (${spec.reason ?? "no reason"}), ${heartbeat}, ${registered}, ${spec.instrumentStatus ?? "active"} instrument ${confirmed}`;
+}
+
+function ago(ms: number | null): Date | null {
+  return ms === null ? null : new Date(NOW.getTime() - ms);
+}
+
+const FIXTURES: Fixture[] = [
+  // Every stored status and reason at every heartbeat age, registered a
+  // minute ago on an active instrument.
+  ...[false, true].flatMap((deregistered) =>
+    STORED.flatMap(({ status, reason }) =>
+      AGES.map((ageMs) => toFixture({ status, reason, ageMs, deregistered }))
+    )
+  ),
+  // `registered` rows around the 15 minutes they have to check in.
+  ...INSTRUMENT_STATUSES.flatMap((instrumentStatus) =>
+    REGISTRATION_AGES.flatMap((registeredAgeMs) =>
+      CONFIRMATION_AGES.flatMap((confirmedAgeMs) =>
+        [null, 15 * MINUTE_MS - 1, 15 * MINUTE_MS + 1].map((ageMs) =>
+          toFixture({
+            status: "registered",
+            reason: null,
+            ageMs,
+            registeredAgeMs,
+            confirmedAgeMs,
+            instrumentStatus,
+          })
+        )
+      )
+    )
+  ),
+];
 
 describe("effectiveStatusCondition and computeEffectiveStatus at their limits", () => {
   const idByKey = new Map<string, string>();
@@ -96,10 +162,11 @@ describe("effectiveStatusCondition and computeEffectiveStatus at their limits", 
     const db = getTestDb();
 
     await db.insert(instruments).values(
-      FIXTURES.map((_fixture, index) => ({
+      FIXTURES.map((fixture, index) => ({
         id: `boundary-inst-${index}`,
         displayName: `Boundary instrument ${index}`,
-        status: "active" as const,
+        status: fixture.instrumentStatus,
+        confirmedAt: ago(fixture.confirmedAgeMs),
       }))
     );
     const inserted = await db
@@ -110,10 +177,8 @@ describe("effectiveStatusCondition and computeEffectiveStatus at their limits", 
           hostname: `boundary-pc-${index}`,
           status: fixture.status,
           statusReason: fixture.reason,
-          lastHeartbeatAt:
-            fixture.ageMs === null
-              ? null
-              : new Date(NOW.getTime() - fixture.ageMs),
+          lastHeartbeatAt: ago(fixture.ageMs),
+          createdAt: ago(fixture.registeredAgeMs) ?? NOW,
           deletedAt: fixture.deregistered ? new Date(NOW.getTime() - 1) : null,
         }))
       )
@@ -126,9 +191,11 @@ describe("effectiveStatusCondition and computeEffectiveStatus at their limits", 
 
     // What the SQL condition says, status by status.
     for (const status of ALL_STATUSES) {
+      // Joined as `GET /api/v1/watchers` joins it.
       const rows = await db
         .select({ id: watchers.id })
         .from(watchers)
+        .leftJoin(instruments, eq(instruments.id, watchers.instrumentId))
         .where(effectiveStatusCondition(status, NOW));
       for (const { id } of rows) {
         const key = keyById.get(id) ?? id;
@@ -143,9 +210,13 @@ describe("effectiveStatusCondition and computeEffectiveStatus at their limits", 
         status: watchers.status,
         statusReason: watchers.statusReason,
         lastHeartbeatAt: watchers.lastHeartbeatAt,
+        createdAt: watchers.createdAt,
         deletedAt: watchers.deletedAt,
+        instrumentStatus: instruments.status,
+        instrumentConfirmedAt: instruments.confirmedAt,
       })
-      .from(watchers);
+      .from(watchers)
+      .leftJoin(instruments, eq(instruments.id, watchers.instrumentId));
     for (const row of stored) {
       jsStatus.set(
         keyById.get(row.id) ?? row.id,
@@ -308,7 +379,14 @@ describe("effectiveStatusCondition and computeEffectiveStatus at their limits", 
       false,
       "stale",
     ],
-    ["registered, a day old", "registered", null, DAY_MS, false, "registered"],
+    [
+      "registered a minute ago, heartbeat a day old",
+      "registered",
+      null,
+      DAY_MS,
+      false,
+      "registered",
+    ],
     [
       "deregistered, watching, past the limit",
       "watching",
@@ -327,7 +405,86 @@ describe("effectiveStatusCondition and computeEffectiveStatus at their limits", 
     ],
   ])("%s", (_name, status, reason, ageMs, deregistered, expected) => {
     it(`reads ${expected} in SQL and in JavaScript`, () => {
-      const key = keyOf(status, reason, ageMs, deregistered);
+      const key = keyOf({ status, reason, ageMs, deregistered });
+      expect(sqlStatuses.get(key)).toEqual([expected]);
+      expect(jsStatus.get(key)).toBe(expected);
+    });
+  });
+
+  // A `registered` watcher with no heartbeat has 15 minutes from the later of
+  // its registration and its instrument's confirmation, and no limit while the
+  // instrument is pending.
+  describe.each<{
+    confirmedAgeMs: number | null;
+    expected: EffectiveStatus;
+    instrumentStatus: InstrumentStatus;
+    name: string;
+    registeredAgeMs: number;
+  }>([
+    {
+      name: "registered on the 15-minute limit",
+      registeredAgeMs: 15 * MINUTE_MS,
+      confirmedAgeMs: null,
+      instrumentStatus: "active",
+      expected: "registered",
+    },
+    {
+      name: "registered a millisecond past it",
+      registeredAgeMs: 15 * MINUTE_MS + 1,
+      confirmedAgeMs: null,
+      instrumentStatus: "active",
+      expected: "stale",
+    },
+    {
+      name: "registered a day ago, confirmed on the limit",
+      registeredAgeMs: DAY_MS,
+      confirmedAgeMs: 15 * MINUTE_MS,
+      instrumentStatus: "active",
+      expected: "registered",
+    },
+    {
+      name: "registered a day ago, confirmed a millisecond past the limit",
+      registeredAgeMs: DAY_MS,
+      confirmedAgeMs: 15 * MINUTE_MS + 1,
+      instrumentStatus: "active",
+      expected: "stale",
+    },
+    {
+      name: "registered a millisecond inside the limit, confirmed past it",
+      registeredAgeMs: 15 * MINUTE_MS - 1,
+      confirmedAgeMs: 15 * MINUTE_MS + 1,
+      instrumentStatus: "active",
+      expected: "registered",
+    },
+    {
+      name: "registered a day ago on a pending instrument",
+      registeredAgeMs: DAY_MS,
+      confirmedAgeMs: null,
+      instrumentStatus: "pending",
+      expected: "registered",
+    },
+    {
+      name: "registered a day ago on a retired instrument",
+      registeredAgeMs: DAY_MS,
+      confirmedAgeMs: null,
+      instrumentStatus: "inactive",
+      expected: "stale",
+    },
+  ])("$name, no heartbeat", ({
+    registeredAgeMs,
+    confirmedAgeMs,
+    instrumentStatus,
+    expected,
+  }) => {
+    it(`reads ${expected} in SQL and in JavaScript`, () => {
+      const key = keyOf({
+        status: "registered",
+        reason: null,
+        ageMs: null,
+        registeredAgeMs,
+        confirmedAgeMs,
+        instrumentStatus,
+      });
       expect(sqlStatuses.get(key)).toEqual([expected]);
       expect(jsStatus.get(key)).toBe(expected);
     });

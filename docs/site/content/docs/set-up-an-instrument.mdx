@@ -150,7 +150,7 @@ Choose an **Instrument type**, which is required, then click **Confirm instrumen
 
 ![The Confirm window, with the instrument’s ID, where the watcher registered from, its watch folder, file patterns, how files become runs, and the instrument type to choose](/images/instrument-confirm-dialog.webp)
 
-The instrument’s badge reads **Connecting** until the watcher service is running and checks in, which step 5 starts, and then **Online**. Open the instrument’s page and check the watched folder and file patterns shown under its name. They should match what you entered in the wizard; files outside that folder, or with names that don’t match a pattern, won’t reach Data Hub.
+The instrument’s badge reads **Connecting** until the watcher service is running and checks in, which step 5 starts, and then **Online**. Start the service within 15 minutes of confirming: after that, the badge turns **Offline** with the notice “The watcher never checked in” until the watcher’s first check-in. Open the instrument’s page and check the watched folder and file patterns shown under its name. They should match what you entered in the wizard; files outside that folder, or with names that don’t match a pattern, won’t reach Data Hub.
 
 Admins can change an instrument’s type later: open the three-dot menu, select **Edit details**, and pick a supported type. What each type produces is in [Instrument data preprocessing](/docs/instrument-preprocessing).
 

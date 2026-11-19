@@ -79,7 +79,8 @@ const STATUS_CONFIG: Record<
     Icon: FolderX,
     className: WARNING_CLASSNAME,
   },
-  // Registered but hasn't sent its first heartbeat yet — transient.
+  // Registered but hasn't sent its first heartbeat yet. It turns `stale` if
+  // none arrives in time (see `FIRST_CHECK_IN_GRACE_MS`).
   registered: {
     label: "Registered",
     Icon: Clock,
@@ -114,10 +115,11 @@ export function WatcherStatusBadge({
   reason?: string | null;
   /**
    * Most recent watcher heartbeat. When the badge is in an "unexpected
-   * silence" state (`stale`) and this is provided, the tooltip
-   * leads with it so users can tell at a glance how long the watcher has
-   * been silent. For a watcher that stopped for a restart, it sets the time
-   * the tooltip gives for when the watcher starts to read as unresponsive.
+   * silence" state (`stale`), the tooltip leads with it so users can tell at
+   * a glance how long the watcher has been silent, and without it the tooltip
+   * says the watcher never checked in. For a watcher that stopped for a
+   * restart, it sets the time the tooltip gives for when the watcher starts to
+   * read as unresponsive.
    */
   lastOnlineAt?: Date | null;
   className?: string;
@@ -166,15 +168,31 @@ export function WatcherStatusBadge({
     return badge;
   }
 
+  // Only a `registered` watcher past its time limit reads `stale` without ever
+  // having sent a heartbeat.
+  if (!lastOnlineAt) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>{badge}</TooltipTrigger>
+        <TooltipContent className="flex max-w-80 flex-col items-start gap-0.5">
+          <p className="font-medium">Never checked in</p>
+          <p>
+            The watcher was set up but hasn&apos;t sent its first check-in.
+            Start the watcher service on the PC and check that it can reach Data
+            Hub.
+          </p>
+        </TooltipContent>
+      </Tooltip>
+    );
+  }
+
   return (
     <Tooltip>
       <TooltipTrigger asChild>{badge}</TooltipTrigger>
       <TooltipContent className="flex flex-col items-start gap-0.5">
-        {lastOnlineAt ? (
-          <p className="font-medium">
-            Last online {formatRelativeTime(lastOnlineAt)}
-          </p>
-        ) : null}
+        <p className="font-medium">
+          Last online {formatRelativeTime(lastOnlineAt)}
+        </p>
         <p>
           The watcher checks in with Data Hub once a minute. If it was just
           restarted, it can take up to a minute to show as online. Refresh the

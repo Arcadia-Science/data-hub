@@ -93,11 +93,15 @@ export async function getInstrumentWatcherInfo(
         status: watchers.status,
         statusReason: watchers.statusReason,
         lastHeartbeatAt: watchers.lastHeartbeatAt,
+        createdAt: watchers.createdAt,
+        instrumentStatus: instruments.status,
+        instrumentConfirmedAt: instruments.confirmedAt,
         configYaml: watchers.configYaml,
         configRevisionStatus: currentRevisionStatusSql,
         pcEditAwaitingRestart: pcEditAwaitingRestartSql,
       })
       .from(watchers)
+      .innerJoin(instruments, eq(instruments.id, watchers.instrumentId))
       .where(
         and(
           isNull(watchers.deletedAt),
@@ -217,8 +221,12 @@ async function readConnectionWatcher(
       status: watchers.status,
       statusReason: watchers.statusReason,
       lastHeartbeatAt: watchers.lastHeartbeatAt,
+      createdAt: watchers.createdAt,
+      instrumentStatus: instruments.status,
+      instrumentConfirmedAt: instruments.confirmedAt,
     })
     .from(watchers)
+    .innerJoin(instruments, eq(instruments.id, watchers.instrumentId))
     .where(
       and(eq(watchers.instrumentId, instrumentId), isNull(watchers.deletedAt))
     )
@@ -229,6 +237,7 @@ async function readConnectionWatcher(
   return {
     status: computeEffectiveStatus({ ...row, deletedAt: null }),
     statusReason: row.statusReason,
+    lastHeartbeatAt: row.lastHeartbeatAt,
   };
 }
 
@@ -306,11 +315,13 @@ export async function listInstrumentConnections(
       instrumentId: instruments.id,
       displayName: instruments.displayName,
       instrumentStatus: instruments.status,
+      instrumentConfirmedAt: instruments.confirmedAt,
       watcherId: watchers.id,
       hostname: watchers.hostname,
       status: watchers.status,
       statusReason: watchers.statusReason,
       lastHeartbeatAt: watchers.lastHeartbeatAt,
+      createdAt: watchers.createdAt,
       configYaml: watchers.configYaml,
       pastWatcherCount: sql<number>`(
         select cast(count(*) as int) from ${watchers} as past
@@ -329,7 +340,11 @@ export async function listInstrumentConnections(
   for (const row of rows) {
     let connectionWatcher: ConnectionWatcher | null = null;
     let watcher: InstrumentConnectionSnapshot["watcher"] = null;
-    if (row.watcherId !== null && row.status !== null) {
+    if (
+      row.watcherId !== null &&
+      row.status !== null &&
+      row.createdAt !== null
+    ) {
       pauseWatchers.push({
         status: row.status,
         lastHeartbeatAt: row.lastHeartbeatAt,
@@ -340,11 +355,15 @@ export async function listInstrumentConnections(
             status: row.status,
             statusReason: row.statusReason,
             lastHeartbeatAt: row.lastHeartbeatAt,
+            createdAt: row.createdAt,
+            instrumentStatus: row.instrumentStatus,
+            instrumentConfirmedAt: row.instrumentConfirmedAt,
             deletedAt: null,
           },
           now
         ),
         statusReason: row.statusReason,
+        lastHeartbeatAt: row.lastHeartbeatAt,
       };
       watcher = {
         hostname: row.hostname,

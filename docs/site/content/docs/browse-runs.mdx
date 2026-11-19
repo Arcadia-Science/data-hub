@@ -70,7 +70,7 @@ If a file you saved on the instrument PC hasn’t shown up, start with the badge
 | --- | --- |
 | **Online** | New files upload automatically. For an instrument in manual upload mode, new files upload when someone requests them. |
 | **Restarting** | The instrument PC is restarting or updating. This usually takes a minute or two, and you don’t need to do anything. |
-| **Connecting** | The watcher was just set up and hasn’t checked in yet. |
+| **Connecting** | The watcher was just set up and hasn’t checked in yet. If it hasn’t checked in after 15 minutes, the badge turns **Offline**. |
 | **Offline** | New files won’t appear right now. A notice under the instrument’s name says why. |
 | **Pending** | An admin hasn’t confirmed this instrument yet. Admins see a card in place of the runs table; members see one line. |
 | **Retired** | The instrument no longer takes new runs. Its runs stay browsable. |
@@ -87,6 +87,7 @@ A red notice sits between the instrument’s name and its runs. It says what hap
 | --- | --- |
 | **New files aren’t being picked up** | The watcher is running but can’t find its watch folder, which the notice names. An admin can choose **Change folder** to fix it. |
 | **The watcher isn’t checking in** | The watcher hasn’t checked in for 5 minutes, or didn’t come back within 15 minutes of a restart. The notice says when it last did. The PC may be off, or the watcher may have crashed. |
+| **The watcher never checked in** | The watcher was set up, but no check-in arrived within 15 minutes. Its service may not be running on the PC, or the PC can’t reach Data Hub. |
 | **Uploads from this instrument are paused** | Someone stopped the watcher on the PC. New files appear once it’s started again. |
 | **This instrument isn’t connected to a watcher** | The instrument never had a watcher, or its watcher was deregistered, which the notice dates and credits. Admins can choose **Connect a watcher**, which opens [Set up an instrument](/docs/set-up-an-instrument). |
 

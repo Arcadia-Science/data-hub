@@ -63,24 +63,32 @@ export async function GET(request: NextRequest) {
       created_at: watchers.createdAt,
       updated_at: watchers.updatedAt,
       deleted_at: watchers.deletedAt,
+      instrument_status: instruments.status,
+      instrument_confirmed_at: instruments.confirmedAt,
     })
     .from(watchers)
     .leftJoin(instruments, eq(watchers.instrumentId, instruments.id))
     .where(conditions.length > 0 ? and(...conditions) : undefined);
 
   // Override stored status with the computed effective status (may be "stale").
-  const data = rows.map((row) => ({
-    ...row,
-    status: computeEffectiveStatus(
-      {
-        status: row.status,
-        statusReason: row.status_reason,
-        lastHeartbeatAt: row.last_heartbeat_at,
-        deletedAt: row.deleted_at,
-      },
-      now
-    ),
-  }));
+  // The instrument's status and confirmation time only feed that computation.
+  const data = rows.map(
+    ({ instrument_status, instrument_confirmed_at, ...row }) => ({
+      ...row,
+      status: computeEffectiveStatus(
+        {
+          status: row.status,
+          statusReason: row.status_reason,
+          lastHeartbeatAt: row.last_heartbeat_at,
+          createdAt: row.created_at,
+          instrumentStatus: instrument_status,
+          instrumentConfirmedAt: instrument_confirmed_at,
+          deletedAt: row.deleted_at,
+        },
+        now
+      ),
+    })
+  );
 
   return Response.json({ data });
 }

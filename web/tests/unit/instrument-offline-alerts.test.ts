@@ -162,6 +162,19 @@ describe("stepOfflineAlert from Waiting", () => {
       )
     ).toBe("alert");
   });
+
+  // The pause counts only watchers that have checked in, so a watcher that
+  // never did can't be part of a fault on Data Hub's side.
+  it("keeps and alerts a watcher that never checked in while paused", () => {
+    expect(
+      stepOfflineAlert(
+        waiting(OFFLINE_ALERT_AFTER_MS),
+        { badge: "offline", reason: "never_checked_in" },
+        NOW,
+        true
+      )
+    ).toBe("alert");
+  });
 });
 
 describe("stepOfflineAlert from Alerted", () => {
@@ -306,6 +319,10 @@ describe("offline alert wording", () => {
       "The watcher hasn't checked in for 35 minutes. New files won't appear until it's back.",
     ],
     [
+      "never_checked_in",
+      "The watcher on LAB-PC-1 never checked in after it was set up. New files won't appear until the watcher service is running on that PC.",
+    ],
+    [
       "stopped",
       "The watcher on LAB-PC-1 was stopped. New files won't appear until it's started again.",
     ],
@@ -339,6 +356,9 @@ describe("offline alert wording", () => {
     );
     expect(offlineAlertMessage("unresponsive", unknown)).toBe(
       "The watcher isn't checking in. New files won't appear until it's back."
+    );
+    expect(offlineAlertMessage("never_checked_in", unknown)).toBe(
+      "The watcher never checked in after it was set up. New files won't appear until the watcher service is running on that PC."
     );
     expect(offlineAlertMessage("stopped", unknown)).toBe(
       "The watcher was stopped. New files won't appear until it's started again."
