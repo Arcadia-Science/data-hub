@@ -30,9 +30,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { apiErrorMessage } from "@/lib/api/errors";
 import { type InstrumentType, VALID_INSTRUMENT_TYPES } from "@/lib/db/schema";
 import {
-  apiErrorMessage,
   buildConfirmInstrumentBody,
   type InstrumentConfirmReview,
 } from "@/lib/instruments/confirm-review";

@@ -59,3 +59,18 @@ export function apiErrorFromResult(result: {
 }): Response {
   return apiError(result.status, result.code, result.message, result.details);
 }
+
+/**
+ * The text a page shows for a failed request, read from the body `apiError`
+ * sends. A bare string `error` is accepted too. Anything else, such as a body
+ * that isn't JSON, gets the fallback. Always a string, so React can render it:
+ * passing `error` itself to a toast crashes the page.
+ */
+export function apiErrorMessage(body: unknown, fallback: string): string {
+  const error = (body as { error?: unknown } | null | undefined)?.error;
+  if (typeof error === "string" && error) {
+    return error;
+  }
+  const message = (error as { message?: unknown } | null | undefined)?.message;
+  return typeof message === "string" && message ? message : fallback;
+}

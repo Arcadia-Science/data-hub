@@ -15,6 +15,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useReturnFocus } from "@/hooks/use-return-focus";
+import { apiErrorMessage } from "@/lib/api/errors";
 
 export function DeregisterDialog({
   watcherId,
@@ -64,7 +65,7 @@ export function DeregisterDialog({
 
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        toast.error(body?.error ?? "Failed to deregister watcher");
+        toast.error(apiErrorMessage(body, "Failed to deregister watcher"));
         return;
       }
 

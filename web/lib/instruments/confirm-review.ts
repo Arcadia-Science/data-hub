@@ -105,20 +105,6 @@ export function workedRunExample(
 }
 
 /**
- * The text to show for a failed request. The API's errors look like
- * { error: { code, message } }; a bare string is accepted too. Anything else,
- * such as a body that isn't JSON, gets the fallback.
- */
-export function apiErrorMessage(body: unknown, fallback: string): string {
-  const error = (body as { error?: unknown } | null | undefined)?.error;
-  if (typeof error === "string" && error) {
-    return error;
-  }
-  const message = (error as { message?: unknown } | null | undefined)?.message;
-  return typeof message === "string" && message ? message : fallback;
-}
-
-/**
  * The one request that confirms a pending instrument. It makes the instrument
  * active and saves the type the admin picked, in a single update.
  */
