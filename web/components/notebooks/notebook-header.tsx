@@ -41,13 +41,13 @@ export function NotebookHeader({
   const deleted = notebook.deletedAt !== null;
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-2">
       <RecordNotebookVisit
         deleted={deleted}
         name={notebook.name}
         notebookId={notebook.id}
       />
-      <Breadcrumb>
+      <Breadcrumb className="mb-2">
         <BreadcrumbList>
           <BreadcrumbItem>
             <BreadcrumbLink asChild>
@@ -64,7 +64,7 @@ export function NotebookHeader({
       </Breadcrumb>
 
       {notebook.deletedAt ? (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-2.5 text-destructive text-sm">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-2.5 text-destructive text-sm">
           <div className="flex items-start gap-2">
             <Trash2 aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
             <div className="flex flex-col gap-0.5">
@@ -88,10 +88,60 @@ export function NotebookHeader({
         </div>
       ) : null}
 
+      {/* Laid out like the instrument header: the name, description, and
+          details line share a column, so the buttons beside the name don't
+          push the details line down. */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <h1 className="min-w-0 break-words font-semibold text-2xl tracking-tight">
-          {notebook.name}
-        </h1>
+        <div className="flex min-w-0 flex-col gap-3">
+          <h1 className="break-words font-semibold text-2xl tracking-tight">
+            {notebook.name}
+          </h1>
+
+          {notebook.description ? (
+            <p className="max-w-3xl whitespace-pre-line text-pretty text-muted-foreground text-sm">
+              {notebook.description}
+            </p>
+          ) : null}
+
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground text-sm">
+            {notebook.owner ? (
+              <span className="inline-flex items-center gap-1.5">
+                Owner
+                <UserAvatarLink user={notebook.owner}>
+                  <span className="font-medium text-foreground">
+                    {notebook.owner.displayName}
+                  </span>
+                </UserAvatarLink>
+              </span>
+            ) : (
+              <span>No owner</span>
+            )}
+            <Dot />
+            {notebook.runCount === 0 ? (
+              <span>No runs yet</span>
+            ) : (
+              <>
+                <span className="tabular-nums">
+                  {countLabel(notebook.runCount, "run")}
+                </span>
+                <Dot />
+                <span className="tabular-nums">
+                  {countLabel(notebook.instrumentCount, "instrument")}
+                </span>
+                {notebook.lastRunAt ? (
+                  <>
+                    <Dot />
+                    <span>
+                      Last run{" "}
+                      <RelativeTime date={notebook.lastRunAt.toISOString()} />
+                    </span>
+                  </>
+                ) : null}
+              </>
+            )}
+          </div>
+        </div>
+
         <div className="flex shrink-0 items-center gap-2">
           <Button asChild size="sm" variant="outline">
             <a href={notebook.url} rel="noopener noreferrer" target="_blank">
@@ -105,50 +155,6 @@ export function NotebookHeader({
             viewerId={viewerId}
           />
         </div>
-      </div>
-
-      {notebook.description ? (
-        <p className="max-w-3xl whitespace-pre-line text-pretty text-muted-foreground text-sm">
-          {notebook.description}
-        </p>
-      ) : null}
-
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground text-sm">
-        {notebook.owner ? (
-          <span className="inline-flex items-center gap-1.5">
-            Owner
-            <UserAvatarLink user={notebook.owner}>
-              <span className="font-medium text-foreground">
-                {notebook.owner.displayName}
-              </span>
-            </UserAvatarLink>
-          </span>
-        ) : (
-          <span>No owner</span>
-        )}
-        <Dot />
-        {notebook.runCount === 0 ? (
-          <span>No runs yet</span>
-        ) : (
-          <>
-            <span className="tabular-nums">
-              {countLabel(notebook.runCount, "run")}
-            </span>
-            <Dot />
-            <span className="tabular-nums">
-              {countLabel(notebook.instrumentCount, "instrument")}
-            </span>
-            {notebook.lastRunAt ? (
-              <>
-                <Dot />
-                <span>
-                  Last run{" "}
-                  <RelativeTime date={notebook.lastRunAt.toISOString()} />
-                </span>
-              </>
-            ) : null}
-          </>
-        )}
       </div>
     </div>
   );
