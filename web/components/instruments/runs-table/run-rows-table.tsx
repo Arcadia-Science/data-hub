@@ -7,6 +7,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import type { NotebookLinkNameOptions } from "@/lib/notebook-links/name-filter";
 import { runRowToRef } from "@/lib/runs/row-actions";
 import { cn, formatBytes } from "@/lib/utils";
 
@@ -16,10 +17,8 @@ import {
   type FilterOption,
   type InstrumentFilterParamKey,
 } from "./filterable-column-header";
-import {
-  NOTEBOOK_LINK_FILTER_OPTIONS,
-  NotebookLinksCell,
-} from "./notebook-links-cell";
+import { NotebookLinkColumnHeader } from "./notebook-link-column-header";
+import { NotebookLinksCell } from "./notebook-links-cell";
 import { RanByCell } from "./ran-by-cell";
 import { RawFileColumnHeader } from "./raw-file-column-header";
 import { RunIdCell } from "./run-id-cell";
@@ -49,11 +48,13 @@ export function RunRowsTable({
   columns = [],
   data,
   instrumentId,
+  notebookLinkNames,
   ranByOptions,
 }: {
   columns?: MetadataColumn[];
   data: RunRow[];
   instrumentId: string;
+  notebookLinkNames: NotebookLinkNameOptions;
   ranByOptions: { value: string; label: string }[];
 }) {
   const runRefs = data.map(runRowToRef);
@@ -85,11 +86,7 @@ export function RunRowsTable({
             />
           </TableHead>
           <TableHead>
-            <FilterableColumnHeader
-              label="Lab Notebook"
-              options={NOTEBOOK_LINK_FILTER_OPTIONS}
-              paramKey="has_notebook_link"
-            />
+            <NotebookLinkColumnHeader names={notebookLinkNames} />
           </TableHead>
           <RunTimeHeads />
         </TableRow>

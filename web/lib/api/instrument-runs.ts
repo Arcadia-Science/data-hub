@@ -28,6 +28,7 @@ import { notebookLinkToWire } from "@/lib/api/run-notebook-link-wire";
 import {
   getNotebookLinksByRunIds,
   notebookLinkCondition,
+  notebookLinkNameCondition,
 } from "@/lib/api/run-notebook-links";
 import { db } from "@/lib/db";
 import type { InstrumentType } from "@/lib/db/schema";
@@ -344,6 +345,12 @@ interface RunListFilters extends RunMetadataFilterArgs {
   hasNotebookLink?: boolean;
   includeDeleted: boolean;
   instrumentId?: string | string[];
+  // Lists only runs with a lab notebook link by this name, as the runs table
+  // shows it: the link's label, or the name worked out from its URL.
+  notebookLinkName?: string;
+  // Lists only runs with a lab notebook link whose name contains this text,
+  // ignoring case.
+  notebookLinkSearch?: string;
   order?: string;
   page: number;
   perPage: number;
@@ -664,6 +671,17 @@ export async function buildRunListQuery(filters: RunListFilters) {
 
   if (filters.hasNotebookLink !== undefined) {
     conditions.push(notebookLinkCondition(filters.hasNotebookLink));
+  }
+  if (
+    filters.notebookLinkName !== undefined ||
+    filters.notebookLinkSearch !== undefined
+  ) {
+    conditions.push(
+      await notebookLinkNameCondition({
+        name: filters.notebookLinkName,
+        search: filters.notebookLinkSearch,
+      })
+    );
   }
 
   if (filters.statuses && filters.statuses.length > 0) {

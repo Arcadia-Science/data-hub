@@ -4,6 +4,7 @@ import {
 } from "@/components/runs/metadata-badges";
 import type { QpcrFilterOptions } from "@/lib/api/instrument-runs";
 import { getDyeChannelColor } from "@/lib/instrument-colors";
+import type { NotebookLinkNameOptions } from "@/lib/notebook-links/name-filter";
 import type { RunRow } from ".";
 import { type MetadataColumn, RunRowsTable } from "./run-rows-table";
 
@@ -11,11 +12,13 @@ export function QpcrRunsTable({
   data,
   instrumentId,
   filterOptions,
+  notebookLinkNames,
   ranByOptions,
 }: {
   data: RunRow[];
   instrumentId: string;
   filterOptions: QpcrFilterOptions;
+  notebookLinkNames: NotebookLinkNameOptions;
   ranByOptions: { value: string; label: string }[];
 }) {
   const columns: MetadataColumn[] = [
@@ -45,6 +48,7 @@ export function QpcrRunsTable({
       columns={columns}
       data={data}
       instrumentId={instrumentId}
+      notebookLinkNames={notebookLinkNames}
       ranByOptions={ranByOptions}
     />
   );

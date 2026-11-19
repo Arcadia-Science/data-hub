@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { buildRunListQuery } from "@/lib/api/instrument-runs";
 import {
   bulkAddNotebookLinkResult,
   bulkRemoveNotebookLinksResult,
@@ -8,8 +9,10 @@ import {
   runDetail,
   runListResponse,
 } from "@/lib/api/openapi";
+import { getNotebookLinkNameOptions } from "@/lib/api/run-notebook-links";
 import type { GlobalSearchResult } from "@/lib/api/search";
 import { instruments } from "@/lib/db/schema";
+import { countRunsWithNameContaining } from "@/lib/notebook-links/name-filter";
 import { NOTEBOOK_LINKS_PER_RUN_MAX } from "@/lib/notebook-links/url";
 import {
   api,
@@ -485,6 +488,89 @@ describe("Run notebook links API", () => {
       ).json()
     );
     expect(crossInstrument.pagination.total).toBe(1);
+  });
+
+  it("filters run lists by a link's name, and lists names with run counts", async () => {
+    const listInstrument = "notebook-links-names";
+    await getTestDb()
+      .insert(instruments)
+      .values({ id: listInstrument, displayName: "Names", status: "active" });
+    for (const runId of ["names-1", "names-2", "names-3", "names-gone"]) {
+      await createRun(runId, listInstrument);
+    }
+    const link = (runId: string, body: { url: string; label?: string }) =>
+      api(linksPath(runId, listInstrument), { method: "POST", token, body });
+    await link("names-1", {
+      url: "https://example.com/eln/growth-1",
+      label: "Growth curve method",
+    });
+    await link("names-1", {
+      url: "https://example.com/eln/yeast",
+      label: "Yeast growth curves",
+    });
+    await link("names-2", {
+      url: "https://example.com/eln/growth-2",
+      label: "Growth curve method",
+    });
+    // No label, so the name comes from the URL: "notion.so › Plate growth".
+    await link("names-3", {
+      url: `https://www.notion.so/arcadia/Plate-growth-${NOTION_ID}`,
+    });
+    await link("names-gone", {
+      url: "https://example.com/eln/growth-3",
+      label: "Growth curve method",
+    });
+    await api(`/api/v1/instruments/${listInstrument}/runs/names-gone`, {
+      method: "DELETE",
+      token,
+    });
+
+    // Deleted runs don't count toward a name.
+    const options = await getNotebookLinkNameOptions({
+      instrumentId: listInstrument,
+    });
+    expect(options.names).toEqual([
+      { name: "Growth curve method", runCount: 2 },
+      { name: "notion.so › Plate growth", runCount: 1 },
+      { name: "Yeast growth curves", runCount: 1 },
+    ]);
+    expect(countRunsWithNameContaining(options, "growth")).toBe(3);
+
+    const runIds = async (filters: {
+      includeDeleted?: boolean;
+      notebookLinkName?: string;
+      notebookLinkSearch?: string;
+    }) => {
+      const result = await buildRunListQuery({
+        instrumentId: listInstrument,
+        includeDeleted: false,
+        page: 1,
+        perPage: 50,
+        ...filters,
+      });
+      return result.data.map((run) => run.run_id).sort();
+    };
+
+    expect(await runIds({ notebookLinkName: "Growth curve method" })).toEqual([
+      "names-1",
+      "names-2",
+    ]);
+    expect(
+      await runIds({
+        notebookLinkName: "Growth curve method",
+        includeDeleted: true,
+      })
+    ).toEqual(["names-1", "names-2", "names-gone"]);
+    expect(
+      await runIds({ notebookLinkName: "notion.so › Plate growth" })
+    ).toEqual(["names-3"]);
+    expect(await runIds({ notebookLinkSearch: "GROWTH" })).toEqual([
+      "names-1",
+      "names-2",
+      "names-3",
+    ]);
+    expect(await runIds({ notebookLinkSearch: "yeast" })).toEqual(["names-1"]);
+    expect(await runIds({ notebookLinkSearch: "pombe" })).toEqual([]);
   });
 
   it("finds runs in global search by a pasted copy of a link's URL", async () => {

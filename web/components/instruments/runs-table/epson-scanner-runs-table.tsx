@@ -8,6 +8,7 @@ import {
   DPI_COLORS,
   formatColorMode,
 } from "@/lib/instrument-colors";
+import type { NotebookLinkNameOptions } from "@/lib/notebook-links/name-filter";
 import type { RunRow } from ".";
 import { type MetadataColumn, RunRowsTable } from "./run-rows-table";
 
@@ -25,11 +26,13 @@ export function EpsonScannerRunsTable({
   data,
   instrumentId,
   filterOptions,
+  notebookLinkNames,
   ranByOptions,
 }: {
   data: RunRow[];
   instrumentId: string;
   filterOptions: EpsonScannerFilterOptions;
+  notebookLinkNames: NotebookLinkNameOptions;
   ranByOptions: { value: string; label: string }[];
 }) {
   const columns: MetadataColumn[] = [
@@ -72,6 +75,7 @@ export function EpsonScannerRunsTable({
       columns={columns}
       data={data}
       instrumentId={instrumentId}
+      notebookLinkNames={notebookLinkNames}
       ranByOptions={ranByOptions}
     />
   );

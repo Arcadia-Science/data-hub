@@ -1,6 +1,7 @@
 "use client";
 
 import { ExternalLink } from "lucide-react";
+import { useQueryStates } from "nuqs";
 import { TruncatedTooltip } from "@/components/truncated-tooltip";
 import { Button } from "@/components/ui/button";
 import {
@@ -9,19 +10,25 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import type { NotebookLinkWire } from "@/lib/api/run-notebook-link-wire";
-
-/** Options for the "Lab Notebook" column's filter menu. */
-export const NOTEBOOK_LINK_FILTER_OPTIONS = [
-  { value: "true", label: "Has a link" },
-  { value: "false", label: "No link" },
-];
+import { parseNotebookLinkNameParams } from "@/lib/api/validators";
+import { matchingLinkFirst } from "@/lib/notebook-links/name-filter";
+import { notebookLinkNameSearchParams } from "@/lib/search-params";
 
 /**
  * A run's lab notebook links in a runs table: the first link by name, and a
- * "+N" button that lists them all when the run has more than one.
+ * "+N" button that lists them all when the run has more than one. While the
+ * column is filtered by a link name, the link that matches it comes first.
  */
 export function NotebookLinksCell({ links }: { links: NotebookLinkWire[] }) {
-  const [first, ...rest] = links;
+  const [params] = useQueryStates(notebookLinkNameSearchParams);
+  const { notebookLinkName, notebookLinkSearch } = parseNotebookLinkNameParams({
+    name: params.notebook_link_name,
+    search: params.notebook_link_search,
+  });
+  const [first, ...rest] = matchingLinkFirst(links, {
+    name: notebookLinkName,
+    search: notebookLinkSearch,
+  });
   if (!first) {
     return (
       <span className="text-muted-foreground text-sm">
