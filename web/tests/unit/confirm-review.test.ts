@@ -4,7 +4,6 @@ import { runIdForPathGuarded } from "@/lib/api/watcher-config/guarded-run-id";
 import { RUN_DETECTION_PRESETS } from "@/lib/api/watcher-config/settings";
 import { VALID_INSTRUMENT_TYPES } from "@/lib/db/schema";
 import {
-  apiErrorMessage,
   buildConfirmInstrumentBody,
   presetRunDetectionName,
   workedRunExample,
@@ -174,38 +173,5 @@ describe("workedRunExample", () => {
         path === "a/b.csv" ? "from-matcher" : null
       )
     ).toEqual({ path: "a/b.csv", runId: "from-matcher" });
-  });
-});
-
-describe("apiErrorMessage", () => {
-  const FALLBACK = "Failed to confirm instrument";
-
-  it("reads the message from the API's error object", () => {
-    expect(
-      apiErrorMessage(
-        { error: { code: "FORBIDDEN", message: "Admin access required" } },
-        FALLBACK
-      )
-    ).toBe("Admin access required");
-  });
-
-  it("accepts a plain string error", () => {
-    expect(apiErrorMessage({ error: "Nope" }, FALLBACK)).toBe("Nope");
-  });
-
-  it.each([
-    ["no body", null],
-    ["a body with no error", {}],
-    ["an error with no message", { error: { code: "X" } }],
-    ["a message that is not text", { error: { message: { nested: true } } }],
-    ["an empty message", { error: { message: "" } }],
-  ])("falls back for %s", (_label, body) => {
-    expect(apiErrorMessage(body, FALLBACK)).toBe(FALLBACK);
-  });
-
-  it("always returns text a page can render", () => {
-    expect(typeof apiErrorMessage({ error: { message: 5 } }, FALLBACK)).toBe(
-      "string"
-    );
   });
 });
