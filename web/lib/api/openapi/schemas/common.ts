@@ -12,6 +12,13 @@ import {
   RUN_STATUS_VALUES,
 } from "@/lib/runs/run-status";
 
+// The MCP tool outputs import this file directly, so it can load before
+// `../registry.ts` adds `.openapi()` to Zod. A schema built then never gets
+// `.openapi()`, so calling it on an export from here can break every route
+// that loads the OpenAPI schemas. Call `.describe()` on these instead, or
+// call `.openapi()` on a new schema made from one, such as `.optional()`.
+// tests/unit/openapi-load-order.test.ts loads the schemas in this order.
+
 export const isoDateTime = z.string().datetime({ offset: true });
 export const instrumentTypeSchema = z.enum(VALID_INSTRUMENT_TYPES);
 export const instrumentStatusSchema = z.enum(["pending", "active", "inactive"]);
