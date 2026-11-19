@@ -52,7 +52,8 @@ interface RouteContext {
 //
 // Idempotent on s3_key: if a file of this run already has the key (partial
 // unique index), returns the existing record with 200 instead of 201. A file
-// of another run holding it gets 409.
+// of another run holding the key, or another file of this run holding the
+// path, gets 409.
 // ---------------------------------------------------------------------------
 
 export async function POST(request: NextRequest, { params }: RouteContext) {
@@ -134,47 +135,44 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     )
     .limit(1);
 
-  if (existing) {
-    if (PRE_UPLOAD_STATUSES.has(existing.status)) {
-      const updated = await adoptPreUploadFile(existing.id, {
-        s3Bucket,
-        s3Key,
-        // The Lambda omits content_type/size_bytes for raw uploads; keep
-        // what the watcher's detected_files report recorded rather than
-        // wiping the columns to null.
-        contentType: contentType ?? existing.contentType,
-        sizeBytes: sizeBytes ?? existing.sizeBytes,
-        // Honour the Lambda-supplied category when adopting a row. The
-        // watcher always inserts with the default ("raw"), so without
-        // this the insert vs. reconcile branches would diverge for
-        // Lambda-classified processed files.
-        category,
-        uploadedAt: now,
-      });
-
-      if (!updated) {
-        // The row left pre-upload (or was dismissed) after the read above,
-        // so nothing changed. Return it as it is now, like a retry on an
-        // uploaded row below.
-        const [current] = await db
-          .select()
-          .from(files)
-          .where(eq(files.id, existing.id))
-          .limit(1);
-        return Response.json(formatFileResponse(current), { status: 200 });
-      }
-
-      await touchRuns([run.id]);
-      return Response.json(formatFileResponse(updated), { status: 200 });
-    }
-
+  if (existing && !PRE_UPLOAD_STATUSES.has(existing.status)) {
     // Already uploaded / processing / completed / failed: Lambda is calling
     // again (likely a retry after a warm-container timeout). Don't regress
     // status — return the existing record as-is.
     return Response.json(formatFileResponse(existing), { status: 200 });
   }
 
-  // No matching row yet — insert one. Set relativePath = filename so that
+  if (existing) {
+    const adopt = await adoptPreUploadFile(existing.id, {
+      s3Bucket,
+      s3Key,
+      // The Lambda omits content_type/size_bytes for raw uploads; keep
+      // what the watcher's detected_files report recorded rather than
+      // wiping the columns to null.
+      contentType: contentType ?? existing.contentType,
+      sizeBytes: sizeBytes ?? existing.sizeBytes,
+      // Honour the Lambda-supplied category when adopting a row. The
+      // watcher always inserts with the default ("raw"), so without
+      // this the insert vs. reconcile branches would diverge for
+      // Lambda-classified processed files.
+      category,
+      uploadedAt: now,
+    });
+
+    if (adopt.kind === "adopted") {
+      await touchRuns([run.id]);
+      return Response.json(formatFileResponse(adopt.row), { status: 200 });
+    }
+    if (adopt.kind === "moved_on") {
+      // The row left pre-upload after the read above. Return it as it is
+      // now, like a retry on an uploaded row.
+      return Response.json(formatFileResponse(adopt.row), { status: 200 });
+    }
+    // Dismissed after the read above: it no longer blocks a new row, so
+    // insert one below.
+  }
+
+  // No active row to adopt — insert one. Set relativePath = filename so that
   // future watcher reports also dedup against this row via the existing
   // (instrument_run_id, relative_path) partial unique index, which covers
   // active rows only, so a dismissed row at that path doesn't block this
@@ -226,7 +224,11 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       .limit(1);
 
     if (!racedByName) {
-      return apiError(409, CONFLICT, "Another file already uses this S3 key");
+      return apiError(
+        409,
+        CONFLICT,
+        "Another file already uses this S3 key or path"
+      );
     }
     return Response.json(formatFileResponse(racedByName), { status: 200 });
   }

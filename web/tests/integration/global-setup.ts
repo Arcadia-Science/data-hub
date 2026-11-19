@@ -390,9 +390,10 @@ export async function setup() {
     AWS_ACCESS_KEY_ID: process.env.AWS_ACCESS_KEY_ID ?? "test-key",
     AWS_SECRET_ACCESS_KEY: process.env.AWS_SECRET_ACCESS_KEY ?? "test-secret",
     AWS_REGION: process.env.AWS_REGION ?? "us-east-1",
-    S3_RAW_DATA_BUCKET: process.env.S3_RAW_DATA_BUCKET ?? TEST_RAW_BUCKET,
-    S3_PROCESSED_BUCKET:
-      process.env.S3_PROCESSED_BUCKET ?? TEST_PROCESSED_BUCKET,
+    // Pinned, not taken from the shell: the tests register files in these
+    // buckets by name, and the API refuses any other.
+    S3_RAW_DATA_BUCKET: TEST_RAW_BUCKET,
+    S3_PROCESSED_BUCKET: TEST_PROCESSED_BUCKET,
     // Multipart uploads call S3 for real. The integration server runs as
     // production, so LOCAL_S3_MIRROR is off. This directory is the stand-in,
     // and the small threshold lets tests finish a multipart upload quickly.

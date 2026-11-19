@@ -12,10 +12,19 @@ export type AdoptedFileValues = Pick<
   "s3Bucket" | "s3Key" | "contentType" | "sizeBytes" | "category" | "uploadedAt"
 >;
 
+// What `adoptPreUploadFile` did:
+// - `adopted`: the row is now `uploaded` at the given location.
+// - `moved_on`: the row left pre-upload after the caller read it; `row` is
+//   how it is now, untouched.
+// - `dismissed`: the row was dismissed after the caller read it. It no longer
+//   blocks a new row with the same name, so the caller can insert one.
+export type AdoptResult =
+  | { kind: "adopted"; row: FileRow }
+  | { kind: "moved_on"; row: FileRow }
+  | { kind: "dismissed" };
+
 // Moves a pre-upload row to `uploaded` at the given S3 location: the Lambda
-// found the file's bytes before the watcher reported them. Returns the updated
-// row, or undefined when the row has left pre-upload or been dismissed since
-// the caller read it.
+// found the file's bytes before the watcher reported them.
 //
 // The pre-upload check is part of the write. Between the caller's read and
 // this update, the watcher's PATCH can mark the row uploaded and processing
@@ -24,7 +33,7 @@ export type AdoptedFileValues = Pick<
 export async function adoptPreUploadFile(
   fileId: number,
   values: AdoptedFileValues
-): Promise<FileRow | undefined> {
+): Promise<AdoptResult> {
   const [updated] = await db
     .update(files)
     .set({ ...values, ...UPLOAD_ARRIVED_RESET, status: "uploaded" })
@@ -36,7 +45,20 @@ export async function adoptPreUploadFile(
       )
     )
     .returning();
-  return updated;
+  if (updated) {
+    return { kind: "adopted", row: updated };
+  }
+  const [current] = await db
+    .select()
+    .from(files)
+    .where(eq(files.id, fileId))
+    .limit(1);
+  // File rows are never hard-deleted, so a missing row is treated like a
+  // dismissed one.
+  if (!current || current.deletedAt) {
+    return { kind: "dismissed" };
+  }
+  return { kind: "moved_on", row: current };
 }
 
 // Fetches an active (not soft-deleted) file by numeric ID.

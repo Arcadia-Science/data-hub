@@ -516,19 +516,25 @@ describe("Files API", () => {
       ],
     ];
 
-    it.each(BAD_LOCATIONS)("rejects %s", async (_label, body, message) => {
-      const res = await postFile(locRunId, body());
+    it.each(
+      BAD_LOCATIONS
+    )("rejects %s and stores nothing", async (_label, body, message) => {
+      const sent = body();
+      const res = await postFile(locRunId, sent);
       expect(res.status).toBe(400);
       const data = await res.json();
       expect(data.error.code).toBe("VALIDATION_ERROR");
       expect(data.error.message).toMatch(message);
-    });
 
-    it("stored nothing for the rejected locations", async () => {
       const rows = await getTestDb()
         .select({ id: schemaFiles.id })
         .from(schemaFiles)
-        .where(eq(schemaFiles.instrumentRunId, await runUuid(locRunId)));
+        .where(
+          and(
+            eq(schemaFiles.instrumentRunId, await runUuid(locRunId)),
+            eq(schemaFiles.filename, String(sent.filename))
+          )
+        );
       expect(rows).toHaveLength(0);
     });
 
@@ -592,13 +598,13 @@ describe("Files API", () => {
         })
         .where(eq(schemaFiles.id, row.id));
 
-      const adopted = await adoptPreUploadFile(row.id, {
+      const adopt = await adoptPreUploadFile(row.id, {
         s3Bucket: TEST_PROCESSED_BUCKET,
         s3Key: `${instrumentId}/${otherRunId}/${filename}`,
         category: "processed",
         uploadedAt: new Date(),
       });
-      expect(adopted).toBeUndefined();
+      expect(adopt.kind).toBe("moved_on");
 
       const [after] = await getTestDb()
         .select()
@@ -608,6 +614,44 @@ describe("Files API", () => {
       expect(after.s3Bucket).toBe(TEST_RAW_BUCKET);
       expect(after.s3Key).toBe(canonicalKey);
       expect(after.category).toBe("raw");
+
+      // Finish the row so it doesn't count toward the processing limit the
+      // reprocess tests below rely on.
+      await getTestDb()
+        .update(schemaFiles)
+        .set({ status: "completed", processedAt: new Date() })
+        .where(eq(schemaFiles.id, row.id));
+    });
+
+    // A row dismissed between the route's read and its write no longer
+    // blocks a new row, so the route inserts one instead of returning it.
+    it("doesn't adopt a row that was dismissed after it was read", async () => {
+      const filename = "dismissed-meanwhile.csv";
+      const [row] = await getTestDb()
+        .insert(schemaFiles)
+        .values({
+          instrumentRunId: await runUuid(locRunId),
+          relativePath: filename,
+          filename,
+          status: "detected",
+          deletedAt: new Date(),
+        })
+        .returning();
+
+      const adopt = await adoptPreUploadFile(row.id, {
+        s3Bucket: TEST_RAW_BUCKET,
+        s3Key: `${instrumentId}/${locRunId}/${filename}`,
+        category: "raw",
+        uploadedAt: new Date(),
+      });
+      expect(adopt.kind).toBe("dismissed");
+
+      const [after] = await getTestDb()
+        .select()
+        .from(schemaFiles)
+        .where(eq(schemaFiles.id, row.id));
+      expect(after.status).toBe("detected");
+      expect(after.s3Key).toBeNull();
     });
 
     it("adopts a row that is still pre-upload", async () => {
@@ -623,14 +667,17 @@ describe("Files API", () => {
         })
         .returning();
 
-      const adopted = await adoptPreUploadFile(row.id, {
+      const adopt = await adoptPreUploadFile(row.id, {
         s3Bucket: TEST_RAW_BUCKET,
         s3Key: `${instrumentId}/${locRunId}/${filename}`,
         category: "raw",
         uploadedAt: new Date(),
       });
-      expect(adopted?.status).toBe("uploaded");
-      expect(adopted?.s3Key).toBe(`${instrumentId}/${locRunId}/${filename}`);
+      expect(adopt.kind).toBe("adopted");
+      if (adopt.kind === "adopted") {
+        expect(adopt.row.status).toBe("uploaded");
+        expect(adopt.row.s3Key).toBe(`${instrumentId}/${locRunId}/${filename}`);
+      }
     });
 
     // `uq_files_s3_key` spans every run. A row stored in another run before
