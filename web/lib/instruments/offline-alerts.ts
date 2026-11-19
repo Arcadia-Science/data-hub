@@ -93,9 +93,11 @@ export type OfflineAlertTransition =
  * outage, so neither sends anything. Retiring ends it silently.
  *
  * The pause (see `isOfflineAlertPaused`) only holds back `unresponsive`, the one
- * reason that comes from heartbeats not arriving. The other reasons come from
- * a heartbeat that did arrive, or from an admin, so a fault on Data Hub's side
- * can't produce them.
+ * reason that comes from heartbeats that stopped arriving. `never_checked_in`
+ * comes from a watcher that never sent one, which the pause doesn't count, so
+ * a setup that failed still alerts during an unrelated outage. The other
+ * reasons come from a heartbeat that did arrive, or from an admin, so a fault
+ * on Data Hub's side can't produce them.
  */
 export function stepOfflineAlert(
   state: OfflineAlertState | null,
@@ -218,6 +220,8 @@ export function offlineAlertMessage(
       return input.lastHeartbeatAt
         ? `The watcher hasn't checked in for ${formatOutageDuration(input.lastHeartbeatAt, input.now)}. New files won't appear until it's back.`
         : "The watcher isn't checking in. New files won't appear until it's back.";
+    case "never_checked_in":
+      return `The watcher${input.hostname ? ` on ${input.hostname}` : ""} never checked in after it was set up. New files won't appear until the watcher service is running on that PC.`;
     case "stopped":
       return input.hostname
         ? `The watcher on ${input.hostname} was stopped. New files won't appear until it's started again.`

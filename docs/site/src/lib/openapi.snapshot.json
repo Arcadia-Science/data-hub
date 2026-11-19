@@ -269,7 +269,7 @@
               "connecting",
               "offline"
             ],
-            "description": "`online`: the watcher checked in within 5 minutes. `restarting`: the watcher stopped for a Windows restart or an automatic update less than 15 minutes ago. `connecting`: the watcher registered and hasn't sent a heartbeat yet. `offline`: anything else. The instrument's own status plays no part: a pending instrument can be `online`."
+            "description": "`online`: the watcher checked in within 5 minutes. `restarting`: the watcher stopped for a Windows restart or an automatic update less than 15 minutes ago. `connecting`: the watcher registered and hasn't sent a heartbeat yet, for up to 15 minutes after it registered or the instrument was confirmed; after that the instrument is `offline` with reason `never_checked_in`. `offline`: anything else. The instrument's own status plays no part: a pending instrument can be `online`."
           },
           "reason": {
             "type": [
@@ -279,6 +279,7 @@
             "enum": [
               "folder_missing",
               "unresponsive",
+              "never_checked_in",
               "stopped",
               "no_watcher",
               "deregistered",
@@ -1474,7 +1475,7 @@
               "waiting",
               "stale"
             ],
-            "description": "The status Data Hub shows for the watcher. `stale` is worked out when you ask and is never stored. A `watching` or `waiting` watcher is `stale` when its last heartbeat is more than 5 minutes old. A `stopped` watcher stays `stopped`, however old its last heartbeat, unless it stopped for a restart or an update (see `status_reason`): then it is `stale` when its last heartbeat is more than 15 minutes old. A deregistered watcher is always `stopped`. The `status` filter on the list endpoint returns the watchers that show that status."
+            "description": "The status Data Hub shows for the watcher. `stale` is worked out when you ask and is never stored. A `watching` or `waiting` watcher is `stale` when its last heartbeat is more than 5 minutes old. A `stopped` watcher stays `stopped`, however old its last heartbeat, unless it stopped for a restart or an update (see `status_reason`): then it is `stale` when its last heartbeat is more than 15 minutes old. A `registered` watcher, which hasn't sent its first heartbeat, is `stale` 15 minutes after it registered, or after its instrument was confirmed if that came later; while its instrument is pending it stays `registered`. A deregistered watcher is always `stopped`. The `status` filter on the list endpoint returns the watchers that show that status."
           },
           "config_yaml": {
             "type": [

@@ -213,10 +213,10 @@ describe("legacy scopes on a watcher's token", () => {
 });
 
 // The migration stores the same narrowing that `validatePat` applies.
-describe("migration 0070_narrow_watcher_token_legacy_scopes", () => {
+describe("migration 0071_narrow_watcher_token_legacy_scopes", () => {
   const MIGRATION = path.resolve(
     import.meta.dirname,
-    "../../drizzle/0070_narrow_watcher_token_legacy_scopes.sql"
+    "../../drizzle/0071_narrow_watcher_token_legacy_scopes.sql"
   );
 
   interface Case {

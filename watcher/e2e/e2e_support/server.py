@@ -32,6 +32,7 @@ from e2e_support._http import ApiResult, call, new_session
 from e2e_support.waiting import wait_until
 
 __all__ = [
+    "FIRST_CHECK_IN_MINUTES",
     "STALE_AFTER_MINUTES",
     "SWEEP_GRACE_MINUTES",
     "EventRow",
@@ -42,10 +43,11 @@ __all__ = [
     "WatcherRow",
 ]
 
-# The server's own timers: `STALE_THRESHOLD_MS` in web/lib/api/watchers.ts and
-# `UPLOAD_REQUEST_REVERT_GRACE_MS` in web/lib/api/watcher-status.ts.
+# The server's own timers: `STALE_THRESHOLD_MS`, `UPLOAD_REQUEST_REVERT_GRACE_MS` and
+# `FIRST_CHECK_IN_GRACE_MS` in web/lib/api/watcher-status.ts.
 STALE_AFTER_MINUTES = 5
 SWEEP_GRACE_MINUTES = 15
+FIRST_CHECK_IN_MINUTES = 15
 
 RunStatus = Literal[
     "failed",
@@ -475,6 +477,24 @@ class ServerView:
     def age_past_sweep_grace(self, watcher_id: str) -> None:
         """Age the last heartbeat to just past the cron sweep's grace period (16 minutes)."""
         self.age_heartbeat(watcher_id, SWEEP_GRACE_MINUTES + 1)
+
+    def age_registration(self, watcher_id: str, minutes: float) -> None:
+        """Make the watcher's registration ``minutes`` old, and its instrument's confirmation
+        too when it has one.
+
+        A ``registered`` watcher that hasn't checked in reads ``stale`` once
+        :data:`FIRST_CHECK_IN_MINUTES` have passed since the later of the two.
+        """
+        self.execute(
+            "UPDATE watchers SET created_at = now() - (%s * interval '1 minute') WHERE id = %s",
+            (minutes, watcher_id),
+        )
+        self.execute(
+            "UPDATE instruments SET confirmed_at = now() - (%s * interval '1 minute') "
+            "WHERE confirmed_at IS NOT NULL "
+            "AND id = (SELECT instrument_id FROM watchers WHERE id = %s)",
+            (minutes, watcher_id),
+        )
 
     def clear_heartbeat(self, watcher_id: str) -> None:
         """Set ``last_heartbeat_at`` to null, as for a watcher that never checked in."""

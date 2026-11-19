@@ -39,7 +39,7 @@ export const listWatchersTool = {
       .enum(["registered", "watching", "stopped", "waiting", "stale"])
       .optional()
       .describe(
-        "Filter by effective status. stale is computed, never stored: a watching or waiting watcher with no heartbeat for 5 minutes, or one that stopped for a restart or an automatic update and has sent none for 15 minutes. A stopped watcher otherwise stays stopped, and a deregistered watcher is always stopped."
+        "Filter by effective status. stale is computed, never stored: a watching or waiting watcher with no heartbeat for 5 minutes, one that stopped for a restart or an automatic update and has sent none for 15 minutes, or a registered one with no first heartbeat 15 minutes after it registered or its instrument was confirmed (a pending instrument's watcher stays registered). A stopped watcher otherwise stays stopped, and a deregistered watcher is always stopped."
       ),
   },
   outputSchema: listWatchersOutputSchema,

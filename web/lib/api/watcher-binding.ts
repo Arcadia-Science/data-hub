@@ -122,7 +122,7 @@ export function hasLegacyScope(scopes: readonly string[]): boolean {
  * for the Watcher-preset scopes they used to imply, so an old watcher token
  * can't read every instrument's runs and files. Scopes the token lists
  * explicitly are kept, so the result never allows more than the stored scopes
- * did. Migration `0070_narrow_watcher_token_legacy_scopes` applied the same
+ * did. Migration `0071_narrow_watcher_token_legacy_scopes` applied the same
  * rule once to the scopes stored then.
  */
 export function narrowWatcherTokenScopes(scopes: readonly string[]): string[] {

@@ -1,5 +1,5 @@
 {
-  "id": "37a90dfa-8251-40f2-9a0b-64347181b282",
+  "id": "7fe6bb2a-deee-49e6-a646-c766a3d2dbc3",
   "prevId": "a6ed26fb-7218-40eb-9a90-cb86e5c1e367",
   "version": "7",
   "dialect": "postgresql",
@@ -107,24 +107,24 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "account_userId_user_id_fk": {
           "name": "account_userId_user_id_fk",
           "tableFrom": "account",
+          "tableTo": "user",
           "columnsFrom": [
             "userId"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -232,10 +232,10 @@
             }
           ],
           "isUnique": true,
-          "with": {},
-          "method": "btree",
           "where": "\"archive_jobs\".\"status\" in ('pending', 'building')",
-          "concurrently": false
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         },
         "idx_archive_jobs_run_fingerprint_status": {
           "name": "idx_archive_jobs_run_fingerprint_status",
@@ -260,50 +260,50 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "archive_jobs_instrument_run_id_instrument_runs_id_fk": {
           "name": "archive_jobs_instrument_run_id_instrument_runs_id_fk",
           "tableFrom": "archive_jobs",
+          "tableTo": "instrument_runs",
           "columnsFrom": [
             "instrument_run_id"
           ],
-          "tableTo": "instrument_runs",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "archive_jobs_created_by_user_id_fk": {
           "name": "archive_jobs_created_by_user_id_fk",
           "tableFrom": "archive_jobs",
+          "tableTo": "user",
           "columnsFrom": [
             "created_by"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         },
         "archive_jobs_created_by_token_personal_access_tokens_id_fk": {
           "name": "archive_jobs_created_by_token_personal_access_tokens_id_fk",
           "tableFrom": "archive_jobs",
+          "tableTo": "personal_access_tokens",
           "columnsFrom": [
             "created_by_token"
           ],
-          "tableTo": "personal_access_tokens",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "restrict"
+          "onDelete": "restrict",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -516,10 +516,10 @@
             }
           ],
           "isUnique": true,
-          "with": {},
-          "method": "btree",
           "where": "\"files\".\"relative_path\" is not null and \"files\".\"deleted_at\" is null",
-          "concurrently": false
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         },
         "uq_files_active_instrument_run_id_filename": {
           "name": "uq_files_active_instrument_run_id_filename",
@@ -538,10 +538,10 @@
             }
           ],
           "isUnique": true,
-          "with": {},
-          "method": "btree",
           "where": "\"files\".\"deleted_at\" is null",
-          "concurrently": false
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         },
         "uq_files_s3_key": {
           "name": "uq_files_s3_key",
@@ -554,10 +554,10 @@
             }
           ],
           "isUnique": true,
-          "with": {},
-          "method": "btree",
           "where": "\"files\".\"s3_key\" is not null",
-          "concurrently": false
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         },
         "idx_files_instrument_run_id": {
           "name": "idx_files_instrument_run_id",
@@ -570,9 +570,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "idx_files_status_instrument_run_id": {
           "name": "idx_files_status_instrument_run_id",
@@ -591,9 +591,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "idx_files_upload_queue": {
           "name": "idx_files_upload_queue",
@@ -606,10 +606,10 @@
             }
           ],
           "isUnique": false,
-          "with": {},
-          "method": "btree",
           "where": "\"files\".\"upload_requested_at\" is not null and \"files\".\"uploaded_at\" is null and \"files\".\"deleted_at\" is null",
-          "concurrently": false
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         },
         "idx_files_metadata_gin": {
           "name": "idx_files_metadata_gin",
@@ -622,9 +622,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "gin",
-          "concurrently": false
+          "with": {}
         },
         "idx_files_auto_upload_expected": {
           "name": "idx_files_auto_upload_expected",
@@ -637,54 +637,54 @@
             }
           ],
           "isUnique": false,
-          "with": {},
-          "method": "btree",
           "where": "\"files\".\"auto_upload_expected_at\" is not null",
-          "concurrently": false
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         },
         "idx_files_filename_trgm": {
           "name": "idx_files_filename_trgm",
           "columns": [
             {
               "expression": "\"filename\" gin_trgm_ops",
-              "isExpression": true,
               "asc": true,
+              "isExpression": true,
               "nulls": "last"
             }
           ],
           "isUnique": false,
-          "with": {},
-          "method": "gin",
           "where": "\"files\".\"deleted_at\" is null",
-          "concurrently": false
+          "concurrently": false,
+          "method": "gin",
+          "with": {}
         }
       },
       "foreignKeys": {
         "files_instrument_run_id_instrument_runs_id_fk": {
           "name": "files_instrument_run_id_instrument_runs_id_fk",
           "tableFrom": "files",
+          "tableTo": "instrument_runs",
           "columnsFrom": [
             "instrument_run_id"
           ],
-          "tableTo": "instrument_runs",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "files_upload_requested_by_user_id_fk": {
           "name": "files_upload_requested_by_user_id_fk",
           "tableFrom": "files",
+          "tableTo": "user",
           "columnsFrom": [
             "upload_requested_by"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -756,37 +756,37 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "instrument_notification_subscriptions_user_id_user_id_fk": {
           "name": "instrument_notification_subscriptions_user_id_user_id_fk",
           "tableFrom": "instrument_notification_subscriptions",
+          "tableTo": "user",
           "columnsFrom": [
             "user_id"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "instrument_notification_subscriptions_instrument_id_instruments_id_fk": {
           "name": "instrument_notification_subscriptions_instrument_id_instruments_id_fk",
           "tableFrom": "instrument_notification_subscriptions",
+          "tableTo": "instruments",
           "columnsFrom": [
             "instrument_id"
           ],
-          "tableTo": "instruments",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -831,15 +831,15 @@
         "instrument_offline_alerts_instrument_id_instruments_id_fk": {
           "name": "instrument_offline_alerts_instrument_id_instruments_id_fk",
           "tableFrom": "instrument_offline_alerts",
+          "tableTo": "instruments",
           "columnsFrom": [
             "instrument_id"
           ],
-          "tableTo": "instruments",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -949,9 +949,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "idx_instrument_runs_active": {
           "name": "idx_instrument_runs_active",
@@ -970,10 +970,10 @@
             }
           ],
           "isUnique": false,
-          "with": {},
-          "method": "btree",
           "where": "\"instrument_runs\".\"deleted_at\" is null",
-          "concurrently": false
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         },
         "idx_instrument_runs_active_acquired_at": {
           "name": "idx_instrument_runs_active_acquired_at",
@@ -986,16 +986,16 @@
             },
             {
               "expression": "coalesce(\"acquired_at\", \"created_at\") desc",
-              "isExpression": true,
               "asc": true,
+              "isExpression": true,
               "nulls": "last"
             }
           ],
           "isUnique": false,
-          "with": {},
-          "method": "btree",
           "where": "\"instrument_runs\".\"deleted_at\" is null",
-          "concurrently": false
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         },
         "idx_instrument_runs_metadata_gin": {
           "name": "idx_instrument_runs_metadata_gin",
@@ -1008,89 +1008,89 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "gin",
-          "concurrently": false
+          "with": {}
         },
         "idx_instrument_runs_run_id_trgm": {
           "name": "idx_instrument_runs_run_id_trgm",
           "columns": [
             {
               "expression": "\"run_id\" gin_trgm_ops",
-              "isExpression": true,
               "asc": true,
+              "isExpression": true,
               "nulls": "last"
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "gin",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "instrument_runs_instrument_id_instruments_id_fk": {
           "name": "instrument_runs_instrument_id_instruments_id_fk",
           "tableFrom": "instrument_runs",
+          "tableTo": "instruments",
           "columnsFrom": [
             "instrument_id"
           ],
-          "tableTo": "instruments",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "instrument_runs_watcher_id_watchers_id_fk": {
           "name": "instrument_runs_watcher_id_watchers_id_fk",
           "tableFrom": "instrument_runs",
+          "tableTo": "watchers",
           "columnsFrom": [
             "watcher_id"
           ],
-          "tableTo": "watchers",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "instrument_runs_deleted_by_user_id_fk": {
           "name": "instrument_runs_deleted_by_user_id_fk",
           "tableFrom": "instrument_runs",
+          "tableTo": "user",
           "columnsFrom": [
             "deleted_by"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         },
         "instrument_runs_deleted_by_token_personal_access_tokens_id_fk": {
           "name": "instrument_runs_deleted_by_token_personal_access_tokens_id_fk",
           "tableFrom": "instrument_runs",
+          "tableTo": "personal_access_tokens",
           "columnsFrom": [
             "deleted_by_token"
           ],
-          "tableTo": "personal_access_tokens",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "restrict"
+          "onDelete": "restrict",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "uq_instrument_runs_instrument_id_run_id": {
           "name": "uq_instrument_runs_instrument_id_run_id",
+          "nullsNotDistinct": false,
           "columns": [
             "instrument_id",
             "run_id"
-          ],
-          "nullsNotDistinct": false
+          ]
         }
       },
       "policies": {},
@@ -1148,6 +1148,12 @@
           "notNull": true,
           "default": "now()"
         },
+        "confirmed_at": {
+          "name": "confirmed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "retired_at": {
           "name": "retired_at",
           "type": "timestamp with time zone",
@@ -1173,43 +1179,43 @@
           "columns": [
             {
               "expression": "\"display_name\" gin_trgm_ops",
-              "isExpression": true,
               "asc": true,
+              "isExpression": true,
               "nulls": "last"
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "gin",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "instruments_retired_by_user_id_fk": {
           "name": "instruments_retired_by_user_id_fk",
           "tableFrom": "instruments",
+          "tableTo": "user",
           "columnsFrom": [
             "retired_by"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         },
         "instruments_retired_by_token_personal_access_tokens_id_fk": {
           "name": "instruments_retired_by_token_personal_access_tokens_id_fk",
           "tableFrom": "instruments",
+          "tableTo": "personal_access_tokens",
           "columnsFrom": [
             "retired_by_token"
           ],
-          "tableTo": "personal_access_tokens",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "restrict"
+          "onDelete": "restrict",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1655,15 +1661,15 @@
         "notification_preferences_user_id_user_id_fk": {
           "name": "notification_preferences_user_id_user_id_fk",
           "tableFrom": "notification_preferences",
+          "tableTo": "user",
           "columnsFrom": [
             "user_id"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1770,9 +1776,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "idx_notifications_user_id_unread": {
           "name": "idx_notifications_user_id_unread",
@@ -1791,90 +1797,90 @@
             }
           ],
           "isUnique": false,
-          "with": {},
-          "method": "btree",
           "where": "\"notifications\".\"read_at\" is null",
-          "concurrently": false
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
         "notifications_user_id_user_id_fk": {
           "name": "notifications_user_id_user_id_fk",
           "tableFrom": "notifications",
+          "tableTo": "user",
           "columnsFrom": [
             "user_id"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "notifications_run_id_instrument_runs_id_fk": {
           "name": "notifications_run_id_instrument_runs_id_fk",
           "tableFrom": "notifications",
+          "tableTo": "instrument_runs",
           "columnsFrom": [
             "run_id"
           ],
-          "tableTo": "instrument_runs",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "notifications_instrument_id_instruments_id_fk": {
           "name": "notifications_instrument_id_instruments_id_fk",
           "tableFrom": "notifications",
+          "tableTo": "instruments",
           "columnsFrom": [
             "instrument_id"
           ],
-          "tableTo": "instruments",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "notifications_comment_id_run_comments_id_fk": {
           "name": "notifications_comment_id_run_comments_id_fk",
           "tableFrom": "notifications",
+          "tableTo": "run_comments",
           "columnsFrom": [
             "comment_id"
           ],
-          "tableTo": "run_comments",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "notifications_actor_user_id_user_id_fk": {
           "name": "notifications_actor_user_id_user_id_fk",
           "tableFrom": "notifications",
+          "tableTo": "user",
           "columnsFrom": [
             "actor_user_id"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         },
         "notifications_actor_token_id_personal_access_tokens_id_fk": {
           "name": "notifications_actor_token_id_personal_access_tokens_id_fk",
           "tableFrom": "notifications",
+          "tableTo": "personal_access_tokens",
           "columnsFrom": [
             "actor_token_id"
           ],
-          "tableTo": "personal_access_tokens",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "restrict"
+          "onDelete": "restrict",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1995,9 +2001,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "oauthAccessToken_sessionId_idx": {
           "name": "oauthAccessToken_sessionId_idx",
@@ -2010,9 +2016,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "oauthAccessToken_userId_idx": {
           "name": "oauthAccessToken_userId_idx",
@@ -2025,9 +2031,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "oauthAccessToken_authorizationCodeId_idx": {
           "name": "oauthAccessToken_authorizationCodeId_idx",
@@ -2040,9 +2046,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "oauthAccessToken_refreshId_idx": {
           "name": "oauthAccessToken_refreshId_idx",
@@ -2055,73 +2061,73 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "oauth_access_token_clientId_oauth_client_clientId_fk": {
           "name": "oauth_access_token_clientId_oauth_client_clientId_fk",
           "tableFrom": "oauth_access_token",
+          "tableTo": "oauth_client",
           "columnsFrom": [
             "clientId"
           ],
-          "tableTo": "oauth_client",
           "columnsTo": [
             "clientId"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "oauth_access_token_sessionId_session_id_fk": {
           "name": "oauth_access_token_sessionId_session_id_fk",
           "tableFrom": "oauth_access_token",
+          "tableTo": "session",
           "columnsFrom": [
             "sessionId"
           ],
-          "tableTo": "session",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         },
         "oauth_access_token_userId_user_id_fk": {
           "name": "oauth_access_token_userId_user_id_fk",
           "tableFrom": "oauth_access_token",
+          "tableTo": "user",
           "columnsFrom": [
             "userId"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "oauth_access_token_refreshId_oauth_refresh_token_id_fk": {
           "name": "oauth_access_token_refreshId_oauth_refresh_token_id_fk",
           "tableFrom": "oauth_access_token",
+          "tableTo": "oauth_refresh_token",
           "columnsFrom": [
             "refreshId"
           ],
-          "tableTo": "oauth_refresh_token",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "oauth_access_token_token_unique": {
           "name": "oauth_access_token_token_unique",
+          "nullsNotDistinct": false,
           "columns": [
             "token"
-          ],
-          "nullsNotDistinct": false
+          ]
         }
       },
       "policies": {},
@@ -2206,9 +2212,9 @@
             }
           ],
           "isUnique": true,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "oauthClientResource_clientId_idx": {
           "name": "oauthClientResource_clientId_idx",
@@ -2221,9 +2227,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "oauthClientResource_resourceId_idx": {
           "name": "oauthClientResource_resourceId_idx",
@@ -2236,37 +2242,37 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "oauth_client_resource_clientId_oauth_client_clientId_fk": {
           "name": "oauth_client_resource_clientId_oauth_client_clientId_fk",
           "tableFrom": "oauth_client_resource",
+          "tableTo": "oauth_client",
           "columnsFrom": [
             "clientId"
           ],
-          "tableTo": "oauth_client",
           "columnsTo": [
             "clientId"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "oauth_client_resource_resourceId_oauth_resource_identifier_fk": {
           "name": "oauth_client_resource_resourceId_oauth_resource_identifier_fk",
           "tableFrom": "oauth_client_resource",
+          "tableTo": "oauth_resource",
           "columnsFrom": [
             "resourceId"
           ],
-          "tableTo": "oauth_resource",
           "columnsTo": [
             "identifier"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -2523,34 +2529,34 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "oauth_client_userId_user_id_fk": {
           "name": "oauth_client_userId_user_id_fk",
           "tableFrom": "oauth_client",
+          "tableTo": "user",
           "columnsFrom": [
             "userId"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "oauth_client_clientId_unique": {
           "name": "oauth_client_clientId_unique",
+          "nullsNotDistinct": false,
           "columns": [
             "clientId"
-          ],
-          "nullsNotDistinct": false
+          ]
         }
       },
       "policies": {},
@@ -2628,9 +2634,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "oauthConsent_userId_idx": {
           "name": "oauthConsent_userId_idx",
@@ -2643,37 +2649,37 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "oauth_consent_clientId_oauth_client_clientId_fk": {
           "name": "oauth_consent_clientId_oauth_client_clientId_fk",
           "tableFrom": "oauth_consent",
+          "tableTo": "oauth_client",
           "columnsFrom": [
             "clientId"
           ],
-          "tableTo": "oauth_client",
           "columnsTo": [
             "clientId"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "oauth_consent_userId_user_id_fk": {
           "name": "oauth_consent_userId_user_id_fk",
           "tableFrom": "oauth_consent",
+          "tableTo": "user",
           "columnsFrom": [
             "userId"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -2807,9 +2813,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "oauthRefreshToken_sessionId_idx": {
           "name": "oauthRefreshToken_sessionId_idx",
@@ -2822,9 +2828,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "oauthRefreshToken_userId_idx": {
           "name": "oauthRefreshToken_userId_idx",
@@ -2837,9 +2843,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "oauthRefreshToken_authorizationCodeId_idx": {
           "name": "oauthRefreshToken_authorizationCodeId_idx",
@@ -2852,60 +2858,60 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "oauth_refresh_token_clientId_oauth_client_clientId_fk": {
           "name": "oauth_refresh_token_clientId_oauth_client_clientId_fk",
           "tableFrom": "oauth_refresh_token",
+          "tableTo": "oauth_client",
           "columnsFrom": [
             "clientId"
           ],
-          "tableTo": "oauth_client",
           "columnsTo": [
             "clientId"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "oauth_refresh_token_sessionId_session_id_fk": {
           "name": "oauth_refresh_token_sessionId_session_id_fk",
           "tableFrom": "oauth_refresh_token",
+          "tableTo": "session",
           "columnsFrom": [
             "sessionId"
           ],
-          "tableTo": "session",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         },
         "oauth_refresh_token_userId_user_id_fk": {
           "name": "oauth_refresh_token_userId_user_id_fk",
           "tableFrom": "oauth_refresh_token",
+          "tableTo": "user",
           "columnsFrom": [
             "userId"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "oauth_refresh_token_token_unique": {
           "name": "oauth_refresh_token_token_unique",
+          "nullsNotDistinct": false,
           "columns": [
             "token"
-          ],
-          "nullsNotDistinct": false
+          ]
         }
       },
       "policies": {},
@@ -3016,10 +3022,10 @@
       "uniqueConstraints": {
         "oauth_resource_identifier_unique": {
           "name": "oauth_resource_identifier_unique",
+          "nullsNotDistinct": false,
           "columns": [
             "identifier"
-          ],
-          "nullsNotDistinct": false
+          ]
         }
       },
       "policies": {},
@@ -3106,34 +3112,34 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "personal_access_tokens_created_by_user_id_fk": {
           "name": "personal_access_tokens_created_by_user_id_fk",
           "tableFrom": "personal_access_tokens",
+          "tableTo": "user",
           "columnsFrom": [
             "created_by"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "personal_access_tokens_token_hash_unique": {
           "name": "personal_access_tokens_token_hash_unique",
+          "nullsNotDistinct": false,
           "columns": [
             "token_hash"
-          ],
-          "nullsNotDistinct": false
+          ]
         }
       },
       "policies": {},
@@ -3176,9 +3182,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "idx_run_attributions_user_id": {
           "name": "idx_run_attributions_user_id",
@@ -3191,37 +3197,37 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "run_attributions_run_id_instrument_runs_id_fk": {
           "name": "run_attributions_run_id_instrument_runs_id_fk",
           "tableFrom": "run_attributions",
+          "tableTo": "instrument_runs",
           "columnsFrom": [
             "run_id"
           ],
-          "tableTo": "instrument_runs",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "run_attributions_user_id_user_id_fk": {
           "name": "run_attributions_user_id_user_id_fk",
           "tableFrom": "run_attributions",
+          "tableTo": "user",
           "columnsFrom": [
             "user_id"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -3324,9 +3330,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "idx_run_comments_user_id": {
           "name": "idx_run_comments_user_id",
@@ -3339,9 +3345,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "idx_run_comments_created_at_active": {
           "name": "idx_run_comments_created_at_active",
@@ -3360,80 +3366,80 @@
             }
           ],
           "isUnique": false,
-          "with": {},
-          "method": "btree",
           "where": "\"run_comments\".\"deleted_at\" is null",
-          "concurrently": false
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         },
         "idx_run_comments_body_trgm": {
           "name": "idx_run_comments_body_trgm",
           "columns": [
             {
               "expression": "\"body\" gin_trgm_ops",
-              "isExpression": true,
               "asc": true,
+              "isExpression": true,
               "nulls": "last"
             }
           ],
           "isUnique": false,
-          "with": {},
-          "method": "gin",
           "where": "\"run_comments\".\"deleted_at\" is null",
-          "concurrently": false
+          "concurrently": false,
+          "method": "gin",
+          "with": {}
         }
       },
       "foreignKeys": {
         "run_comments_run_id_instrument_runs_id_fk": {
           "name": "run_comments_run_id_instrument_runs_id_fk",
           "tableFrom": "run_comments",
+          "tableTo": "instrument_runs",
           "columnsFrom": [
             "run_id"
           ],
-          "tableTo": "instrument_runs",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "run_comments_user_id_user_id_fk": {
           "name": "run_comments_user_id_user_id_fk",
           "tableFrom": "run_comments",
+          "tableTo": "user",
           "columnsFrom": [
             "user_id"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "run_comments_token_id_personal_access_tokens_id_fk": {
           "name": "run_comments_token_id_personal_access_tokens_id_fk",
           "tableFrom": "run_comments",
+          "tableTo": "personal_access_tokens",
           "columnsFrom": [
             "token_id"
           ],
-          "tableTo": "personal_access_tokens",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "restrict"
+          "onDelete": "restrict",
+          "onUpdate": "no action"
         },
         "run_comments_deleted_by_user_id_fk": {
           "name": "run_comments_deleted_by_user_id_fk",
           "tableFrom": "run_comments",
+          "tableTo": "user",
           "columnsFrom": [
             "deleted_by"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -3527,124 +3533,124 @@
           "columns": [
             {
               "expression": "\"url_key\" gin_trgm_ops",
-              "isExpression": true,
               "asc": true,
+              "isExpression": true,
               "nulls": "last"
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "gin",
-          "concurrently": false
+          "with": {}
         },
         "idx_run_notebook_links_url_trgm": {
           "name": "idx_run_notebook_links_url_trgm",
           "columns": [
             {
               "expression": "\"url\" gin_trgm_ops",
-              "isExpression": true,
               "asc": true,
+              "isExpression": true,
               "nulls": "last"
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "gin",
-          "concurrently": false
+          "with": {}
         },
         "idx_run_notebook_links_label_trgm": {
           "name": "idx_run_notebook_links_label_trgm",
           "columns": [
             {
               "expression": "\"label\" gin_trgm_ops",
-              "isExpression": true,
               "asc": true,
+              "isExpression": true,
               "nulls": "last"
             }
           ],
           "isUnique": false,
-          "with": {},
-          "method": "gin",
           "where": "\"run_notebook_links\".\"label\" is not null",
-          "concurrently": false
+          "concurrently": false,
+          "method": "gin",
+          "with": {}
         }
       },
       "foreignKeys": {
         "run_notebook_links_run_id_instrument_runs_id_fk": {
           "name": "run_notebook_links_run_id_instrument_runs_id_fk",
           "tableFrom": "run_notebook_links",
+          "tableTo": "instrument_runs",
           "columnsFrom": [
             "run_id"
           ],
-          "tableTo": "instrument_runs",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "run_notebook_links_created_by_user_id_fk": {
           "name": "run_notebook_links_created_by_user_id_fk",
           "tableFrom": "run_notebook_links",
+          "tableTo": "user",
           "columnsFrom": [
             "created_by"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         },
         "run_notebook_links_created_by_token_personal_access_tokens_id_fk": {
           "name": "run_notebook_links_created_by_token_personal_access_tokens_id_fk",
           "tableFrom": "run_notebook_links",
+          "tableTo": "personal_access_tokens",
           "columnsFrom": [
             "created_by_token"
           ],
-          "tableTo": "personal_access_tokens",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "restrict"
+          "onDelete": "restrict",
+          "onUpdate": "no action"
         },
         "run_notebook_links_updated_by_user_id_fk": {
           "name": "run_notebook_links_updated_by_user_id_fk",
           "tableFrom": "run_notebook_links",
+          "tableTo": "user",
           "columnsFrom": [
             "updated_by"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         },
         "run_notebook_links_updated_by_token_personal_access_tokens_id_fk": {
           "name": "run_notebook_links_updated_by_token_personal_access_tokens_id_fk",
           "tableFrom": "run_notebook_links",
+          "tableTo": "personal_access_tokens",
           "columnsFrom": [
             "updated_by_token"
           ],
-          "tableTo": "personal_access_tokens",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "restrict"
+          "onDelete": "restrict",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "uq_run_notebook_links_run_id_url_key": {
           "name": "uq_run_notebook_links_run_id_url_key",
+          "nullsNotDistinct": false,
           "columns": [
             "run_id",
             "url_key"
-          ],
-          "nullsNotDistinct": false
+          ]
         }
       },
       "policies": {},
@@ -3727,34 +3733,34 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "session_userId_user_id_fk": {
           "name": "session_userId_user_id_fk",
           "tableFrom": "session",
+          "tableTo": "user",
           "columnsFrom": [
             "userId"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "session_token_unique": {
           "name": "session_token_unique",
+          "nullsNotDistinct": false,
           "columns": [
             "token"
-          ],
-          "nullsNotDistinct": false
+          ]
         }
       },
       "policies": {},
@@ -3815,15 +3821,15 @@
         "slack_app_config_updated_by_user_id_fk": {
           "name": "slack_app_config_updated_by_user_id_fk",
           "tableFrom": "slack_app_config",
+          "tableTo": "user",
           "columnsFrom": [
             "updated_by"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -3873,15 +3879,15 @@
         "slack_channel_config_updated_by_user_id_fk": {
           "name": "slack_channel_config_updated_by_user_id_fk",
           "tableFrom": "slack_channel_config",
+          "tableTo": "user",
           "columnsFrom": [
             "updated_by"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -3942,15 +3948,15 @@
         "slack_connections_user_id_user_id_fk": {
           "name": "slack_connections_user_id_user_id_fk",
           "tableFrom": "slack_connections",
+          "tableTo": "user",
           "columnsFrom": [
             "user_id"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -4022,10 +4028,10 @@
       "uniqueConstraints": {
         "user_email_unique": {
           "name": "user_email_unique",
+          "nullsNotDistinct": false,
           "columns": [
             "email"
-          ],
-          "nullsNotDistinct": false
+          ]
         }
       },
       "policies": {},
@@ -4087,9 +4093,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {},
@@ -4179,52 +4185,52 @@
         "watcher_config_revisions_watcher_id_watchers_id_fk": {
           "name": "watcher_config_revisions_watcher_id_watchers_id_fk",
           "tableFrom": "watcher_config_revisions",
+          "tableTo": "watchers",
           "columnsFrom": [
             "watcher_id"
           ],
-          "tableTo": "watchers",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "watcher_config_revisions_created_by_user_id_fk": {
           "name": "watcher_config_revisions_created_by_user_id_fk",
           "tableFrom": "watcher_config_revisions",
+          "tableTo": "user",
           "columnsFrom": [
             "created_by"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         },
         "watcher_config_revisions_created_by_token_personal_access_tokens_id_fk": {
           "name": "watcher_config_revisions_created_by_token_personal_access_tokens_id_fk",
           "tableFrom": "watcher_config_revisions",
+          "tableTo": "personal_access_tokens",
           "columnsFrom": [
             "created_by_token"
           ],
-          "tableTo": "personal_access_tokens",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "restrict"
+          "onDelete": "restrict",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "uq_watcher_config_revisions_watcher_revision": {
           "name": "uq_watcher_config_revisions_watcher_revision",
+          "nullsNotDistinct": false,
           "columns": [
             "watcher_id",
             "revision"
-          ],
-          "nullsNotDistinct": false
+          ]
         }
       },
       "policies": {},
@@ -4303,9 +4309,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "idx_watcher_events_watcher_id_event_type": {
           "name": "idx_watcher_events_watcher_id_event_type",
@@ -4324,24 +4330,24 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "watcher_events_watcher_id_watchers_id_fk": {
           "name": "watcher_events_watcher_id_watchers_id_fk",
           "tableFrom": "watcher_events",
+          "tableTo": "watchers",
           "columnsFrom": [
             "watcher_id"
           ],
-          "tableTo": "watchers",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -4438,24 +4444,24 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "watcher_heartbeats_watcher_id_watchers_id_fk": {
           "name": "watcher_heartbeats_watcher_id_watchers_id_fk",
           "tableFrom": "watcher_heartbeats",
+          "tableTo": "watchers",
           "columnsFrom": [
             "watcher_id"
           ],
-          "tableTo": "watchers",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -4513,15 +4519,15 @@
         "watcher_release_config_updated_by_user_id_fk": {
           "name": "watcher_release_config_updated_by_user_id_fk",
           "tableFrom": "watcher_release_config",
+          "tableTo": "user",
           "columnsFrom": [
             "updated_by"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -4665,64 +4671,64 @@
             }
           ],
           "isUnique": true,
-          "with": {},
-          "method": "btree",
           "where": "\"watchers\".\"deleted_at\" is null",
-          "concurrently": false
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
         "watchers_instrument_id_instruments_id_fk": {
           "name": "watchers_instrument_id_instruments_id_fk",
           "tableFrom": "watchers",
+          "tableTo": "instruments",
           "columnsFrom": [
             "instrument_id"
           ],
-          "tableTo": "instruments",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "watchers_deregistered_by_user_id_fk": {
           "name": "watchers_deregistered_by_user_id_fk",
           "tableFrom": "watchers",
+          "tableTo": "user",
           "columnsFrom": [
             "deregistered_by"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         },
         "watchers_deregistered_by_token_personal_access_tokens_id_fk": {
           "name": "watchers_deregistered_by_token_personal_access_tokens_id_fk",
           "tableFrom": "watchers",
+          "tableTo": "personal_access_tokens",
           "columnsFrom": [
             "deregistered_by_token"
           ],
-          "tableTo": "personal_access_tokens",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "restrict"
+          "onDelete": "restrict",
+          "onUpdate": "no action"
         },
         "watchers_registered_by_token_personal_access_tokens_id_fk": {
           "name": "watchers_registered_by_token_personal_access_tokens_id_fk",
           "tableFrom": "watchers",
+          "tableTo": "personal_access_tokens",
           "columnsFrom": [
             "registered_by_token"
           ],
-          "tableTo": "personal_access_tokens",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -4885,10 +4891,10 @@
     }
   },
   "schemas": {},
-  "views": {},
   "sequences": {},
   "roles": {},
   "policies": {},
+  "views": {},
   "_meta": {
     "columns": {},
     "schemas": {},

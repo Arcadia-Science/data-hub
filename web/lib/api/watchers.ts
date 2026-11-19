@@ -44,6 +44,7 @@ import {
 import {
   computeEffectiveStatus,
   type EffectiveStatus,
+  FIRST_CHECK_IN_GRACE_MS,
   RESTART_STOP_REASONS,
   STALE_THRESHOLD_MS,
   UPLOAD_REQUEST_REVERT_GRACE_MS,
@@ -624,7 +625,9 @@ export async function deregisterInstrumentWatchers(
  * The SQL condition that selects the watchers whose `computeEffectiveStatus`
  * is `status`, for list filters. It uses the same thresholds as that function,
  * and each watcher row satisfies the condition of exactly one status.
- * `now` is the moment the thresholds count back from.
+ * `now` is the moment the thresholds count back from. It reads the watcher's
+ * instrument, so the query must join `instruments` on the watcher's
+ * `instrument_id`.
  */
 export function effectiveStatusCondition(
   status: EffectiveStatus,
@@ -635,6 +638,9 @@ export function effectiveStatusCondition(
   const restartStaleBefore = new Date(
     now.getTime() - UPLOAD_REQUEST_REVERT_GRACE_MS
   );
+  const firstCheckInDueBefore = new Date(
+    now.getTime() - FIRST_CHECK_IN_GRACE_MS
+  );
   const restartReasons = sql.join(
     RESTART_STOP_REASONS.map((reason) => sql`${reason}`),
     sql`, `
@@ -643,10 +649,14 @@ export function effectiveStatusCondition(
   // A deregistered watcher is `stopped` and nothing else, so every other
   // status needs `deleted_at is null`.
   const active = sql`${watchers.deletedAt} is null`;
+  // A `registered` watcher's first check-in is due from the latest of these.
+  // `greatest` skips NULLs, and `created_at` is never NULL.
+  const checkInDueFrom = sql`greatest(${watchers.createdAt}, ${instruments.confirmedAt}, ${heartbeat})`;
+  const instrumentPending = sql`${instruments.status} = 'pending'`;
 
   switch (status) {
     case "registered":
-      return sql`(${active} and ${watchers.status} = 'registered')`;
+      return sql`(${active} and ${watchers.status} = 'registered' and (${instrumentPending} or ${checkInDueFrom} >= ${firstCheckInDueBefore}))`;
     case "watching":
       return sql`(${active} and ${watchers.status} = 'watching' and ${heartbeat} >= ${staleBefore})`;
     case "waiting":
@@ -656,7 +666,7 @@ export function effectiveStatusCondition(
       // is NULL, not true, and a plain stop has no reason.
       return sql`(${watchers.deletedAt} is not null or (${watchers.status} = 'stopped' and (${watchers.statusReason} is null or ${watchers.statusReason} not in (${restartReasons}) or ${heartbeat} >= ${restartStaleBefore})))`;
     case "stale":
-      return sql`(${active} and ((${watchers.status} in ('watching', 'waiting') and (${heartbeat} is null or ${heartbeat} < ${staleBefore})) or (${watchers.status} = 'stopped' and ${watchers.statusReason} in (${restartReasons}) and (${heartbeat} is null or ${heartbeat} < ${restartStaleBefore}))))`;
+      return sql`(${active} and ((${watchers.status} in ('watching', 'waiting') and (${heartbeat} is null or ${heartbeat} < ${staleBefore})) or (${watchers.status} = 'stopped' and ${watchers.statusReason} in (${restartReasons}) and (${heartbeat} is null or ${heartbeat} < ${restartStaleBefore})) or (${watchers.status} = 'registered' and ${instruments.status} is distinct from 'pending' and ${checkInDueFrom} < ${firstCheckInDueBefore})))`;
     default:
       return status satisfies never;
   }
@@ -713,6 +723,9 @@ export const watcherListColumns = {
   lastHeartbeatAt: watchers.lastHeartbeatAt,
   createdAt: watchers.createdAt,
   deletedAt: watchers.deletedAt,
+  // For `computeEffectiveStatus` only.
+  instrumentStatus: instruments.status,
+  instrumentConfirmedAt: instruments.confirmedAt,
 };
 
 const selectWatcherListRows = () =>
@@ -799,6 +812,8 @@ export const getWatcherById = cache(async function getWatcherById(
       createdAt: watchers.createdAt,
       updatedAt: watchers.updatedAt,
       deletedAt: watchers.deletedAt,
+      instrumentStatus: instruments.status,
+      instrumentConfirmedAt: instruments.confirmedAt,
       deregisteredByUserId: watchers.deregisteredBy,
       deregisteredByTokenId: watchers.deregisteredByToken,
       deregisteredByName: users.name,

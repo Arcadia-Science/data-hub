@@ -134,7 +134,7 @@ export const watcherDetail = z
     // which route the server loads first, so `.openapi` here can break
     // `next build`. `.describe` doesn't need the extension.
     status: watcherStatusSchema.describe(
-      "The status Data Hub shows for the watcher. `stale` is worked out when you ask and is never stored. A `watching` or `waiting` watcher is `stale` when its last heartbeat is more than 5 minutes old. A `stopped` watcher stays `stopped`, however old its last heartbeat, unless it stopped for a restart or an update (see `status_reason`): then it is `stale` when its last heartbeat is more than 15 minutes old. A deregistered watcher is always `stopped`. The `status` filter on the list endpoint returns the watchers that show that status."
+      "The status Data Hub shows for the watcher. `stale` is worked out when you ask and is never stored. A `watching` or `waiting` watcher is `stale` when its last heartbeat is more than 5 minutes old. A `stopped` watcher stays `stopped`, however old its last heartbeat, unless it stopped for a restart or an update (see `status_reason`): then it is `stale` when its last heartbeat is more than 15 minutes old. A `registered` watcher, which hasn't sent its first heartbeat, is `stale` 15 minutes after it registered, or after its instrument was confirmed if that came later; while its instrument is pending it stays `registered`. A deregistered watcher is always `stopped`. The `status` filter on the list endpoint returns the watchers that show that status."
     ),
     config_yaml: z.string().nullable().optional(),
     config_checksum: z.string().nullable().optional(),

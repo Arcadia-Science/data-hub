@@ -103,7 +103,7 @@ export async function PATCH(
   }
 
   const [existing] = await db
-    .select({ id: instruments.id })
+    .select({ id: instruments.id, status: instruments.status })
     .from(instruments)
     .where(eq(instruments.id, instrumentId))
     .limit(1);
@@ -127,6 +127,11 @@ export async function PATCH(
       updates.retiredAt = null;
       updates.retiredBy = null;
       updates.retiredByToken = null;
+    }
+    // Confirming a pending instrument starts its watcher's clock for a first
+    // check-in: the watcher refuses to start before this.
+    if (existing.status === "pending" && body.status === "active") {
+      updates.confirmedAt = new Date();
     }
   }
   if (body.display_name !== undefined) {
