@@ -73,6 +73,8 @@ describe("proxy", () => {
     "/instruments/a/runs/b?tab=files",
     "/instruments/plate-reader-a",
     "/instruments/plate-reader-a/watchers",
+    "/lab-notebooks?q=growth",
+    "/lab-notebooks/3f2a9c1e-7b4d-4e0a-9c55-1d2e8f6a7b90",
     "/settings/tokens",
   ])("passes public route %s through with its address", (path) => {
     const response = proxy(request(path));

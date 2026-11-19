@@ -206,6 +206,32 @@ export const runDetailParamsCache = createSearchParamsCache(
   runDetailSearchParams
 );
 
+// The `/lab-notebooks` index. `q` is a name, part of a description, or a pasted
+// link. The sorts are the ones `listNotebooks` takes that have a column; a
+// missing `order` leaves it to the sort (A to Z for names, otherwise largest
+// or newest first).
+export const NOTEBOOK_LIST_SORT_FIELDS = [
+  "last_run",
+  "name",
+  "run_count",
+] as const;
+
+export const notebooksIndexSearchParams = {
+  q: parseAsString.withDefault(""),
+  include_deleted: parseAsBoolean
+    .withDefault(false)
+    .withOptions({ clearOnDefault: true }),
+  sort: parseAsStringLiteral(NOTEBOOK_LIST_SORT_FIELDS)
+    .withDefault("last_run")
+    .withOptions({ clearOnDefault: true }),
+  order: parseAsStringLiteral(RUN_SORT_ORDERS),
+  page: parseAsInteger.withDefault(1),
+};
+
+export const notebooksIndexParamsCache = createSearchParamsCache(
+  notebooksIndexSearchParams
+);
+
 // Cross-run comments page. `author` and `ran_by` are mutually exclusive in
 // the UI (a person filter replaces the All / Comments on my runs choice) but
 // the query applies whichever are present. `instrument_id` narrows that scope.

@@ -107,13 +107,14 @@ export async function searchNotebooks(
 }
 
 /**
- * Creates a notebook for a page and adds the runs to it in one request.
- * `ownedByMe` makes the signed-in person its owner.
+ * Creates a notebook for a page, and adds the runs to it in the same request
+ * when there are any. `ownedByMe` makes the signed-in person its owner.
  */
 export function createNotebook(input: {
+  description?: string;
   name: string;
   ownedByMe: boolean;
-  runs: readonly RunRef[];
+  runs?: readonly RunRef[];
   url: string;
 }): Promise<{ lab_notebook: NotebookWire; runs: AddRunsWire | null }> {
   return send(NOTEBOOKS_URL, {
@@ -121,10 +122,37 @@ export function createNotebook(input: {
     body: JSON.stringify({
       url: input.url,
       name: input.name,
+      ...(input.description && { description: input.description }),
       ...(input.ownedByMe && { owner_id: "me" }),
-      runs: wireRuns(input.runs),
+      ...(input.runs && input.runs.length > 0
+        ? { runs: wireRuns(input.runs) }
+        : {}),
     }),
   });
+}
+
+/**
+ * Edits a notebook. Fields left out stay as they are; a null description or
+ * owner clears it, and `owner_id: "me"` makes the signed-in person the owner.
+ */
+export function updateNotebook(
+  notebookId: string,
+  changes: {
+    description?: string | null;
+    name?: string;
+    owner_id?: string | null;
+    url?: string;
+  }
+): Promise<NotebookWire> {
+  return send(notebookUrl(notebookId), {
+    method: "PATCH",
+    body: JSON.stringify(changes),
+  });
+}
+
+/** Marks a notebook deleted. Its runs come back when it is restored. */
+export function deleteNotebook(notebookId: string): Promise<NotebookWire> {
+  return send(notebookUrl(notebookId), { method: "DELETE" });
 }
 
 export function addRunsToNotebook(

@@ -12,13 +12,14 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar";
-import type { SidebarInstrument } from "@/lib/api/sidebar";
+import type { SidebarInstrument, SidebarNotebook } from "@/lib/api/sidebar";
 import type { Session } from "@/lib/auth";
 
 interface AppSidebarProps {
   // Extra items for the account menu, such as the Feedback entry.
   children?: ReactNode;
   instruments: SidebarInstrument[];
+  notebooks: SidebarNotebook[];
   session: Session;
   signOutAction: () => Promise<void>;
 }
@@ -27,6 +28,7 @@ export function AppSidebar({
   children,
   session,
   instruments,
+  notebooks,
   signOutAction,
 }: AppSidebarProps) {
   return (
@@ -63,6 +65,7 @@ export function AppSidebar({
         currentUserId={session.user.id}
         instruments={instruments}
         isAdmin={session.user.isAdmin === true}
+        notebooks={notebooks}
       />
       <SidebarFooter>
         <UserMenuFooter signOutAction={signOutAction} user={session.user}>

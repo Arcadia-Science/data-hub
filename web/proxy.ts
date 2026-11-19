@@ -35,6 +35,8 @@ const publicPrefixes = [
   // this, the middleware redirects them to `/login` and the job never runs.
   "/api/cron",
   "/instruments",
+  // A notebook's page unfurls with the notebook's name.
+  "/lab-notebooks",
   "/settings",
   // Linear attachment links redirect here before the viewer is signed in.
   "/feedback",

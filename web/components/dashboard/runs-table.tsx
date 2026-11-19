@@ -40,6 +40,7 @@ export function RunsTable({
   hasFilters,
   totalCount,
   notebookOptions,
+  notebookId,
   ranByOptions,
   emptyLabel = "No instrument runs yet.",
 }: {
@@ -47,8 +48,11 @@ export function RunsTable({
   hasFilters: boolean;
   totalCount: number;
   // The notebooks the "Lab Notebook" menu lists, with their runs counted over
-  // the runs this page can show.
-  notebookOptions: NotebookFilterOption[];
+  // the runs this page can show. Omitted on a notebook's page, where every
+  // row is in that notebook, so a plain header is rendered instead.
+  notebookOptions?: NotebookFilterOption[];
+  // On a notebook's page, that notebook. Each row lists it first.
+  notebookId?: string;
   // When provided, the "Ran By" column becomes a filterable dropdown bound to
   // the dashboard `ran_by` search param. Omitted on a member's runs page, where
   // every row is the same user, so a plain header is rendered instead.
@@ -104,7 +108,11 @@ export function RunsTable({
               )}
             </TableHead>
             <TableHead>
-              <NotebookLinkColumnHeader options={notebookOptions} />
+              {notebookOptions ? (
+                <NotebookLinkColumnHeader options={notebookOptions} />
+              ) : (
+                "Lab Notebook"
+              )}
             </TableHead>
             <RunTimeHeads />
           </TableRow>
@@ -143,7 +151,10 @@ export function RunsTable({
                   />
                 </TableCell>
                 <TableCell>
-                  <NotebookLinksCell notebooks={row.lab_notebooks} />
+                  <NotebookLinksCell
+                    notebooks={row.lab_notebooks}
+                    pageNotebookId={notebookId}
+                  />
                 </TableCell>
                 <RunTimeCells row={row} />
               </TableRow>
