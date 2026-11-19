@@ -16,33 +16,32 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  type NotebookLinkWire,
-  notebookLinkCreator,
-} from "@/lib/api/run-notebook-link-wire";
+  type RunNotebookWire,
+  runNotebookLinker,
+} from "@/lib/api/notebook-wire";
 
 /**
- * One lab notebook link on the run page: its name, and who added it and
- * when. They share a line on wider screens and stack on narrow ones. The
- * menu offers Edit and Remove unless `readOnly`, and Copy link always.
+ * One lab notebook on the run page: its name, which opens the notebook's
+ * page, and who added the run and when. They share a line on wider screens
+ * and stack on narrow ones. The menu offers Copy link always, and Remove
+ * from notebook unless `readOnly`.
  */
 export function NotebookLinkRow({
-  link,
+  notebook,
   readOnly,
-  onEdit,
   onRemove,
 }: {
-  link: NotebookLinkWire;
+  notebook: RunNotebookWire;
   readOnly: boolean;
-  onEdit: () => void;
-  // Resolves true once the link is gone.
+  // Resolves true once the run is out of the notebook.
   onRemove: () => Promise<boolean>;
 }) {
   const [removeOpen, setRemoveOpen] = useState(false);
-  const creator = notebookLinkCreator(link);
+  const linker = runNotebookLinker(notebook);
 
   async function copyLink() {
     try {
-      await navigator.clipboard.writeText(link.url);
+      await navigator.clipboard.writeText(notebook.url);
       toast.success("Link copied");
     } catch {
       toast.error("Couldn't copy the link.");
@@ -56,25 +55,25 @@ export function NotebookLinkRow({
         className="mt-0.5 size-4 shrink-0 text-muted-foreground sm:mt-0"
       />
       <div className="flex min-w-0 flex-1 flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-        <TruncatedTooltip text={link.display_name}>
+        <TruncatedTooltip text={notebook.name}>
           <a
             className="min-w-0 truncate font-medium text-sm underline-offset-2 hover:underline"
-            href={link.url}
+            href={notebook.url}
             rel="noopener noreferrer"
             target="_blank"
           >
-            {link.display_name}
+            {notebook.name}
           </a>
         </TruncatedTooltip>
         {/* On narrow screens the time gets its own line, so the dot that
             separates it only shows when everything fits on one. */}
         <span className="flex flex-col gap-0.5 whitespace-nowrap text-muted-foreground text-xs sm:shrink-0 sm:flex-row sm:items-center sm:gap-1">
           <span className="inline-flex items-center gap-1">
-            {creator ? (
+            {linker ? (
               <>
                 Added by
                 <ActorLabel
-                  actor={creator}
+                  actor={linker}
                   nameClassName="font-medium text-foreground"
                 />
               </>
@@ -85,13 +84,13 @@ export function NotebookLinkRow({
           <span aria-hidden="true" className="hidden sm:inline">
             ·
           </span>
-          <RelativeTime date={link.created_at} />
+          <RelativeTime date={notebook.linked_at} />
         </span>
       </div>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
-            aria-label={`Actions for ${link.display_name}`}
+            aria-label={`Actions for ${notebook.name}`}
             className="-my-1 -mr-1 size-7 shrink-0 text-muted-foreground/70 hover:text-foreground"
             size="icon"
             type="button"
@@ -101,9 +100,6 @@ export function NotebookLinkRow({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="min-w-36">
-          {readOnly ? null : (
-            <DropdownMenuItem onSelect={onEdit}>Edit</DropdownMenuItem>
-          )}
           <DropdownMenuItem onSelect={copyLink}>Copy link</DropdownMenuItem>
           {readOnly ? null : (
             <>
@@ -115,7 +111,7 @@ export function NotebookLinkRow({
                 }}
                 variant="destructive"
               >
-                Remove
+                Remove from lab notebook
               </DropdownMenuItem>
             </>
           )}
@@ -123,11 +119,11 @@ export function NotebookLinkRow({
       </DropdownMenu>
       <ConfirmDialog
         confirmLabel="Remove"
-        description={`“${link.display_name}” will no longer be linked from this run. The page itself isn't changed.`}
+        description={`This run will no longer be in “${notebook.name}”. The lab notebook and its page aren't changed.`}
         onConfirm={onRemove}
         onOpenChange={setRemoveOpen}
         open={removeOpen}
-        title="Remove this notebook link?"
+        title="Remove this run from the lab notebook?"
         variant="destructive"
       />
     </div>

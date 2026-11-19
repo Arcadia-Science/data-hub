@@ -34,7 +34,7 @@ export const searchRunsTool = {
   scope: "runs:read",
   title: "Search Runs",
   description:
-    "Search instrument runs with filtering, pagination, and sorting. Each run lists its lab notebook links. Supports run status, lab notebook link, and instrument-metadata filters (plate reader, gel-doc, qPCR, Hina microscope, Epson scanner, Aunty). Prefer global_search when the query may match filenames, instrument names, or attributor names rather than run IDs. Discover valid metadata filter values via get_instrument_filter_options or datahub://instruments/{id}/filter-options.",
+    "Search instrument runs with filtering, pagination, and sorting. Each run lists its lab notebooks. Supports run status, lab notebook, and instrument-metadata filters (plate reader, gel-doc, qPCR, Hina microscope, Epson scanner, Aunty). Prefer global_search when the query may match filenames, instrument names, or attributor names rather than run IDs. Discover valid metadata filter values via get_instrument_filter_options or datahub://instruments/{id}/filter-options.",
   outputSchema: searchRunsOutputSchema,
   inputSchema: {
     instrumentId: z
@@ -95,23 +95,17 @@ export const searchRunsTool = {
       .describe(
         'Filter by attributor. Pass a user id, the literal "me" for the authenticated token owner, or "unattributed" for runs with no attributions. Use get_me for your user id, or list_run_attributors to discover colleagues.'
       ),
-    hasNotebookLink: z
+    hasLabNotebook: z
       .boolean()
       .optional()
       .describe(
-        "true: only runs with at least one lab notebook link. false: only runs with none."
+        "true: only runs in at least one lab notebook. false: only runs in none. Deleted lab notebooks don't count."
       ),
-    notebookLinkName: z
+    labNotebookId: z
       .string()
       .optional()
       .describe(
-        "Only runs with a lab notebook link named exactly this, matching case. A link's name is its display_name: its label, or a name worked out from its URL when it has no label. list_notebook_link_names lists the names."
-      ),
-    notebookLinkSearch: z
-      .string()
-      .optional()
-      .describe(
-        "Only runs with a lab notebook link whose name (display_name) contains this text, ignoring case."
+        "Only runs in this lab notebook, on any instrument. Find the id with list_lab_notebooks. Works for a deleted lab notebook too."
       ),
     status: z
       .array(z.enum([...RUN_STATUS_VALUES, DEPRECATED_PENDING_RUN_STATUS]))
@@ -129,7 +123,7 @@ export const getRunTool = {
   scope: "runs:read",
   title: "Get Run",
   description:
-    "Get details for a specific instrument run by its natural key (instrument ID + run ID). Returns metadata, timestamps, instrument info, attributions, and lab notebook links (notebookLinks) by default. Pass include to attach the first page of files, comments, and/or a failure_summary without extra tool calls. To show the interactive report (plate maps, spectra, images) or a bounded processed-CSV sample, call get_run_report for the same run.",
+    "Get details for a specific instrument run by its natural key (instrument ID + run ID). Returns metadata, timestamps, instrument info, attributions, and lab notebooks by default. Pass include to attach the first page of files, comments, and/or a failure_summary without extra tool calls. To show the interactive report (plate maps, spectra, images) or a bounded processed-CSV sample, call get_run_report for the same run.",
   outputSchema: getRunOutputSchema,
   inputSchema: {
     instrumentId: z.string().describe("Instrument identifier"),

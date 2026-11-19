@@ -505,6 +505,13 @@
       "when": 1795057971942,
       "tag": "0071_narrow_watcher_token_legacy_scopes",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1795123625378,
+      "tag": "0072_lab_notebooks",
+      "breakpoints": true
     }
   ]
 }

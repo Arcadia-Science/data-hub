@@ -1,19 +1,21 @@
-// Rules for lab notebook links on runs: which URLs are allowed, when two
-// links point to the same page, and what to call a link that has no label.
-// Both the browser and the server import this file, so keep server-only
-// imports out of it.
+// Rules for lab notebooks: which links are allowed, when two links point to
+// the same page, what to call a page before someone names it, and the limits
+// on names, descriptions, and runs. Both the browser and the server import
+// this file, so keep server-only imports out of it.
 //
-// `notebookUrlKey` is stored in `run_notebook_links.url_key`. If you change
-// how it builds a key, recompute the key for existing rows, or duplicate
-// checks and URL search will miss links saved under the old rules.
+// `notebookUrlKey` is stored in `notebooks.url_key`. If you change how it
+// builds a key, recompute the key for existing rows, or duplicate checks and
+// URL search will miss notebooks saved under the old rules.
 
 import { z } from "zod";
 
 export const NOTEBOOK_LINK_URL_MAX_LENGTH = 2048;
-export const NOTEBOOK_LINK_LABEL_MAX_LENGTH = 200;
-export const NOTEBOOK_LINKS_PER_RUN_MAX = 20;
-export const NOTEBOOK_LINK_BULK_RUNS_MAX = 100;
-export const NOTEBOOK_LINK_BULK_URLS_MAX = 20;
+export const NOTEBOOK_NAME_MAX_LENGTH = 200;
+export const NOTEBOOK_DESCRIPTION_MAX_LENGTH = 2000;
+// How many notebooks one run can be in.
+export const NOTEBOOKS_PER_RUN_MAX = 20;
+// How many runs one request can add to or remove from a notebook.
+export const NOTEBOOK_RUNS_PER_REQUEST_MAX = 100;
 
 export interface ParsedNotebookLinkUrl {
   /** The URL as the browser would open it, query string and fragment kept. */
@@ -140,17 +142,13 @@ const TRAILING_ID =
 const ACTION_SEGMENTS = new Set(["edit", "view", "preview"]);
 
 /**
- * What to call a link: its label, or else the site and the page name taken
- * from the last part of its path, like "notion.so › Heat stress day 1".
+ * A name for a notebook page worked out from its link: the page name taken
+ * from the last part of its path, like "Heat stress day 1" for a Notion page
+ * titled that, or the site when the path has no name in it. Forms suggest it
+ * for a new notebook. Migration `0072_lab_notebooks` named pages that had no
+ * label the same way.
  */
-export function notebookLinkDisplayName(
-  url: string,
-  label: string | null | undefined
-): string {
-  const trimmedLabel = label?.trim();
-  if (trimmedLabel) {
-    return trimmedLabel;
-  }
+export function notebookNameFromUrl(url: string): string {
   let parsed: URL;
   try {
     parsed = new URL(url);
@@ -173,7 +171,7 @@ export function notebookLinkDisplayName(
     .replace(TRAILING_ID, "")
     .replace(/[-_]+/g, " ")
     .trim();
-  return name ? `${host} › ${name}` : host;
+  return name || host;
 }
 
 function safeDecode(segment: string): string {
@@ -210,23 +208,29 @@ export const notebookLinkUrlSchema = z
     message: NOTEBOOK_LINK_URL_MESSAGE,
   });
 
-/** A label as typed. Request bodies use this; it has no transform. */
-export const notebookLinkLabelInputSchema = z
+/** A notebook's name: required, one line. */
+export const notebookNameSchema = z
+  .string()
+  .trim()
+  .min(1, "Enter a name.")
+  .max(
+    NOTEBOOK_NAME_MAX_LENGTH,
+    `Names can be at most ${NOTEBOOK_NAME_MAX_LENGTH} characters.`
+  )
+  .refine((value) => !hasControlCharacter(value), {
+    message: "Names must be a single line.",
+  });
+
+/** A notebook's description as typed. Blank means none. */
+export const notebookDescriptionSchema = z
   .string()
   .trim()
   .max(
-    NOTEBOOK_LINK_LABEL_MAX_LENGTH,
-    `Labels can be at most ${NOTEBOOK_LINK_LABEL_MAX_LENGTH} characters.`
-  )
-  .refine((value) => !hasControlCharacter(value), {
-    message: "Labels must be a single line.",
-  });
+    NOTEBOOK_DESCRIPTION_MAX_LENGTH,
+    `Descriptions can be at most ${NOTEBOOK_DESCRIPTION_MAX_LENGTH} characters.`
+  );
 
-/** An optional label. Blank becomes null, so the link shows its page name. */
-export const notebookLinkLabelSchema =
-  notebookLinkLabelInputSchema.transform(blankLabelToNull);
-
-/** A blank label means "no label". */
-export function blankLabelToNull(label: string): string | null {
-  return label === "" ? null : label;
+/** A blank description means "no description". */
+export function blankToNull(value: string): string | null {
+  return value === "" ? null : value;
 }

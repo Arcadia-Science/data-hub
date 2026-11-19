@@ -3060,58 +3060,103 @@ export async function seedRunAttributions(
   await db.insert(schema.runAttributions).values(rows);
 }
 
-// Synthetic notebook pages. Every other run links to one, and every sixth run
-// links to a second, so list views show the column, its "+1", and its filter.
-const NOTEBOOK_PAGES: Array<{ url: string; label: string | null }> = [
+// Synthetic lab notebooks. Every other run is in one, and every sixth run is
+// in a second, so list views show the column, its "+1", and its filter. One
+// notebook has no runs yet, and one is deleted, so the Notebooks list and its
+// "Show deleted" filter have something to show.
+const NOTEBOOK_PAGES: Array<{
+  url: string;
+  name: string;
+  description: string | null;
+  runs: boolean;
+  deleted?: boolean;
+}> = [
   {
     url: "https://www.notion.so/example-lab/Heat-stress-time-course-0a1b2c3d4e5f60718293a4b5c6d7e8f9",
-    label: null,
+    name: "Heat stress time course",
+    description: "Growth at 30, 37 and 42 °C, sampled every two hours.",
+    runs: true,
   },
   {
     url: "https://www.notion.so/example-lab/Osmotic-stress-panel-1b2c3d4e5f60718293a4b5c6d7e8f90a",
-    label: "Osmotic stress, day 2",
+    name: "Osmotic stress panel",
+    description: null,
+    runs: true,
   },
   {
     url: "https://eln.example.com/entries/gel-ladder-calibration",
-    label: null,
+    name: "Gel ladder calibration",
+    description: "Ladder lots compared on the gel doc.",
+    runs: true,
+  },
+  {
+    url: "https://www.notion.so/example-lab/Plasmid-screen-round-2-2c3d4e5f60718293a4b5c6d7e8f90a1b",
+    name: "Plasmid screen round 2",
+    description: "Set up before the first plates are read.",
+    runs: false,
+  },
+  {
+    url: "https://www.notion.so/example-lab/Old-media-test-3d4e5f60718293a4b5c6d7e8f90a1b2c",
+    name: "Old media test",
+    description: null,
+    runs: false,
+    deleted: true,
   },
 ];
 
-export async function seedRunNotebookLinks(
+export async function seedNotebooks(
   db: Db,
   runs: SeededRun[],
   userIds: string[]
 ): Promise<void> {
-  if (runs.length === 0 || userIds.length === 0) {
+  if (userIds.length === 0) {
     return;
   }
+  const inserted = await db
+    .insert(schema.notebooks)
+    .values(
+      NOTEBOOK_PAGES.map((page, i) => {
+        const parsed = parseNotebookLinkUrl(page.url);
+        if (!parsed) {
+          throw new Error(`Seed notebook URL is invalid: ${page.url}`);
+        }
+        const userId = userIds[i % userIds.length];
+        return {
+          url: parsed.url,
+          urlKey: parsed.urlKey,
+          name: page.name,
+          description: page.description,
+          ownerId: i === 1 ? null : userId,
+          createdBy: userId,
+          updatedBy: userId,
+          ...(page.deleted && { deletedAt: new Date(), deletedBy: userId }),
+        };
+      })
+    )
+    .returning({ id: schema.notebooks.id });
+  const withRuns = inserted.filter((_, i) => NOTEBOOK_PAGES[i].runs);
+
   type LinkInsert = typeof schema.runNotebookLinks.$inferInsert;
   const rows: LinkInsert[] = [];
   for (const [i, run] of runs.entries()) {
     if (i % 2 !== 0) {
       continue;
     }
-    const pages = [NOTEBOOK_PAGES[i % NOTEBOOK_PAGES.length]];
+    const picked = [withRuns[i % withRuns.length]];
     if (i % 6 === 0) {
-      pages.push(NOTEBOOK_PAGES[(i + 1) % NOTEBOOK_PAGES.length]);
+      picked.push(withRuns[(i + 1) % withRuns.length]);
     }
-    const userId = userIds[i % userIds.length];
-    for (const page of pages) {
-      const parsed = parseNotebookLinkUrl(page.url);
-      if (!parsed) {
-        throw new Error(`Seed notebook URL is invalid: ${page.url}`);
-      }
+    for (const notebook of picked) {
       rows.push({
         runId: run.id,
-        url: parsed.url,
-        urlKey: parsed.urlKey,
-        label: page.label,
-        createdBy: userId,
-        updatedBy: userId,
+        notebookId: notebook.id,
+        createdBy: userIds[i % userIds.length],
       });
     }
   }
-  await db.insert(schema.runNotebookLinks).values(rows);
+  if (rows.length > 0) {
+    await db.insert(schema.runNotebookLinks).values(rows);
+  }
 }
 
 // ---------------------------------------------------------------------------

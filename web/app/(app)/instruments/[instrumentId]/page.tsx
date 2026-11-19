@@ -38,16 +38,18 @@ import {
 } from "@/lib/api/instrument-runs";
 import { getInstrumentById } from "@/lib/api/instruments";
 import {
+  getNotebookFilterOptions,
+  type NotebookFilterOption,
+} from "@/lib/api/notebooks";
+import {
   getPreferences,
   listInstrumentSubscriptions,
 } from "@/lib/api/notifications";
-import { getNotebookLinkNameOptions } from "@/lib/api/run-notebook-links";
 import {
-  parseHasNotebookLinkParam,
-  parseNotebookLinkNameParams,
+  parseHasNotebookParam,
+  parseNotebookIdParam,
 } from "@/lib/api/validators";
 import { auth } from "@/lib/auth";
-import type { NotebookLinkNameOptions } from "@/lib/notebook-links/name-filter";
 import {
   hasActiveInstrumentFilters,
   instrumentDetailParamsCache,
@@ -95,7 +97,7 @@ function renderRunsTableVariant(
   filterOptions: InstrumentFilterOptionsByType,
   data: RunRow[],
   instrumentId: string,
-  notebookLinkNames: NotebookLinkNameOptions,
+  notebookOptions: NotebookFilterOption[],
   ranByOptions: RanByOption[]
 ) {
   switch (filterOptions.kind) {
@@ -105,7 +107,7 @@ function renderRunsTableVariant(
           data={data}
           filterOptions={filterOptions.options}
           instrumentId={instrumentId}
-          notebookLinkNames={notebookLinkNames}
+          notebookOptions={notebookOptions}
           ranByOptions={ranByOptions}
         />
       );
@@ -115,7 +117,7 @@ function renderRunsTableVariant(
           data={data}
           filterOptions={filterOptions.options}
           instrumentId={instrumentId}
-          notebookLinkNames={notebookLinkNames}
+          notebookOptions={notebookOptions}
           ranByOptions={ranByOptions}
         />
       );
@@ -125,7 +127,7 @@ function renderRunsTableVariant(
           data={data}
           filterOptions={filterOptions.options}
           instrumentId={instrumentId}
-          notebookLinkNames={notebookLinkNames}
+          notebookOptions={notebookOptions}
           ranByOptions={ranByOptions}
         />
       );
@@ -135,7 +137,7 @@ function renderRunsTableVariant(
           data={data}
           filterOptions={filterOptions.options}
           instrumentId={instrumentId}
-          notebookLinkNames={notebookLinkNames}
+          notebookOptions={notebookOptions}
           ranByOptions={ranByOptions}
         />
       );
@@ -145,7 +147,7 @@ function renderRunsTableVariant(
           data={data}
           filterOptions={filterOptions.options}
           instrumentId={instrumentId}
-          notebookLinkNames={notebookLinkNames}
+          notebookOptions={notebookOptions}
           ranByOptions={ranByOptions}
         />
       );
@@ -155,7 +157,7 @@ function renderRunsTableVariant(
           data={data}
           filterOptions={filterOptions.options}
           instrumentId={instrumentId}
-          notebookLinkNames={notebookLinkNames}
+          notebookOptions={notebookOptions}
           ranByOptions={ranByOptions}
         />
       );
@@ -164,7 +166,7 @@ function renderRunsTableVariant(
         <DefaultRunsTable
           data={data}
           instrumentId={instrumentId}
-          notebookLinkNames={notebookLinkNames}
+          notebookOptions={notebookOptions}
           ranByOptions={ranByOptions}
         />
       );
@@ -319,7 +321,7 @@ async function InstrumentRunsSection({
 
   // Paginated runs plus the per-instrument filter options and attribution
   // dropdown options are independent once we know the instrument type.
-  const [runResult, filterOptions, ranByUsers, notebookLinkNames] =
+  const [runResult, filterOptions, ranByUsers, notebookOptions] =
     await Promise.all([
       buildRunListQuery({
         instrumentId,
@@ -347,18 +349,15 @@ async function InstrumentRunsSection({
         auntyTemperature: filters.aunty_temperature ?? undefined,
         auntyRampRate: filters.aunty_ramp_rate ?? undefined,
         ranBy: filters.ran_by ?? undefined,
-        hasNotebookLink: parseHasNotebookLinkParam(filters.has_notebook_link),
-        ...parseNotebookLinkNameParams({
-          name: filters.notebook_link_name,
-          search: filters.notebook_link_search,
-        }),
+        hasNotebook: parseHasNotebookParam(filters.has_lab_notebook),
+        ...parseNotebookIdParam(filters.lab_notebook_id),
         statuses: filters.status.length > 0 ? filters.status : undefined,
         sort: filters.sort,
         order: filters.order,
       }),
       getInstrumentFilterOptions(instrument.instrumentType, instrumentId),
       getRanByFilterOptions(instrumentId),
-      getNotebookLinkNameOptions({ instrumentId }),
+      getNotebookFilterOptions({ instrumentId }),
     ]);
 
   const hasFilters = hasActiveInstrumentFilters(filters);
@@ -392,7 +391,7 @@ async function InstrumentRunsSection({
                 filterOptions,
                 runResult.data,
                 instrumentId,
-                notebookLinkNames,
+                notebookOptions,
                 ranByOptions
               )}
             </InstrumentRunsTableShell>

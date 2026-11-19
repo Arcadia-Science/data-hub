@@ -9,7 +9,7 @@ import {
   uploadFailureReasonSchema,
 } from "@/lib/api/openapi/schemas/common";
 import { mcpActorTokenSchema, mcpActorUserSchema } from "./common.output";
-import { mcpNotebookLinkSchema } from "./notebook-links.output";
+import { mcpRunNotebookSchema } from "./notebooks.output";
 
 // Plain Zod only — do not import from openapi/schemas/runs (those use
 // `.openapi()` and require registry side effects that unit tests skip).
@@ -100,7 +100,7 @@ export const searchRunsListItemSchema = z.object({
   error_messages: z.array(z.string()),
   attributions: z.array(mcpActorUserSchema),
   comment_count: z.number().int(),
-  notebook_links: z.array(mcpNotebookLinkSchema),
+  lab_notebooks: z.array(mcpRunNotebookSchema),
 });
 
 export const searchRunsOutputSchema = z.object({
@@ -125,7 +125,7 @@ export const getRunOutputSchema = z.object({
   deletedByUser: mcpActorUserSchema.nullable(),
   deletedByToken: mcpActorTokenSchema.nullable(),
   attributions: z.array(mcpActorUserSchema),
-  notebookLinks: z.array(mcpNotebookLinkSchema),
+  labNotebooks: z.array(mcpRunNotebookSchema),
   files: z.array(mcpRunFileSchema).optional(),
   filesPagination: paginationSchema.optional(),
   comments: z.array(mcpRunCommentSchema).optional(),

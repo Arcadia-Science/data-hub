@@ -13,8 +13,8 @@ import { toast } from "sonner";
 import { DisabledReasonButton } from "@/components/disabled-reason-button";
 import { DeleteRunsDialog } from "@/components/runs/delete-runs-dialog";
 import {
-  AddNotebookLinkDialog,
-  RemoveNotebookLinksDialog,
+  AddToNotebookDialog,
+  RemoveFromNotebooksDialog,
 } from "@/components/runs/notebook-link-bulk-dialogs";
 import { ReprocessRunsDialog } from "@/components/runs/reprocess-runs-dialog";
 import { Button } from "@/components/ui/button";
@@ -26,7 +26,7 @@ import {
 } from "@/components/ui/tooltip";
 import { useArchiveDownload } from "@/hooks/use-archive-download";
 import { useClaimPrompt } from "@/hooks/use-claim-prompt";
-import { NOTEBOOK_LINK_BULK_RUNS_MAX } from "@/lib/notebook-links/url";
+import { NOTEBOOK_RUNS_PER_REQUEST_MAX } from "@/lib/notebook-links/url";
 import { buildArchiveHref } from "@/lib/runs/archive-href";
 import {
   type AttributionMethod,
@@ -89,18 +89,18 @@ export function RunBulkActionBar() {
   const [isPending, startTransition] = useTransition();
   const [reprocessOpen, setReprocessOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const [addLinkOpen, setAddLinkOpen] = useState(false);
-  const [removeLinksOpen, setRemoveLinksOpen] = useState(false);
+  const [addToNotebookOpen, setAddToNotebookOpen] = useState(false);
+  const [removeFromNotebooksOpen, setRemoveFromNotebooksOpen] = useState(false);
 
   if (meta.count === 0) {
     return null;
   }
 
   const refs = Array.from(state.selected.values());
-  const anyLinked = refs.some((ref) => ref.notebookLinks.length > 0);
-  // The bulk endpoints take at most this many runs per request.
-  const tooManyToLink = refs.length > NOTEBOOK_LINK_BULK_RUNS_MAX;
-  const tooManyReason = `Select at most ${NOTEBOOK_LINK_BULK_RUNS_MAX} runs to change notebook links at once.`;
+  const anyInNotebook = refs.some((ref) => ref.notebooks.length > 0);
+  // The notebook endpoints take at most this many runs per request.
+  const tooManyToLink = refs.length > NOTEBOOK_RUNS_PER_REQUEST_MAX;
+  const tooManyReason = `Select at most ${NOTEBOOK_RUNS_PER_REQUEST_MAX} runs to change lab notebooks at once.`;
 
   function runAttribution(method: AttributionMethod, label: string) {
     startTransition(async () => {
@@ -235,41 +235,41 @@ export function RunBulkActionBar() {
                 variant="outline"
               >
                 <NotebookPen className="size-3.5" />
-                Add notebook link
+                Add to lab notebook
               </DisabledReasonButton>
             ) : (
               <Button
                 className="gap-1.5"
                 disabled={isPending}
-                onClick={() => setAddLinkOpen(true)}
+                onClick={() => setAddToNotebookOpen(true)}
                 size="sm"
                 type="button"
                 variant="outline"
               >
                 <NotebookPen className="size-3.5" />
-                Add notebook link
+                Add to lab notebook
               </Button>
             ))}
 
           {meta.allCanLink &&
-            anyLinked &&
+            anyInNotebook &&
             (tooManyToLink ? (
               <DisabledReasonButton
                 reason={tooManyReason}
                 size="sm"
                 variant="outline"
               >
-                Remove notebook link
+                Remove from lab notebook
               </DisabledReasonButton>
             ) : (
               <Button
                 disabled={isPending}
-                onClick={() => setRemoveLinksOpen(true)}
+                onClick={() => setRemoveFromNotebooksOpen(true)}
                 size="sm"
                 type="button"
                 variant="outline"
               >
-                Remove notebook link
+                Remove from lab notebook
               </Button>
             ))}
 
@@ -362,16 +362,16 @@ export function RunBulkActionBar() {
         open={deleteOpen}
         runs={deleteTargets}
       />
-      <AddNotebookLinkDialog
+      <AddToNotebookDialog
         onComplete={() => actions.clear()}
-        onOpenChange={setAddLinkOpen}
-        open={addLinkOpen}
+        onOpenChange={setAddToNotebookOpen}
+        open={addToNotebookOpen}
         runRefs={refs}
       />
-      <RemoveNotebookLinksDialog
+      <RemoveFromNotebooksDialog
         onComplete={() => actions.clear()}
-        onOpenChange={setRemoveLinksOpen}
-        open={removeLinksOpen}
+        onOpenChange={setRemoveFromNotebooksOpen}
+        open={removeFromNotebooksOpen}
         runRefs={refs}
       />
     </>

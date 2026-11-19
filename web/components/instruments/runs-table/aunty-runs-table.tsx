@@ -10,8 +10,8 @@ import {
   formatAuntyTemperatureDisplay,
 } from "@/components/runs/run-metadata-badges";
 import type { AuntyFilterOptions } from "@/lib/api/instrument-runs";
+import type { NotebookFilterOption } from "@/lib/api/notebooks";
 import { AUNTY_EXPERIMENT_TYPE_COLORS } from "@/lib/instrument-colors";
-import type { NotebookLinkNameOptions } from "@/lib/notebook-links/name-filter";
 import type { RunRow } from ".";
 import { type MetadataColumn, RunRowsTable } from "./run-rows-table";
 
@@ -19,13 +19,13 @@ export function AuntyRunsTable({
   data,
   instrumentId,
   filterOptions,
-  notebookLinkNames,
+  notebookOptions,
   ranByOptions,
 }: {
   data: RunRow[];
   instrumentId: string;
   filterOptions: AuntyFilterOptions;
-  notebookLinkNames: NotebookLinkNameOptions;
+  notebookOptions: NotebookFilterOption[];
   ranByOptions: { value: string; label: string }[];
 }) {
   const experimentColors: Record<string, string> = {};
@@ -98,7 +98,7 @@ export function AuntyRunsTable({
       columns={columns}
       data={data}
       instrumentId={instrumentId}
-      notebookLinkNames={notebookLinkNames}
+      notebookOptions={notebookOptions}
       ranByOptions={ranByOptions}
     />
   );

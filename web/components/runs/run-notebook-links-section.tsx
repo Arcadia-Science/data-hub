@@ -2,117 +2,171 @@
 
 import { Plus } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { Fragment, useOptimistic, useState, useTransition } from "react";
-import { toast } from "sonner";
 import {
-  NotebookLinkForm,
-  type NotebookLinkFormValues,
-} from "@/components/runs/notebook-link-form";
+  Fragment,
+  useEffect,
+  useOptimistic,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
+import { toast } from "sonner";
 import { NotebookLinkRow } from "@/components/runs/notebook-link-row";
+import {
+  NotebookPickerForm,
+  type NotebookPickerValues,
+} from "@/components/runs/notebook-picker-form";
 import { RunSectionHeading } from "@/components/runs/run-section-heading";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import type { RunAttribution } from "@/lib/api/instrument-runs";
-import type { NotebookLinkWire } from "@/lib/api/run-notebook-link-wire";
+import type { RunNotebookWire } from "@/lib/api/notebook-wire";
 import { useSession } from "@/lib/auth-client";
 import { toUserAvatarUser } from "@/lib/avatar-color";
-import {
-  notebookLinkDisplayName,
-  parseNotebookLinkUrl,
-} from "@/lib/notebook-links/url";
 import { ownAttributionUrl } from "@/lib/runs/attribution-requests";
+import { addRunError } from "@/lib/runs/notebook-outcomes";
 import {
-  addNotebookLink,
-  NotebookLinkRequestError,
-  removeNotebookLink,
-  updateNotebookLink,
-} from "@/lib/runs/notebook-link-requests";
+  addRunsToPick,
+  type NotebookPick,
+  NotebookRequestError,
+  removeRunsFromNotebook,
+} from "@/lib/runs/notebook-requests";
 
 type Action =
-  | { kind: "add"; link: NotebookLinkWire }
-  | { kind: "update"; id: string; url: string; label: string | null }
+  | { kind: "add"; notebook: RunNotebookWire }
   | { kind: "remove"; id: string };
 
 function applyAction(
-  links: NotebookLinkWire[],
+  notebooks: RunNotebookWire[],
   action: Action
-): NotebookLinkWire[] {
+): RunNotebookWire[] {
   switch (action.kind) {
     case "add":
-      return [...links, action.link];
-    case "update":
-      return links.map((link) =>
-        link.id === action.id
-          ? {
-              ...link,
-              url: action.url,
-              label: action.label,
-              display_name: notebookLinkDisplayName(action.url, action.label),
-            }
-          : link
-      );
+      return notebooks.some((notebook) => notebook.id === action.notebook.id)
+        ? notebooks
+        : [...notebooks, action.notebook];
     case "remove":
-      return links.filter((link) => link.id !== action.id);
+      return notebooks.filter((notebook) => notebook.id !== action.id);
     default:
-      return links;
+      return notebooks;
   }
 }
 
 function saveErrorMessage(error: unknown): string {
-  if (error instanceof NotebookLinkRequestError) {
-    if (error.linkId) {
-      return "This run already links to that page.";
-    }
-    if (error.status === 400 || error.status === 409) {
-      return error.message;
-    }
+  if (
+    error instanceof NotebookRequestError &&
+    (error.status === 400 || error.status === 409)
+  ) {
+    return error.message;
   }
-  return "Couldn't save the link. Try again?";
+  return "Couldn't add the run. Try again?";
 }
 
 /**
- * The run page's "Lab notebooks" section: the run's links to notebook pages,
- * with an inline form to add or edit one. Each change goes to the API and
+ * The run page's "Lab Notebooks" section: the notebooks the run is in, with
+ * an inline picker to add it to another. Each change goes to the API and
  * then refreshes the page; the list shows the change right away and falls
  * back if the request fails.
  */
 export function RunNotebookLinksSection({
   instrumentId,
   runId,
-  links,
+  notebooks,
   attributions,
   isDeleted,
 }: {
   instrumentId: string;
   runId: string;
-  links: NotebookLinkWire[];
+  notebooks: RunNotebookWire[];
   attributions: RunAttribution[];
   isDeleted: boolean;
 }) {
   const router = useRouter();
   const { data: session } = useSession();
   const [, startTransition] = useTransition();
-  const [optimistic, dispatch] = useOptimistic(links, applyAction);
+  const [optimistic, dispatch] = useOptimistic(notebooks, applyAction);
   const [adding, setAdding] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const addButtonRef = useRef<HTMLButtonElement>(null);
+  // Set when the picker closes, so focus goes back to the Add button once
+  // it's on screen again instead of dropping to the page.
+  const returnFocusRef = useRef(false);
+
+  useEffect(() => {
+    if (!adding && returnFocusRef.current) {
+      returnFocusRef.current = false;
+      addButtonRef.current?.focus();
+    }
+  }, [adding]);
 
   const run = { instrumentId, runId };
   const userId = session?.user?.id ?? null;
   const viewerRanIt =
     userId !== null && attributions.some((a) => a.userId === userId);
 
-  // Runs `work` as a transition that ends with a page refresh, and resolves
-  // with the error to show in the form, or null once it worked.
-  function mutate(
-    optimisticAction: Action,
-    work: () => Promise<void>
+  function closePicker() {
+    returnFocusRef.current = true;
+    setAdding(false);
+  }
+
+  function placeholderNotebook(pick: NotebookPick): RunNotebookWire {
+    const me = session?.user
+      ? toUserAvatarUser({
+          userId: session.user.id,
+          name: session.user.name,
+          email: session.user.email,
+          image: session.user.image,
+        })
+      : null;
+    const notebook =
+      pick.kind === "create"
+        ? { id: `temp-${crypto.randomUUID()}`, name: pick.name, url: pick.url }
+        : pick.notebook;
+    return {
+      id: notebook.id,
+      name: notebook.name,
+      url: notebook.url,
+      url_key: notebook.url,
+      linked_at: new Date().toISOString(),
+      linked_by: me
+        ? {
+            id: me.userId,
+            displayName: me.displayName,
+            initials: me.initials,
+            avatarUrl: me.avatarUrl,
+          }
+        : null,
+      linked_by_token: null,
+    };
+  }
+
+  // Adds the run as a transition that ends with a page refresh, and resolves
+  // with the error to show in the picker, or null once it worked.
+  function handleAdd(
+    pick: NotebookPick,
+    values: NotebookPickerValues
   ): Promise<string | null> {
     return new Promise((resolve) => {
       startTransition(async () => {
-        dispatch(optimisticAction);
+        dispatch({ kind: "add", notebook: placeholderNotebook(pick) });
         try {
-          await work();
+          const { result } = await addRunsToPick(pick, [run]);
+          const error = addRunError(result.results[0]?.outcome);
+          if (error) {
+            resolve(error);
+            return;
+          }
+          closePicker();
+          if (values.claim) {
+            const res = await fetch(ownAttributionUrl(instrumentId, runId), {
+              method: "PUT",
+            }).catch(() => null);
+            if (!res?.ok) {
+              toast.error(
+                "The run was added to the lab notebook, but marking you as having run it didn't work. Try again from Ran By."
+              );
+            }
+          }
           resolve(null);
         } catch (error) {
           resolve(saveErrorMessage(error));
@@ -123,83 +177,23 @@ export function RunNotebookLinksSection({
     });
   }
 
-  function placeholderLink(values: NotebookLinkFormValues): NotebookLinkWire {
-    const parsed = parseNotebookLinkUrl(values.url);
-    const label = values.label === "" ? null : values.label;
-    const now = new Date().toISOString();
-    const me = session?.user
-      ? toUserAvatarUser({
-          userId: session.user.id,
-          name: session.user.name,
-          email: session.user.email,
-          image: session.user.image,
-        })
-      : null;
-    const user = me
-      ? {
-          id: me.userId,
-          displayName: me.displayName,
-          initials: me.initials,
-          avatarUrl: me.avatarUrl,
-        }
-      : null;
-    return {
-      id: `temp-${crypto.randomUUID()}`,
-      url: parsed?.url ?? values.url,
-      url_key: parsed?.urlKey ?? values.url,
-      label,
-      display_name: notebookLinkDisplayName(values.url, label),
-      created_at: now,
-      created_by: user,
-      created_by_token: null,
-      updated_at: now,
-      updated_by: user,
-      updated_by_token: null,
-    };
-  }
-
-  function handleAdd(values: NotebookLinkFormValues) {
-    return mutate({ kind: "add", link: placeholderLink(values) }, async () => {
-      await addNotebookLink(run, { url: values.url, label: values.label });
-      setAdding(false);
-      if (values.claim) {
-        const res = await fetch(ownAttributionUrl(instrumentId, runId), {
-          method: "PUT",
-        }).catch(() => null);
-        if (!res?.ok) {
-          toast.error(
-            "The link was added, but marking you as having run this didn't work. Try again from Ran By."
-          );
-        }
-      }
-    });
-  }
-
-  function handleUpdate(
-    link: NotebookLinkWire,
-    values: NotebookLinkFormValues
-  ) {
-    const label = values.label === "" ? null : values.label;
-    return mutate(
-      { kind: "update", id: link.id, url: values.url, label },
-      async () => {
-        await updateNotebookLink(run, link.id, {
-          url: values.url,
-          label: values.label,
-        });
-        setEditingId(null);
-      }
-    );
-  }
-
-  async function handleRemove(link: NotebookLinkWire): Promise<boolean> {
+  async function handleRemove(notebook: RunNotebookWire): Promise<boolean> {
     // `ConfirmDialog` calls this inside its own transition.
-    dispatch({ kind: "remove", id: link.id });
+    dispatch({ kind: "remove", id: notebook.id });
     try {
-      await removeNotebookLink(run, link.id);
+      const result = await removeRunsFromNotebook(notebook.id, [run]);
+      const outcome = result.results[0]?.outcome;
+      if (outcome === "run_deleted" || outcome === "not_found") {
+        toast.error("Couldn't remove the run from the lab notebook.");
+        return false;
+      }
       return true;
-    } catch {
-      toast.error("Couldn't remove the link. Try again?");
+    } catch (error) {
+      // The notebook is gone, so the run isn't in it anymore.
+      if (error instanceof NotebookRequestError && error.status === 404) {
+        return true;
+      }
+      toast.error("Couldn't remove the run from the lab notebook. Try again?");
       return false;
     } finally {
       router.refresh();
@@ -209,69 +203,55 @@ export function RunNotebookLinksSection({
   const showAddButton = !(isDeleted || adding);
 
   return (
-    <section aria-label="Lab notebooks" className="flex flex-col gap-2">
+    <section aria-label="Lab Notebooks" className="flex flex-col gap-2">
       <RunSectionHeading
         actions={
           showAddButton ? (
             <Button
-              onClick={() => {
-                setEditingId(null);
-                setAdding(true);
-              }}
+              onClick={() => setAdding(true)}
+              ref={addButtonRef}
               size="sm"
               type="button"
               variant="outline"
             >
               <Plus data-icon="inline-start" />
-              Add link
+              Add to lab notebook
             </Button>
           ) : undefined
         }
         countLabel={optimistic.length > 0 ? optimistic.length : undefined}
-        title="Lab notebooks"
+        title="Lab Notebooks"
       />
       <Card className="gap-0 py-0">
         {adding ? (
           <div className="px-4 py-3">
-            <NotebookLinkForm
+            <NotebookPickerForm
               claimLabel={viewerRanIt ? undefined : "I ran this run"}
-              onCancel={() => setAdding(false)}
+              onCancel={closePicker}
               onSave={handleAdd}
-              variant="add"
+              runNotebookIds={[notebooks.map((notebook) => notebook.id)]}
             />
           </div>
         ) : null}
         {optimistic.length === 0 && !adding ? (
           <p className="px-4 py-3 text-muted-foreground text-sm">
             {isDeleted
-              ? "This run has no lab notebook links."
-              : "Link the lab notebook pages for this run, so whoever analyzes it can find the context."}
+              ? "This run isn't in any lab notebook."
+              : "Add this run to the lab notebooks that describe it, so whoever analyzes it can find the context."}
           </p>
         ) : null}
-        {optimistic.map((link, index) => (
-          <Fragment key={link.id}>
+        {optimistic.map((notebook, index) => (
+          <Fragment key={notebook.id}>
             {index > 0 || adding ? <Separator /> : null}
-            {editingId === link.id ? (
-              <div className="px-4 py-3">
-                <NotebookLinkForm
-                  initialLabel={link.label ?? ""}
-                  initialUrl={link.url}
-                  onCancel={() => setEditingId(null)}
-                  onSave={(values) => handleUpdate(link, values)}
-                  variant="edit"
-                />
-              </div>
-            ) : (
-              <NotebookLinkRow
-                link={link}
-                onEdit={() => {
-                  setAdding(false);
-                  setEditingId(link.id);
-                }}
-                onRemove={() => handleRemove(link)}
-                readOnly={isDeleted || link.id.startsWith("temp-")}
-              />
-            )}
+            <NotebookLinkRow
+              notebook={notebook}
+              onRemove={() => handleRemove(notebook)}
+              // A row still being added has nothing to remove yet.
+              readOnly={
+                isDeleted ||
+                !notebooks.some((saved) => saved.id === notebook.id)
+              }
+            />
           </Fragment>
         ))}
       </Card>

@@ -1,11 +1,5 @@
 import { z } from "zod";
 import {
-  NOTEBOOK_LINK_BULK_RUNS_MAX,
-  NOTEBOOK_LINK_BULK_URLS_MAX,
-  notebookLinkLabelInputSchema,
-  notebookLinkUrlSchema,
-} from "@/lib/notebook-links/url";
-import {
   REPORT_ITEM_KINDS,
   REPORT_ITEMS_MAX_LIMIT,
 } from "@/lib/runs/report-items";
@@ -92,17 +86,13 @@ export const runListQuery = z.object({
       description:
         "Derived run status. Several values (repeated, or comma-separated) match any of them. `pending` is deprecated: it matches `waiting_upload` and `not_uploaded`, and no run reports it.",
     }),
-  has_notebook_link: z.enum(["true", "false"]).optional().openapi({
+  has_lab_notebook: z.enum(["true", "false"]).optional().openapi({
     description:
-      "`true` lists only runs with at least one lab notebook link; `false` lists only runs with none.",
+      "`true` lists only runs in at least one lab notebook; `false` lists only runs in none. Deleted lab notebooks don't count.",
   }),
-  notebook_link_name: z.string().optional().openapi({
+  lab_notebook_id: z.string().optional().openapi({
     description:
-      "Lists only runs with a lab notebook link named exactly this, matching case. A link's name is its `display_name`: its label, or a name worked out from its URL when it has no label. A blank value is ignored.",
-  }),
-  notebook_link_search: z.string().optional().openapi({
-    description:
-      "Lists only runs with a lab notebook link whose name (`display_name`) contains this text, ignoring case. With `notebook_link_name`, one link has to match both. A blank value is ignored.",
+      "Lists only runs in this lab notebook. A deleted lab notebook still lists its runs. A blank value is ignored, and an ID that matches no lab notebook matches no runs.",
   }),
   metadata_key: z
     .string()
@@ -136,38 +126,38 @@ export const tokenActor = z
   })
   .openapi("TokenActor");
 
-const notebookLinkUser = z.object({
+// A person as notebooks name them: who owns, created, changed, or deleted
+// one, or who added a run to it.
+export const notebookUser = z.object({
   id: z.string(),
   displayName: z.string(),
   initials: z.string(),
   avatarUrl: z.string().nullable(),
 });
 
-export const notebookLink = z
+export const notebookUrlKey = z.string().openapi({
+  description:
+    "Two links with the same key point to the same page. The key ignores http vs. https, `www.`, a trailing slash, the fragment, and tracking parameters. Notion links are keyed by page ID, so a renamed page still matches.",
+});
+
+// A lab notebook as a run lists it. Deleted notebooks are left out.
+export const runNotebook = z
   .object({
     id: z.string().uuid(),
+    name: z.string(),
     url: z.string().openapi({
-      description: "The link as saved, ready to open.",
+      description: "The lab notebook's page, ready to open.",
     }),
-    url_key: z.string().openapi({
-      description:
-        "Two links with the same key point to the same page. The key ignores http vs. https, `www.`, a trailing slash, the fragment, and tracking parameters. Notion links are keyed by page ID, so a renamed page still matches.",
-    }),
-    label: z.string().nullable(),
-    display_name: z.string().openapi({
-      description:
-        "The label, or a name worked out from the URL when there is none.",
-    }),
-    created_at: isoDateTime,
-    // At most one of `created_by` and `created_by_token` is set: the person
-    // or token that added the link. Both are null once that person is deleted.
-    created_by: notebookLinkUser.nullable(),
-    created_by_token: tokenActor.nullable(),
-    updated_at: isoDateTime,
-    updated_by: notebookLinkUser.nullable(),
-    updated_by_token: tokenActor.nullable(),
+    url_key: notebookUrlKey,
+    linked_at: isoDateTime.describe(
+      "When the run was added to the lab notebook."
+    ),
+    // At most one of `linked_by` and `linked_by_token` is set: the person or
+    // token that added the run. Both are null once that person is deleted.
+    linked_by: notebookUser.nullable(),
+    linked_by_token: tokenActor.nullable(),
   })
-  .openapi("RunNotebookLink");
+  .openapi("RunLabNotebook");
 
 export const runCreated = z
   .object({
@@ -248,7 +238,10 @@ export const runDetail = z
     deleted_by_token: tokenActor.nullable(),
     metadata: metadataObject.nullable(),
     attributions: z.array(attribution),
-    notebook_links: z.array(notebookLink),
+    lab_notebooks: z.array(runNotebook).openapi({
+      description:
+        "The run's lab notebooks, in the order the run was added to them.",
+    }),
     files: z.array(runDetailFile),
   })
   .openapi("RunDetail");
@@ -297,7 +290,10 @@ export const runListItem = z
     error_messages: z.array(z.string()),
     attributions: z.array(attribution),
     comment_count: z.number().int(),
-    notebook_links: z.array(notebookLink),
+    lab_notebooks: z.array(runNotebook).openapi({
+      description:
+        "The run's lab notebooks, in the order the run was added to them.",
+    }),
   })
   .openapi("RunListItem");
 
@@ -437,119 +433,6 @@ export const commentsListResponse = z.object({
 export const commentDeleted = z.object({
   id: z.string(),
   deleted: z.literal(true),
-});
-
-export const notebookLinksListResponse = z.object({
-  notebook_links: z.array(notebookLink),
-});
-
-export const createNotebookLinkBody = z.object({
-  url: notebookLinkUrlSchema,
-  label: notebookLinkLabelInputSchema.nullable().optional().openapi({
-    description: "Optional name for the link. Blank or null means none.",
-  }),
-});
-
-export const updateNotebookLinkBody = z
-  .object({
-    url: notebookLinkUrlSchema.optional(),
-    label: notebookLinkLabelInputSchema.nullable().optional().openapi({
-      description: "Null or blank clears the label. Leave it out to keep it.",
-    }),
-  })
-  .refine((body) => body.url !== undefined || body.label !== undefined, {
-    message: "Send url, label, or both",
-  });
-
-export const notebookLinkDeleted = z.object({
-  id: z.string().uuid(),
-  deleted: z.literal(true),
-});
-
-const bulkRunRef = z.object({
-  instrument_id: z.string().min(1),
-  run_id: z.string().min(1),
-});
-
-const bulkRuns = z
-  .array(bulkRunRef)
-  .min(1)
-  .max(NOTEBOOK_LINK_BULK_RUNS_MAX)
-  .openapi({
-    description: `The runs to change, at most ${NOTEBOOK_LINK_BULK_RUNS_MAX}. They can belong to different instruments.`,
-  });
-
-export const bulkAddNotebookLinkBody = z.object({
-  runs: bulkRuns,
-  url: notebookLinkUrlSchema,
-  label: notebookLinkLabelInputSchema.nullable().optional().openapi({
-    description:
-      "Optional name for the new links. Runs that already link to the page keep their own label.",
-  }),
-});
-
-export const bulkAddNotebookLinkResult = z.object({
-  url: z.string(),
-  url_key: z.string(),
-  results: z.array(
-    z.object({
-      instrument_id: z.string(),
-      run_id: z.string(),
-      outcome: z
-        .enum([
-          "added",
-          "already_linked",
-          "run_deleted",
-          "limit_reached",
-          "not_found",
-        ])
-        .openapi({
-          description:
-            "`already_linked`: the run already links to the same page and was left as it was. `limit_reached`: the run already has the most links allowed.",
-        }),
-      link: notebookLink.nullable().openapi({
-        description:
-          "The run's link to the page, for `added` and `already_linked`.",
-      }),
-    })
-  ),
-  counts: z.object({
-    added: z.number().int(),
-    already_linked: z.number().int(),
-    run_deleted: z.number().int(),
-    limit_reached: z.number().int(),
-    not_found: z.number().int(),
-  }),
-});
-
-export const bulkRemoveNotebookLinksBody = z.object({
-  runs: bulkRuns,
-  urls: z
-    .array(notebookLinkUrlSchema)
-    .min(1)
-    .max(NOTEBOOK_LINK_BULK_URLS_MAX)
-    .openapi({
-      description:
-        "Links to remove. Each removes any link to the same page, so a copy of the URL with a different query string or `www.` still matches.",
-    }),
-});
-
-export const bulkRemoveNotebookLinksResult = z.object({
-  url_keys: z.array(z.string()),
-  results: z.array(
-    z.object({
-      instrument_id: z.string(),
-      run_id: z.string(),
-      outcome: z.enum(["removed", "not_linked", "run_deleted", "not_found"]),
-      removed: z.number().int(),
-    })
-  ),
-  counts: z.object({
-    removed: z.number().int(),
-    not_linked: z.number().int(),
-    run_deleted: z.number().int(),
-    not_found: z.number().int(),
-  }),
 });
 
 export const reportItemsQuery = z.object({

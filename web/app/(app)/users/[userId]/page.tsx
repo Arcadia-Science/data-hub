@@ -32,11 +32,11 @@ import {
   type UserProfile,
 } from "@/lib/api/dashboard";
 import { buildRunListQuery } from "@/lib/api/instrument-runs";
+import { getNotebookFilterOptions } from "@/lib/api/notebooks";
 import { listCommentFeed } from "@/lib/api/run-comments";
-import { getNotebookLinkNameOptions } from "@/lib/api/run-notebook-links";
 import {
-  parseHasNotebookLinkParam,
-  parseNotebookLinkNameParams,
+  parseHasNotebookParam,
+  parseNotebookIdParam,
 } from "@/lib/api/validators";
 import { auth } from "@/lib/auth";
 import {
@@ -184,9 +184,9 @@ async function UserRunsSection({
   // The toolbar instrument list and the filtered run page are independent.
   // Runs are scoped to this user via `ranBy`, so the URL `ran_by` param (which
   // the dashboard toolbar never sets here) is intentionally ignored.
-  const [instruments, notebookLinkNames, runResult] = await Promise.all([
+  const [instruments, notebookOptions, runResult] = await Promise.all([
     getInstruments(true),
-    getNotebookLinkNameOptions({ ranBy: profile.userId }),
+    getNotebookFilterOptions({ ranBy: profile.userId }),
     buildRunListQuery({
       ranBy: profile.userId,
       instrumentId: instrumentIds,
@@ -196,11 +196,8 @@ async function UserRunsSection({
       page: params.page,
       perPage: params.per_page,
       includeDeleted: params.include_deleted,
-      hasNotebookLink: parseHasNotebookLinkParam(params.has_notebook_link),
-      ...parseNotebookLinkNameParams({
-        name: params.notebook_link_name,
-        search: params.notebook_link_search,
-      }),
+      hasNotebook: parseHasNotebookParam(params.has_lab_notebook),
+      ...parseNotebookIdParam(params.lab_notebook_id),
       statuses: params.status.length > 0 ? params.status : undefined,
       sort: params.sort,
       order: params.order,
@@ -224,7 +221,7 @@ async function UserRunsSection({
               data={runResult.data}
               emptyLabel={emptyLabel}
               hasFilters={hasFilters}
-              notebookLinkNames={notebookLinkNames}
+              notebookOptions={notebookOptions}
               totalCount={runResult.pagination.total}
             />
           </TablePendingBoundary>

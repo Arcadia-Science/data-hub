@@ -37,11 +37,11 @@ import {
   getRanByFilterOptions,
 } from "@/lib/api/instrument-runs";
 import { getRecentActiveInstrumentsForDashboard } from "@/lib/api/instruments";
+import { getNotebookFilterOptions } from "@/lib/api/notebooks";
 import { listCommentFeed } from "@/lib/api/run-comments";
-import { getNotebookLinkNameOptions } from "@/lib/api/run-notebook-links";
 import {
-  parseHasNotebookLinkParam,
-  parseNotebookLinkNameParams,
+  parseHasNotebookParam,
+  parseNotebookIdParam,
 } from "@/lib/api/validators";
 import { auth } from "@/lib/auth";
 import { startOfTodayISO } from "@/lib/date";
@@ -174,14 +174,14 @@ async function DashboardRunsSection({
   // viewer timezone for the default "today" lookback.
   const instrumentsPromise = getInstruments(true);
   const ranByUsersPromise = getRanByFilterOptions();
-  const notebookLinkNamesPromise = getNotebookLinkNameOptions();
+  const notebookOptionsPromise = getNotebookFilterOptions();
   const defaultDateFrom = startOfTodayISO(await getViewerTimeZone());
 
-  const [instruments, ranByUsers, notebookLinkNames, runResult] =
+  const [instruments, ranByUsers, notebookOptions, runResult] =
     await Promise.all([
       instrumentsPromise,
       ranByUsersPromise,
-      notebookLinkNamesPromise,
+      notebookOptionsPromise,
       buildRunListQuery({
         instrumentId: instrumentIds,
         search: params.search || undefined,
@@ -194,11 +194,8 @@ async function DashboardRunsSection({
         perPage: params.per_page,
         includeDeleted: params.include_deleted,
         ranBy: params.ran_by ?? undefined,
-        hasNotebookLink: parseHasNotebookLinkParam(params.has_notebook_link),
-        ...parseNotebookLinkNameParams({
-          name: params.notebook_link_name,
-          search: params.notebook_link_search,
-        }),
+        hasNotebook: parseHasNotebookParam(params.has_lab_notebook),
+        ...parseNotebookIdParam(params.lab_notebook_id),
         statuses: params.status.length > 0 ? params.status : undefined,
         sort: params.sort,
         order: params.order,
@@ -231,7 +228,7 @@ async function DashboardRunsSection({
             <RunsTable
               data={runResult.data}
               hasFilters={hasFilters}
-              notebookLinkNames={notebookLinkNames}
+              notebookOptions={notebookOptions}
               ranByOptions={ranByOptions}
               totalCount={runResult.pagination.total}
             />

@@ -10,7 +10,7 @@ import {
 } from "@/components/runs/run-metadata-badges";
 import { Badge } from "@/components/ui/badge";
 import type { HinaFilterOptions } from "@/lib/api/instrument-runs";
-import type { NotebookLinkNameOptions } from "@/lib/notebook-links/name-filter";
+import type { NotebookFilterOption } from "@/lib/api/notebooks";
 import type { RunRow } from ".";
 import { type MetadataColumn, RunRowsTable } from "./run-rows-table";
 
@@ -18,13 +18,13 @@ export function HinaRunsTable({
   data,
   instrumentId,
   filterOptions,
-  notebookLinkNames,
+  notebookOptions,
   ranByOptions,
 }: {
   data: RunRow[];
   instrumentId: string;
   filterOptions: HinaFilterOptions;
-  notebookLinkNames: NotebookLinkNameOptions;
+  notebookOptions: NotebookFilterOption[];
   ranByOptions: { value: string; label: string }[];
 }) {
   const columns: MetadataColumn[] = [
@@ -78,7 +78,7 @@ export function HinaRunsTable({
       columns={columns}
       data={data}
       instrumentId={instrumentId}
-      notebookLinkNames={notebookLinkNames}
+      notebookOptions={notebookOptions}
       ranByOptions={ranByOptions}
     />
   );

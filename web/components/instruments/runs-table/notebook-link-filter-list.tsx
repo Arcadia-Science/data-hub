@@ -12,12 +12,11 @@ import {
   CommandList,
   CommandSeparator,
 } from "@/components/ui/command";
+import type { NotebookFilterOption } from "@/lib/api/notebooks";
 import {
-  countRunsWithNameContaining,
-  type NotebookLinkFilter,
-  type NotebookLinkNameOptions,
-  notebookLinkNameContains,
-} from "@/lib/notebook-links/name-filter";
+  type NotebookFilter,
+  narrowNotebookOptions,
+} from "@/lib/runs/notebook-filter";
 import { cn } from "@/lib/utils";
 
 // Lives in its own module so a runs table loads the command menu library only
@@ -27,53 +26,29 @@ export function NotebookLinkFilterList({
   onSelect,
   options,
 }: {
-  filter: NotebookLinkFilter;
-  onSelect: (filter: NotebookLinkFilter) => void;
-  options: NotebookLinkNameOptions;
+  filter: NotebookFilter;
+  onSelect: (filter: NotebookFilter) => void;
+  options: NotebookFilterOption[];
 }) {
-  // Reopening the menu on a "containing" filter shows the text it matched.
-  const [query, setQuery] = useState(
-    filter.kind === "search" ? filter.text : ""
-  );
+  const [query, setQuery] = useState("");
   const text = query.trim();
-  const names = text
-    ? options.names.filter((entry) =>
-        notebookLinkNameContains(entry.name, text)
-      )
-    : options.names;
+  const notebooks = narrowNotebookOptions(options, text);
 
   return (
-    // Matching is by substring, like the run list query, so cmdk's fuzzy
-    // filter stays off.
+    // Matching is by substring, so cmdk's fuzzy filter stays off.
     <Command shouldFilter={false}>
       {/* Radix focuses a popover's contents once, when it opens. On the first
           open only the loading placeholder exists then, so ask for focus here. */}
       <CommandInput
-        aria-label="Search notebook labels"
+        aria-label="Search lab notebooks"
         autoFocus
         onValueChange={setQuery}
-        placeholder="Search labels…"
+        placeholder="Search lab notebooks…"
         value={query}
       />
       <CommandList className="max-h-none">
-        <CommandEmpty>No matching labels.</CommandEmpty>
-        {text ? (
-          names.length > 0 && (
-            <CommandGroup>
-              <FilterItem
-                checked={
-                  filter.kind === "search" &&
-                  filter.text.toLowerCase() === text.toLowerCase()
-                }
-                count={countRunsWithNameContaining(options, text)}
-                onSelect={() => onSelect({ kind: "search", text })}
-                value="search"
-              >
-                Labels containing “{text}”
-              </FilterItem>
-            </CommandGroup>
-          )
-        ) : (
+        <CommandEmpty>No matching lab notebooks.</CommandEmpty>
+        {text ? null : (
           <>
             <CommandGroup>
               <FilterItem
@@ -87,39 +62,44 @@ export function NotebookLinkFilterList({
             <CommandSeparator />
             <CommandGroup>
               <FilterItem
-                checked={filter.kind === "has_link"}
-                onSelect={() => onSelect({ kind: "has_link" })}
-                value="has_link"
+                checked={filter.kind === "has_lab_notebook"}
+                onSelect={() => onSelect({ kind: "has_lab_notebook" })}
+                value="has_lab_notebook"
               >
-                Has a link
+                In any lab notebook
               </FilterItem>
               <FilterItem
-                checked={filter.kind === "no_link"}
-                onSelect={() => onSelect({ kind: "no_link" })}
-                value="no_link"
+                checked={filter.kind === "no_notebook"}
+                onSelect={() => onSelect({ kind: "no_notebook" })}
+                value="no_notebook"
               >
-                No link
+                In no lab notebook
               </FilterItem>
             </CommandGroup>
           </>
         )}
-        {names.length > 0 && (
+        {notebooks.length > 0 && (
           <>
-            <CommandSeparator />
-            {/* Only the names scroll, so All and the link choices stay put. */}
+            {text ? null : <CommandSeparator />}
+            {/* Only the notebooks scroll, so All and the other choices stay
+                put. */}
             <CommandGroup className="max-h-48 overflow-y-auto overscroll-contain">
-              {names.map((entry) => (
+              {notebooks.map((notebook) => (
                 <FilterItem
-                  checked={filter.kind === "name" && filter.name === entry.name}
-                  count={entry.runCount}
-                  key={entry.name}
-                  onSelect={() => onSelect({ kind: "name", name: entry.name })}
-                  value={`name:${entry.name}`}
+                  checked={
+                    filter.kind === "notebook" && filter.id === notebook.id
+                  }
+                  count={notebook.runCount}
+                  key={notebook.id}
+                  onSelect={() =>
+                    onSelect({ kind: "notebook", id: notebook.id })
+                  }
+                  value={`notebook:${notebook.id}`}
                 >
                   <Highlight
                     className="rounded-[2px] bg-blue-400/30 text-foreground"
                     query={text}
-                    text={entry.name}
+                    text={notebook.name}
                   />
                 </FilterItem>
               ))}

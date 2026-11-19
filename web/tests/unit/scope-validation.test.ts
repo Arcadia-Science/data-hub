@@ -156,15 +156,34 @@ describe("hasScope", () => {
     // other resources.
     expect(hasScope({ scopes: ["runs:write"] }, "runs:read")).toBe(false);
     expect(hasScope({ scopes: ["runs:write"] }, "files:create")).toBe(false);
-    // `runs:link` came after the split, so old tokens don't pick it up.
-    expect(hasScope({ scopes: ["runs:write"] }, "runs:link")).toBe(false);
+    // `lab-notebooks:write` came after the split, so old tokens don't pick it up.
+    expect(hasScope({ scopes: ["runs:write"] }, "lab-notebooks:write")).toBe(
+      false
+    );
   });
 
-  it("offers runs:link on new tokens without implying comments", () => {
-    const result = validateRequestedScopes(["runs:read", "runs:link"]);
+  it("offers lab-notebooks:write on new tokens without implying comments", () => {
+    const result = validateRequestedScopes([
+      "runs:read",
+      "lab-notebooks:write",
+    ]);
     expect(result.ok).toBe(true);
-    expect(hasScope({ scopes: ["runs:link"] }, "runs:comment")).toBe(false);
-    expect(hasScope({ scopes: ["runs:comment"] }, "runs:link")).toBe(false);
+    expect(hasScope({ scopes: ["lab-notebooks:write"] }, "runs:comment")).toBe(
+      false
+    );
+    expect(hasScope({ scopes: ["runs:comment"] }, "lab-notebooks:write")).toBe(
+      false
+    );
+  });
+
+  // `runs:link` was renamed `lab-notebooks:write`. A token stored before the
+  // rename keeps working, but new tokens can't ask for the old name.
+  it("reads a stored runs:link as lab-notebooks:write", () => {
+    expect(hasScope({ scopes: ["runs:link"] }, "lab-notebooks:write")).toBe(
+      true
+    );
+    expect(hasScope({ scopes: ["runs:link"] }, "runs:read")).toBe(false);
+    expect(validateRequestedScopes(["runs:link"]).ok).toBe(false);
   });
 
   it("expands legacy 'files:write' and 'watchers:write'", () => {
