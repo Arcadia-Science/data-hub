@@ -1,6 +1,6 @@
 ---
 title: Runs can link to their lab notebook pages
-docs: https://datahub.arcadiascience.com/docs/browse-runs#lab-notebook
+docs: https://datahub.arcadiascience.com/docs/lab-notebooks
 ---
 
 A run page now has a **Lab notebooks** section between the run summary and its files. Choose **Add link** to paste the URL of the notebook page for the experiment, from Notion, Google Docs, or any other site, and give it a label if you like. A run can have several links, and each one shows who added it. Tick **I ran this run** to claim the run at the same time.

@@ -6,13 +6,13 @@ contentType: How-to
 
 <Audience>Lab operators</Audience>
 
-Install the watcher on an instrument PC, verify it, and apply manual updates. Fleet auto-update (what admins advertise and how PCs upgrade in the background) is covered in [Roll out watcher releases](/docs/watcher-releases).
+Install the watcher on an instrument PC, check that it works, and update it by hand. These docs describe watcher 1.4.0 and later. Admins control automatic updates for every PC at once; see [Roll out watcher releases](/docs/watcher-releases).
 
 ## Prerequisites
 
-- **[uv](https://docs.astral.sh/uv/getting-started/installation/)**: recommended. It installs Python for you; you do not need a separate Python install.
-- **A personal access token** starting with `dhub_`. Admins create these at **Settings → Access Tokens**; members cannot mint their own. See [Issue and revoke tokens](/docs/manage-tokens).
-- **Watch directory** and **file patterns** for the instrument output folder.
+- **[uv](https://docs.astral.sh/uv/getting-started/installation/)**: recommended. It installs Python for you, so you don’t need to install Python separately.
+- **A personal access token** starting with `dhub_`. Admins create these at **Settings → Access Tokens**; members can’t create their own. See [Issue and revoke tokens](/docs/manage-tokens).
+- **The watch folder and file patterns**: the folder the instrument saves to, and which files in it to upload.
 
 ## Install
 
@@ -22,9 +22,9 @@ Most lab instrument PCs run Windows, so install the `windows-service` extra by d
 uv tool install "data-hub-watcher[windows-service]"
 ```
 
-This puts the `data-hub-watcher` CLI on PATH in an isolated venv managed by `uv`.
+This installs the `data-hub-watcher` command in its own Python environment, managed by `uv`, so you can run it from any terminal.
 
-On macOS or Linux, or on a PC you will only run in the foreground, omit the extra:
+On macOS or Linux, or on a PC where you’ll only run the watcher in a terminal window, leave out the extra:
 
 ```sh
 uv tool install data-hub-watcher
@@ -36,9 +36,9 @@ uv tool install data-hub-watcher
 data-hub-watcher init
 ```
 
-The wizard walks through environment, API key, instrument, watch directory, file patterns, run detection, stability period, and upload mode. New instruments start as `pending` until an admin confirms them; see [Set up an instrument](/docs/set-up-an-instrument).
+The wizard asks for the environment, API key, instrument, watch folder, file patterns, run detection, stability period, and upload mode. New instruments start as `pending` until an admin confirms them; see [Set up an instrument](/docs/set-up-an-instrument).
 
-Config saves to `~/.data-hub/config.yaml` and syncs to the server. Intent-level guidance for detection and uploads is in [Configure run detection and uploads](/docs/configure-run-detection); every field is in [Watcher configuration](/docs/configuration-reference).
+The wizard saves the config to `~/.data-hub/config.yaml` and sends it to Data Hub. [Configure run detection and uploads](/docs/configure-run-detection) explains how to choose those settings, and [Watcher configuration](/docs/configuration-reference) lists every field.
 
 ## Verify
 
@@ -46,30 +46,30 @@ Config saves to `~/.data-hub/config.yaml` and syncs to the server. Intent-level 
 data-hub-watcher watch --dry-run
 ```
 
-Dry-run validates config, checks API reachability and instrument status, and previews matching files without starting the monitor.
+The dry run checks the config, checks that Data Hub is reachable and the instrument is active, and lists the files it would upload, without starting to watch.
 
 ## Run
 
-On a lab PC, run the watcher as a Windows service so it starts on boot, survives logout, and auto-updates in the background. From an **Administrator** terminal:
+On a lab PC, run the watcher as a Windows service, so it starts when the PC starts, keeps running after you sign out, and updates itself. From an **Administrator** terminal:
 
 ```sh
 data-hub-watcher service install
 data-hub-watcher service start
 ```
 
-Lifecycle commands, log locations, and recovery settings are in [Run as a Windows service](/docs/windows-service).
+[Run as a Windows service](/docs/windows-service) covers the commands to stop and restart it, where it writes logs, and what happens if it crashes.
 
-For a one-off check, or on macOS or Linux, run in the foreground instead:
+For a one-off check, or on macOS or Linux, run the watcher in a terminal instead:
 
 ```sh
 data-hub-watcher watch
 ```
 
-The watcher monitors the directory, waits for files to stabilize, groups them into runs, uploads (or queues in manual mode), and heartbeats every 60 seconds. Stop a foreground watcher with `Ctrl+C`; stop the service with `data-hub-watcher service stop`.
+The watcher watches the folder, waits for each file to stop changing, groups files into runs, uploads them in auto mode, and checks in with Data Hub every 60 seconds. Stop it with `Ctrl+C` in the terminal, or stop the service with `data-hub-watcher service stop`.
 
 ## Reinstall
 
-Reinstall the same package (for example after a broken venv or missing service extra):
+Reinstall the watcher if its install breaks, or if it’s missing the Windows service extra:
 
 ```sh
 uv tool install --reinstall data-hub-watcher
@@ -77,7 +77,7 @@ uv tool install --reinstall data-hub-watcher
 uv tool install --reinstall "data-hub-watcher[windows-service]"
 ```
 
-On Windows services, follow with `data-hub-watcher service reinstall` from an Administrator shell so the service and upgrade Scheduled Task point at the new install.
+If the watcher runs as a Windows service, then run `data-hub-watcher service reinstall` from an Administrator terminal, so the service and the upgrade Scheduled Task use the new install.
 
 ## Change configuration later
 
@@ -87,11 +87,11 @@ data-hub-watcher config open   # open the YAML in your editor
 data-hub-watcher config show   # print the current config
 ```
 
-Changes sync to the server automatically.
+The watcher sends the changes to Data Hub. A running watcher keeps its old settings until it restarts; see [Edits made on the PC](/docs/manage-watchers#edits-on-the-pc).
 
 ## Manual update (`self-update`)
 
-Use this when you want an upgrade immediately, or on a non-service install. Background fleet upgrades are described in [Roll out watcher releases](/docs/watcher-releases).
+Use `self-update` to update right away, or on a PC that doesn’t run the watcher as a service. [Roll out watcher releases](/docs/watcher-releases) describes automatic updates.
 
 ```sh
 data-hub-watcher self-update            # check + upgrade if needed
@@ -99,25 +99,25 @@ data-hub-watcher self-update --check    # report status only
 data-hub-watcher self-update --force    # re-run even if versions match
 ```
 
-The command asks the API for the latest published version and upgrades according to how the watcher was installed:
+The command asks Data Hub for the latest version and upgrades the way the watcher was installed:
 
 | Install method | Upgrade flow |
 | --- | --- |
-| Windows + `uv tool install` | Routes through the `DataHubWatcherUpgrade` Scheduled Task. The CLI returns when the task accepts; the service restarts automatically. Tail `~/.data-hub/upgrade-worker.log` for progress. |
-| POSIX + `uv tool install` | `uv tool install --reinstall data-hub-watcher==<latest>` inline. **Restart the watcher** afterward. |
-| Plain venv `pip install` | `pip install -U data-hub-watcher==<latest>` inline. **Restart the watcher.** |
-| Editable / `uv sync` checkout | Refused; upgrade with `git pull && uv sync`. |
+| Windows, with `uv tool install` | Hands the upgrade to the `DataHubWatcherUpgrade` Scheduled Task and returns once the task accepts it. The service restarts by itself. Follow `~/.data-hub/upgrade-worker.log` for progress. |
+| macOS or Linux, with `uv tool install` | Runs `uv tool install --reinstall` for the latest version. **Restart the watcher** afterward. |
+| `pip install` into a Python environment | Runs `pip install -U` for the latest version. **Restart the watcher** afterward. |
+| A development checkout (editable install or `uv sync`) | Refused. Upgrade with `git pull && uv sync`. |
 
 <Callout type="warn">
-On Windows uv-tool installs, `data-hub-watcher service install` (or `service reinstall`) must have run once from an Administrator shell so the upgrade Scheduled Task exists.
+On Windows, when the watcher was installed with `uv tool install`, `data-hub-watcher service install` (or `service reinstall`) must have run once from an Administrator terminal, so the upgrade Scheduled Task exists.
 </Callout>
 
 ### Pin a specific version
 
 ```sh
-uv tool install data-hub-watcher==1.2.1
+uv tool install "data-hub-watcher[windows-service]==1.4.5"
 ```
 
-Some features need a minimum watcher version, such as uploading files larger than 5 GB (1.2.0) or **Request upload** on instruments that upload automatically (1.2.1). Check [What each version adds](/docs/watcher-releases#what-each-version-adds) before pinning an older version.
+On macOS or Linux, leave out `[windows-service]`. Some features need a minimum watcher version, such as changing settings from the web app (1.4.0) or marking files **Upload failed** (1.4.5). Check [What each version adds](/docs/watcher-releases#what-each-version-adds) before you pin an older version.
 
-Run `self-update --check` to confirm the server’s advertised target. When the server’s latest moves past your pin, the next auto-update tick tries to upgrade again. Fleet-wide pins and rollbacks are admin actions under [Roll out watcher releases](/docs/watcher-releases).
+Run `data-hub-watcher self-update --check` to see which version Data Hub offers. A pinned watcher still updates itself, at its next hourly check, once Data Hub offers a newer version than the pin. Admins choose that version for every PC, and roll it back, in [Roll out watcher releases](/docs/watcher-releases).

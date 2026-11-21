@@ -20,13 +20,13 @@ Each person’s own notification choices are separate, under **Settings → Noti
 
 Data Hub encrypts the secrets you paste on this page before saving them: the Linear client secret and signing secret, and the Slack bot token and client secret. It never shows a saved secret again. To change one, paste a new value and save.
 
-Encryption needs the `INTEGRATION_SECRETS_KEY` environment variable on the web app. It is 64 hexadecimal characters; generate one with `openssl rand -hex 32`, set it in Vercel, and redeploy. Until it is set, saving a secret fails, and the Slack app card says so.
+Encryption needs the `INTEGRATION_SECRETS_KEY` environment variable on the web app. It’s 64 hexadecimal characters. Generate one with `openssl rand -hex 32`, set it in Vercel, and redeploy. Until it’s set, saving a secret fails, and the Slack app card says so.
 
 If the key changes after secrets were saved, Data Hub can’t read them anymore. The affected field says **Can’t read saved value**. Put the old key back, or paste the value again and save.
 
 ## Linear for feedback reports [#linear]
 
-Feedback that people send from Data Hub becomes an issue in your Linear workspace, and the report’s status follows that issue. Until an admin saves a Linear team here, the **Feedback** item stays out of the account menu, and sending feedback through the API or an AI assistant returns an error saying feedback isn’t set up. What reporters see is in [Send feedback](/docs/send-feedback).
+Feedback that people send from Data Hub becomes an issue in your Linear workspace, and the report’s status follows that issue. Until an admin saves a Linear team here, the **Feedback** item stays out of the account menu. Sending feedback through the API or an AI assistant returns an error saying feedback isn’t set up. [Send feedback](/docs/send-feedback) covers what reporters see.
 
 The Linear card walks you through four steps.
 
@@ -67,15 +67,15 @@ If the credentials belong to a different Linear workspace than the one already c
 <Steps>
 
 <Step>
-Pick the **Team** that receives reports. Only public teams are listed, because Linear doesn’t show private teams to apps.
+Choose the **Team** that receives reports. Only public teams are listed, because Linear doesn’t show private teams to apps.
 </Step>
 
 <Step>
-Optionally pick a **Project**.
+Optionally choose a **Project**.
 </Step>
 
 <Step>
-Optionally pick a label for each kind of report: **Bug**, **Feature request**, and **Other**. Labels can come from the team or from the whole workspace. Linear adds the matching label to each new issue.
+Optionally choose a label for each kind of report: **Bug**, **Feature request**, and **Other**. Labels can come from the team or from the whole workspace. Linear adds the matching label to each new issue.
 </Step>
 
 <Step>
@@ -110,15 +110,22 @@ Save the webhook, then copy its signing secret into **Signing secret** in Data H
 
 </Steps>
 
-Data Hub uses the signing secret to check that each update really comes from Linear. The step shows **Waiting for an update from Linear** until the first one arrives. Any change to an issue in the team sends one, including the test report in the next step.
+Data Hub uses the signing secret to check that each update comes from Linear. The step shows **Waiting for an update from Linear** until the first one arrives. Any change to an issue in the team sends one, including the test report in the next step.
 
 ### 4. Send a test report [#linear-test-report]
 
-Choose **Send test report**. Data Hub files a report as you and links to the new Linear issue. Move that issue to **Done** in Linear. The step confirms that the issue closed and that you got a Data Hub notification. You can also skip the test.
+Choose **Send test report**. Data Hub files a report as you and links to the new Linear issue. Move that issue to **Done** in Linear.
+
+The step confirms that the issue closed and that you got a Data Hub notification. You can also skip the test.
 
 ### After setup [#linear-after-setup]
 
-Once setup is finished, the Linear card shows a summary: the connected workspace, where reports go, whether status updates are working and when the last one arrived, and what reporters see for each Linear status.
+Once setup is finished, the Linear card shows a summary:
+
+- The connected workspace
+- Where reports go
+- Whether status updates are working, and when the last one arrived
+- What reporters see for each Linear status, as in this table
 
 | When the Linear issue moves to | The reporter sees |
 | --- | --- |
@@ -129,7 +136,7 @@ Once setup is finished, the Linear card shows a summary: the connected workspace
 
 Data Hub notifies the reporter once, when the issue first closes. Moving an issue from one closed status to another, such as **Done** to **Released**, doesn’t notify again. Reopening an issue and closing it again does.
 
-If Data Hub keeps rejecting updates from Linear, **Status updates** shows **Not working**. The usual cause is a wrong signing secret, or Linear turning the webhook off after repeated failures. Paste the signing secret again from the webhook’s page in Linear, and check that the webhook is still turned on.
+If Data Hub keeps rejecting updates from Linear, **Status updates** shows **Not working**. Look for a wrong signing secret, or for Linear turning the webhook off after repeated failures. Paste the signing secret again from the webhook’s page in Linear, and check that the webhook is still turned on.
 
 **Disconnect Linear** turns feedback off. Issues already in Linear stay there.
 
@@ -171,7 +178,7 @@ Under **Redirect URLs**, add one callback URL per environment. The path is alway
 | Staging | `https://staging.datahub.example.com/api/v1/settings/slack/callback` |
 | Production | `https://datahub.example.com/api/v1/settings/slack/callback` |
 
-`SLACK_REDIRECT_URI`, or the request origin plus that path when unset, must match a listed URL exactly.
+After someone connects Slack, Slack sends them back to a callback URL. Data Hub uses `SLACK_REDIRECT_URI` as that URL. When it isn’t set, Data Hub uses the address of the site the person is on, followed by this path. Either way, the URL has to match one of the URLs you listed exactly.
 </Step>
 
 <Step>
@@ -197,10 +204,10 @@ Two settings exist only as environment variables, and changing them needs a rede
 
 | Variable | Purpose | Required |
 | --- | --- | --- |
-| `SLACK_STATE_SECRET` | Signs the short-lived value Data Hub checks while a person connects Slack. Generate with `openssl rand -base64 32` | No (falls back to `AUTH_SECRET`) |
-| `SLACK_REDIRECT_URI` | Full callback URL, when it differs from the request origin | No |
+| `SLACK_STATE_SECRET` | Signs the short-lived value Data Hub checks while a person connects Slack. Generate one with `openssl rand -base64 32` | No (falls back to `AUTH_SECRET`) |
+| `SLACK_REDIRECT_URI` | Full callback URL, when it differs from the site’s address plus the callback path | No |
 
-Members can then connect under **Settings → Notifications**. Deploy runbooks are linked from [Deploy Data Hub](/docs/self-hosting).
+Members can then connect under **Settings → Notifications**. Deployment guides are linked from [Deploy Data Hub](/docs/self-hosting).
 
 ## Slack channel for new runs [#slack-channel]
 

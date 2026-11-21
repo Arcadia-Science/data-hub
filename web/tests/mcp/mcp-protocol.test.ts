@@ -2596,7 +2596,7 @@ describe("MCP Protocol (in-memory)", () => {
     const names = docs.map((r) => r.name);
     expect(new Set(names).size).toBe(names.length);
     expect(names).toEqual(
-      expect.arrayContaining(["Overview", "Overview (api)", "Overview (mcp)"])
+      expect.arrayContaining(["Overview", "API overview", "MCP overview"])
     );
   });
 

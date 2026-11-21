@@ -1,29 +1,29 @@
 ---
 title: Manage members
-description: Promote and demote workspace admins from Settings → Members.
+description: Promote members to admin, and demote admins, from Settings → Members.
 contentType: How-to
 ---
 
 <Audience>Administrators</Audience>
 
-Workspace members sign in with Google OAuth. Admins decide who else has the admin role. Member vs admin capabilities are summarized in [Security and permissions](/docs/security#roles).
+Members sign in with Google. Admins decide who else has the admin role. [Security and permissions](/docs/security#roles) lists what members and admins can each do.
 
 ## Open the members list
 
-Go to **Settings → Members**. Non-admins who open the URL see an “Admins only” message; the settings sidebar hides the entry for them.
+Go to **Settings → Members**. The settings menu hides this page from members, and a member who opens its URL sees an **Admins Only** message.
 
-The table lists every signed-in user: name, email, role badge, and an **Admin** toggle.
+The table lists everyone who has signed in, with their name, email, role, and an **Admin** switch.
 
 ![Settings Members page with the workspace members table and Admin toggles](/images/workspace-members.webp)
 
 ## Promote or demote
 
-Toggle **Admin** on a row to grant or revoke admin access. Every privileged action re-checks the database, so the change applies to that user’s next one. Their view of the dashboard can lag by up to 5 minutes, because admin-only buttons and sidebar entries come from their [cached session](/docs/security#session-lifetime).
+Turn **Admin** on or off on a row to give or remove admin access, then confirm. Data Hub checks the role again on every admin action, so the change applies from that person’s next one. The admin-only buttons and sidebar entries they see can take up to 5 minutes to change, because they come from their [cached session](/docs/security#session-lifetime).
 
-You cannot demote yourself. That guard prevents locking the workspace out of its last admin. Ask another admin to demote you if needed.
+You can’t demote yourself. That rule stops the last admin from removing their own admin role. Ask another admin to demote you if you need to.
 
-## First admin bootstrap
+## Choose the first admins [#first-admin-bootstrap]
 
-The first admins come from the `ADMIN_EMAILS` environment variable (comma-separated, case-insensitive). Listed users are promoted on every sign-in. After that, any admin can promote others from this page.
+The first admins come from the `ADMIN_EMAILS` environment variable, a comma-separated list of email addresses that ignores case. Data Hub makes each listed person an admin every time they sign in. After that, any admin can promote others from this page.
 
-There is no invite flow in the product: people appear here after they sign in successfully to your deployment. Every Google account your OAuth client accepts can sign in, so that client, not this page, controls who appears here. See [Who can sign in](/docs/security#who-can-sign-in).
+People appear on this page after they first sign in to your deployment, and Data Hub has no invitations. Any Google account that your Google OAuth client accepts can sign in. That client, which your team created when it set up Data Hub, decides who appears here. See [Who can sign in](/docs/security#who-can-sign-in).

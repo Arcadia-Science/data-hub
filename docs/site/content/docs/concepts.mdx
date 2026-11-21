@@ -6,13 +6,13 @@ contentType: Reference
 
 <Audience>Everyone</Audience>
 
-Short definitions of the vocabulary the rest of these docs use. If you’ve arrived mid-page and a term is unfamiliar, it’s defined here. Terms are grouped by what they describe: the equipment, the data, the rules that turn files into runs, and who can do what.
+Short definitions of the words these docs use, grouped by what they describe: the equipment, the data, the rules that turn files into runs, and who can do what.
 
-## Equipment and fleet [#equipment-and-fleet]
+## Instruments and watchers [#equipment-and-fleet]
 
 ### Instrument [#instrument]
 
-A piece of lab equipment registered in Data Hub, identified by a kebab-case **instrument ID** (e.g., `akta-fplc`, `plate-sealer-a`). The ID is permanent, because it becomes the storage key prefix and the identifier used across the system. A human-readable display name sits alongside it.
+A piece of lab equipment registered in Data Hub. Each instrument has an **instrument ID** made of lowercase words joined by hyphens, such as `akta-fplc` or `plate-sealer-a`, and a display name for people to read. The ID can’t change, because Data Hub uses it in the storage path of every file and to identify the instrument everywhere else.
 
 An instrument has three states. The **Instruments** page groups them into a tab per state, and a status badge beside each name shows whether new files can reach Data Hub:
 
@@ -26,20 +26,22 @@ See [Set up an instrument](/docs/set-up-an-instrument), [Manage instruments](/do
 
 ### Instrument type [#instrument-type]
 
-Separate from the instrument ID. The type tells Data Hub which [preprocessor](#preprocessor) to run on files from this instrument, so it controls what metadata, badges, and reports you get.
+Separate from the instrument ID. The type tells Data Hub which [processor](#preprocessor) reads files from this instrument, so it decides what metadata, badges, and reports you get.
 
-Admins set it from the instrument page: open the three-dot menu, choose **Edit details**, and pick a supported type. An instrument with no matching type still stores and serves raw files. It gets no extracted metadata and no processed artifacts. See [Instrument data preprocessing](/docs/instrument-preprocessing).
+Admins set it from the instrument page: open the three-dot menu, choose **Edit details**, and pick a supported type. An instrument with no matching type still stores and serves raw files. It gets no extracted metadata and no processed files. See [Instrument data preprocessing](/docs/instrument-preprocessing).
 
 ### Instrument status [#instrument-status]
 
-The badge beside an instrument’s name, in the instruments table, on Home, and in search results. It answers one question: will new files from this instrument show up? It is built for the people who use the instrument, so it doesn’t show the watcher’s detail. On an instrument’s page and in the instruments table, select the badge to open the instrument’s [watcher page](/docs/manage-watchers#the-watcher-page). In search results the whole row is the link, so the badge there is a label only. Hover over it, or focus it with the keyboard, for a one-sentence explanation.
+The badge beside an instrument’s name, in the instruments table, on Home, and in search results. It answers one question: will new files from this instrument show up? It’s meant for the people who use the instrument, so it leaves out the watcher’s details.
+
+Hover over the badge, or focus it with the keyboard, for a one-sentence explanation. On an instrument’s page and in the instruments table, select the badge to open the instrument’s [watcher page](/docs/manage-watchers#the-watcher-page). In search results the whole row is the link, so the badge there is only a label.
 
 | Badge | When it shows | What it means |
 | ----- | ------------- | ------------- |
 | **Pending** | The instrument isn’t confirmed yet. This wins over everything below, even when its watcher is checking in. | Waiting for an admin to confirm this instrument. |
 | **Retired** | The instrument is retired. This wins over the watcher’s state. | This instrument no longer takes new runs. Its runs stay browsable. |
-| **Connecting** | The watcher registered but hasn’t sent its first heartbeat, and 15 minutes haven’t passed since it registered or since an admin confirmed the instrument, whichever came later. | The watcher was just set up and hasn’t checked in yet. |
-| **Restarting** | The watcher stopped for a Windows restart or an automatic update less than 15 minutes ago. | The instrument PC is restarting or updating. This usually takes a minute or two. |
+| **Connecting** | The watcher registered but hasn’t sent its first heartbeat, and 15 minutes haven’t passed since it registered or since an admin confirmed the instrument, whichever came later. | The watcher was set up recently and hasn’t checked in yet. |
+| **Restarting** | The watcher stopped for a Windows restart or an automatic update less than 15 minutes ago. | The instrument PC is restarting or the watcher is updating. Either takes a minute or two. |
 | **Online** | The watcher is watching and its last heartbeat is less than 5 minutes old. | New files upload automatically, or when someone requests them if the instrument is in manual upload mode. |
 | **Offline** | Anything else: the instrument has no watcher, or its watcher was deregistered; the watcher is silent, never checked in, stopped by someone, or can’t find its watch folder. | New files won’t appear right now. A notice on the instrument page says why. |
 
@@ -47,24 +49,24 @@ Only the watcher’s own state decides **Online**, **Restarting**, **Connecting*
 
 ### Watcher [#watcher]
 
-The `data-hub-watcher` command-line program that runs on an instrument PC. It monitors a directory, groups new files into runs, uploads them to cloud storage, and reports status to the API. Each instrument can have at most one active watcher at a time.
+The `data-hub-watcher` command-line program that runs on an instrument PC. It watches a folder, groups new files into runs, uploads them to cloud storage, and checks in with Data Hub every minute. Each instrument can have at most one active watcher at a time.
 
-A watcher is registered with the API and carries one registration ID per [environment](#environment). Each instrument’s watcher has its own page, under the instrument, with its activity, health, and settings. Deregistering a watcher is a [soft delete](#soft-delete): the instrument keeps it as a past watcher, and its history stays visible for auditing. See [Manage the watcher fleet](/docs/manage-watchers).
+Each watcher registers with Data Hub and gets a registration ID for each [environment](#environment) it connects to. Each instrument’s watcher has its own page, under the instrument, with its activity, health, and settings. Deregistering a watcher is a [soft delete](#soft-delete): the instrument keeps it as a past watcher, and its history stays visible for auditing. See [Manage the watcher fleet](/docs/manage-watchers).
 
 ### Watcher status [#watcher-status]
 
-What a watcher’s page, and **Settings → Watchers** for admins, show for each watcher, derived from its most recent [heartbeat](#heartbeat):
+The state a watcher’s page shows, and **Settings → Watchers** shows for admins, worked out from the watcher’s most recent [heartbeat](#heartbeat):
 
-| Status           | Meaning                                                                                          |
-| ---------------- | ------------------------------------------------------------------------------------------------ |
-| **Online**       | A heartbeat arrived in the last 5 minutes.                                                        |
-| **Unresponsive** | No heartbeat for more than 5 minutes. The process crashed, the PC is off, or the network is blocking the API. A watcher that stopped for a Windows restart or shutdown, or for an automatic update, shows **Unresponsive** after 15 minutes instead. So does a watcher that never sent its first heartbeat, 15 minutes after it registered or its instrument was confirmed; hovering over its badge says it never checked in. |
-| **Stopped**      | The watcher shut down cleanly and said so in its last heartbeat. After a stop you chose, such as `data-hub-watcher service stop`, it keeps showing **Stopped**, however long ago that was, until it starts again. After a Windows restart or shutdown, or the stop of an automatic update, it shows **Stopped** for 15 minutes, then **Unresponsive** if it hasn’t returned. |
-| **Waiting: folder not found** | The watcher is running and sending heartbeats, but its watch folder is missing, so it isn’t watching anything. A watcher goes into this state when it starts without the folder (watcher 1.4.0 and later), and when the folder disappears while it runs (watcher 1.4.3 and later). It starts watching again once the folder is back. |
-| **Registered**   | The watcher registered but hasn’t sent its first heartbeat yet. It shows **Unresponsive** once 15 minutes pass after it registered, or after an admin confirmed its instrument if that came later. While the instrument is pending it stays **Registered**, because the watcher won’t start until the instrument is confirmed. |
-| **Deregistered** | A past watcher. Someone deregistered it, or retired its instrument. Its page is read-only.        |
+| Status | Meaning |
+| --- | --- |
+| **Online** | A heartbeat arrived in the last 5 minutes. |
+| **Unresponsive** | No heartbeat for more than 5 minutes: the process crashed, the PC is off, or the network is blocking Data Hub. A watcher that stopped for a Windows restart, a shutdown, or an automatic update gets 15 minutes instead. So does a new watcher that never sent a heartbeat, counted from when it registered or its instrument was confirmed; hovering over its badge says it never checked in. |
+| **Stopped** | The watcher shut down cleanly and said so in its last heartbeat. A stop you chose, such as `data-hub-watcher service stop`, shows **Stopped** until the watcher starts again. A stop for a Windows restart, a shutdown, or an automatic update shows **Stopped** for 15 minutes, then **Unresponsive** if the watcher hasn’t returned. |
+| **Waiting: folder not found** | The watcher is running and checking in, but its watch folder is missing, so it isn’t watching anything. It starts watching again once the folder is back. Watchers before 1.4.3 notice a missing folder only when they start. |
+| **Registered** | The watcher registered but hasn’t sent its first heartbeat. It turns **Unresponsive** 15 minutes after it registered, or after an admin confirmed its instrument if that came later. It stays **Registered** while its instrument is pending, because the watcher doesn’t start until the instrument is confirmed. |
+| **Deregistered** | A past watcher. Someone deregistered it, or retired its instrument. Its page is read-only. |
 
-A watcher that stopped because Windows is restarting or shutting down (watcher 1.4.1 and later), or because it is installing an automatic update (watcher 1.4.2 and later), is expected back. It shows **Stopped**, and hovering over the badge tells you when it starts showing **Unresponsive** if it hasn’t returned: 15 minutes after its last heartbeat. Any other stop, such as `data-hub-watcher service stop` or Ctrl+C, shows **Stopped** until the watcher starts again.
+Hover over a **Stopped** badge to see when it turns **Unresponsive** if the watcher doesn’t return. Watchers before 1.4.1 don’t tell Data Hub about a Windows restart, and watchers before 1.4.2 don’t mark a stop for an automatic update, so Data Hub doesn’t expect those watchers back.
 
 An unresponsive watcher keeps its registration and history, so you can read its last events to work out what happened. See [Troubleshoot a watcher](/docs/troubleshoot-a-watcher).
 
@@ -72,53 +74,44 @@ Instruments show a simpler summary of this status, the [instrument status](#inst
 
 ### Heartbeat [#heartbeat]
 
-A status ping the watcher sends to the API every 60 seconds. It carries the watcher version, instrument ID, watch directory, upload mode, activity counters, and uptime, and it drives **Last heartbeat** on the watcher’s page, the status badges, and the connectivity grid on the **Health** tab. The same tick runs the auto-updater. The upload queue is checked separately, also once a minute, so a slow upload can’t delay a heartbeat. With watcher 1.4.3 and later, the counts of a heartbeat that fails to send go out with the next one, so an outage doesn’t lose them. Older watchers lose them.
+The check-in a watcher sends to Data Hub every 60 seconds. It reports the watcher’s version, instrument ID, watch folder, upload mode, upload counts, and how long it has been running. Data Hub uses it for **Last heartbeat** on the watcher’s page, the status badges, and the connectivity grid on the **Health** tab.
+
+The same loop runs the hourly update check. The watcher checks for requested uploads separately, also once a minute, so a slow upload can’t delay a heartbeat. If a heartbeat fails to send, watcher 1.4.3 and later add its counts to the next one.
 
 ### Events [#events]
 
-A per-watcher log of lifecycle moments and errors: `watcher_started`, `run_reported`, `file_uploaded`, `update_succeeded`, and `error` (with a `details.kind` discriminator), among others. Events are batched and flushed on each heartbeat and are shown on the watcher’s **Activity** tab, with a plain label and message for each, which makes them the primary tool for diagnosing a watcher remotely. With watcher 1.4.3 and later, the watcher keeps the events it hasn’t sent in its state file on the PC. An event that Data Hub couldn’t take at the time is sent with a later heartbeat while the watcher runs, and one that was queued when the watcher was stopped or killed is sent after the next start. Either way it keeps its original time. An event that Data Hub refuses as invalid isn’t sent again, and nor is one that Data Hub answers with a server error three heartbeats in a row; an `events_dropped` event records how many were lost. Older watchers lose those events. Data Hub writes some events itself, such as `upload_requests_cancelled`, which it records when someone deletes a run that has requested uploads. See [Troubleshoot a watcher](/docs/troubleshoot-a-watcher).
+A watcher’s log of what it did and what went wrong, such as `watcher_started`, `run_reported`, `file_uploaded`, `update_succeeded`, and `error`. The watcher sends its events with each heartbeat. The watcher’s **Activity** tab shows them with a plain label and message, so you can see what happened on the PC without going to it. Data Hub records some events itself, such as `upload_requests_cancelled` when someone deletes a run that had requested uploads.
+
+With watcher 1.4.3 and later, events that couldn’t be sent are kept on the PC and sent later with their original time, and an `events_dropped` event counts any that were lost. See [Activity](/docs/manage-watchers#activity) and [Troubleshoot a watcher](/docs/troubleshoot-a-watcher).
 
 ### Environment [#environment]
 
-Which Data Hub deployment a watcher talks to: `staging`, `production`, or `preview` (a Vercel preview deployment, which needs an explicit API base URL). Staging and production are separate deployments with separate databases, so a single PC keeps an independent registration and local state per environment and can switch between them.
+Which Data Hub deployment a watcher talks to: `staging`, `production`, or `preview`. A `preview` is a Vercel preview deployment, and you give the watcher its API URL by hand. Each environment has its own database, so one PC keeps a separate registration and local records for each environment and can switch between them.
 
 ## Data [#data]
 
 ### Run [#run]
 
-A logical grouping of files produced by one acquisition. The watcher assigns each file a **run ID** using its configured [run detection](#run-detection) method, then reports the run to the API. The first file for a run creates it; later files are added incrementally to the same run’s manifest. Spaces at the start or end of a run ID are ignored, so a run ID of `RUN001` with a space after it is the same run as `RUN001`.
+The files from one acquisition, grouped together. The watcher gives each file a **run ID** using its [run detection](#run-detection) rule, then reports the run to Data Hub. The first file creates the run, and later files with the same run ID join it. Spaces at the start or end of a run ID are ignored, so `RUN001` with a space after it is the same run as `RUN001`.
 
 ### Run status [#run-status]
 
-How far a run’s files have got from the instrument to the dashboard. These are the values you can filter by under **Add filter** on any run list:
+How far a run’s files have got from the instrument to the web app. From the most urgent down, a run shows **Failed**, **Stalled**, **Upload failed**, **Waiting to upload**, **Uploaded**, **Queued**, **Processing**, **Not uploaded**, **Completed**, or **Empty**. When a run’s files are in different states, the run shows the first of these that applies.
 
-| Status         | Meaning                                                                                  |
-| -------------- | ---------------------------------------------------------------------------------------- |
-| Failed         | At least one file stopped on an error. [Reprocess](/docs/browse-runs#reprocess-and-delete) after a fix. |
-| Stalled        | At least one file has been processing for more than 20 minutes without finishing. Reprocess it to try again. |
-| Upload failed  | The watcher gave up on at least one file, for example because its folder is no longer on the instrument PC. The file’s status says why. See [When an upload fails](/docs/browse-runs#upload-failed). |
-| Waiting to upload | Files are on their way from the instrument PC: someone requested them, or the watcher uploads them on its own. |
-| Uploaded       | The files are in storage. Processing hasn’t started, or this instrument type has no preprocessor. |
-| Queued         | You chose **Reprocess**, and the files are waiting for a free processing slot. They start as other files finish. See [How reprocessing is queued](/docs/browse-runs#reprocess-queue). |
-| Processing     | The preprocessor is reading the files, extracting metadata, and building reports.          |
-| Not uploaded   | Some files are only on the instrument PC, and nothing will upload them until someone requests them. |
-| Completed      | Processing finished.                                                                      |
-| Empty          | The run has no files.                                                                     |
-
-When a run’s files are in different states, the run shows the first status in this table that applies. The filter value `pending`, from before **Pending upload** was split, still matches **Waiting to upload** and **Not uploaded**.
+Filter by status under **Add filter** on any run list. [What each run status means](/docs/browse-runs#run-status) explains each one.
 
 ### File and file category [#file-and-file-category]
 
-Every file in a run carries a category, shown as a label in the run’s files table:
+Every file in a run has a category, shown as a label in the run’s files table:
 
 - **Raw**: what the instrument wrote, uploaded unchanged
-- **Processed**: what a [preprocessor](#preprocessor) generated from a raw file, such as a CSV of well values, a contrast-adjusted PNG, or a preview JPG
+- **Processed**: what a [processor](#preprocessor) made from a raw file, such as a CSV of well values, a contrast-adjusted PNG, or a preview JPG
 
 Both categories download the same way, and file filters on the run page work on this label. See [Download files](/docs/browse-runs#download-files).
 
-### Preprocessor [#preprocessor]
+### Processor [#preprocessor]
 
-The server-side code that reads a raw file, extracts metadata, and writes processed files. It runs in an AWS Lambda when a file arrives in raw storage, or when you choose **Reprocess**. Reprocessing starts at most 10 files at a time and queues the rest; see [How reprocessing is queued](/docs/browse-runs#reprocess-queue). Which preprocessor runs depends on the [instrument type](#instrument-type), and not every type has one. Per-type inputs and outputs are in [Instrument data preprocessing](/docs/instrument-preprocessing).
+The server-side code that reads a raw file, extracts metadata, and writes processed files. It runs in an AWS Lambda when a file arrives in raw storage, or when you choose **Reprocess**. Reprocessing starts at most 10 files at a time and queues the rest; see [How reprocessing is queued](/docs/browse-runs#reprocess-queue). Which processor runs depends on the [instrument type](#instrument-type), and not every type has one. Per-type inputs and outputs are in [Instrument data preprocessing](/docs/instrument-preprocessing).
 
 ### Run archive [#run-archive]
 
@@ -126,52 +119,47 @@ The zip that **Download all** builds for a run. It covers the run’s active fil
 
 ### Attribution [#attribution]
 
-The record of who ran a run. Use **Claim** on the run to attribute yourself. Attribution is self-only: you claim or unclaim your own user, and you can’t attribute someone else. API tokens can’t claim runs. Claims drive **My runs** and the “ran by” filters, and claiming a run subscribes you to its comments. See [Claim who ran it](/docs/browse-runs#claim-who-ran-it).
+The record of who ran a run. Choose **Claim** on a run to put your name on it. You can only claim runs for yourself, and API tokens can’t claim runs. Claims fill **My runs** and the “ran by” filters, and claiming a run subscribes you to its comments. See [Claim who ran it](/docs/browse-runs#claim-who-ran-it).
 
 ### Lab notebook [#lab-notebook]
 
-One lab notebook page, on any site, such as Notion or Google Docs, with a name, an optional description and owner, and the runs added to it from any instrument. A run can be in several lab notebooks. Anyone signed in can create lab notebooks and add or remove runs, and global search finds a lab notebook by its name or a pasted lab notebook URL. See [Add runs to a lab notebook](/docs/browse-runs#lab-notebook).
+A Data Hub record that stands for one notebook page, such as a Notion or Google Docs page. It has a name, an optional description and owner, and the runs added to it from any instrument. A run can be in several lab notebooks, and anyone signed in can create lab notebooks and add or remove runs. See [Lab notebooks](/docs/lab-notebooks).
 
 ## Turning files into runs [#turning-files-into-runs]
 
 ### Run detection [#run-detection]
 
-The rule that maps a file to a run ID. Two broad strategies:
+The rule that gives each file a run ID. There are two kinds:
 
-- **Prefix**: a regex extracts the run ID from the filename. The default `^([^_]+)` takes everything before the first underscore, so `RUN001_data.csv` → `RUN001`
-- **Directory**: each subdirectory under the watch directory is its own run, so `RUN001/data.csv` → `RUN001`
+- **Prefix**: a pattern (a regular expression) picks the run ID out of the file name. The default `^([^_]+)` takes everything before the first underscore, so `RUN001_data.csv` → `RUN001`
+- **Directory**: each folder inside the watch folder is its own run, so `RUN001/data.csv` → `RUN001`
 
-The full set of presets, and the custom-regex option, is in the [Configuration reference](/docs/configuration-reference#run-detection).
+The full set of presets, and how to write your own pattern, is in the [Configuration reference](/docs/configuration-reference#run-detection).
 
 ### Stability period [#stability-period]
 
-How many seconds a file must stay unchanged (same size and modification time) before the watcher treats it as fully written and eligible for upload. The default is 5 seconds; raise it for instruments that write large files slowly. A file that keeps changing past `max_stability_wait_seconds` (default 300, or 5 minutes) is abandoned with a `stability_timeout` error event. A file that the instrument keeps open after its last write can look finished while the watcher still can’t read it. Watcher 1.4.2 and later try it again every minute and upload it once the instrument lets go of it. Older watchers try it again only the next time they start.
+How many seconds a file must stay unchanged, with the same size and modification time, before the watcher treats it as fully written and ready to upload. The default is 5 seconds; raise it for instruments that write large files slowly. [Wait until writes finish](/docs/configure-run-detection#wait-until-writes-finish) covers files that keep changing or that the instrument keeps open.
 
 ### Upload mode [#upload-mode]
 
 How files get from the instrument to cloud storage:
 
-- **auto**: files upload immediately after they’re detected and stabilized. With watcher 1.2.1 and later, the watcher also uploads files someone requests from the run page
-- **manual**: runs are reported to the server, but files aren’t uploaded until approved through the server-side upload queue, which the watcher checks once a minute. Use this when uploads need human approval
+- **auto**: files upload as soon as they’re found and stable. The watcher also uploads files someone requests from the run page
+- **manual**: the watcher reports runs but uploads a file only after someone requests it in the web app. It checks for requests once a minute. Use this when someone must approve which files leave the instrument PC
 
 ### Initial scan [#initial-scan]
 
-What the watcher does with files already sitting in the watch directory the first time an environment is entered. `production` uploads the existing backlog (`full`). `staging` and `preview` record it as a baseline and skip it (`new-only`), so test environments aren’t flooded with history. See the [Configuration reference](/docs/configuration-reference#initial-scan).
+What the watcher does with files already in the watch folder the first time it connects to an environment. In `production` it uploads them (`full`). In `staging` and `preview` it records them and skips them (`new-only`), so test environments don’t fill up with old files. See the [Configuration reference](/docs/configuration-reference#initial-scan).
 
 ### Dismiss [#dismiss]
 
-For instruments in [manual upload mode](#upload-mode), dismissing a detected file, or one whose upload failed, tells the watcher not to upload it. Dismissing differs from deleting: the file never reached Data Hub storage, so there’s nothing to restore. A dismissed file stays dismissed, even if the watcher reports it again. See [Manage the watcher fleet](/docs/manage-watchers#approving-manual-uploads).
+Dismissing a file that the watcher found but didn’t upload, or one whose upload failed, tells the watcher not to upload it. A dismissed file stays dismissed, even if the watcher reports it again. Dismissing differs from deleting: the file never reached Data Hub storage, so there’s nothing to restore.
 
-The watcher reports a path only once, so a different file that the instrument later writes at the same path doesn’t appear on its own. It appears when the watcher reports that path again, which happens after `data-hub-watcher state forget`, or when the watcher starts without its saved record of what it has reported, for example after a reinstall. Data Hub then detects the file as new when its size or creation time differs from the dismissed file’s. On Linux, the modification time stands in for the creation time. The dismissed file stays dismissed.
-
-Because Data Hub compares only size and time, two cases can surprise you:
-
-- A new file the same size as the dismissed one counts as the same file when it keeps the old creation time, so it stays dismissed. On Windows and macOS this happens when the instrument overwrites the file in place. On Windows it can also happen when the file is deleted and written again, or saved through a temporary copy, within about 15 seconds.
-- Copying a folder, for example with Explorer or `xcopy` on Windows or `cp` without `-p` on Linux, gives the copies new times. After you replace an instrument PC or restore its folder from a backup, a new watcher that scans the copied folder reports the files you dismissed as new detected files. Dismiss them again.
+[Approve or dismiss files](/docs/manage-watchers#approving-manual-uploads) explains how, and when a new file at the same path shows up again.
 
 ### Soft delete [#soft-delete]
 
-Data Hub marks things deleted rather than erasing them, so history survives for auditing. Deleting a run hides it from run lists without removing its stored files, and **Show deleted runs** brings it back into view. It also cancels any uploads that were requested for the run’s files, and restoring the run doesn’t bring them back. Deregistering a watcher keeps its events and heartbeats. Anyone signed in can restore a deleted run from the run page.
+Data Hub marks things deleted instead of erasing them, so their history stays for auditing. Deleting a run hides it from run lists without removing its stored files, and **Show deleted runs** brings it back into view. It also cancels any uploads that were requested for the run’s files, and restoring the run doesn’t bring them back. Deregistering a watcher keeps its events and heartbeats. Anyone signed in can restore a deleted run from the run page.
 
 ## People and access [#people-and-access]
 
@@ -181,13 +169,13 @@ Data Hub has two roles, **Member** and **Admin**. Members sign in, browse instru
 
 ### Personal access token [#personal-access-token]
 
-A `dhub_`-prefixed bearer token that authenticates the watcher, and other API clients, with the Data Hub API. Tokens carry permission [scopes](#scope) and are created and revoked by admins. The plaintext is shown once, at creation.
+A secret starting with `dhub_` that the watcher and scripts send to sign in to the Data Hub API. Each token has permission [scopes](#scope), and only admins create and revoke tokens. Data Hub shows the full token once, when it’s created.
 
 A token acts as itself, under its own name. Comments it posts and runs it deletes show the token’s name with a key icon, not a person. Because a token isn’t a person, it can’t claim runs or send feedback. See [Issue and revoke tokens](/docs/manage-tokens).
 
 ### Scope [#scope]
 
-A permission string carried by a token, such as `runs:read`. A token-authenticated request is refused with `403 FORBIDDEN` when the token’s scopes don’t cover what the route requires. Dashboard sessions hold every scope, so scope checks only apply to token requests. The scope table is in [Security and permissions](/docs/security#token-scopes).
+A permission a token has, such as `runs:read`. Data Hub refuses a token’s request with `403 FORBIDDEN` when the token lacks the scope that request needs. People signed in to the web app have every scope, so scopes only limit tokens. The scope table is in [Security and permissions](/docs/security#token-scopes).
 
 ### Feedback report [#feedback-report]
 

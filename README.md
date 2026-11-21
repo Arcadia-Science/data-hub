@@ -1,6 +1,6 @@
 # Data Hub
 
-Data Hub is a platform for automatically capturing, processing, and visualizing data from laboratory instruments. Lab instrument PCs run a watcher service that uploads files to S3, an AWS Lambda function processes them through instrument-specific pipelines, and a Next.js web application provides a dashboard, REST API, and MCP server for scientists to use.
+Data Hub collects the files that lab instruments write and makes them searchable in one place. A small program called the watcher runs on each instrument PC, uploads new files to S3 as they appear, and groups them into runs. An AWS Lambda reads each supported file format, and a Next.js web app, REST API, and MCP server let people and scripts find, view, and download the results.
 
 Nobody signs up for Data Hub. Your team deploys it, so raw instrument data and everything derived from it stay on infrastructure you control. The source is MIT licensed.
 
@@ -30,23 +30,25 @@ A run shows up in three places at once:
 - **REST API**: served at `/api/v1/`, with an OpenAPI 3.1 document at `/api/v1/openapi.json` so you can generate a client instead of writing one. See the [API reference](https://datahub.arcadiascience.com/docs/api).
 - **MCP server**: served at `/mcp/v1`, so Claude Code, Claude Desktop, or Cursor can search runs and fetch files during a conversation. See the [MCP setup](https://datahub.arcadiascience.com/docs/mcp).
 
-All three authenticate with tokens you create in the app, scoped and revocable. A read-only token stays read-only whichever route it takes.
+People sign in to the web app with Google. Scripts call the REST API with a personal access token that an admin creates in the app, with only the scopes it needs. AI clients sign in to the MCP server through the browser and act with the permissions of the person who approved them.
 
 ## Supported instruments
 
-Seven instrument types have a processor that reads the vendor's format after upload and writes metadata and viewable artifacts alongside the untouched original:
+Nine instrument types have a processor. After upload, it reads the vendor's format and writes metadata and viewable files next to the untouched original:
 
 | Instrument | What processing adds |
 | --- | --- |
 | SpectraMax iD3 and iD5 plate readers | Well-data CSV and interactive plate maps |
 | Azure 600 gel doc | Contrast-enhanced PNG preview and imaging settings |
-| Azure Cielo qPCR | Dye channels read from the Cq values export |
+| Azure Cielo qPCR | Dye channels, melting curves, and the instrument's PDF report |
 | Agilent 4150 TapeStation | Tape type and the run report |
 | Cytiva ÄKTA FPLC | Chromatography run report |
 | Epson V700 scanner | Plate preview and colony measurements |
-| Hina microscope (Nikon ND2) | Channel overlay JPG and channel list |
+| Hina microscope (Nikon ND2) | Channel overlay JPG, channel list, and a video of each time-lapse |
+| DishCam time-lapse camera | A video of each photo stack and the camera settings |
+| Unchained Labs Aunty | A plate with a curve chart in each well, and the experiment settings |
 
-An instrument with no matching processor still uploads, and its files stay searchable and downloadable. What it misses is extracted metadata and rendered previews. Adding a type is a code change in `web/` and `lambda/` rather than a settings change, described in [Lambda](docs/developer/lambda.md).
+An instrument with no matching processor still uploads, and its files stay searchable and downloadable. It gets no extracted metadata or previews. Adding a type takes code changes in `web/` and `lambda/`, described in [Lambda](docs/developer/lambda.md).
 
 ## How it works
 
@@ -62,7 +64,7 @@ flowchart LR
     AI[AI clients] --> API
 ```
 
-Four components coordinate through S3 and the API. The watcher and the Lambda never talk to each other, because S3 is the durable hand-off between them. File bytes travel directly between S3 and the client over presigned URLs rather than through the web app.
+Four components coordinate through S3 and the API. The watcher and the Lambda never talk to each other: the watcher writes files to S3, and each upload starts the Lambda. File contents move directly between S3 and the client over short-lived presigned URLs, without passing through the web app.
 
 | Directory | Package | Role |
 | --- | --- | --- |
@@ -109,7 +111,7 @@ Run both before opening a pull request:
 
 ```sh
 make check  # Format, lint, and type-check Python and TypeScript.
-make test       # Python and web tests, unit and integration.
+make test   # Python and web tests, unit and integration.
 ```
 
 Integration tests need PostgreSQL, and the web suite builds the app into `web/.next`, so stop `make dev` before running them. [Testing](docs/developer/testing.md) describes each suite and the shared test server; [Conventions](docs/developer/conventions.md) covers S3 key layout, instrument IDs, and code style.
