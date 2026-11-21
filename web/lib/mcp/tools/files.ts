@@ -1,10 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/server";
+import { deleteFiles } from "@/lib/api/file-deletion";
 import { reprocessFile } from "@/lib/api/file-reprocessing";
-import {
-  dismissFile,
-  getActiveFileById,
-  lookupFileForDownload,
-} from "@/lib/api/files";
+import { getActiveFileById, lookupFileForDownload } from "@/lib/api/files";
 import { prepareRunArchive } from "@/lib/api/run-archive";
 import { getRunClaimStatus } from "@/lib/api/run-attributions";
 import { trackArchiveDownload, trackFileDownload } from "@/lib/mcp/analytics";
@@ -156,9 +153,15 @@ export function registerFileTools(server: McpServer) {
       if (writeError) {
         return writeError;
       }
-      const result = await dismissFile(fileId);
-      if (!result.ok) {
-        return errorResult(result.message);
+      const userId = getMcpUserId(ctx.http?.authInfo);
+      const { results } = await deleteFiles(
+        [fileId],
+        userId ? { kind: "user", userId } : null,
+        { includeLinked: false }
+      );
+      const result = results[0];
+      if (!result?.ok) {
+        return errorResult(result?.message ?? `File '${fileId}' not found.`);
       }
       return structuredResult({
         id: result.id,

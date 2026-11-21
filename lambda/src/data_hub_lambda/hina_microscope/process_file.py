@@ -76,7 +76,13 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
             processor.load()
             jpg_file_path = processor.export_jpg(output_dir=output_dir)
             upload_processed(
-                client, instrument_id, run_id, processed_bucket, jpg_file_path, "image/jpeg"
+                client,
+                instrument_id,
+                run_id,
+                processed_bucket,
+                jpg_file_path,
+                "image/jpeg",
+                source_file_id=file_id,
             )
             logger.info("Uploaded processed image %s", jpg_file_path.name)
 
@@ -99,7 +105,13 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
                 raise TimelapseVideoError(str(exc)) from exc
             if video is not None:
                 upload_processed(
-                    client, instrument_id, run_id, processed_bucket, video.path, "video/mp4"
+                    client,
+                    instrument_id,
+                    run_id,
+                    processed_bucket,
+                    video.path,
+                    "video/mp4",
+                    source_file_id=file_id,
                 )
                 logger.info("Uploaded timelapse video %s", video.path.name)
 

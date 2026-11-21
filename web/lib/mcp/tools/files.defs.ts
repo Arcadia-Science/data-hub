@@ -66,7 +66,7 @@ export const dismissFileTool = {
   name: "dismiss_file",
   title: "Dismiss File",
   description:
-    "Soft-delete a detected or upload_requested file (UI 'dismiss'). Uploaded files cannot be dismissed — delete the run instead. Idempotent: dismissing an already-dismissed file succeeds as a no-op.",
+    "Soft-delete a file from a run, whether or not it has been uploaded (UI 'dismiss'). The file stays in storage and records who deleted it. It is refused while the file is queued or still processing (a stalled file can be deleted), and for a file of a deleted run. Idempotent: deleting an already-deleted file succeeds as a no-op.",
   group: "files",
   scope: "files:delete",
   inputSchema: { fileId: z.number().int().describe("Numeric file ID") },

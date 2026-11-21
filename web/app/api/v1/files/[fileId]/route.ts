@@ -1,16 +1,18 @@
 import { eq } from "drizzle-orm";
 import { after, type NextRequest } from "next/server";
+import { actorRefFromAuth } from "@/lib/api/actor";
 import { authorize, authorizeToken } from "@/lib/api/auth";
 import {
   apiError,
   apiErrorFromResult,
   CONFLICT,
+  fileDeletedError,
   INTERNAL_ERROR,
   NOT_FOUND,
   VALIDATION_ERROR,
 } from "@/lib/api/errors";
+import { deleteFiles } from "@/lib/api/file-deletion";
 import { dispatchQueuedFiles } from "@/lib/api/file-reprocessing";
-import { dismissFile } from "@/lib/api/files";
 import { patchFileBody, readJsonBody } from "@/lib/api/openapi";
 import { runFileS3Key } from "@/lib/api/run-file-location";
 import { touchRuns } from "@/lib/api/touch-runs";
@@ -75,7 +77,9 @@ const VALID_TRANSITIONS: Record<string, string[]> = {
 //   - Lambda: uploaded → processing → completed/failed (with metadata)
 //
 // Enforces the file status state machine and rejects mutations on
-// soft-deleted files or files whose parent run is soft-deleted.
+// soft-deleted files (409, `details.reason: "file_deleted"`) or files whose
+// parent run is soft-deleted. The Lambda reads that reason to stop quietly when
+// a file was deleted while it processed.
 //
 // A token that registered a watcher may change only the files of an
 // instrument whose active watcher it registered, and gets 403 for any other
@@ -84,7 +88,7 @@ const VALID_TRANSITIONS: Record<string, string[]> = {
 //
 // PAT-only (no browser sessions): session auth carries `*` scope, and
 // accepting it let any signed-in user mark files uploaded or overwrite
-// Lambda-owned metadata. DELETE below stays session-reachable for dismiss.
+// Lambda-owned metadata. DELETE below stays session-reachable for the UI.
 // ---------------------------------------------------------------------------
 
 export async function PATCH(request: NextRequest, { params }: RouteContext) {
@@ -139,7 +143,7 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
   }
 
   if (file.deletedAt) {
-    return apiError(409, CONFLICT, "Cannot update a soft-deleted file");
+    return fileDeletedError("Cannot update a soft-deleted file");
   }
 
   if (parentRun.deletedAt) {
@@ -306,18 +310,21 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
     processing_started_at: updated.processingStartedAt,
     created_at: updated.createdAt,
     file_created_at: updated.fileCreatedAt,
+    deleted_at: updated.deletedAt,
   });
 }
 
 // ---------------------------------------------------------------------------
 // DELETE /api/v1/files/:fileId
 //
-// Soft-delete for dismissing individual detected/upload_requested files from
-// the UI. Files that have already been uploaded to S3 (status "uploaded" or
-// later) cannot be dismissed here — use the run-level DELETE instead.
+// Soft-deletes one file in any state a person can see it in, uploaded files
+// included. The file keeps its row and its S3 object, records who deleted it,
+// and can be restored. A file that is queued or processing is refused until
+// processing finishes, and so is any file of a deleted run. Deleting a file
+// that is already deleted succeeds with `already_applied`.
 //
-// A token that registered a watcher may dismiss only its own instrument's
-// files, like PATCH above.
+// A token that registered a watcher may delete only its own instrument's files,
+// like PATCH above.
 // ---------------------------------------------------------------------------
 
 export async function DELETE(request: NextRequest, { params }: RouteContext) {
@@ -337,10 +344,17 @@ export async function DELETE(request: NextRequest, { params }: RouteContext) {
     return denied;
   }
 
-  const result = await dismissFile(numericId);
+  const { results } = await deleteFiles(
+    [numericId],
+    actorRefFromAuth(authResult),
+    { includeLinked: false }
+  );
+  const result = results[0];
 
-  if (!result.ok) {
-    return apiErrorFromResult(result);
+  if (!result?.ok) {
+    return result
+      ? apiErrorFromResult(result)
+      : apiError(404, NOT_FOUND, `File '${fileId}' not found`);
   }
 
   return Response.json({

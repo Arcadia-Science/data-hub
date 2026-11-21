@@ -401,6 +401,12 @@ class TestProcessFileTimelapse:
         assert mp4["category"] == "processed"
         assert mp4["s3_key"] == "hina-microscope/run-xyz/sample.mp4"
         assert _created(client, "sample.jpg")["category"] == "processed"
+        # Both previews are linked to the raw file, whose row is the first
+        # create_file result (id 10).
+        assert mp4["source_file_id"] == 10
+        assert _created(client, "sample.jpg")["source_file_id"] == 10
+        assert mp4["size_bytes"] == len(b"mp4-bytes")
+        assert mp4["content_type"] == "video/mp4"
         client.update_file.assert_any_call(
             12, size_bytes=len(b"mp4-bytes"), content_type="video/mp4"
         )

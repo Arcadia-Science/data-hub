@@ -4,8 +4,8 @@ import logging
 from data_hub_lambda.api_client import get_client
 from data_hub_lambda.azure_600_gel_doc.image_processing import TIFFProcessor
 from data_hub_lambda.azure_600_gel_doc.parse_metadata import parse_metadata
+from data_hub_lambda.processed_files import upload_processed
 from data_hub_lambda.raw_access import local_raw_file
-from data_hub_shared import s3_utils
 from data_hub_shared.config import config
 
 logger = logging.getLogger(__name__)
@@ -50,24 +50,17 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
             tiff_processor.load()
             png_file_path = tiff_processor.export_figure(output_dir=output_dir)
 
-            processed_bucket = config.AWS_S3_PROCESSED_DATA_BUCKET
-            png_s3_key = f"{instrument_id}/{run_id}/{png_file_path.name}"
-            s3_utils.upload_file(png_file_path, f"s3://{processed_bucket}/{png_s3_key}")
-            logger.info("Uploaded processed image to s3://%s/%s", processed_bucket, png_s3_key)
-
-            processed_file = client.create_file(
-                instrument_id=instrument_id,
-                run_id=run_id,
-                s3_bucket=processed_bucket or "",
-                s3_key=png_s3_key,
-                filename=png_file_path.name,
-                category="processed",
+            processed_bucket = config.AWS_S3_PROCESSED_DATA_BUCKET or ""
+            upload_processed(
+                client,
+                instrument_id,
+                run_id,
+                processed_bucket,
+                png_file_path,
+                "image/png",
+                source_file_id=file_id,
             )
-            client.update_file(
-                processed_file.id,
-                size_bytes=png_file_path.stat().st_size,
-                content_type="image/png",
-            )
+            logger.info("Uploaded processed image %s", png_file_path.name)
 
             metadata = parse_metadata(local_file_path)
             logger.info("Parsed metadata: %s", metadata)

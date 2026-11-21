@@ -9,6 +9,10 @@ export const createFileBody = z.object({
   content_type: z.string().optional(),
   size_bytes: z.number().optional(),
   category: fileCategorySchema.optional(),
+  // The raw file of this run that a processed file was made from. Deleting the
+  // raw file offers to delete this file with it, and a processed file made from
+  // a deleted raw file is saved deleted. Only for `processed` files.
+  source_file_id: z.number().int().positive().optional(),
 });
 
 // No `s3_bucket` / `s3_key`: the server derives the canonical S3 location on
@@ -47,6 +51,9 @@ export const fileDetail = z
     processing_started_at: isoDateTime.nullable(),
     created_at: isoDateTime,
     file_created_at: isoDateTime.nullable(),
+    // Set when the file is deleted. A deleted file keeps its row and its stored
+    // object, and refuses changes (`409`, `details.reason: file_deleted`).
+    deleted_at: isoDateTime.nullable(),
   })
   .openapi("FileDetail");
 

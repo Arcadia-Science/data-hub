@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 import logging
-from pathlib import Path
 
 from data_hub_lambda.api_client import get_client
+from data_hub_lambda.processed_files import upload_processed
 from data_hub_lambda.raw_access import local_raw_file
 from data_hub_lambda.unchained_labs_aunty.utils import (
     parse_aunty_workbook,
     write_curves_csv,
     write_plate_json,
 )
-from data_hub_shared import s3_utils
 from data_hub_shared.config import config
 
 logger = logging.getLogger(__name__)
@@ -64,20 +63,22 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
         write_curves_csv(csv_path, parsed.curve_rows)
         write_plate_json(json_path, parsed.experiments)
 
-        _upload_processed(
-            instrument_id=instrument_id,
-            run_id=run_id,
-            local_path=csv_path,
-            filename=csv_filename,
-            content_type="text/csv",
-        )
-        _upload_processed(
-            instrument_id=instrument_id,
-            run_id=run_id,
-            local_path=json_path,
-            filename=json_filename,
-            content_type="application/json",
-        )
+        # An Aunty run is one workbook, so both outputs are made from this file.
+        processed_bucket = config.AWS_S3_PROCESSED_DATA_BUCKET or ""
+        for local_path, content_type in (
+            (csv_path, "text/csv"),
+            (json_path, "application/json"),
+        ):
+            upload_processed(
+                client,
+                instrument_id,
+                run_id,
+                processed_bucket,
+                local_path,
+                content_type,
+                source_file_id=file_id,
+            )
+            logger.info("Uploaded processed file %s", local_path.name)
 
         client.update_run(instrument_id, run_id, metadata=parsed.metadata)
         client.update_file(file_id, status="completed")
@@ -87,32 +88,3 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
         logger.error("Error processing file: %s", e)
         client.update_file(file_id, status="failed", error_message=str(e))
         raise
-
-
-def _upload_processed(
-    *,
-    instrument_id: str,
-    run_id: str,
-    local_path: Path,
-    filename: str,
-    content_type: str,
-) -> None:
-    client = get_client()
-    processed_bucket = config.AWS_S3_PROCESSED_DATA_BUCKET
-    s3_key = f"{instrument_id}/{run_id}/{filename}"
-    s3_utils.upload_file(local_path, f"s3://{processed_bucket}/{s3_key}")
-    logger.info("Uploaded processed file to s3://%s/%s", processed_bucket, s3_key)
-
-    processed_file = client.create_file(
-        instrument_id=instrument_id,
-        run_id=run_id,
-        s3_bucket=processed_bucket or "",
-        s3_key=s3_key,
-        filename=filename,
-        category="processed",
-    )
-    client.update_file(
-        processed_file.id,
-        size_bytes=local_path.stat().st_size,
-        content_type=content_type,
-    )

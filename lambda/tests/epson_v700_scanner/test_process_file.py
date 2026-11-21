@@ -5,6 +5,7 @@ and the TiffProcessor.
 """
 
 from __future__ import annotations
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -97,6 +98,8 @@ def patched_converter(patched_jpg_path: Path) -> MagicMock:
 
 
 _PATCH_PREFIX = "data_hub_lambda.epson_v700_scanner.process_file"
+# The shared helper uploads to the processed bucket.
+_S3_PATCH = "data_hub_lambda.processed_files.s3_utils"
 
 
 class TestProcessFileHappyPath:
@@ -108,7 +111,7 @@ class TestProcessFileHappyPath:
 
         with (
             patch(f"{_PATCH_PREFIX}.get_client", return_value=client),
-            patch(f"{_PATCH_PREFIX}.s3_utils") as s3_mock,
+            patch(_S3_PATCH) as s3_mock,
             patch(
                 f"{_PATCH_PREFIX}.TiffProcessor",
                 return_value=patched_converter,
@@ -135,7 +138,7 @@ class TestProcessFileHappyPath:
 
         with (
             patch(f"{_PATCH_PREFIX}.get_client", return_value=client),
-            patch(f"{_PATCH_PREFIX}.s3_utils"),
+            patch(_S3_PATCH),
             patch(
                 f"{_PATCH_PREFIX}.TiffProcessor",
                 return_value=patched_converter,
@@ -157,6 +160,118 @@ class TestProcessFileHappyPath:
         assert processed_create_call.kwargs["category"] == "processed"
         assert processed_create_call.kwargs["filename"] == "scan.jpg"
 
+    def test_registers_the_jpg_with_its_raw_file_as_the_source(
+        self,
+        patched_converter: MagicMock,
+        patched_jpg_path: Path,
+    ) -> None:
+        client = _build_client_mock()
+
+        with (
+            patch(f"{_PATCH_PREFIX}.get_client", return_value=client),
+            patch(_S3_PATCH),
+            patch(
+                f"{_PATCH_PREFIX}.TiffProcessor",
+                return_value=patched_converter,
+            ),
+        ):
+            from data_hub_lambda.epson_v700_scanner.process_file import process_file
+
+            process_file(
+                instrument_id="epson-v700-scanner",
+                run_id="run-xyz",
+                filename="scan.tif",
+            )
+
+        # The raw file's row is the first create_file result (id 10).
+        processed = client.create_file.call_args_list[1].kwargs
+        assert processed["source_file_id"] == 10
+        # The size and type go with the create call.
+        assert processed["size_bytes"] == patched_jpg_path.stat().st_size
+        assert processed["content_type"] == "image/jpeg"
+
+    def test_registers_the_colony_table_with_its_raw_file_as_the_source(
+        self,
+        patched_converter: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        client = _build_client_mock()
+        client.create_file.side_effect = [
+            _file_response(file_id=10),
+            _file_response(file_id=11),
+            _file_response(file_id=12),
+        ]
+        patched_converter.crop_plates.return_value = [MagicMock()]
+        patched_converter.path = tmp_path / "scan.tif"
+        csv_path = tmp_path / "scan_colonies.csv"
+        csv_path.write_bytes(b"colony,area\n1,2\n")
+        pipeline = MagicMock()
+        pipeline.summaries = []
+
+        with (
+            patch(f"{_PATCH_PREFIX}.get_client", return_value=client),
+            patch(_S3_PATCH),
+            patch(
+                f"{_PATCH_PREFIX}.TiffProcessor",
+                return_value=patched_converter,
+            ),
+            patch(f"{_PATCH_PREFIX}.run_colony_pipeline", return_value=pipeline),
+            patch(f"{_PATCH_PREFIX}.export_colony_csv", return_value=csv_path),
+        ):
+            from data_hub_lambda.epson_v700_scanner.process_file import process_file
+
+            process_file(
+                instrument_id="epson-v700-scanner",
+                run_id="run-xyz",
+                filename="scan.tif",
+            )
+
+        csv_create = client.create_file.call_args_list[2].kwargs
+        assert csv_create["filename"] == "scan_colonies.csv"
+        assert csv_create["category"] == "processed"
+        assert csv_create["content_type"] == "text/csv"
+        assert csv_create["source_file_id"] == 10
+
+    def test_leaves_a_deleted_output_alone_and_stops_at_the_deleted_raw_file(
+        self,
+        patched_converter: MagicMock,
+    ) -> None:
+        from data_hub_lambda.api_client import FileDeletedError
+
+        client = _build_client_mock()
+        # The raw file was deleted while it processed: the API saves the new
+        # output as deleted, and refuses the final PATCH on the raw file.
+        client.create_file.side_effect = [
+            _file_response(file_id=10),
+            _file_response(file_id=11).model_copy(update={"deleted_at": datetime.now(UTC)}),
+        ]
+
+        def _update(file_id: int, **kwargs: Any) -> None:
+            if file_id == 10 and kwargs.get("status") == "completed":
+                raise FileDeletedError("Cannot update a soft-deleted file", status_code=409)
+
+        client.update_file.side_effect = _update
+
+        with (
+            patch(f"{_PATCH_PREFIX}.get_client", return_value=client),
+            patch(_S3_PATCH),
+            patch(
+                f"{_PATCH_PREFIX}.TiffProcessor",
+                return_value=patched_converter,
+            ),
+        ):
+            from data_hub_lambda.epson_v700_scanner.process_file import process_file
+
+            with pytest.raises(FileDeletedError):
+                process_file(
+                    instrument_id="epson-v700-scanner",
+                    run_id="run-xyz",
+                    filename="scan.tif",
+                )
+
+        # No PATCH went to the deleted output.
+        assert all(call.args[0] != 11 for call in client.update_file.call_args_list)
+
     def test_stores_metadata_on_run(
         self,
         patched_converter: MagicMock,
@@ -165,7 +280,7 @@ class TestProcessFileHappyPath:
 
         with (
             patch(f"{_PATCH_PREFIX}.get_client", return_value=client),
-            patch(f"{_PATCH_PREFIX}.s3_utils"),
+            patch(_S3_PATCH),
             patch(
                 f"{_PATCH_PREFIX}.TiffProcessor",
                 return_value=patched_converter,
@@ -191,7 +306,7 @@ class TestProcessFileHappyPath:
 
         with (
             patch(f"{_PATCH_PREFIX}.get_client", return_value=client),
-            patch(f"{_PATCH_PREFIX}.s3_utils"),
+            patch(_S3_PATCH),
             patch(
                 f"{_PATCH_PREFIX}.TiffProcessor",
                 return_value=patched_converter,
@@ -222,7 +337,7 @@ class TestProcessFileFailure:
 
         with (
             patch(f"{_PATCH_PREFIX}.get_client", return_value=client),
-            patch(f"{_PATCH_PREFIX}.s3_utils"),
+            patch(_S3_PATCH),
             patch(
                 f"{_PATCH_PREFIX}.TiffProcessor",
                 return_value=failing_converter,

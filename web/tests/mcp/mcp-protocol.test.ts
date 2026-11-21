@@ -540,13 +540,32 @@ vi.mock("@/lib/api/files", () => ({
     }
     return { ok: false, reason: "not_found" };
   }),
-  dismissFile: vi.fn().mockResolvedValue({
-    ok: true,
-    id: 1,
-    filename: "a.txt",
-    deletedAt: new Date(),
-    alreadyApplied: false,
-  }),
+}));
+
+// `dismiss_file` goes through `deleteFiles`, which locks rows in a transaction.
+vi.mock("@/lib/api/file-deletion", () => ({
+  deleteFiles: vi.fn().mockImplementation((ids: number[]) => ({
+    results: ids.map((id) =>
+      id === 1
+        ? {
+            ok: true,
+            id,
+            filename: "a.txt",
+            deletedAt: new Date(),
+            deletedBy: null,
+            deletedByToken: null,
+            alreadyApplied: false,
+          }
+        : {
+            ok: false,
+            id,
+            status: 409,
+            code: "CONFLICT",
+            message: `Cannot delete 'b.txt' while it is processing. Wait for processing to finish.`,
+          }
+    ),
+    linked: [],
+  })),
 }));
 
 // `prepareRunArchive` owns the cache-hit / build-kickoff branch on the
@@ -1869,6 +1888,8 @@ describe("MCP Protocol (in-memory)", () => {
   });
 
   it("dismiss_file returns the soft-deleted file", async () => {
+    const { deleteFiles } = await import("@/lib/api/file-deletion");
+    vi.mocked(deleteFiles).mockClear();
     const result = await client.callTool({
       name: "dismiss_file",
       arguments: { fileId: 1 },
@@ -1883,6 +1904,31 @@ describe("MCP Protocol (in-memory)", () => {
     expect(parsed.id).toBe(1);
     expect(parsed.filename).toBe("a.txt");
     expect(parsed.alreadyApplied).toBe(false);
+    // One file, none of its linked files. The in-memory transport has no
+    // signed-in user, so no actor is recorded.
+    expect(deleteFiles).toHaveBeenCalledWith([1], null, {
+      includeLinked: false,
+    });
+  });
+
+  it("dismiss_file passes on why a file can't be deleted", async () => {
+    const result = await client.callTool({
+      name: "dismiss_file",
+      arguments: { fileId: 2 },
+    });
+    expect(result.isError).toBe(true);
+    const text = (result.content as Array<{ type: string; text: string }>)[0]
+      .text;
+    expect(text).toContain("Wait for processing to finish");
+  });
+
+  it("dismiss_file says uploaded files can be deleted too", async () => {
+    const { tools } = await client.listTools();
+    const description = tools.find(
+      (t) => t.name === "dismiss_file"
+    )?.description;
+    expect(description).toContain("whether or not it has been uploaded");
+    expect(description).not.toContain("cannot be dismissed");
   });
 
   it("get_watcher_heartbeats returns heartbeat history", async () => {
@@ -2803,7 +2849,7 @@ describe("MCP download analytics (signed in)", () => {
   const SIGNED_IN: AuthInfo = {
     token: "token",
     clientId: "client-1",
-    scopes: ["read"],
+    scopes: ["read", "write"],
     extra: { userId: "user-1" },
   };
   const BUILDING = {
@@ -2894,6 +2940,21 @@ describe("MCP download analytics (signed in)", () => {
       client: "Claude",
       category: "raw",
     });
+  });
+
+  it("records the signed-in user as the one who deleted a file", async () => {
+    const { deleteFiles } = await import("@/lib/api/file-deletion");
+    vi.mocked(deleteFiles).mockClear();
+    const result = await client.callTool({
+      name: "dismiss_file",
+      arguments: { fileId: 1 },
+    });
+    expect(result.isError).toBeFalsy();
+    expect(deleteFiles).toHaveBeenCalledWith(
+      [1],
+      { kind: "user", userId: "user-1" },
+      { includeLinked: false }
+    );
   });
 
   it("records no download when the tool hands out no link", async () => {
