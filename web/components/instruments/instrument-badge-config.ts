@@ -10,6 +10,7 @@ import type {
   InstrumentBadgeState,
   UploadMode,
 } from "@/lib/instruments/connection";
+import { GREEN_BADGE_COLORS, RED_BADGE_COLORS } from "@/lib/ui-classes";
 
 /**
  * What each state of the instrument badge looks like and says, kept apart from
@@ -32,8 +33,7 @@ export const INSTRUMENT_BADGE_CONFIG: Record<
   online: {
     label: "Online",
     Icon: Radio,
-    className:
-      "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300",
+    className: GREEN_BADGE_COLORS,
   },
   restarting: {
     label: "Restarting",
@@ -50,7 +50,7 @@ export const INSTRUMENT_BADGE_CONFIG: Record<
   offline: {
     label: "Offline",
     Icon: WifiOff,
-    className: "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300",
+    className: RED_BADGE_COLORS,
   },
   pending: {
     label: "Pending",

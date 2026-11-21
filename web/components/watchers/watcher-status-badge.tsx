@@ -17,6 +17,7 @@ import {
   UPLOAD_REQUEST_REVERT_GRACE_MS,
 } from "@/lib/api/watcher-status";
 import { formatTime } from "@/lib/date";
+import { GREEN_BADGE_COLORS, RED_BADGE_COLORS } from "@/lib/ui-classes";
 import { cn, formatRelativeTime } from "@/lib/utils";
 
 /**
@@ -29,11 +30,9 @@ import { cn, formatRelativeTime } from "@/lib/utils";
  */
 export type WatcherBadgeStatus = EffectiveStatus | "deregistered";
 
-const ONLINE_CLASSNAME =
-  "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300";
+const ONLINE_CLASSNAME = GREEN_BADGE_COLORS;
 
-const OFFLINE_CLASSNAME =
-  "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300";
+const OFFLINE_CLASSNAME = RED_BADGE_COLORS;
 
 // The badge's default variant sets a blue fill for dark mode, and `bg-muted`
 // alone doesn't replace that one, so the dark fill is set here as well. It is

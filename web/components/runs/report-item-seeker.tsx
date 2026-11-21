@@ -160,6 +160,7 @@ function ItemPicker({
           aria-expanded={open}
           className="w-full max-w-md justify-between font-normal"
           role="combobox"
+          size="sm"
           variant="outline"
         >
           <span className="truncate">
@@ -260,7 +261,7 @@ export function SeekerToolbar({
             aria-label={labels.previous}
             disabled={!canGoPrev}
             onClick={actions.previous}
-            size="icon"
+            size="icon-sm"
             variant="outline"
           >
             <ChevronLeft className="size-4" />
@@ -269,7 +270,7 @@ export function SeekerToolbar({
             aria-label={labels.next}
             disabled={!canGoNext}
             onClick={actions.next}
-            size="icon"
+            size="icon-sm"
             variant="outline"
           >
             <ChevronRight className="size-4" />

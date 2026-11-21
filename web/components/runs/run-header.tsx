@@ -2,6 +2,7 @@
 
 import { Trash2 } from "lucide-react";
 import Link from "next/link";
+import { CopyButton } from "@/components/copy-button";
 import { RecordInstrumentVisit } from "@/components/recent-instrument-visit";
 import { RunSwitcher } from "@/components/runs/run-switcher";
 import { ActorLabel } from "@/components/token-actor";
@@ -83,9 +84,18 @@ export function RunHeader({
       )}
 
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="font-mono font-semibold text-2xl tracking-tight">
-          {run.runId}
-        </h1>
+        <div className="flex min-w-0 items-center gap-1.5">
+          <h1 className="font-mono font-semibold text-2xl tracking-tight">
+            {run.runId}
+          </h1>
+          <CopyButton
+            className="text-muted-foreground"
+            label="Copy run ID"
+            size="icon-sm"
+            value={run.runId}
+            variant="ghost"
+          />
+        </div>
 
         <div className="flex items-center gap-2">
           {runNavSlot}

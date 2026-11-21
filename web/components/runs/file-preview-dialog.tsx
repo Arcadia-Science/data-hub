@@ -310,7 +310,7 @@ export function FilePreviewDialog({
             </DialogTitle>
             <div className="flex shrink-0 items-center gap-1.5">
               {current?.downloadable && (
-                <Button asChild variant="outline">
+                <Button asChild size="sm" variant="outline">
                   <a
                     download={current.filename}
                     href={`/api/v1/files/${current.id}/download`}
@@ -337,6 +337,7 @@ export function FilePreviewDialog({
                         });
                       }
                     }}
+                    size="sm"
                     variant="outline"
                   >
                     <Trash2 />
@@ -348,7 +349,7 @@ export function FilePreviewDialog({
                 aria-label="Previous file"
                 disabled={previous === null}
                 onClick={() => previous && onSelect(previous.id)}
-                size="icon"
+                size="icon-sm"
                 variant="outline"
               >
                 <ChevronLeft className="size-4" />
@@ -357,7 +358,7 @@ export function FilePreviewDialog({
                 aria-label="Next file"
                 disabled={next === null}
                 onClick={() => next && onSelect(next.id)}
-                size="icon"
+                size="icon-sm"
                 variant="outline"
               >
                 <ChevronRight className="size-4" />
@@ -406,7 +407,14 @@ export function FilePreviewDialog({
 
         {row !== null && (
           <>
-            <div className="flex flex-wrap items-center gap-3 text-muted-foreground text-sm">
+            {/* Sits closer to the title than the window's usual gap, unless the
+                deleted banner comes between them. */}
+            <div
+              className={cn(
+                "flex flex-wrap items-center gap-3 text-muted-foreground text-sm",
+                (target === null || row.deletedAt === null) && "-mt-3"
+              )}
+            >
               <Badge
                 className={cn(
                   "capitalize",

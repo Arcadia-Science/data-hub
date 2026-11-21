@@ -18,6 +18,8 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { preloader } from "@/lib/preload";
 import type { RunStatus } from "@/lib/runs/run-status";
+import { CODE_BADGE_COLORS } from "@/lib/ui-classes";
+import { cn } from "@/lib/utils";
 
 // The menu uses the command palette library, which most page visits never
 // need. It loads when the popover first opens, or earlier when the pointer or
@@ -69,7 +71,10 @@ export function RunFiltersCombobox({
           <ListFilter className="size-3.5 text-muted-foreground" />
           <span className="text-sm">Add filter</span>
           {activeCount > 0 && (
-            <Badge className="ml-0.5 px-1.5 text-[10px]" variant="secondary">
+            <Badge
+              className={cn("ml-0.5 px-1.5 text-[10px]", CODE_BADGE_COLORS)}
+              variant="secondary"
+            >
               {activeCount}
             </Badge>
           )}
