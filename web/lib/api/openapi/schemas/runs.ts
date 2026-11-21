@@ -218,9 +218,24 @@ export const runDetailFile = z
     download_url: z.string().url().nullable(),
     created_at: isoDateTime,
     file_created_at: isoDateTime.nullable(),
-    deleted_at: isoDateTime.nullable(),
+    deleted_at: isoDateTime.nullable().openapi({
+      description:
+        "Set when the file is deleted. The run lists deleted files only with `include_deleted=true`.",
+    }),
+    // At most one of the two is set, the way a run reports its deleter.
+    deleted_by: z.string().nullable().openapi({
+      description: "The user ID of the person who deleted the file.",
+    }),
+    deleted_by_token: tokenActor.nullable(),
   })
   .openapi("RunDetailFile");
+
+export const runDetailQuery = z.object({
+  include_deleted: z.enum(["true", "false"]).optional().openapi({
+    description:
+      "`true` also lists the run's deleted files, each with `deleted_at` and who deleted it. Default `false`.",
+  }),
+});
 
 export const runDetail = z
   .object({

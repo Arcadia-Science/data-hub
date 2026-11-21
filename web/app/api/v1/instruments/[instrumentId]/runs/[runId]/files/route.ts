@@ -8,7 +8,12 @@ import {
   NOT_FOUND,
   VALIDATION_ERROR,
 } from "@/lib/api/errors";
-import { adoptPreUploadFile } from "@/lib/api/files";
+import {
+  adoptPreUploadFile,
+  fillMissingSource,
+  lockSourceDeletion,
+  reviveProcessedFile,
+} from "@/lib/api/files";
 import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
 import { createFileBody, readJsonBody } from "@/lib/api/openapi";
 import {
@@ -54,6 +59,20 @@ interface RouteContext {
 // unique index), returns the existing record with 200 instead of 201. A file
 // of another run holding the key, or another file of this run holding the
 // path, gets 409.
+//
+// A processor writes its output to S3 before it registers it, so a regenerated
+// output has already replaced the old object when it gets here. If the row that
+// holds the key was deleted, a processed one becomes the new output (see
+// `reviveProcessedFile`), so a reprocess doesn't leave its output hidden. A
+// deleted raw row is never revived, only returned.
+//
+// `source_file_id` names the raw file of this run that a processed file was
+// made from. A processed file made from a deleted raw file is saved deleted,
+// the way the raw file was, because that file was deleted while it processed.
+// The insert and the revive read the source with a lock in their own
+// transaction (`lockSourceDeletion`), so a delete of the source that runs at
+// the same time can't leave the output active. An existing active processed
+// file that has no source yet is linked to it.
 // ---------------------------------------------------------------------------
 
 export async function POST(request: NextRequest, { params }: RouteContext) {
@@ -115,7 +134,69 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     return apiError(400, VALIDATION_ERROR, locationError);
   }
 
+  // The raw file a processed file was made from. It may be deleted.
+  const sourceFileId = body.source_file_id ?? null;
+  if (sourceFileId !== null) {
+    if (category !== "processed") {
+      return apiError(
+        400,
+        VALIDATION_ERROR,
+        "source_file_id is only for processed files"
+      );
+    }
+    if (!(await isRawFileOfRun(run.id, sourceFileId))) {
+      return apiError(
+        400,
+        VALIDATION_ERROR,
+        "source_file_id must be a raw file of this run"
+      );
+    }
+  }
+
   const now = new Date();
+
+  // Answers for a row that already holds this S3 key: an active one is
+  // returned as it is, linked to its source if it had none. A deleted processed
+  // one in the same bucket becomes the new output. Any other deleted row, a raw
+  // file above all, is returned as it is, still deleted.
+  const respondForKeyHolder = async (
+    holder: typeof files.$inferSelect
+  ): Promise<Response> => {
+    if (!holder.deletedAt) {
+      const linked = await fillMissingSource(holder, sourceFileId);
+      return Response.json(formatFileResponse(linked), { status: 200 });
+    }
+    if (
+      holder.category !== "processed" ||
+      category !== "processed" ||
+      holder.s3Bucket !== s3Bucket
+    ) {
+      return Response.json(formatFileResponse(holder), { status: 200 });
+    }
+    const revived = await reviveProcessedFile(holder.id, {
+      contentType: contentType ?? holder.contentType,
+      sizeBytes: sizeBytes ?? holder.sizeBytes,
+      sourceFileId: sourceFileId ?? holder.sourceFileId,
+    });
+    if (revived.kind === "conflict") {
+      return apiError(
+        409,
+        CONFLICT,
+        "Another file already uses this S3 key or path"
+      );
+    }
+    if (revived.kind === "unchanged") {
+      return revived.row
+        ? Response.json(formatFileResponse(revived.row), { status: 200 })
+        : apiError(
+            409,
+            CONFLICT,
+            "Another file already uses this S3 key or path"
+          );
+    }
+    await touchRuns([run.id]);
+    return Response.json(formatFileResponse(revived.row), { status: 200 });
+  };
 
   // Reconcile against any active row the watcher may have already created
   // for this file. Both writers now share the partial unique index on
@@ -137,9 +218,11 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
 
   if (existing && !PRE_UPLOAD_STATUSES.has(existing.status)) {
     // Already uploaded / processing / completed / failed: Lambda is calling
-    // again (likely a retry after a warm-container timeout). Don't regress
-    // status — return the existing record as-is.
-    return Response.json(formatFileResponse(existing), { status: 200 });
+    // again (likely a retry after a warm-container timeout, or a reprocess).
+    // Don't regress status — return the existing record, only linked to its
+    // source if it had none.
+    const linked = await fillMissingSource(existing, sourceFileId);
+    return Response.json(formatFileResponse(linked), { status: 200 });
   }
 
   if (existing) {
@@ -172,28 +255,45 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     // insert one below.
   }
 
-  // No active row to adopt — insert one. Set relativePath = filename so that
+  // A deleted row can hold the key. `uq_files_s3_key` covers deleted rows, so
+  // the insert below can't add a second one.
+  const [keyHolder] = await db
+    .select()
+    .from(files)
+    .where(and(eq(files.instrumentRunId, run.id), eq(files.s3Key, s3Key)))
+    .limit(1);
+  if (keyHolder) {
+    return await respondForKeyHolder(keyHolder);
+  }
+
+  // No row to adopt or revive — insert one. Set relativePath = filename so that
   // future watcher reports also dedup against this row via the existing
   // (instrument_run_id, relative_path) partial unique index, which covers
   // active rows only, so a dismissed row at that path doesn't block this
   // insert. The onConflictDoNothing() guards against concurrent retries that
   // race past the lookup above.
-  const [inserted] = await db
-    .insert(files)
-    .values({
-      instrumentRunId: run.id,
-      relativePath: filename,
-      s3Bucket,
-      s3Key,
-      filename,
-      contentType,
-      sizeBytes,
-      category,
-      status: "uploaded",
-      uploadedAt: now,
-    })
-    .onConflictDoNothing()
-    .returning();
+  const inserted = await db.transaction(async (tx) => {
+    const deletion = await lockSourceDeletion(tx, sourceFileId);
+    const [row] = await tx
+      .insert(files)
+      .values({
+        instrumentRunId: run.id,
+        relativePath: filename,
+        s3Bucket,
+        s3Key,
+        filename,
+        contentType,
+        sizeBytes,
+        category,
+        sourceFileId,
+        ...deletion,
+        status: "uploaded",
+        uploadedAt: now,
+      })
+      .onConflictDoNothing()
+      .returning();
+    return row;
+  });
 
   if (!inserted) {
     // Another concurrent insert won — fetch and return that row. Look up
@@ -208,7 +308,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       .limit(1);
 
     if (raced) {
-      return Response.json(formatFileResponse(raced), { status: 200 });
+      return await respondForKeyHolder(raced);
     }
 
     const [racedByName] = await db
@@ -237,6 +337,25 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   return Response.json(formatFileResponse(inserted), { status: 201 });
 }
 
+// Whether `sourceFileId` is a raw file of this run, deleted or not.
+async function isRawFileOfRun(
+  runId: string,
+  sourceFileId: number
+): Promise<boolean> {
+  const [row] = await db
+    .select({ id: files.id })
+    .from(files)
+    .where(
+      and(
+        eq(files.id, sourceFileId),
+        eq(files.instrumentRunId, runId),
+        eq(files.category, "raw")
+      )
+    )
+    .limit(1);
+  return row !== undefined;
+}
+
 function formatFileResponse(f: typeof files.$inferSelect) {
   return {
     id: f.id,
@@ -256,5 +375,6 @@ function formatFileResponse(f: typeof files.$inferSelect) {
     processing_started_at: f.processingStartedAt,
     created_at: f.createdAt,
     file_created_at: f.fileCreatedAt,
+    deleted_at: f.deletedAt,
   };
 }

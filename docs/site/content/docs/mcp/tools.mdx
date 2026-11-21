@@ -6,8 +6,8 @@ contentType: Reference
 
 <Audience>Developers and integrators</Audience>
 
-All tools return JSON encoded as a single text content block. Error cases set `isError: true` and return a plain-text message. Each tool below carries its annotations (`readOnly`, `idempotent`, `destructive`) and the schema of its JSON response.
+Every tool returns JSON in a single text content block. When a tool fails, it sets `isError: true` and returns a plain-text message. Each tool below lists its annotations (`readOnly`, `idempotent`, `destructive`) and the schema of its JSON response.
 
-Connecting requires the `read` scope. Every tool without a `readOnly` annotation also requires `write`. See [MCP overview](/docs/mcp) for authentication and client setup.
+Connecting needs the `read` scope. Every tool without a `readOnly` annotation also needs `write`. See [MCP overview](/docs/mcp) for sign-in and client setup.
 
 <McpToolCatalog />

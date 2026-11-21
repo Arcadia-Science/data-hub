@@ -44,7 +44,7 @@ import {
   REPORT_ITEMS_WINDOW,
   reportItemKindForInstrument,
 } from "@/lib/runs/report-items";
-import { runDetailParamsCache } from "@/lib/search-params";
+import { filesShowDeleted, runDetailParamsCache } from "@/lib/search-params";
 import { getViewerTimeZone } from "@/lib/viewer-timezone";
 
 const FILES_PER_PAGE = 10;
@@ -205,7 +205,8 @@ async function RunDetailContentBody({
       categories: filters.files_category,
       statuses: filters.files_status,
       sort: filters.files_sort,
-      includeDismissed: filters.files_dismissed,
+      order: filters.files_order,
+      includeDeleted: filesShowDeleted(filters),
     }),
     getRunFileStats(run.id),
     reportFilesPromise,
@@ -273,8 +274,10 @@ async function RunDetailContentBody({
             auntyPlate={auntyPlate}
             fileStats={fileStats}
             files={filesPage.data}
+            filesDeletedCount={filesPage.deletedCount}
             filesDownloadableCount={filesPage.downloadableCount}
             filesPagination={filesPage.pagination}
+            filesRelated={filesPage.related}
             instrumentId={instrumentId}
             notebooksSlot={
               <RunNotebookLinksSection

@@ -12,17 +12,16 @@ import {
 import { Button } from "@/components/ui/button";
 import { useResolvedFileUrl } from "@/hooks/use-resolved-file-url";
 
-function SelectedPdf() {
-  const { state } = useReportItemsContext();
-  const downloadUrl = useResolvedFileUrl(state.selectedItem?.id);
-
-  if (!state.selectedItem) {
-    return (
-      <div className="flex h-[70vh] items-center justify-center rounded-md border bg-muted/30 text-muted-foreground text-sm">
-        {state.error ?? (state.isLoading ? "Loading\u2026" : "No PDFs found.")}
-      </div>
-    );
-  }
+// One PDF in a frame, with a link to open it in its own tab. The report's
+// carousel and the file window both show a PDF this way.
+export function PdfFrame({
+  fileId,
+  filename,
+}: {
+  fileId: number;
+  filename: string;
+}) {
+  const downloadUrl = useResolvedFileUrl(fileId);
 
   if (!downloadUrl) {
     return (
@@ -35,9 +34,7 @@ function SelectedPdf() {
   return (
     <>
       <div className="flex items-center justify-between gap-2">
-        <h3 className="truncate font-medium text-sm">
-          {state.selectedItem.filename}
-        </h3>
+        <h3 className="truncate font-medium text-sm">{filename}</h3>
         <Button asChild className="h-7 gap-1 text-xs" size="sm" variant="ghost">
           <a href={downloadUrl} rel="noopener noreferrer" target="_blank">
             <ExternalLink className="size-3" />
@@ -49,10 +46,29 @@ function SelectedPdf() {
         <iframe
           className="h-[70vh] w-full"
           src={downloadUrl}
-          title={state.selectedItem.filename}
+          title={filename}
         />
       </div>
     </>
+  );
+}
+
+function SelectedPdf() {
+  const { state } = useReportItemsContext();
+
+  if (!state.selectedItem) {
+    return (
+      <div className="flex h-[70vh] items-center justify-center rounded-md border bg-muted/30 text-muted-foreground text-sm">
+        {state.error ?? (state.isLoading ? "Loading\u2026" : "No PDFs found.")}
+      </div>
+    );
+  }
+
+  return (
+    <PdfFrame
+      fileId={state.selectedItem.id}
+      filename={state.selectedItem.filename}
+    />
   );
 }
 

@@ -1,10 +1,10 @@
 import type { McpServer } from "@modelcontextprotocol/server";
+import { deleteRunFiles, restoreRunFiles } from "@/lib/api/file-batch";
+import { loadTokenRefs, tokenRefFor } from "@/lib/api/file-deleters";
+import { deleteFiles } from "@/lib/api/file-deletion";
 import { reprocessFile } from "@/lib/api/file-reprocessing";
-import {
-  dismissFile,
-  getActiveFileById,
-  lookupFileForDownload,
-} from "@/lib/api/files";
+import { fileFailureToWire } from "@/lib/api/file-wire";
+import { getFileById, lookupFileForDownload } from "@/lib/api/files";
 import { prepareRunArchive } from "@/lib/api/run-archive";
 import { getRunClaimStatus } from "@/lib/api/run-attributions";
 import { trackArchiveDownload, trackFileDownload } from "@/lib/mcp/analytics";
@@ -22,24 +22,36 @@ import {
 } from "@/lib/s3";
 import { contentTypeForDownload } from "@/lib/s3-local-mirror";
 import {
+  deleteFilesTool,
   dismissFileTool,
   getFileDownloadUrlTool,
   getFileTool,
   getRunArchiveTool,
   reprocessFileTool,
+  restoreFilesTool,
 } from "./files.defs";
+
+// The signed-in user is the actor, taken from the session and never from the
+// arguments. The in-memory test transport has none, so no actor is recorded.
+function actorOf(userId: string | undefined) {
+  return userId ? ({ kind: "user", userId } as const) : null;
+}
 
 export function registerFileTools(server: McpServer) {
   server.registerTool(
     getFileTool.name,
     toolRegistrationConfig(getFileTool),
     async ({ fileId }) => {
-      const file = await getActiveFileById(fileId);
+      const file = await getFileById(fileId);
       if (!file) {
         return errorResult(`File '${fileId}' not found.`);
       }
+      // A deleted file is returned too, with the token that deleted it named
+      // the way list_run_files names it.
+      const tokens = await loadTokenRefs([file.deletedByToken]);
       return structuredResult({
         ...file,
+        deletedByToken: tokenRefFor(tokens, file.deletedByToken),
         stalled: isStalledProcessing(file),
       });
     }
@@ -149,16 +161,112 @@ export function registerFileTools(server: McpServer) {
   );
 
   server.registerTool(
-    dismissFileTool.name,
-    toolRegistrationConfig(dismissFileTool),
-    async ({ fileId }, ctx) => {
-      const writeError = requireMcpWrite(ctx.http?.authInfo);
+    deleteFilesTool.name,
+    toolRegistrationConfig(deleteFilesTool),
+    async ({ instrumentId, runId, fileIds, includeLinked }, ctx) => {
+      const authInfo = ctx.http?.authInfo;
+      const writeError = requireMcpWrite(authInfo);
       if (writeError) {
         return writeError;
       }
-      const result = await dismissFile(fileId);
+      const result = await deleteRunFiles({
+        instrumentId,
+        runId,
+        fileIds,
+        includeLinked: includeLinked ?? false,
+        actor: actorOf(getMcpUserId(authInfo)),
+      });
       if (!result.ok) {
-        return errorResult(result.message);
+        return errorResult(`${result.message}.`);
+      }
+      return structuredResult({
+        instrumentId: result.instrumentId,
+        runId: result.runId,
+        results: result.results.map((file) =>
+          file.ok
+            ? {
+                ok: true,
+                id: file.id,
+                filename: file.filename,
+                deletedAt: file.deletedAt,
+                deletedBy: file.deletedBy,
+                deletedByToken: file.deletedByToken,
+                alreadyApplied: file.alreadyApplied,
+              }
+            : fileFailureToWire(file)
+        ),
+        linked: result.linked.map((file) => ({
+          id: file.id,
+          filename: file.filename,
+          relation: file.relation,
+          deletedAt: file.deletedAt,
+        })),
+        counts: result.counts,
+      });
+    }
+  );
+
+  server.registerTool(
+    restoreFilesTool.name,
+    toolRegistrationConfig(restoreFilesTool),
+    async ({ instrumentId, runId, fileIds, includeLinked }, ctx) => {
+      const authInfo = ctx.http?.authInfo;
+      const writeError = requireMcpWrite(authInfo);
+      if (writeError) {
+        return writeError;
+      }
+      const result = await restoreRunFiles({
+        instrumentId,
+        runId,
+        fileIds,
+        includeLinked: includeLinked ?? false,
+        actor: actorOf(getMcpUserId(authInfo)),
+      });
+      if (!result.ok) {
+        return errorResult(`${result.message}.`);
+      }
+      const restoredToMcp = (file: (typeof result.results)[number]) =>
+        file.ok
+          ? {
+              ok: true,
+              id: file.id,
+              filename: file.filename,
+              alreadyApplied: file.alreadyApplied,
+            }
+          : fileFailureToWire(file);
+      return structuredResult({
+        instrumentId: result.instrumentId,
+        runId: result.runId,
+        results: result.results.map(restoredToMcp),
+        linked: result.linked.map((file) => ({
+          ...restoredToMcp(file),
+          relation: file.relation,
+        })),
+        counts: result.counts,
+      });
+    }
+  );
+
+  // Deprecated: the same delete as `delete_files`, for one file by its ID and
+  // with no linked files, which is all this tool ever did. Kept until
+  // assistants have moved to `delete_files`.
+  server.registerTool(
+    dismissFileTool.name,
+    toolRegistrationConfig(dismissFileTool),
+    async ({ fileId }, ctx) => {
+      const authInfo = ctx.http?.authInfo;
+      const writeError = requireMcpWrite(authInfo);
+      if (writeError) {
+        return writeError;
+      }
+      const { results } = await deleteFiles(
+        [fileId],
+        actorOf(getMcpUserId(authInfo)),
+        { includeLinked: false }
+      );
+      const result = results[0];
+      if (!result?.ok) {
+        return errorResult(result?.message ?? `File '${fileId}' not found.`);
       }
       return structuredResult({
         id: result.id,

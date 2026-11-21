@@ -19,6 +19,7 @@ import {
 import { UserAvatarLink } from "@/components/user-avatar";
 import type { NotebookDto } from "@/lib/api/notebooks";
 import { notebookPageHref } from "@/lib/notebooks/details";
+import { CODE_BADGE_COLORS, TABLE_EDGE_PADDING } from "@/lib/ui-classes";
 import { cn } from "@/lib/utils";
 
 function NoValue({ label }: { label: string }) {
@@ -57,7 +58,7 @@ export function NotebooksTable({
 
   return (
     <div className="isolate rounded-lg border bg-background dark:bg-muted">
-      <Table>
+      <Table className={TABLE_EDGE_PADDING}>
         <TableHeader>
           <TableRow>
             <NotebookSortHeader field="name" label="Name" />
@@ -92,7 +93,10 @@ export function NotebooksTable({
                       />
                     </RowControl>
                     {deleted ? (
-                      <Badge className="ml-1 font-normal" variant="outline">
+                      <Badge
+                        className={cn("ml-1 font-normal", CODE_BADGE_COLORS)}
+                        variant="outline"
+                      >
                         Deleted
                       </Badge>
                     ) : null}
@@ -142,7 +146,7 @@ export function NotebooksTableSkeleton() {
       className="rounded-lg border bg-background dark:bg-muted"
       role="status"
     >
-      <Table>
+      <Table className={TABLE_EDGE_PADDING}>
         <TableHeader>
           <TableRow>
             <TableHead>Name</TableHead>

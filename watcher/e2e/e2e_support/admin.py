@@ -157,7 +157,9 @@ class Admin:
         )
 
     def dismiss_file(self, file_id: int) -> ApiResult:
-        """Dismiss a file that has not been uploaded: it is soft-deleted and leaves the queue."""
+        """Delete a file (the web app's "Dismiss" for a file that was never uploaded): it is
+        soft-deleted and leaves the queue. A file that is already uploaded can be deleted too,
+        and its S3 object stays. A file that is queued or processing gets a 409."""
         return self._call("DELETE", f"/api/v1/files/{file_id}", headers=self._bearer())
 
     # ------------------------------------------------------------------

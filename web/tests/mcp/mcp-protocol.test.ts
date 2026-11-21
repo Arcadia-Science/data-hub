@@ -235,6 +235,8 @@ const {
       fileCreatedAt: null,
       createdAt: new Date("2025-01-01T00:00:00Z"),
       deletedAt: null,
+      deletedBy: null,
+      deletedByToken: null,
     },
     MOCK_RUN_LIST_ROW,
     mockRunDetail,
@@ -517,6 +519,21 @@ vi.mock("@/lib/api/files", () => ({
   getActiveFileById: vi
     .fn()
     .mockImplementation(async (id: number) => (id === 42 ? MOCK_FILE : null)),
+  // File 43 is file 42 after a token deleted it.
+  getFileById: vi.fn().mockImplementation((id: number) => {
+    if (id === 42) {
+      return MOCK_FILE;
+    }
+    if (id === 43) {
+      return {
+        ...MOCK_FILE,
+        id: 43,
+        deletedAt: new Date("2025-01-02T00:00:00Z"),
+        deletedByToken: "token-1",
+      };
+    }
+    return null;
+  }),
   getActiveFilesByIds: vi
     .fn()
     .mockImplementation(async (ids: number[]) =>
@@ -540,12 +557,212 @@ vi.mock("@/lib/api/files", () => ({
     }
     return { ok: false, reason: "not_found" };
   }),
-  dismissFile: vi.fn().mockResolvedValue({
-    ok: true,
-    id: 1,
-    filename: "a.txt",
-    deletedAt: new Date(),
-    alreadyApplied: false,
+}));
+
+// `dismiss_file` goes through `deleteFiles`, which locks rows in a transaction.
+vi.mock("@/lib/api/file-deletion", () => ({
+  deleteFiles: vi.fn().mockImplementation((ids: number[]) => ({
+    results: ids.map((id) =>
+      id === 1
+        ? {
+            ok: true,
+            id,
+            filename: "a.txt",
+            deletedAt: new Date(),
+            deletedBy: null,
+            deletedByToken: null,
+            alreadyApplied: false,
+          }
+        : {
+            ok: false,
+            id,
+            status: 409,
+            code: "CONFLICT",
+            message: `Cannot delete 'b.txt' while it is processing. Wait for processing to finish.`,
+          }
+    ),
+    linked: [],
+  })),
+}));
+
+// `delete_files` and `restore_files` look up the run and its files, then call
+// `deleteFiles` and `restoreFiles` (the integration suite runs that for real).
+// These answer for the run `run-1`. File 1 is done, file 2 is refused, file 3 was
+// already done by a token, and any other ID is not found.
+vi.mock("@/lib/api/file-batch", () => {
+  type FileOutcome = Record<string, unknown> & {
+    ok: boolean;
+    alreadyApplied?: boolean;
+  };
+  const at = new Date("2025-01-01T00:00:00Z");
+  const missingRun = (input: { instrumentId: string; runId: string }) => ({
+    ok: false,
+    status: 404,
+    code: "NOT_FOUND",
+    message: `Run '${input.runId}' not found for instrument '${input.instrumentId}'`,
+  });
+  const notFound = (id: number) => ({
+    ok: false,
+    id,
+    status: 404,
+    code: "NOT_FOUND",
+    message: `File '${id}' not found`,
+  });
+  return {
+    deleteRunFiles: vi
+      .fn()
+      .mockImplementation(
+        (input: {
+          fileIds: number[];
+          includeLinked: boolean;
+          instrumentId: string;
+          runId: string;
+        }) => {
+          if (input.runId !== "run-1") {
+            return missingRun(input);
+          }
+          const results: FileOutcome[] = input.fileIds.map((id) => {
+            if (id === 1) {
+              return {
+                ok: true,
+                id,
+                filename: "a.txt",
+                deletedAt: at,
+                deletedBy: "user-1",
+                deletedByToken: null,
+                alreadyApplied: false,
+              };
+            }
+            if (id === 3) {
+              return {
+                ok: true,
+                id,
+                filename: "c.txt",
+                deletedAt: at,
+                deletedBy: null,
+                deletedByToken: { id: "token-1", name: "Lab script" },
+                alreadyApplied: true,
+              };
+            }
+            if (id === 2) {
+              return {
+                ok: false,
+                id,
+                filename: "b.txt",
+                status: 409,
+                code: "CONFLICT",
+                message:
+                  "Cannot delete 'b.txt' while it is processing. Wait for processing to finish.",
+                details: { reason: "file_processing", status: "processing" },
+              };
+            }
+            return notFound(id);
+          });
+          return {
+            ok: true,
+            instrumentId: input.instrumentId,
+            runId: input.runId,
+            results,
+            linked: input.includeLinked
+              ? [
+                  {
+                    id: 10,
+                    filename: "a.mp4",
+                    relation: "video",
+                    deletedAt: at,
+                  },
+                ]
+              : [],
+            counts: {
+              deleted: results.filter((r) => r.ok && !r.alreadyApplied).length,
+              alreadyDeleted: results.filter((r) => r.ok && r.alreadyApplied)
+                .length,
+              failed: results.filter((r) => !r.ok).length,
+            },
+          };
+        }
+      ),
+    restoreRunFiles: vi
+      .fn()
+      .mockImplementation(
+        (input: {
+          fileIds: number[];
+          includeLinked: boolean;
+          instrumentId: string;
+          runId: string;
+        }) => {
+          if (input.runId !== "run-1") {
+            return missingRun(input);
+          }
+          const results: FileOutcome[] = input.fileIds.map((id) => {
+            if (id === 1) {
+              return { ok: true, id, filename: "a.txt", alreadyApplied: false };
+            }
+            if (id === 2) {
+              return {
+                ok: false,
+                id,
+                filename: "b.txt",
+                status: 409,
+                code: "CONFLICT",
+                message:
+                  "Cannot restore 'b.txt': another file in this run now uses its name or path. File 7 ('b.txt') uses it.",
+                details: {
+                  reason: "path_in_use",
+                  held_by: { id: 7, filename: "b.txt", relative_path: "b.txt" },
+                },
+              };
+            }
+            return notFound(id);
+          });
+          return {
+            ok: true,
+            instrumentId: input.instrumentId,
+            runId: input.runId,
+            results,
+            linked: input.includeLinked
+              ? [
+                  {
+                    ok: true,
+                    id: 10,
+                    filename: "a.mp4",
+                    alreadyApplied: false,
+                    relation: "video",
+                  },
+                  {
+                    ok: false,
+                    id: 11,
+                    filename: "a.jpg",
+                    status: 409,
+                    code: "CONFLICT",
+                    message: "Cannot restore 'a.jpg'",
+                    relation: "preview_image",
+                  },
+                ]
+              : [],
+            counts: {
+              restored: results.filter((r) => r.ok && !r.alreadyApplied).length,
+              alreadyRestored: results.filter((r) => r.ok && r.alreadyApplied)
+                .length,
+              failed: results.filter((r) => !r.ok).length,
+            },
+          };
+        }
+      ),
+  };
+});
+
+// Names the token behind a file's `deletedByToken`, as the database would.
+vi.mock("@/lib/api/file-deleters", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api/file-deleters")>()),
+  loadTokenRefs: vi.fn().mockImplementation((ids: (string | null)[]) => {
+    const found = new Map<string, { id: string; name: string }>();
+    for (const id of ids) {
+      if (id) {
+        found.set(id, { id, name: "Lab script" });
+      }
+    }
+    return found;
   }),
 }));
 
@@ -842,6 +1059,8 @@ describe("MCP Protocol (in-memory)", () => {
     "restore_run",
     "request_run_upload",
     "request_run_upload_all",
+    "delete_files",
+    "restore_files",
     "dismiss_file",
     "send_feedback",
     "update_watcher_config",
@@ -1018,7 +1237,7 @@ describe("MCP Protocol (in-memory)", () => {
 
   it("every registered tool advertises outputSchema", async () => {
     const { tools } = await client.listTools();
-    expect(tools).toHaveLength(50);
+    expect(tools).toHaveLength(52);
     for (const tool of tools) {
       const schema = tool.outputSchema as
         | { type?: string; oneOf?: unknown; anyOf?: unknown }
@@ -1084,12 +1303,28 @@ describe("MCP Protocol (in-memory)", () => {
 
   it("soft-delete / restore / dismiss tools are annotated idempotent", async () => {
     const { tools } = await client.listTools();
-    for (const name of ["delete_run", "restore_run", "dismiss_file"]) {
+    for (const name of [
+      "delete_run",
+      "restore_run",
+      "dismiss_file",
+      "delete_files",
+      "restore_files",
+    ]) {
       const tool = tools.find((t) => t.name === name);
       expect(tool?.annotations?.readOnlyHint, `${name} not read-only`).toBe(
         false
       );
       expect(tool?.annotations?.idempotentHint, `${name} idempotent`).toBe(
+        true
+      );
+    }
+  });
+
+  it("delete_files and restore_files are annotated destructive, so clients confirm them", async () => {
+    const { tools } = await client.listTools();
+    for (const name of ["delete_files", "restore_files"]) {
+      const tool = tools.find((t) => t.name === name);
+      expect(tool?.annotations?.destructiveHint, `${name} destructive`).toBe(
         true
       );
     }
@@ -1683,6 +1918,21 @@ describe("MCP Protocol (in-memory)", () => {
     expect(parsed.id).toBe(42);
   });
 
+  it("get_file returns a deleted file, saying when and by whom", async () => {
+    const result = await client.callTool({
+      name: "get_file",
+      arguments: { fileId: 43 },
+    });
+    expect(result.isError).toBeFalsy();
+    expectStructuredMatchesText(result);
+    expect(parseText(result.content)).toMatchObject({
+      id: 43,
+      deletedAt: "2025-01-02T00:00:00.000Z",
+      deletedBy: null,
+      deletedByToken: { id: "token-1", name: "Lab script" },
+    });
+  });
+
   it("get_file_download_url returns a presigned URL", async () => {
     const result = await client.callTool({
       name: "get_file_download_url",
@@ -1869,6 +2119,8 @@ describe("MCP Protocol (in-memory)", () => {
   });
 
   it("dismiss_file returns the soft-deleted file", async () => {
+    const { deleteFiles } = await import("@/lib/api/file-deletion");
+    vi.mocked(deleteFiles).mockClear();
     const result = await client.callTool({
       name: "dismiss_file",
       arguments: { fileId: 1 },
@@ -1883,6 +2135,379 @@ describe("MCP Protocol (in-memory)", () => {
     expect(parsed.id).toBe(1);
     expect(parsed.filename).toBe("a.txt");
     expect(parsed.alreadyApplied).toBe(false);
+    // One file, none of its linked files. The in-memory transport has no
+    // signed-in user, so no actor is recorded.
+    expect(deleteFiles).toHaveBeenCalledWith([1], null, {
+      includeLinked: false,
+    });
+  });
+
+  it("dismiss_file passes on why a file can't be deleted", async () => {
+    const result = await client.callTool({
+      name: "dismiss_file",
+      arguments: { fileId: 2 },
+    });
+    expect(result.isError).toBe(true);
+    const text = (result.content as Array<{ type: string; text: string }>)[0]
+      .text;
+    expect(text).toContain("Wait for processing to finish");
+  });
+
+  it("dismiss_file says uploaded files can be deleted too", async () => {
+    const { tools } = await client.listTools();
+    const description = tools.find(
+      (t) => t.name === "dismiss_file"
+    )?.description;
+    expect(description).toContain("whether or not it has been uploaded");
+    expect(description).not.toContain("cannot be dismissed");
+  });
+
+  it("dismiss_file says it is deprecated and names delete_files", async () => {
+    const { tools } = await client.listTools();
+    const dismiss = tools.find((t) => t.name === "dismiss_file");
+    expect(dismiss?.description).toMatch(/^Deprecated: use delete_files/);
+    expect(dismiss?.title).toContain("Deprecated");
+    // Nothing else says so.
+    for (const tool of tools.filter((t) => t.name !== "dismiss_file")) {
+      expect(tool.description, tool.name).not.toMatch(/^Deprecated/);
+    }
+  });
+
+  // ---- delete_files and restore_files ------------------------------------
+
+  interface FileResult {
+    alreadyApplied?: boolean;
+    deletedBy?: string | null;
+    deletedByToken?: { id: string; name: string } | null;
+    error?: {
+      code: string;
+      message: string;
+      details?: Record<string, unknown>;
+    };
+    filename: string | null;
+    id: number;
+    ok: boolean;
+    status?: number;
+  }
+
+  it("delete_files answers a result for each file, in the order given", async () => {
+    const { deleteRunFiles } = await import("@/lib/api/file-batch");
+    vi.mocked(deleteRunFiles).mockClear();
+    const result = await client.callTool({
+      name: "delete_files",
+      arguments: {
+        instrumentId: "test-plate-reader",
+        runId: "run-1",
+        fileIds: [1, 2, 3, 99],
+        includeLinked: true,
+      },
+    });
+
+    expect(result.isError).toBeFalsy();
+    expectStructuredMatchesText(result);
+    const parsed = parseText(result.content) as {
+      instrumentId: string;
+      runId: string;
+      results: FileResult[];
+      linked: { id: number; relation: string }[];
+      counts: Record<string, number>;
+    };
+    expect(parsed.instrumentId).toBe("test-plate-reader");
+    expect(parsed.runId).toBe("run-1");
+    expect(parsed.results.map((file) => file.id)).toEqual([1, 2, 3, 99]);
+    expect(parsed.results[0]).toMatchObject({
+      ok: true,
+      filename: "a.txt",
+      deletedBy: "user-1",
+      deletedByToken: null,
+      alreadyApplied: false,
+    });
+    // A refused file keeps its place and says why.
+    expect(parsed.results[1]).toMatchObject({
+      ok: false,
+      filename: "b.txt",
+      status: 409,
+      error: {
+        code: "CONFLICT",
+        message: expect.stringContaining("Wait for processing to finish"),
+        details: { reason: "file_processing", status: "processing" },
+      },
+    });
+    expect(parsed.results[2]).toMatchObject({
+      ok: true,
+      deletedBy: null,
+      deletedByToken: { id: "token-1", name: "Lab script" },
+      alreadyApplied: true,
+    });
+    expect(parsed.results[3]).toMatchObject({
+      ok: false,
+      filename: null,
+      status: 404,
+    });
+    expect(parsed.counts).toEqual({
+      deleted: 1,
+      alreadyDeleted: 1,
+      failed: 2,
+    });
+    expect(parsed.linked).toEqual([
+      expect.objectContaining({ id: 10, relation: "video" }),
+    ]);
+    // The in-memory transport has no signed-in user, so no actor is recorded.
+    expect(deleteRunFiles).toHaveBeenCalledWith({
+      instrumentId: "test-plate-reader",
+      runId: "run-1",
+      fileIds: [1, 2, 3, 99],
+      includeLinked: true,
+      actor: null,
+    });
+  });
+
+  it("delete_files leaves the linked files alone unless includeLinked is true, like the REST route", async () => {
+    const { deleteRunFiles } = await import("@/lib/api/file-batch");
+    vi.mocked(deleteRunFiles).mockClear();
+    const result = await client.callTool({
+      name: "delete_files",
+      arguments: {
+        instrumentId: "test-plate-reader",
+        runId: "run-1",
+        fileIds: [1],
+      },
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect((parseText(result.content) as { linked: unknown[] }).linked).toEqual(
+      []
+    );
+    expect(deleteRunFiles).toHaveBeenCalledWith(
+      expect.objectContaining({ includeLinked: false })
+    );
+  });
+
+  it("delete_files fails for a run that doesn't exist", async () => {
+    const result = await client.callTool({
+      name: "delete_files",
+      arguments: {
+        instrumentId: "test-plate-reader",
+        runId: "no-such-run",
+        fileIds: [1],
+      },
+    });
+
+    expect(result.isError).toBe(true);
+    const text = (result.content as Array<{ type: string; text: string }>)[0]
+      .text;
+    expect(text).toContain("Run 'no-such-run' not found");
+  });
+
+  it("delete_files and restore_files take 1 to 100 file IDs", async () => {
+    const { tools } = await client.listTools();
+    for (const name of ["delete_files", "restore_files"]) {
+      const fileIds = tools.find((t) => t.name === name)?.inputSchema.properties
+        ?.fileIds as { minItems?: number; maxItems?: number };
+      expect(fileIds, name).toMatchObject({ minItems: 1, maxItems: 100 });
+
+      for (const ids of [[], Array.from({ length: 101 }, (_, i) => i + 1)]) {
+        const result = await client.callTool({
+          name,
+          arguments: {
+            instrumentId: "test-plate-reader",
+            runId: "run-1",
+            fileIds: ids,
+          },
+        });
+        expect(result.isError, `${name} with ${ids.length} IDs`).toBe(true);
+      }
+    }
+  });
+
+  it("delete_files and restore_files take no user ID, because the signed-in user acts", async () => {
+    const { tools } = await client.listTools();
+    for (const name of ["delete_files", "restore_files"]) {
+      expect(
+        tools.find((t) => t.name === name)?.inputSchema.properties,
+        name
+      ).not.toHaveProperty("userId");
+    }
+  });
+
+  it("restore_files answers a result for each file, with a refused file's holder named", async () => {
+    const { restoreRunFiles } = await import("@/lib/api/file-batch");
+    vi.mocked(restoreRunFiles).mockClear();
+    const result = await client.callTool({
+      name: "restore_files",
+      arguments: {
+        instrumentId: "test-plate-reader",
+        runId: "run-1",
+        fileIds: [1, 2],
+        includeLinked: true,
+      },
+    });
+
+    expect(result.isError).toBeFalsy();
+    expectStructuredMatchesText(result);
+    const parsed = parseText(result.content) as {
+      results: FileResult[];
+      linked: (FileResult & { relation: string })[];
+      counts: Record<string, number>;
+    };
+    expect(parsed.results[0]).toMatchObject({
+      ok: true,
+      id: 1,
+      alreadyApplied: false,
+    });
+    expect(parsed.results[1]).toMatchObject({
+      ok: false,
+      id: 2,
+      status: 409,
+      error: {
+        code: "CONFLICT",
+        details: {
+          reason: "path_in_use",
+          held_by: { id: 7, filename: "b.txt" },
+        },
+      },
+    });
+    // Each linked file has its own result, and one can be refused.
+    expect(parsed.linked.map((file) => [file.relation, file.ok])).toEqual([
+      ["video", true],
+      ["preview_image", false],
+    ]);
+    expect(parsed.counts).toEqual({
+      restored: 1,
+      alreadyRestored: 0,
+      failed: 1,
+    });
+    expect(restoreRunFiles).toHaveBeenCalledWith({
+      instrumentId: "test-plate-reader",
+      runId: "run-1",
+      fileIds: [1, 2],
+      includeLinked: true,
+      actor: null,
+    });
+  });
+
+  it("restore_files leaves the linked files alone unless includeLinked is true, like the REST route", async () => {
+    const { restoreRunFiles } = await import("@/lib/api/file-batch");
+    vi.mocked(restoreRunFiles).mockClear();
+    const result = await client.callTool({
+      name: "restore_files",
+      arguments: {
+        instrumentId: "test-plate-reader",
+        runId: "run-1",
+        fileIds: [1],
+      },
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect((parseText(result.content) as { linked: unknown[] }).linked).toEqual(
+      []
+    );
+    expect(restoreRunFiles).toHaveBeenCalledWith(
+      expect.objectContaining({ includeLinked: false })
+    );
+  });
+
+  it("delete_files and restore_files tell the assistant to confirm before it includes linked files", async () => {
+    const { tools } = await client.listTools();
+    for (const name of ["delete_files", "restore_files"]) {
+      const tool = tools.find((t) => t.name === name);
+      expect(tool?.description, name).toContain(
+        "Before you pass includeLinked: true, tell the user"
+      );
+      const includeLinked = tool?.inputSchema.properties?.includeLinked as {
+        description?: string;
+      };
+      expect(includeLinked.description, name).toContain("Default false");
+    }
+  });
+
+  it("restore_files fails for a run that doesn't exist", async () => {
+    const result = await client.callTool({
+      name: "restore_files",
+      arguments: {
+        instrumentId: "test-plate-reader",
+        runId: "no-such-run",
+        fileIds: [1],
+      },
+    });
+
+    expect(result.isError).toBe(true);
+  });
+
+  it("list_run_files leaves deleted files out unless includeDeleted is true", async () => {
+    const { getRunFilesPage } = await import("@/lib/api/instrument-runs");
+    vi.mocked(getRunFilesPage).mockClear();
+    await client.callTool({
+      name: "list_run_files",
+      arguments: { instrumentId: "test-plate-reader", runId: "run-1" },
+    });
+    await client.callTool({
+      name: "list_run_files",
+      arguments: {
+        instrumentId: "test-plate-reader",
+        runId: "run-1",
+        includeDeleted: true,
+      },
+    });
+
+    expect(vi.mocked(getRunFilesPage).mock.calls.map(([, o]) => o)).toEqual([
+      expect.objectContaining({ includeDeleted: false }),
+      expect.objectContaining({ includeDeleted: true }),
+    ]);
+  });
+
+  it("list_run_files says when each deleted file was deleted and by whom", async () => {
+    const { getRunFilesPage } = await import("@/lib/api/instrument-runs");
+    const file = (id: number, deleted: Record<string, unknown>) =>
+      ({
+        id,
+        filename: `f${id}.csv`,
+        relativePath: `f${id}.csv`,
+        category: "raw",
+        status: "uploaded",
+        sizeBytes: 1,
+        contentType: "text/csv",
+        errorMessage: null,
+        uploadFailureReason: null,
+        createdAt: new Date("2026-01-01T00:00:00Z"),
+        uploadedAt: new Date("2026-01-01T00:00:00Z"),
+        processedAt: null,
+        deletedAt: null,
+        deletedBy: null,
+        deletedByToken: null,
+        ...deleted,
+      }) as never;
+    const deletedAt = new Date("2026-01-02T00:00:00Z");
+    vi.mocked(getRunFilesPage).mockResolvedValueOnce({
+      data: [
+        file(1, {}),
+        file(2, { deletedAt, deletedBy: "user-1" }),
+        file(3, { deletedAt, deletedByToken: "token-1" }),
+      ],
+      pagination: { page: 1, per_page: 50, total: 3, total_pages: 1 },
+    });
+
+    const result = await client.callTool({
+      name: "list_run_files",
+      arguments: {
+        instrumentId: "test-plate-reader",
+        runId: "run-1",
+        includeDeleted: true,
+      },
+    });
+
+    expect(result.isError).toBeFalsy();
+    expectStructuredMatchesText(result);
+    const { data } = parseText(result.content) as {
+      data: Record<string, unknown>[];
+    };
+    expect(
+      data.map((f) => [f.deletedAt, f.deletedBy, f.deletedByToken])
+    ).toEqual([
+      [null, null, null],
+      ["2026-01-02T00:00:00.000Z", "user-1", null],
+      ["2026-01-02T00:00:00.000Z", null, { id: "token-1", name: "Lab script" }],
+    ]);
   });
 
   it("get_watcher_heartbeats returns heartbeat history", async () => {
@@ -2033,6 +2658,9 @@ describe("MCP Protocol (in-memory)", () => {
           createdAt: new Date("2026-01-01T00:00:00Z"),
           uploadedAt: new Date("2026-01-01T00:00:00Z"),
           processedAt: null,
+          deletedAt: null,
+          deletedBy: null,
+          deletedByToken: null,
           // Fields below should be stripped from the MCP payload.
           s3Bucket: "secret-bucket",
           s3Key: "secret/key",
@@ -2057,6 +2685,7 @@ describe("MCP Protocol (in-memory)", () => {
     expect(getRunFilesPage).toHaveBeenCalledWith(MOCK_RUN_UUID_1, {
       page: 2,
       perPage: 10,
+      includeDeleted: false,
       statuses: ["detected", "upload_requested"],
     });
     const payload = parseText(result.content) as {
@@ -2596,7 +3225,7 @@ describe("MCP Protocol (in-memory)", () => {
     const names = docs.map((r) => r.name);
     expect(new Set(names).size).toBe(names.length);
     expect(names).toEqual(
-      expect.arrayContaining(["Overview", "Overview (api)", "Overview (mcp)"])
+      expect.arrayContaining(["Overview", "API overview", "MCP overview"])
     );
   });
 
@@ -2803,7 +3432,7 @@ describe("MCP download analytics (signed in)", () => {
   const SIGNED_IN: AuthInfo = {
     token: "token",
     clientId: "client-1",
-    scopes: ["read"],
+    scopes: ["read", "write"],
     extra: { userId: "user-1" },
   };
   const BUILDING = {
@@ -2894,6 +3523,47 @@ describe("MCP download analytics (signed in)", () => {
       client: "Claude",
       category: "raw",
     });
+  });
+
+  it("records the signed-in user as the one who deleted a file", async () => {
+    const { deleteFiles } = await import("@/lib/api/file-deletion");
+    vi.mocked(deleteFiles).mockClear();
+    const result = await client.callTool({
+      name: "dismiss_file",
+      arguments: { fileId: 1 },
+    });
+    expect(result.isError).toBeFalsy();
+    expect(deleteFiles).toHaveBeenCalledWith(
+      [1],
+      { kind: "user", userId: "user-1" },
+      { includeLinked: false }
+    );
+  });
+
+  it("passes the signed-in user to delete_files and restore_files as the one who acts", async () => {
+    const { deleteRunFiles, restoreRunFiles } = await import(
+      "@/lib/api/file-batch"
+    );
+    vi.mocked(deleteRunFiles).mockClear();
+    vi.mocked(restoreRunFiles).mockClear();
+    const args = {
+      instrumentId: "test-plate-reader",
+      runId: "run-1",
+      fileIds: [1],
+      // A made-up ID in the arguments is never used.
+      userId: "someone-else",
+    };
+
+    await client.callTool({ name: "delete_files", arguments: args });
+    await client.callTool({ name: "restore_files", arguments: args });
+
+    const actor = { kind: "user", userId: "user-1" };
+    expect(deleteRunFiles).toHaveBeenCalledWith(
+      expect.objectContaining({ actor })
+    );
+    expect(restoreRunFiles).toHaveBeenCalledWith(
+      expect.objectContaining({ actor })
+    );
   });
 
   it("records no download when the tool hands out no link", async () => {

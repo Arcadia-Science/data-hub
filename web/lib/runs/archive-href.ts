@@ -1,6 +1,5 @@
 interface ArchiveHrefOptions {
   categories?: readonly string[];
-  dismissed?: boolean;
   // Narrows the archive to these files. The route gives these priority over
   // the filter options below.
   fileIds?: readonly number[];
@@ -10,9 +9,10 @@ interface ArchiveHrefOptions {
 
 /**
  * URL of the run's zip download. With no options it covers every downloadable
- * file in the run. The route resolves `search`, `category`, `status`, and
- * `dismissed` to the matching files on the server, so the zip honors the files
- * table's filters across every page. Lists use commas, like the table's URL.
+ * file in the run. The route resolves `search`, `category`, and `status` to
+ * the matching files on the server, so the zip honors the files table's filters
+ * across every page. A zip never holds a deleted file, so there is no option to
+ * include them. Lists use commas, like the table's URL.
  */
 export function buildArchiveHref(
   instrumentId: string,
@@ -32,9 +32,6 @@ export function buildArchiveHref(
     }
     if (options.statuses && options.statuses.length > 0) {
       params.set("status", options.statuses.join(","));
-    }
-    if (options.dismissed) {
-      params.set("dismissed", "true");
     }
   } else {
     params.set("file_ids", options.fileIds.join(","));

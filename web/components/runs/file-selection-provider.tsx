@@ -5,6 +5,12 @@ import { createContext, use, useCallback, useMemo, useState } from "react";
 import { SelectionNotice } from "@/components/selection-notice";
 import type { RunFileRow } from "@/lib/api/instrument-runs";
 import type { InstrumentType } from "@/lib/db/schema";
+import { canDeleteFile } from "@/lib/runs/deletable-files";
+import {
+  type FileBarState,
+  type FileCaps,
+  fileBarState,
+} from "@/lib/runs/file-bar-actions";
 import {
   IN_S3_FILE_STATUSES,
   isRequestableFileStatus,
@@ -16,50 +22,60 @@ import { isFilesScopeParam, selectionScopeKey } from "@/lib/selection-scope";
 // File selection provider for the run files table. Mirrors RunSelectionProvider
 // in shape (state / actions / meta) so the bulk action bar can derive a
 // rollup from per-row capabilities and only surface actions every selected
-// file supports — pending and uploaded files share a selection but their
-// action sets are disjoint, so a mixed selection collapses to "Clear" only.
+// file supports. A selection of pending and uploaded files can still be
+// deleted, since both can, but it offers nothing else, and a selection that
+// mixes deleted files with active ones shares no action, so it collapses to
+// "Clear" only.
 // ---------------------------------------------------------------------------
 
 const DOWNLOADABLE_STATUSES = new Set<string>(IN_S3_FILE_STATUSES);
 
-export interface FileCaps {
-  dismiss: boolean;
-  download: boolean;
-  reprocess: boolean;
-  upload: boolean;
-}
-
 export interface FileRef {
   caps: FileCaps;
+  // The file is deleted. It can only be restored.
+  deleted: boolean;
   filename: string;
   id: number;
+  relativePath: string | null;
+  sizeBytes: number | null;
 }
 
-// Returns null for rows that should not participate in selection at all
-// (dismissed files, transient `upload_requested` rows). Caller treats null
-// the same as "no checkbox in this row".
+// Every row can be selected. A deleted file offers Restore and nothing else,
+// including download: a selection of deleted files is for bringing them back.
+// Each row reads the actions it supports from its own state.
 export function buildFileRef(
   file: RunFileRow,
   instrumentType: InstrumentType
-): FileRef | null {
-  if (file.deletedAt !== null) {
-    return null;
-  }
-  // `detected` and `upload_failed` files are on the PC and can be requested.
-  const isRequestable = isRequestableFileStatus(file.status);
-  const canDownload = DOWNLOADABLE_STATUSES.has(file.status);
-  const canReprocess = canReprocessFile(file, instrumentType);
-  if (!(isRequestable || canDownload)) {
-    return null;
-  }
-  return {
+): FileRef {
+  const base = {
     id: file.id,
     filename: file.filename,
+    relativePath: file.relativePath,
+    sizeBytes: file.sizeBytes,
+  };
+  if (file.deletedAt !== null) {
+    return {
+      ...base,
+      deleted: true,
+      caps: {
+        upload: false,
+        download: false,
+        reprocess: false,
+        delete: false,
+        restore: true,
+      },
+    };
+  }
+  return {
+    ...base,
+    deleted: false,
     caps: {
-      upload: isRequestable,
-      dismiss: isRequestable,
-      reprocess: canReprocess,
-      download: canDownload,
+      // `detected` and `upload_failed` files are on the PC and can be requested.
+      upload: isRequestableFileStatus(file.status),
+      download: DOWNLOADABLE_STATUSES.has(file.status),
+      reprocess: canReprocessFile(file, instrumentType),
+      delete: canDeleteFile(file),
+      restore: false,
     },
   };
 }
@@ -71,11 +87,12 @@ export interface PickedFile {
 }
 
 // Files on the current page take their actions from the live row. A file whose
-// status moved on gets new actions, or drops out when it can no longer be
-// selected. A file picked on this page whose row is gone has left the results
-// (it finished uploading under a "Pending" filter, or was dismissed elsewhere),
-// so it drops out too. Files picked on other pages keep the actions they had
-// when picked, because their rows are not loaded.
+// status moved on gets new actions, and one that was deleted or restored
+// elsewhere changes between Delete and Restore. A file picked on this page
+// whose row is gone has left the results (it finished uploading under a
+// "Pending" filter, or was deleted elsewhere while deleted files are hidden),
+// so it drops out. Files picked on other pages keep the actions they had when
+// picked, because their rows are not loaded.
 export function refreshFileRefs(
   picked: ReadonlyMap<number, PickedFile>,
   files: RunFileRow[],
@@ -92,10 +109,7 @@ export function refreshFileRefs(
       }
       continue;
     }
-    const ref = buildFileRef(row, instrumentType);
-    if (ref !== null) {
-      next.set(id, { page: currentPage, ref });
-    }
+    next.set(id, { page: currentPage, ref: buildFileRef(row, instrumentType) });
   }
   return next;
 }
@@ -121,10 +135,8 @@ interface FileSelectionContextValue {
     isSelected: (id: number) => boolean;
     allSelected: (refs: FileRef[]) => boolean;
     someSelected: (refs: FileRef[]) => boolean;
-    allCanUpload: boolean;
-    allCanDismiss: boolean;
-    allCanReprocess: boolean;
-    allCanDownload: boolean;
+    // The actions the bar offers, and what it calls the selected files.
+    bar: FileBarState;
   };
   state: { selected: ReadonlyMap<number, FileRef> };
 }
@@ -154,7 +166,7 @@ export function FileSelectionProvider({
   }));
 
   // A new search, filter, or sort lists different files, so picks made on the old
-  // list could be off screen. Dropping them keeps Dismiss and Reprocess away from
+  // list could be off screen. Dropping them keeps Delete and Reprocess away from
   // files the user is not looking at. Another page of the same results keeps them.
   if (store.scopeKey !== scopeKey) {
     setStore({
@@ -252,10 +264,7 @@ export function FileSelectionProvider({
         someSelected: (visible) =>
           visible.some((r) => selected.has(r.id)) &&
           !visible.every((r) => selected.has(r.id)),
-        allCanUpload: count > 0 && refs.every((r) => r.caps.upload),
-        allCanDismiss: count > 0 && refs.every((r) => r.caps.dismiss),
-        allCanReprocess: count > 0 && refs.every((r) => r.caps.reprocess),
-        allCanDownload: count > 0 && refs.every((r) => r.caps.download),
+        bar: fileBarState(refs),
       },
     };
   }, [selected, toggle, selectMany, clear]);

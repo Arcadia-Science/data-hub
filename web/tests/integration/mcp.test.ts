@@ -14,7 +14,7 @@ import {
 } from "@/tests/integration/helpers";
 
 /** Bump when adding/removing an MCP tool so the change shows up in review. */
-const EXPECTED_MCP_TOOL_COUNT = 50;
+const EXPECTED_MCP_TOOL_COUNT = 52;
 
 function jsonRpc(method: string, params: unknown = {}, id = 1) {
   return {
@@ -198,6 +198,8 @@ describe("MCP Server (HTTP)", () => {
     expect(toolNames).toContain("cancel_queued_files");
     expect(toolNames).toContain("delete_run");
     expect(toolNames).toContain("dismiss_file");
+    expect(toolNames).toContain("delete_files");
+    expect(toolNames).toContain("restore_files");
     expect(toolNames).toContain("get_run_report");
     expect(toolNames).toContain("get_watcher");
     expect(toolNames).toContain("list_watcher_events");

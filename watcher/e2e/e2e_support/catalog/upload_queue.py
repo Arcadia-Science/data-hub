@@ -183,8 +183,10 @@ TRANSITIONS: tuple[Transition, ...] = (
     ),
     covered(
         MACHINE,
-        "queue.uploaded_file->dismiss_refused",
-        "A file that is already uploaded cannot be dismissed: the route answers 409.",
+        "queue.uploaded_file->deleted_object_kept",
+        "Deleting a file that is already uploaded soft-deletes it: the route answers 200 and "
+        "sets `deleted_at`, the S3 object stays as it was, and a re-scan of its folder adds no "
+        "row.",
     ),
     covered(
         MACHINE,

@@ -419,6 +419,69 @@ class TestProcessFileEncodesWhenBothPresent:
         assert metadata["frames"] == 4
         assert _completed_file_ids(client) == [10, SIDECAR_ID]
 
+    def test_the_mp4_and_the_poster_are_linked_to_their_stack(self, tmp_path: Path) -> None:
+        client = MagicMock()
+        _stub_run(client, "run.json", "stack.tif")
+        client.ensure_run.return_value = _run_response()
+        client.create_file.side_effect = [
+            _file_response(SIDECAR_ID, "run.json"),
+            _file_response(10, "stack.tif"),
+            _file_response(11, "stack.mp4", category="processed"),
+            _file_response(12, "stack.jpg", category="processed"),
+        ]
+
+        with _patched_process(
+            tmp_path, client, list_objects=["s3://raw/dishcam/run-xyz/stack.tif"]
+        ) as (process_file, _):
+            process_file("dishcam", "run-xyz", "run.json")
+
+        created = {
+            call.kwargs["filename"]: call.kwargs for call in client.create_file.call_args_list
+        }
+        # The stack is file 10. Its outputs name it, and the sidecar has no source.
+        assert created["stack.mp4"]["source_file_id"] == 10
+        assert created["stack.mp4"]["content_type"] == "video/mp4"
+        assert created["stack.jpg"]["source_file_id"] == 10
+        assert created["stack.jpg"]["content_type"] == "image/jpeg"
+        assert "source_file_id" not in created["stack.tif"]
+        assert "source_file_id" not in created["run.json"]
+
+    def test_a_stack_deleted_before_it_encodes_stops_without_saving_outputs(
+        self, tmp_path: Path
+    ) -> None:
+        from data_hub_lambda.api_client import FileDeletedError
+
+        client = MagicMock()
+        _stub_run(client, "run.json", "stack.tif")
+        client.ensure_run.return_value = _run_response()
+        client.create_file.side_effect = [
+            _file_response(SIDECAR_ID, "run.json"),
+            _file_response(10, "stack.tif"),
+        ]
+
+        def _update(file_id: int, **kwargs: Any) -> None:
+            if file_id == 10 and kwargs.get("status") == "processing":
+                raise FileDeletedError("Cannot update a soft-deleted file", status_code=409)
+
+        client.update_file.side_effect = _update
+
+        with (
+            _patched_process(
+                tmp_path, client, list_objects=["s3://raw/dishcam/run-xyz/stack.tif"]
+            ) as (
+                process_file,
+                encode,
+            ),
+            pytest.raises(FileDeletedError),
+        ):
+            process_file("dishcam", "run-xyz", "stack.tif")
+
+        encode.assert_not_called()
+        assert [call.kwargs["filename"] for call in client.create_file.call_args_list] == [
+            "run.json",
+            "stack.tif",
+        ]
+
     def test_processing_sidecar_is_completed_after_encode(self, tmp_path: Path) -> None:
         client = MagicMock()
         _stub_run(client, "run.json", "stack.tif")

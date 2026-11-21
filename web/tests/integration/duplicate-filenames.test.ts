@@ -1,8 +1,12 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { taggedFilename } from "@/lib/api/run-file-identity";
 import { WATCHER_VERSION_HEADER } from "@/lib/api/watcher-compat";
-import { files as filesTable, instruments } from "@/lib/db/schema";
+import {
+  files as filesTable,
+  instrumentRuns,
+  instruments,
+} from "@/lib/db/schema";
 import {
   api,
   closeTestDb,
@@ -323,7 +327,7 @@ describe("same-named files from different folders", () => {
 
   describe("a file at the path of a dismissed file", () => {
     interface RunFile {
-      deleted_at: string | null;
+      deleted_at: Date | null;
       filename: string;
       id: number;
       relative_path: string | null;
@@ -348,13 +352,31 @@ describe("same-named files from different folders", () => {
       };
     }
 
+    // Every file of the run, deleted ones included. The run detail route
+    // leaves deleted files out, so this reads the table.
     async function runFiles(runId: string): Promise<RunFile[]> {
-      const detail = await api(
-        `/api/v1/instruments/${instrumentId}/runs/${runId}`,
-        { token }
-      );
-      const body = await detail.json();
-      return body.files;
+      const rows = await getTestDb()
+        .select({
+          id: filesTable.id,
+          filename: filesTable.filename,
+          relative_path: filesTable.relativePath,
+          size_bytes: filesTable.sizeBytes,
+          status: filesTable.status,
+          deleted_at: filesTable.deletedAt,
+        })
+        .from(filesTable)
+        .innerJoin(
+          instrumentRuns,
+          eq(instrumentRuns.id, filesTable.instrumentRunId)
+        )
+        .where(
+          and(
+            eq(instrumentRuns.instrumentId, instrumentId),
+            eq(instrumentRuns.runId, runId)
+          )
+        )
+        .orderBy(filesTable.createdAt, filesTable.id);
+      return rows;
     }
 
     async function createRunWith(
@@ -600,6 +622,9 @@ describe("same-named files from different folders", () => {
 
       const upload = await requestUpload(runId, reported(1));
       expect(upload.status).toBe(409);
+      expect((await upload.json()).error.message).toContain(
+        "A deleted file may already use that path."
+      );
       const rows = await runFiles(runId);
       expect(rows).toHaveLength(1);
       expect(rows[0]?.deleted_at).toBeTruthy();
@@ -728,14 +753,17 @@ describe("same-named files from different folders", () => {
       expect(await runFiles(runId)).toHaveLength(1);
     });
 
-    it("does not dismiss a file that reaches S3 while the dismiss is waiting", async () => {
+    // A file that reaches S3 while its delete waits is still deleted, and it
+    // keeps the S3 key it got, because the key is what holds its name.
+    it("deletes a file that reaches S3 while the delete is waiting, and keeps its key", async () => {
       const runId = "dismissed-path-dismiss-race";
       await createRunWith(runId, reported(1));
       const [row] = await runFiles(runId);
       const db = getTestDb();
+      const s3Key = `${instrumentId}/${runId}/sample.tif`;
 
-      // Hold the row so the dismiss, which has already read it as `detected`,
-      // waits at its update. Meanwhile the processor adopts the file.
+      // Hold the row so the delete waits for it. Meanwhile the processor
+      // adopts the file.
       let dismissal: Promise<Response> | undefined;
       await db.transaction(async (tx) => {
         await tx
@@ -744,44 +772,54 @@ describe("same-named files from different folders", () => {
           .where(eq(filesTable.id, row.id))
           .for("update");
         dismissal = api(`/api/v1/files/${row.id}`, { method: "DELETE", token });
-        await waitForBlockedUpdate();
+        await waitForBlockedStatement();
         await tx
           .update(filesTable)
           .set({
             status: "uploaded",
             s3Bucket: "test-bucket",
-            s3Key: `${instrumentId}/${runId}/sample.tif`,
+            s3Key,
             uploadedAt: new Date(),
           })
           .where(eq(filesTable.id, row.id));
       });
 
-      expect((await dismissal)?.status).toBe(409);
+      expect((await dismissal)?.status).toBe(200);
       const [after] = await db
         .select({
           deletedAt: filesTable.deletedAt,
+          s3Key: filesTable.s3Key,
           status: filesTable.status,
         })
         .from(filesTable)
         .where(eq(filesTable.id, row.id));
-      expect(after).toEqual({ deletedAt: null, status: "uploaded" });
+      expect(after.deletedAt).not.toBeNull();
+      expect(after.status).toBe("uploaded");
+      expect(after.s3Key).toBe(s3Key);
+
+      // The key holds the name, so a different file at the path is tagged.
+      await report(runId, reported(900, laterCreatedAt));
+      expect((await runFiles(runId)).map((file) => file.filename)).toEqual([
+        "sample.tif",
+        taggedFilename("sample.tif", relativePath),
+      ]);
     });
 
-    // True once a statement that updates `files` waits for a row lock.
-    async function waitForBlockedUpdate() {
+    // True once a statement on `files` waits for a row lock.
+    async function waitForBlockedStatement() {
       for (let attempt = 0; attempt < 100; attempt++) {
         const waiting = await getTestDb().execute(
           sql`select 1 from pg_stat_activity
               where datname = current_database()
                 and wait_event_type = 'Lock'
-                and query ilike 'update "files"%'`
+                and query ilike '%"files"%'`
         );
         if (waiting.rows.length > 0) {
           return;
         }
         await new Promise((resolve) => setTimeout(resolve, 50));
       }
-      throw new Error("The dismiss never waited for the row lock");
+      throw new Error("The delete never waited for the row lock");
     }
 
     describe("for a watcher older than 1.1.0", () => {

@@ -66,7 +66,9 @@ export function BrowserFrame({
 }
 
 // Both themes render, and CSS shows the one that matches. Lazy loading skips
-// the hidden image, so a reader downloads one of the two.
+// the hidden image, so a reader downloads one of the two. The theme classes sit
+// on a wrapper, because `DocsImage` wraps its image in the zoom's own box, which
+// would otherwise stay on the page for the hidden theme.
 function ThemedImage({
   alt,
   entry,
@@ -80,19 +82,17 @@ function ThemedImage({
 }) {
   return (
     <>
-      <DocsImage
-        alt={alt}
-        className="dark:hidden"
-        preload={preload}
-        sizes={sizes}
-        src={entry.light}
-      />
-      <DocsImage
-        alt={alt}
-        className="hidden dark:block"
-        sizes={sizes}
-        src={entry.dark}
-      />
+      <span className="block dark:hidden">
+        <DocsImage
+          alt={alt}
+          preload={preload}
+          sizes={sizes}
+          src={entry.light}
+        />
+      </span>
+      <span className="hidden dark:block">
+        <DocsImage alt={alt} sizes={sizes} src={entry.dark} />
+      </span>
     </>
   );
 }
@@ -101,15 +101,32 @@ export function Screenshot({
   alt,
   className,
   entry,
+  frameless,
   preload,
   sizes,
 }: {
   alt: string;
   className?: string;
   entry: ScreenshotEntry;
+  // Drops the browser title bar from a window screenshot, for a page such as
+  // the home page that shows the app on its own.
+  frameless?: boolean;
   preload?: boolean;
   sizes?: string;
 }) {
+  if (entry.kind === "window" && frameless) {
+    return (
+      <span
+        className={cn(
+          "not-prose block overflow-hidden rounded-xl border bg-fd-card shadow-sm",
+          className
+        )}
+      >
+        <ThemedImage alt={alt} entry={entry} preload={preload} sizes={sizes} />
+      </span>
+    );
+  }
+
   if (entry.kind === "window") {
     return (
       <BrowserFrame address={entry.address} className={className}>

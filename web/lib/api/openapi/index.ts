@@ -9,9 +9,11 @@ export { archiveJobDetail, patchArchiveJobBody } from "./schemas/archive";
 export { watcherStatusSchema } from "./schemas/common";
 export {
   createFileBody,
+  fileActionBody,
+  fileDeleted,
   fileDetail,
-  fileDismissed,
   fileReprocessed,
+  fileRestored,
   multipartAbortBody,
   multipartAbortResponse,
   multipartCompleteBody,
@@ -19,6 +21,9 @@ export {
   multipartPartUrlsBody,
   multipartPartUrlsResponse,
   patchFileBody,
+  runFilesDeleted,
+  runFilesLinked,
+  runFilesRestored,
 } from "./schemas/files";
 export {
   createInstrumentBody,

@@ -13,6 +13,7 @@ import { after } from "next/server";
 import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
 import { touchRuns } from "@/lib/api/touch-runs";
 import { db } from "@/lib/db";
+import { hasPgErrorCode, LOCK_NOT_AVAILABLE } from "@/lib/db/pg-error";
 import { files, instrumentRuns, instruments } from "@/lib/db/schema";
 import { isProcessableInstrumentType } from "@/lib/instruments/processable-types";
 import { hasInvokeCredentials, signLambdaInvoke } from "@/lib/lambda";
@@ -446,29 +447,6 @@ export const DISPATCH_LOCK_NAME = "data-hub:reprocess-queue-dispatch";
 // reprocess-queue cron starts the files on its next run.
 const DISPATCH_LOCK_TIMEOUT = "5s";
 
-// The SQLSTATE that Postgres raises when `lock_timeout` runs out.
-const LOCK_NOT_AVAILABLE = "55P03";
-
-// `pg` puts the SQLSTATE on `code`. Drizzle wraps the `pg` error as the
-// `cause` of its own, so look down the chain.
-function hasPgErrorCode(err: unknown, code: string): boolean {
-  let current: unknown = err;
-  for (let depth = 0; depth < 5; depth += 1) {
-    if (typeof current !== "object" || current === null) {
-      return false;
-    }
-    const { code: found, cause } = current as {
-      code?: unknown;
-      cause?: unknown;
-    };
-    if (found === code) {
-      return true;
-    }
-    current = cause;
-  }
-  return false;
-}
-
 interface StartedFile {
   // The ID that this dispatch gave the start (`files.dispatch_id`). Updates to
   // the file match on it, so they only apply while this start is the current
@@ -755,6 +733,10 @@ async function invokeLambdaForFile(
 // The timestamp cannot do this job. The Lambda's own first update,
 // `PATCH status: "processing"`, moves `processing_started_at` while this start
 // is still the current one. That update leaves `dispatch_id` alone.
+//
+// There is no `deleted_at` check here on purpose. Both callers run within
+// seconds of the start, and `deleteFiles` refuses a processing file until it is
+// stalled, so a file that matches the ID and `processing` is still active.
 function stillThisStart(file: StartedFile) {
   return and(
     eq(files.id, file.id),

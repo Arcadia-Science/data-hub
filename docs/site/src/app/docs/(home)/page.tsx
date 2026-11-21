@@ -40,9 +40,9 @@ const features = [
     icon: Rocket,
   },
   {
-    title: "Browse and analyze runs",
+    title: "Browse runs",
     description:
-      "Find runs, inspect processed results, claim work, download files, and leave lab notes.",
+      "Find runs, check processed results, claim your work, download files, and leave lab notes.",
     audience: "Everyone",
     href: "/docs/browse-runs",
     icon: LayoutDashboard,
@@ -50,7 +50,7 @@ const features = [
   {
     title: "Instrument data preprocessing",
     description:
-      "What each supported instrument's processor extracts and shows on run detail.",
+      "What each supported instrument's processor extracts and shows on the run page.",
     audience: "Everyone",
     href: "/docs/instrument-preprocessing",
     icon: FlaskConical,
@@ -78,19 +78,19 @@ const webAppHighlights = [
   "Filter by instrument, measurement type, date, or who ran it",
   "Read plate maps, kinetic traces, and images without downloading anything",
   "Claim a run to put your name on it, and leave notes in its comment thread",
-  "Download one file, or the whole run as a ZIP",
+  "Download one file, or the whole run as a zip",
 ] as const;
 
 const apiHighlights = [
-  "Authenticate with a token you create in the app, scoped and revocable",
+  "Authenticate with a token an admin creates in the app, limited to the scopes it needs",
   "List instruments, runs, and files, and filter runs the way the app does",
-  "Pull instrument runs as ZIP archives",
+  "Download whole runs as zip archives",
 ] as const;
 
 const mcpHighlights = [
   "Connect Claude Code, Claude Desktop, or Cursor by pasting one URL",
   "Ask which runs failed last week, then pull the files you need",
-  "Sign in from the client, so the agent acts with your own permissions",
+  "Sign in from the client, so the assistant acts with your own permissions",
 ] as const;
 
 const downloadLatestRunCode = `import time, requests
@@ -146,16 +146,17 @@ function HighlightList({ items }: { items: readonly string[] }) {
 export default function HomePage() {
   return (
     <main className="flex flex-1 flex-col">
-      <section className="mx-auto flex w-full max-w-348 flex-col items-center gap-8 px-4 py-16 lg:flex-row lg:items-center lg:gap-12 lg:py-12">
+      <section className="mx-auto flex w-full max-w-348 flex-col items-center gap-8 px-6 py-16 sm:px-8 lg:flex-row lg:items-center lg:gap-12 lg:py-12">
         <div className="flex w-full flex-col items-center gap-6 text-center lg:w-2/5 lg:shrink-0 lg:items-start lg:text-left">
           <DataHubLogo className="size-16" />
           <h1 className="font-bold text-4xl tracking-tight sm:text-5xl">
             Lab instrument data, instantly accessible
           </h1>
           <p className="text-fd-muted-foreground text-lg">
-            Data Hub automatically captures and uploads lab instrument data,
-            enabling scientists to focus on analyzing data rather than managing
-            it.
+            A small program on each instrument PC uploads new files as they
+            appear and groups them into runs. Find any run by instrument, date,
+            or who ran it, in the browser, from a script, or through an AI
+            assistant.
           </p>
           <div className="flex flex-wrap items-center justify-center gap-3 lg:justify-start">
             <Link
@@ -165,7 +166,7 @@ export default function HomePage() {
               )}
               href="/docs/set-up-an-instrument"
             >
-              Get started
+              Set up an instrument
               <ArrowRight className="size-4" />
             </Link>
             <Link
@@ -184,18 +185,20 @@ export default function HomePage() {
           <Screenshot
             alt={runDetailShot.alt}
             entry={runDetailShot.entry}
+            frameless
             preload
             sizes="(max-width: 1024px) 100vw, 64rem"
           />
         </div>
       </section>
 
-      <section className="border-fd-border border-y">
-        <div className="mx-auto flex w-full max-w-348 flex-col items-center gap-10 px-4 py-16 lg:flex-row lg:items-center lg:gap-16 lg:py-20">
+      <section>
+        <div className="mx-auto flex w-full max-w-348 flex-col items-center gap-10 px-6 py-16 sm:px-8 lg:flex-row lg:items-center lg:gap-16 lg:py-20">
           <div className="w-full min-w-0 lg:w-1/2">
             <Screenshot
               alt={homeShot.alt}
               entry={homeShot.entry}
+              frameless
               sizes="(max-width: 1024px) 100vw, 40rem"
             />
           </div>
@@ -227,17 +230,17 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section className="mx-auto flex w-full max-w-348 flex-col items-center gap-10 px-4 py-16 lg:flex-row lg:items-center lg:gap-16 lg:py-20">
+      <section className="mx-auto flex w-full max-w-348 flex-col items-center gap-10 px-6 py-16 sm:px-8 lg:flex-row lg:items-center lg:gap-16 lg:py-20">
         <div className="flex w-full flex-col gap-5 lg:w-1/2">
           <div className="flex flex-col gap-3">
             <h2 className="font-bold text-3xl tracking-tight sm:text-4xl">
-              Automate your data processing workflows
+              Pull runs into your own analysis scripts
             </h2>
             <p className="text-base text-fd-muted-foreground leading-relaxed">
-              Let your pipelines do the heavy lifting. They can check an
-              instrument for its newest run, download the files, and pass them
-              straight into the analysis you already run. Put it on a schedule
-              and last night's plates are counted before you get in.
+              A script can check an instrument for its newest run, download the
+              files, and pass them straight into the analysis you already run.
+              Put it on a schedule and last night's plates are counted before
+              you get in.
             </p>
           </div>
 
@@ -293,8 +296,8 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section className="border-fd-border border-y">
-        <div className="mx-auto flex w-full max-w-348 flex-col items-center gap-10 px-4 py-16 lg:flex-row lg:items-center lg:gap-16 lg:py-20">
+      <section>
+        <div className="mx-auto flex w-full max-w-348 flex-col items-center gap-10 px-6 py-16 sm:px-8 lg:flex-row lg:items-center lg:gap-16 lg:py-20">
           <div className="w-full min-w-0 overflow-hidden rounded-xl border bg-fd-card shadow-sm lg:w-1/2">
             <DocsImage
               alt={mcpShot.alt}
@@ -306,10 +309,10 @@ export default function HomePage() {
           <div className="flex w-full flex-col gap-5 lg:w-1/2">
             <div className="flex flex-col gap-3">
               <h2 className="font-bold text-3xl tracking-tight sm:text-4xl">
-                Let AI agents work with your data
+                Ask an AI assistant about your runs
               </h2>
               <p className="text-base text-fd-muted-foreground leading-relaxed">
-                Ask an agent about a run and it can find the one you mean,
+                Ask an assistant about a run and it can find the one you mean,
                 download its files, and start working on the data, without you
                 leaving the conversation to go and fetch anything.
               </p>
@@ -328,7 +331,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section className="mx-auto grid w-full max-w-348 grid-cols-1 gap-4 px-4 py-16 pb-24 sm:grid-cols-2">
+      <section className="mx-auto grid w-full max-w-348 grid-cols-1 gap-4 px-6 py-16 pb-24 sm:grid-cols-2 sm:px-8">
         {features.map((feature) => (
           <Link
             className="flex flex-col gap-2 rounded-xl border p-6 transition-colors hover:bg-fd-accent"

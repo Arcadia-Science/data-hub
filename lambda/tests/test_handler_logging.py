@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from data_hub_lambda.api_client import ApiError
+from data_hub_lambda.api_client import ApiError, FileDeletedError
 from data_hub_lambda.handler import lambda_handler
 
 # Synthetic stand-ins for what a SigV4-signed Function URL request carries.
@@ -154,3 +154,48 @@ def test_malformed_records_are_summarised_without_raising(
     lambda_handler({"Records": [{"s3": {}}, "not-a-record"]}, MagicMock())
 
     assert "Received S3 notification for s3://?/?, s3://?/?" in lambda_logs.text
+
+
+def _dishcam_event() -> dict[str, Any]:
+    return _s3_event("raw-bucket", "dishcam/run-1/stack.tif")
+
+
+def _processor_that_raises(raised: Exception) -> tuple[MagicMock, MagicMock]:
+    """A processor whose `process_file` raises *raised*, and the client that finds it."""
+    client = MagicMock()
+    client.get_instrument.return_value = MagicMock(instrument_type="dishcam")
+    processor = MagicMock()
+    processor.matches_filename.return_value = True
+    processor.process_file.side_effect = raised
+    return processor, client
+
+
+def test_a_file_deleted_while_processing_stops_without_a_retry(
+    lambda_logs: pytest.LogCaptureFixture,
+) -> None:
+    processor, client = _processor_that_raises(
+        FileDeletedError("Cannot update a soft-deleted file", status_code=409)
+    )
+
+    with (
+        patch("data_hub_lambda.handler.get_client", return_value=client),
+        patch("data_hub_lambda.handler.get_processor", return_value=processor),
+        patch("data_hub_lambda.handler._cleanup_tmp"),
+    ):
+        # No exception, so Lambda does not retry the S3 event.
+        assert lambda_handler(_dishcam_event(), MagicMock()) is None
+
+    processor.process_file.assert_called_once_with("dishcam", "run-1", "stack.tif")
+    assert "stack.tif in run run-1 was deleted; stopping without a retry" in lambda_logs.text
+
+
+def test_any_other_api_error_still_reaches_lambda_so_it_retries() -> None:
+    processor, client = _processor_that_raises(ApiError("unavailable", status_code=503))
+
+    with (
+        patch("data_hub_lambda.handler.get_client", return_value=client),
+        patch("data_hub_lambda.handler.get_processor", return_value=processor),
+        patch("data_hub_lambda.handler._cleanup_tmp"),
+        pytest.raises(ApiError),
+    ):
+        lambda_handler(_dishcam_event(), MagicMock())

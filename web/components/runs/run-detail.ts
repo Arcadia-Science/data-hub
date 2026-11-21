@@ -43,8 +43,11 @@ export interface RunDetailProps {
   fileStats: RunFileStats;
   // Current page of the server-paginated files table.
   files: RunFileRow[];
+  filesDeletedCount: RunFilesPage["deletedCount"];
   filesDownloadableCount: RunFilesPage["downloadableCount"];
   filesPagination: RunFilesPage["pagination"];
+  // Files off the current page that the file window reaches from it.
+  filesRelated: RunFilesPage["related"];
   instrumentId: string;
   // The "Lab Notebooks" section between the summary card and the files.
   // Parent composes it, like `attributionsSlot`.

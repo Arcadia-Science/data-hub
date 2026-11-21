@@ -6,6 +6,7 @@ import { Card } from "@/components/ui/card";
 import { HeartbeatValue } from "@/components/watchers/heartbeat-value";
 import { WatcherSwitcher } from "@/components/watchers/watcher-switcher";
 import type { SharedComputerInstrument } from "@/lib/instruments/connection";
+import { GREEN_BADGE_COLORS } from "@/lib/ui-classes";
 import type { WatcherRegistration } from "@/lib/watchers/registrations";
 import { type WatcherTab, watcherPageHref } from "@/lib/watchers/routes";
 import {
@@ -26,8 +27,7 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
 
 // The same green and amber as the rollout label in Settings › Watchers.
 const VERSION_BADGE_CLASSNAME: Record<VersionSuffix["kind"], string> = {
-  up_to_date:
-    "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300",
+  up_to_date: GREEN_BADGE_COLORS,
   update_available:
     "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300",
 };

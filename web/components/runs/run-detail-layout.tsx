@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { CancelQueuedDialog } from "@/components/runs/cancel-queued-dialog";
 import { DeleteRunDialog } from "@/components/runs/delete-run-dialog";
+import { ReportItemsVersionProvider } from "@/components/runs/report-items-provider";
 import { RestoreRunButton } from "@/components/runs/restore-run-button";
 import { RunDetail, type RunDetailProps } from "@/components/runs/run-detail";
 import { RunOfflineNotice } from "@/components/runs/run-offline-notice";
@@ -12,8 +13,10 @@ type RunDetailLayoutProps = Pick<
   | "attributionsSlot"
   | "fileStats"
   | "files"
+  | "filesDeletedCount"
   | "filesDownloadableCount"
   | "filesPagination"
+  | "filesRelated"
   | "instrumentId"
   | "notebooksSlot"
   | "run"
@@ -39,8 +42,10 @@ export function RunDetailLayout({
   children,
   fileStats,
   files,
+  filesDeletedCount,
   filesDownloadableCount,
   filesPagination,
+  filesRelated,
   instrumentId,
   notebooksSlot,
   run,
@@ -49,8 +54,10 @@ export function RunDetailLayout({
 }: RunDetailLayoutProps) {
   const isDeleted = run.deletedAt !== null;
 
+  // A delete or restore in the files table, the file window, or the "couldn't
+  // upload" notice reloads the report's items, so a deleted video drops out.
   return (
-    <>
+    <ReportItemsVersionProvider>
       <RunDetail.Header run={run} runNavSlot={runNavSlot}>
         {canCancelQueued(fileStats) && (
           <CancelQueuedDialog
@@ -93,18 +100,20 @@ export function RunDetailLayout({
           />
         )}
         <RunDetail.Files
+          deletedCount={filesDeletedCount}
           files={files}
           filteredDownloadableCount={filesDownloadableCount}
           instrumentId={instrumentId}
           instrumentType={run.instrumentType}
           isDeleted={isDeleted}
           pagination={filesPagination}
+          relatedFiles={filesRelated}
           runId={runId}
           stats={fileStats}
         />
       </RunDetail.FilesMetadataLayout>
 
       {children}
-    </>
+    </ReportItemsVersionProvider>
   );
 }

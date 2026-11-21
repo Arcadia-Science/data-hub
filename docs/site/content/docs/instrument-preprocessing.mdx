@@ -6,44 +6,44 @@ contentType: Reference
 
 <Audience>Lab operators, admins, and engineers</Audience>
 
-After a [watcher](/docs/concepts#watcher) uploads a raw file, Data Hub can run a **preprocessor** on it: code that reads the vendor’s file, pulls out settings like wavelength or imaging mode, and builds something you can look at in the browser. Nine instrument types have one today. This page covers what each produces, why a file sometimes gets no processing, and what adding a new instrument involves.
+After a [watcher](/docs/concepts#watcher) uploads a raw file, Data Hub can run a **processor** on it. A processor is code that reads the vendor’s file, pulls out settings like wavelength or imaging mode, and builds something you can look at in the browser. Nine instrument types have one today. This page covers what each processor produces, why a file sometimes gets no processing, and what adding a new instrument involves.
 
 <Callout type="warn">
-  Support for a new instrument isn’t a settings change. It takes a new Python module, a database migration, an edit in two repositories, and a Lambda redeploy. See [Add support for a new instrument](#add-support-for-a-new-instrument).
+  Supporting a new instrument is engineering work that an admin can’t do in settings. It needs a new Python module, a database migration, changes to both the web app and the Lambda (the AWS function that processes files), and a Lambda redeploy. See [Add support for a new instrument](#add-support-for-a-new-instrument).
 </Callout>
 
 ## How a file reaches a processor [#how-preprocessing-works]
 
-1. A file arrives in raw storage, which triggers the Lambda. The bucket notifies on every upload, with no per-instrument filtering.
-2. The Lambda checks the filename against a **filename gate**, a cheap test that skips files no processor wants before making any API call.
-3. It reads the instrument, then looks up a processor by the instrument’s [type](#set-the-instrument-type). Unmapped types stop here.
+1. A file arrives in raw storage, which starts the Lambda. Storage starts it for every upload, whatever the instrument.
+2. The Lambda checks whether any processor accepts the file’s type. If none does, it stops there, before it contacts the Data Hub API.
+3. It looks up the instrument, then finds the processor for the instrument’s [type](#set-the-instrument-type). It stops here when the type has no processor, or when that processor doesn’t accept the file’s type.
 4. The processor reads the file, extracts metadata, writes processed files when it has any, and updates the run through the API.
 5. The file’s status moves from `processing` to `completed` or `failed`.
 
 ### Why an upload sometimes produces nothing [#why-an-upload-produces-nothing]
 
-Two silent no-ops explain a file that uploaded and then produced nothing. Neither marks the file failed, because nothing went wrong:
+Two things can make an upload produce nothing, and neither marks the file failed, because nothing went wrong:
 
-- **The filename missed the gate.** Each type accepts a narrow pattern, listed in the table below. A TapeStation run only triggers on its PDFs, so the peak-table CSVs it writes are stored but don’t start processing on their own.
-- **The instrument has no type set, or a type with no processor.** Files upload and stay browsable; you get no metadata and no reports.
+- **The processor doesn’t accept the file’s type**: each processor accepts only the file types listed in the table below. A TapeStation run starts processing only on its PDFs, so the peak-table CSVs it writes are stored but don’t start processing on their own.
+- **The instrument has no type set, or a type with no processor**: files upload and stay browsable, but you get no metadata and no reports.
 
-Filename gates apply to uploads only. Choosing **Reprocess** in the web app skips the gate, because clicking it states your intent. That’s why a file that produced nothing on upload can still process when you reprocess it by hand.
+The file-type check also applies when you choose **Reprocess** in the web app. Reprocessing a file that the processor doesn’t accept marks it **Failed**, with a message that names the instrument type. Reprocessing does help when the instrument had no type, or a type with no processor, when the file arrived: set the type, then choose **Reprocess**.
 
 ### Set the instrument type [#set-the-instrument-type]
 
-Processing is chosen by the instrument’s **type**, not by its instrument ID. The ID (`azure-cielo-qpcr`) names one physical machine. The type (`qpcr`) names a vendor’s file format, and several instruments can share one.
+Data Hub picks the processor by the instrument’s **type**, not its instrument ID. The ID (`azure-cielo-qpcr`) names one physical machine. The type (`qpcr`) names a vendor’s file format, and several instruments can share one.
 
-To set it, open the instrument page as an admin, choose **Edit details** from the three-dot menu, and pick an **Instrument type**.
+To set it, open the instrument page as an admin, choose **Edit details** from the three-dot menu, and choose an **Instrument type**.
 
 ![Edit instrument window with the display name and instrument type fields](/images/instrument-edit-dialog.webp)
 
 <Callout type="warn">
-  One type means one vendor’s output format. Names like `qpcr` and `fplc` read as generic, but each is bound to a single vendor’s parser: `fplc` expects ÄKTA PDFs, `qpcr` expects Azure Cielo exports. Typing a different vendor’s instrument into an existing type feeds files to a parser that can’t read them. Supporting a second vendor means splitting the type, which is a code change.
+  One type means one vendor’s output format. Names like `qpcr` and `fplc` sound general, but each belongs to a single vendor’s processor: `fplc` expects ÄKTA PDFs, and `qpcr` expects Azure Cielo exports. Giving a different vendor’s instrument an existing type sends its files to a processor that can’t read them. Supporting a second vendor means splitting the type in two, which is a code change.
 </Callout>
 
 ## Supported instrument types [#supported-instruments-at-a-glance]
 
-| Type | Vendor and model | Gate for uploads | You get |
+| Type | Vendor and model | File types it processes on upload | You get |
 | --- | --- | --- | --- |
 | `tape_station` | Agilent 4150 TapeStation | `.pdf` | Tape-type badge, PDF reports |
 | `fplc` | Cytiva ÄKTA FPLC | `.pdf` | PDF you can read on the run page, no metadata |
@@ -64,7 +64,7 @@ Reads the tape type out of peak-table CSV filenames and shows TapeStation report
 - **Processed files**: none
 - **On the run page**: tape-type badge, a PDF viewer, and peak-table reports
 
-Uploads trigger on the PDF, not the CSV. A run of CSVs alone stays unprocessed until you reprocess it by hand.
+Only the PDF starts processing. A run with only CSVs stays unprocessed, and choosing **Reprocess** on one of its CSVs marks it **Failed**, because the TapeStation processor accepts only PDFs.
 
 ## Cytiva ÄKTA FPLC [#akta-fplc]
 
@@ -73,15 +73,15 @@ Stores ÄKTA chromatography PDFs so you can read them in the browser. The proces
 - **Expected files**: `.pdf` reports from the ÄKTA
 - **Metadata**: none
 - **Processed files**: none
-- **On the run page**: files table, plus each PDF embedded under Report Data
+- **On the run page**: files table, plus each PDF embedded under **Report Data**
 
-A newly seeded FPLC stays `generic` on purpose until an operator has checked its output format.
+Leave a new FPLC as `generic` until an operator has checked that its PDFs are ÄKTA reports.
 
 ## Azure 600 Gel Doc [#azure-600-gel-doc]
 
 Rebuilds each gel TIFF as a viewable image and reads the imaging settings the instrument recorded.
 
-The processor stretches intensities to the 1st to 99th percentile, per RGB channel or as grayscale, then lays every page of the TIFF side by side in one 300 dpi PNG. The stretch is cosmetic: it makes faint bands visible on screen and doesn’t change the raw file.
+The processor stretches the contrast of each image, so the darkest 1% of pixels show as black and the brightest 1% show at full brightness. It does this per RGB channel, or once for a grayscale image. Then it lays every page of the TIFF side by side in one 300 dpi PNG. The stretch makes faint bands visible on screen and doesn’t change the raw file.
 
 - **Expected files**: TIFF from the Azure 600
 - **Metadata**: `capture_type`, `imaging_mode` (true color, fluorescence, or chemiluminescence), `wavelengths`, `colors`, read from the TIFF `XPComment` tag
@@ -103,7 +103,7 @@ Reads dye channel names, melting curves, and the instrument’s PDF report.
 - **Processed files**: `{run_id}_melting_curve_derivatives.csv` and `{run_id}_melting_curve_plate.json` from the melting curve CSV. An `.AZE` file produces `{run_id}_aze_melting_curve_derivatives.csv`, `{run_id}_aze_melting_curve_plate.json`, and `{run_id}_aze_experiment.json`.
 - **On the run page**: dye-channel badges, the PDF report under **Report Data**, and a **Melting Curves** section
 
-The **Melting Curves** section shows the plate for one dye channel at a time. Click a well to see its melting curve and derivative, with a dashed line at the melting temperature. A run with more than one PDF gets previous and next buttons under **Report Data**.
+The **Melting Curves** section shows the plate for one dye channel at a time. Select a well to see its melting curve and derivative, with a dashed line at the melting temperature. A run with more than one PDF gets previous and next buttons under **Report Data**.
 
 ![qPCR run page with dye-channel badges, the files table, and a Melting Curves plate showing a derivative curve in each well](/images/qpcr-run-detail.webp)
 
@@ -113,41 +113,62 @@ The other CSV files a qPCR run writes upload normally and show as completed, but
 
 Data Hub reads melting curves from the Azure Cielo’s native `.AZE` project files as well as from the CSV export. Melting temperatures match the CSV export, but other values can differ. That’s because `.AZE` files store raw fluorescence, while the CSV export can be adjusted for baseline. A project with no melt data completes with no processed files.
 
-The watcher uploads `.AZE` files only when `*.AZE` is in the instrument’s file patterns. An admin can add it on the **Settings** tab of the instrument’s watcher page (watcher 1.4.0 and later); see [Change a watcher’s settings](/docs/manage-watchers#change-a-watchers-config). With an older watcher, add it on the instrument PC with `data-hub-watcher config edit` and restart the watcher. Patterns are case-sensitive, so match the case the instrument uses. See [Watcher configuration](/docs/configuration-reference#field-reference).
+The watcher uploads `.AZE` files only when `*.AZE` is in the instrument’s file patterns. Patterns are case-sensitive, so match the case the instrument uses. See [Watcher configuration](/docs/configuration-reference#field-reference).
+
+An admin can add the pattern on the **Settings** tab of the instrument’s watcher page; see [Change a watcher’s settings](/docs/manage-watchers#change-a-watchers-config). You can also add it on the instrument PC with `data-hub-watcher config edit` and restart the watcher.
 
 ## Epson V700 Scanner [#epson-v700-scanner]
 
 Finds agar plates in a flatbed scan and measures the colonies on them.
 
-The processor looks for plates sitting in gold 3D-printed frames. For each plate it finds, it crops the plate, then detects colonies: crop the edge, compare against the plate background, apply a difference-of-Gaussians filter, threshold, and measure whatever survives. Measurements come out in physical units, so colony areas are comparable between scans.
+The processor looks for plates sitting in gold 3D-printed frames. For each plate it finds, it crops the plate and then detects colonies:
+
+1. Trims the edge of the plate
+2. Compares the plate against its background
+3. Applies a difference-of-Gaussians filter, a standard way to pick out small spots
+4. Applies a threshold
+5. Measures whatever is left
+
+Measurements come out in physical units, so colony areas are comparable between scans.
 
 - **Expected files**: TIFF plate scans
 - **Metadata**: `dpi`, `color_mode`, `plate_count`, `plate_boxes`, plus `colony_detection` summaries when colonies were measured
 - **Processed files**: a web-sized JPG with plate outlines and colony boxes drawn on, and a `_colonies.csv` of per-colony area, centroid, eccentricity, and mean RGB
 - **On the run page**: scanner badges, files table, and reports for the processed CSV
 
-When no plates are found, you still get a resized JPG of the whole scan, and colony detection is skipped. An empty `plate_count` usually means the frames weren’t recognized rather than that the plates were blank.
+When no plates are found, you still get a resized JPG of the whole scan, and colony detection is skipped. An empty `plate_count` most likely means the frames weren’t recognized, not that the plates were blank.
 
 ## Hina Microscope [#hina-microscope]
 
 Turns each Nikon ND2 into a composite image you can view in the browser, and each timelapse into a video.
 
-Every channel is reduced to one 2D frame per time point (a maximum projection over Z, the first index over position), stretched to the 1st to 99th percentile, then composited onto a brightfield background in each channel’s fluorophore color. The processor reads one frame at a time, so large stacks process without loading the whole file.
+For each time point, the processor turns every channel into one 2D frame. It takes the maximum projection over Z (the brightest value through the stack) and the first index over position. It reads one frame at a time, so large stacks process without loading the whole file.
+
+The processor stretches each frame’s contrast so the darkest 1% of pixels show as black and the brightest 1% at full brightness. Then it lays the channels over a brightfield background, each in its fluorophore color.
 
 - **Expected files**: ND2
 - **Metadata**: `sizes`, `channels` (name, excitation and emission wavelength, color), and `dimensions`. Each timelapse file also records `frames`, `frame_interval_ms` (the measured time between frames), and `playback_fps` in its own file metadata.
 - **Processed files**: an RGB overlay JPG of the first time point for every file in the run, plus an MP4 for every file with more than one time point
 - **On the run page**: channel and size badges, files table, and a viewer with one item per file. A timelapse plays as a video, with its JPG shown before you press play. Any other file shows its JPG.
 
-A timelapse video plays at the capture rate or at 10 frames per second, whichever is faster, so slow captures stay watchable. A file that doesn’t record the time between frames plays at 10 frames per second. Each channel’s contrast comes from the first frame and stays the same for the whole video, so brightness doesn’t flicker and the first frame matches the JPG. Pixels that later grow brighter than the brightest 1% of the first frame show at full brightness, so a signal that grows strongly during the capture can look saturated.
+A timelapse video plays at the capture rate or at 10 frames per second, whichever is faster, so slow captures stay watchable. A file that doesn’t record the time between frames plays at 10 frames per second.
 
-If the video can’t be made, for example because the timelapse can’t finish within the [15-minute processing limit](#when-processing-fails), the file shows **Failed** and the message says why. The JPG and the raw file are still available. A timelapse processed before Data Hub made videos gets its video when you choose **Reprocess** on the file or on the run. Timelapses take several minutes each, so reprocessing a run with many of them shows most files as **Queued** while 10 process at a time.
+Each channel’s contrast comes from the first frame and stays the same for the whole video, so brightness doesn’t flicker and the first frame matches the JPG. Pixels that later grow brighter than the brightest 1% of the first frame show at full brightness. A signal that grows strongly during the capture can therefore look saturated.
 
-Channel layout is identical across a Hina run, so metadata is written once by whichever file finishes processing first. Later files still get their JPG and skip the metadata write. Reprocessing one file therefore won’t correct run metadata if the layout changed mid-run.
+If the video can’t be made, the file shows **Failed** and the message says why. One cause is a timelapse that can’t finish within the [15-minute processing limit](#when-processing-fails). The JPG and the raw file are still available.
 
-An image too large to preview at full size gets a smaller preview instead. For example, a 6221 × 6221 pixel image is previewed at 3110 × 3110 pixels. The raw file is unchanged, and you can download it at full size. A file that showed **Failed** for this reason earlier gets its preview when you choose **Reprocess** on the file or on the run.
+A timelapse processed before Data Hub made videos gets its video when you reprocess the file or its run; see [Reprocess or delete a run](/docs/browse-runs#reprocess-and-delete). Timelapses take several minutes each. When you reprocess a run with more than 10 of them, 10 process at a time and the rest show **Queued**.
 
-Two kinds of image still show **Failed** instead of a preview: an image from a color camera, which Data Hub can’t preview yet, and an image far larger than the Hina Microscope has produced so far. The message on the file says which. In both cases the raw file is stored and you can download it.
+Every file in a Hina run has the same channel layout, so whichever file finishes processing first writes the run’s metadata. Later files still get their JPG but skip the metadata write. If the layout changed partway through a run, reprocessing one file won’t correct the run’s metadata.
+
+An image too large to preview at full size gets a smaller preview instead. For example, a 6221 × 6221 pixel image is previewed at 3110 × 3110 pixels. The raw file is unchanged, and you can download it at full size. A file that showed **Failed** for this reason earlier gets its preview when you reprocess the file or its run.
+
+Two kinds of image still show **Failed** instead of a preview:
+
+- An image from a color camera, which Data Hub can’t preview yet
+- An image far larger than the Hina Microscope has produced so far
+
+The message on the file says which. In both cases the raw file is stored and you can download it.
 
 ## SpectraMax iD3 and iD5 plate readers [#spectramax-id3-and-id5-plate-readers]
 
@@ -177,7 +198,7 @@ Turns each DishCam photo stack into a video you can play on the run page.
 
 The video plays at the capture rate or at 10 photos per second, whichever is faster, so slow captures stay watchable. The stored `fps` metadata still records the real capture rate.
 
-A stack processes once both the stack and its `run.json` are in storage, in either order. When a run gathers captures from several folders, each stack uses the `run.json` from its own folder. Watcher 1.1.0 and later keep every folder’s `run.json`, renaming later copies with a short tag such as `run~3f9a1c2b.json`. See [Roll out watcher releases](/docs/watcher-releases#what-each-version-adds).
+A stack processes once both the stack and its `run.json` are in storage, in either order. When a run gathers captures from several folders, each stack uses the `run.json` from its own folder. When two folders both have a `run.json`, the watcher renames later copies with a short tag, such as `run~3f9a1c2b.json`.
 
 Large stacks are read one photo at a time. If a stack can’t finish within the [15-minute processing limit](#when-processing-fails), it shows **Failed**, and the message says how far through the photos it got. You can still download the raw file.
 
@@ -188,7 +209,7 @@ Reads Aunty exports, which measure protein melting temperature and particle size
 - **Expected files**: the `.xlsx` export from the Aunty software. Thermal ramps, sizing runs, isothermal holds, and exports that contain only the results table without curves all process.
 - **Metadata**: `experiment_type` (`thermal_ramp`, `sizing`, or `isothermal`), `experiment_count`, and the first experiment’s settings: `analysis_mode`, `start_temp_c`, `end_temp_c`, `rate_c_per_min`, `temperature_c`, `analysis_version`, and `experiment_name`
 - **Processed files**: `{run_id}_aunty_curves.csv`, with every curve point for every well, and `{run_id}_aunty_plate.json`, which drives the plate view
-- **On the run page**: a plate with a small chart in each well. Click a well to open its full chart.
+- **On the run page**: a plate with a small chart in each well. Select a well to open its full chart.
 
 ![Aunty run page with the experiment type and temperature badges, the files table, and a plate with a small curve in each well](/images/aunty-run-detail.webp)
 
@@ -196,27 +217,27 @@ On the instrument page, filter Aunty runs by experiment type, analysis mode, tem
 
 ## Types with no processor [#instruments-without-a-matching-processor]
 
-`generic` and `instant_raman` have no processor, and neither does an instrument whose type is unset. Those uploads still work: files are stored, and you can browse, search, claim, comment on, and download them. What you don’t get is extracted metadata, badges, filters, or processed artifacts.
+Instruments typed `generic` or `instant_raman`, and instruments with no type set, upload without processing. Their files are stored, and you can browse, search, claim, comment on, and download them. They get no extracted metadata, badges, filters, or processed files.
 
-Leaving a new instrument as `generic` is the safe default. It keeps data flowing while someone confirms which processor, if any, can read its files.
+Leave a new instrument as `generic` until someone confirms which processor, if any, can read its files. Its files keep uploading in the meantime.
 
 ## When processing fails [#when-processing-fails]
 
-A file with status `failed` carries an error message on the run page. Open the run, then choose **Reprocess** on that file, or select runs in a run list and choose **Reprocess**. See [Reprocess or delete a run](/docs/browse-runs#reprocess-and-delete).
+A file with status `failed` shows an error message on the run page. Open the run, select that file, and choose **Reprocess**, or select runs in a run list and choose **Reprocess**. See [Reprocess or delete a run](/docs/browse-runs#reprocess-and-delete).
 
 Processing one file has a 15-minute limit. A file that hits the limit, or is too large to process at all, shows **Failed** with a message that explains why. The raw file stays in storage, and you can download it.
 
-A file that stays in processing for more than 20 minutes without finishing shows **Stalled**. That usually means the processor stopped without reporting back. Reprocess it to try again.
+A file that stays in processing for more than 20 minutes without finishing shows **Stalled**. That most likely means the processor stopped without reporting back. Reprocess it to try again.
 
 Reprocessing puts a file in a queue and starts at most 10 files at a time. A file that has to wait shows **Queued** until a slot opens. See [How reprocessing is queued](/docs/browse-runs#reprocess-queue).
 
-Reprocessing is also the fix after an engineer corrects a parser: the code changed, but the stored result didn’t, until you ask for it again.
+Reprocess files after an engineer fixes a processor, too. The fix changes the code, but results already stored stay the same until you reprocess.
 
 ## Add support for a new instrument [#add-support-for-a-new-instrument]
 
 <Audience>Engineers</Audience>
 
-Adding an instrument type is a development task spanning the web app and the Lambda, not a configuration change an admin can make in the dashboard. Budget for a database migration and a Lambda image deploy.
+Adding an instrument type is development work in the web app and the Lambda. Plan for a database migration and a Lambda image deploy.
 
 <Steps>
 
@@ -225,23 +246,23 @@ Adding an instrument type is a development task spanning the web app and the Lam
 </Step>
 
 <Step>
-**Write the processor.** Add a module under `lambda/src/data_hub_lambda/` exposing `process_file(instrument_id, run_id, filename)`, which reports progress through the Data Hub API.
+**Write the processor.** Add a module under `lambda/src/data_hub_lambda/` with a `process_file(instrument_id, run_id, filename)` function that reports progress through the Data Hub API.
 </Step>
 
 <Step>
-**Register it twice.** Add the type to `PROCESSORS` in `lambda/src/data_hub_lambda/processors.py`, with its filename gate, and to `PROCESSABLE_INSTRUMENT_TYPES` in `web/lib/instruments/processable-types.ts`. These two lists have to agree: the Lambda uses the first to dispatch, and the web app uses the second to decide whether to offer **Reprocess**.
+**Register it twice.** Add the type to `PROCESSORS` in `lambda/src/data_hub_lambda/processors.py`, with the file types it accepts, and to `PROCESSABLE_INSTRUMENT_TYPES` in `web/lib/instruments/processable-types.ts`. These two lists have to agree. The Lambda uses the first to pick a processor, and the web app uses the second to decide whether to offer **Reprocess**.
 </Step>
 
 <Step>
-**Add tests** for the processor and for the registry gate.
+**Add tests** for the processor and for the file types it accepts.
 </Step>
 
 <Step>
-**Deploy the Lambda image.** No new S3 trigger is needed, since the raw bucket already notifies on every upload.
+**Deploy the Lambda image.** The raw bucket already starts the Lambda for every upload, so you don’t need a new S3 trigger.
 </Step>
 
 </Steps>
 
-You can exercise a processor locally without S3 or API access using the `data-hub-process` CLI, and drive the whole handler against a local S3 mirror with its `handler` subcommand.
+To try a processor on your own machine without S3 or API access, use the `data-hub-process` CLI. Its `handler` subcommand runs the whole handler against a local copy of S3.
 
 Full detail, including the archive builder and the Docker build, is in [the Lambda developer docs](https://github.com/Arcadia-Science/data-hub/blob/production/docs/developer/lambda.md#adding-a-new-instrument--processor).

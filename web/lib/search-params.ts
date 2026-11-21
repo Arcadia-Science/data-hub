@@ -187,6 +187,10 @@ const FILES_CATEGORY_VALUES = ["raw", "processed"] as const;
 
 const FILES_SORT_VALUES = ["name", "size", "date", "status"] as const;
 
+// `files_sort` is the column and `files_order` its direction, both set by a
+// column header's menu. `files_deleted` shows deleted files. Its old name,
+// `files_dismissed`, is still read so saved links keep working, but never
+// written.
 export const runDetailSearchParams = {
   files_page: parseAsInteger.withDefault(1),
   files_search: parseAsString.withDefault(""),
@@ -199,8 +203,22 @@ export const runDetailSearchParams = {
     .withDefault([])
     .withOptions({ clearOnDefault: true }),
   files_sort: parseAsStringLiteral(FILES_SORT_VALUES).withDefault("name"),
+  files_order: parseAsStringLiteral(RUN_SORT_ORDERS)
+    .withDefault("asc")
+    .withOptions({ clearOnDefault: true }),
+  files_deleted: parseAsBoolean
+    .withDefault(false)
+    .withOptions({ clearOnDefault: true }),
   files_dismissed: parseAsBoolean.withDefault(false),
 };
+
+/** Whether the files table lists deleted files, by either of the two params. */
+export function filesShowDeleted(params: {
+  files_deleted: boolean;
+  files_dismissed: boolean;
+}): boolean {
+  return params.files_deleted || params.files_dismissed;
+}
 
 export const runDetailParamsCache = createSearchParamsCache(
   runDetailSearchParams

@@ -10,6 +10,7 @@ import {
   ilike,
   inArray,
   isNull,
+  notInArray,
   or,
   sql,
 } from "drizzle-orm";
@@ -22,6 +23,7 @@ import {
   formatHinaSizes,
 } from "@/components/runs/run-metadata-badges";
 import { type Actor, resolveActor } from "@/lib/api/actor";
+import { folderSql, isSidecarSql } from "@/lib/api/file-link-sql";
 import { escapeLikePattern } from "@/lib/api/like-pattern";
 import { runNotebookToWire } from "@/lib/api/notebook-wire";
 import {
@@ -51,6 +53,7 @@ import {
   filePendingUploadSql,
 } from "@/lib/runs/file-buckets.sql";
 import type { FilesLifecycleFilter } from "@/lib/runs/file-lifecycle-filter";
+import { folderOfPath, isSidecarFilename, pathOf } from "@/lib/runs/file-links";
 import {
   isQpcrMeltingDerivativesFile,
   isQpcrMeltingPlateFile,
@@ -840,8 +843,13 @@ export type RunDetail = NonNullable<
 export type RunFile = typeof files.$inferSelect;
 
 // Run-page file row with stall decided on the server so the files table
-// does not re-read the clock during hydration.
-export type RunFileRow = RunFile & { stalledProcessing: boolean };
+// does not re-read the clock during hydration, and the deleter named so a
+// deleted row can say who deleted it. `deleter` is null for a file that is not
+// deleted and for one deleted before Data Hub recorded who did it.
+export type RunFileRow = RunFile & {
+  deleter: Actor | null;
+  stalledProcessing: boolean;
+};
 
 // Server-truth row shape for the paginated runs list. Derived from
 // buildRunListQuery's return type so any column added to the Drizzle
@@ -866,16 +874,22 @@ export type { FilesLifecycleFilter } from "@/lib/runs/file-lifecycle-filter";
 
 export type FilesSortField = "name" | "size" | "date" | "status";
 
+export type FilesSortOrder = "asc" | "desc";
+
 // Filter inputs shared by the paginated query and the archive-download
 // "download what you filtered" resolution. Empty arrays mean "no filter".
 export interface RunFilesFilter {
   categories?: FilesCategoryFilter[];
-  includeDismissed?: boolean;
+  // Deleted files are left out unless asked for. A status filter never
+  // matches a deleted file, so it leaves them out either way.
+  includeDeleted?: boolean;
   search?: string;
   statuses?: FilesLifecycleFilter[];
 }
 
 export type RunFilesListFilters = RunFilesFilter & {
+  // The direction of `sort`. Defaults to ascending.
+  order?: FilesSortOrder;
   page: number;
   perPage: number;
   sort?: FilesSortField;
@@ -936,7 +950,7 @@ export function runFilesWhere(
 ): SQL[] {
   const conditions: SQL[] = [eq(files.instrumentRunId, runInternalId)];
 
-  if (!filters.includeDismissed) {
+  if (!filters.includeDeleted) {
     conditions.push(isNull(files.deletedAt));
   }
 
@@ -950,12 +964,16 @@ export function runFilesWhere(
     conditions.push(inArray(files.category, filters.categories));
   }
 
+  // The status buckets describe files that are in play, and a deleted file
+  // shows "Deleted" whatever its status was. So a deleted file never matches a
+  // status, and "Completed" does not list a file that was completed before it
+  // was deleted.
   if (filters.statuses && filters.statuses.length > 0) {
     const statusOr = or(
       ...filters.statuses.map((status) => fileStatusCondition(status, now))
     );
     if (statusOr) {
-      conditions.push(statusOr);
+      conditions.push(isNull(files.deletedAt), statusOr);
     }
   }
 
@@ -972,29 +990,40 @@ function fileStatusCondition(status: FilesLifecycleFilter, now: Date): SQL {
   return fileInRunBucketSql(status, now);
 }
 
-// Category-first ordering (raw before processed, matching the old
-// `compareByCategory`) then the chosen field. Date sorts on
-// coalesce(file_created_at, created_at) to match the displayed "Created"
-// column; size coalesces NULL to 0 like the old numeric comparator.
-function runFilesOrderBy(sort: FilesSortField, now: Date): SQL[] {
-  const categoryFirst = sql`(${files.category} = 'raw') desc`;
+// Orders by the chosen column and nothing else, so a header sort reads the same
+// as the column it sorts. Date sorts on coalesce(file_created_at, created_at) to
+// match the displayed "Created" column; size coalesces NULL to 0 like the old
+// numeric comparator. Rows that tie on the column come back in file id order,
+// whichever way the column runs, so a page boundary never repeats or skips a
+// file between requests.
+function runFilesOrderBy(
+  sort: FilesSortField,
+  order: FilesSortOrder,
+  now: Date
+): SQL[] {
+  const direction = order === "desc" ? sql`desc` : sql`asc`;
+  const tiebreaker = sql`${files.id} asc`;
   switch (sort) {
     case "size":
-      return [categoryFirst, sql`coalesce(${files.sizeBytes}, 0) asc`];
+      return [sql`coalesce(${files.sizeBytes}, 0) ${direction}`, tiebreaker];
     case "date":
       return [
-        categoryFirst,
-        sql`coalesce(${files.fileCreatedAt}, ${files.createdAt}) asc`,
+        sql`coalesce(${files.fileCreatedAt}, ${files.createdAt}) ${direction}`,
+        tiebreaker,
       ];
     case "status":
-      return [categoryFirst, sql`${statusSortRank(now)} asc`];
+      return [sql`${statusSortRank(now)} ${direction}`, tiebreaker];
     default:
-      return [categoryFirst, sql`${files.filename} asc`];
+      return [sql`${files.filename} ${direction}`, tiebreaker];
   }
 }
 
 export interface RunFilesPage {
   data: RunFileRow[];
+  // Deleted files that match the current search and filters, shown or not.
+  // This is the count beside "Show deleted files". A status filter matches no
+  // deleted file, so it is 0 then.
+  deletedCount: number;
   // Files in the current filter that have S3 keys and can be zipped by the
   // archive route (matches `loadDownloadableFiles` after id resolution).
   downloadableCount: number;
@@ -1004,6 +1033,143 @@ export interface RunFilesPage {
     total: number;
     total_pages: number;
   };
+  // The files the file window can reach through the linked files of the page's
+  // files, when they are not on the page: deleted or not, whatever the filters.
+  // See `loadRelatedFiles`.
+  related: RunFileRow[];
+}
+
+// A file row with the names of whoever deleted it, as the files table needs it.
+// A deleter that is a user comes from `users`, and a token from
+// `personal_access_tokens`, the way a run's deleter is read in
+// `lookupRunByNaturalKey`.
+function selectRunFileRows() {
+  return db
+    .select({
+      file: files,
+      deletedByName: users.name,
+      deletedByEmail: users.email,
+      deletedByImage: users.image,
+      deletedByTokenName: personalAccessTokens.name,
+      deletedByTokenRevokedAt: personalAccessTokens.revokedAt,
+    })
+    .from(files)
+    .leftJoin(users, eq(users.id, files.deletedBy))
+    .leftJoin(
+      personalAccessTokens,
+      eq(personalAccessTokens.id, files.deletedByToken)
+    );
+}
+
+function toRunFileRow(
+  row: Awaited<ReturnType<typeof selectRunFileRows>>[number],
+  now: Date
+): RunFileRow {
+  const { file } = row;
+  return {
+    ...file,
+    stalledProcessing: isStalledProcessing(file, now),
+    deleter: resolveActor({
+      userId: file.deletedBy,
+      userName: row.deletedByName,
+      userEmail: row.deletedByEmail,
+      userImage: row.deletedByImage,
+      tokenId: file.deletedByToken,
+      tokenName: row.deletedByTokenName,
+      tokenRevokedAt: row.deletedByTokenRevokedAt,
+    }),
+  };
+}
+
+// The most files each of the two lookups in `loadRelatedFiles` returns. Files
+// already on the page don't count toward it. A raw file has a handful of
+// outputs, so the cap only guards a run that has far more. The window then
+// lists the ones it has.
+const RELATED_FILES_LIMIT = 200;
+
+// The files of a run that the file window can reach from a page of files
+// through its Linked files, and that are not on the page. A raw file links to
+// the processed files made from it and to the sidecars in its folder. A
+// processed file links to the raw file it was made from, and that file links on
+// to its other outputs. So this loads the raw files the page's processed files
+// came from, and then the outputs and sidecars of every raw file in play.
+// Deleted files are included: the window lists them as deleted.
+async function loadRelatedFiles(
+  runInternalId: string,
+  page: readonly RunFileRow[],
+  now: Date
+): Promise<RunFileRow[]> {
+  const onPage = new Set(page.map((file) => file.id));
+  const sourceIds = [
+    ...new Set(
+      page.flatMap((file) =>
+        file.category === "processed" &&
+        file.sourceFileId !== null &&
+        !onPage.has(file.sourceFileId)
+          ? [file.sourceFileId]
+          : []
+      )
+    ),
+  ];
+  const sources =
+    sourceIds.length === 0
+      ? []
+      : (
+          await selectRunFileRows().where(
+            and(
+              eq(files.instrumentRunId, runInternalId),
+              inArray(files.id, sourceIds)
+            )
+          )
+        ).map((row) => toRunFileRow(row, now));
+
+  const raws = [...page, ...sources].filter(
+    (file) => file.category === "raw" && !isSidecarFilename(file.filename)
+  );
+  if (raws.length === 0) {
+    return sources;
+  }
+  const folders = [...new Set(raws.map((file) => folderOfPath(pathOf(file))))];
+  const offPage = notInArray(files.id, [...onPage]);
+  const [outputs, sidecars] = await Promise.all([
+    selectRunFileRows()
+      .where(
+        and(
+          eq(files.instrumentRunId, runInternalId),
+          eq(files.category, "processed"),
+          inArray(
+            files.sourceFileId,
+            raws.map((file) => file.id)
+          ),
+          offPage
+        )
+      )
+      .orderBy(asc(files.id))
+      .limit(RELATED_FILES_LIMIT),
+    selectRunFileRows()
+      .where(
+        and(
+          eq(files.instrumentRunId, runInternalId),
+          eq(files.category, "raw"),
+          isSidecarSql,
+          inArray(folderSql, folders),
+          offPage
+        )
+      )
+      .orderBy(asc(files.id))
+      .limit(RELATED_FILES_LIMIT),
+  ]);
+
+  const related = new Map<number, RunFileRow>();
+  for (const file of [
+    ...sources,
+    ...[...outputs, ...sidecars].map((row) => toRunFileRow(row, now)),
+  ]) {
+    if (!onPage.has(file.id)) {
+      related.set(file.id, file);
+    }
+  }
+  return [...related.values()];
 }
 
 export async function buildRunFilesQuery(
@@ -1018,28 +1184,35 @@ export async function buildRunFilesQuery(
   const now = new Date();
 
   const where = and(...runFilesWhere(runInternalId, filters, now));
+  // The counts read deleted rows too, so one query gives the total, the number
+  // of deleted files behind the filter, and the downloadable files.
+  const countWhere = and(
+    ...runFilesWhere(runInternalId, { ...filters, includeDeleted: true }, now)
+  );
 
-  const [{ total, downloadableCount }] = await db
+  const [{ total, deletedCount, downloadableCount }] = await db
     .select({
-      total: sql<number>`cast(count(*) as int)`,
+      total: filters.includeDeleted
+        ? sql<number>`cast(count(*) as int)`
+        : sql<number>`cast(count(*) filter (where ${files.deletedAt} is null) as int)`,
+      deletedCount: sql<number>`cast(count(*) filter (where ${files.deletedAt} is not null) as int)`,
       downloadableCount: sql<number>`cast(count(*) filter (where ${files.s3Bucket} is not null and ${files.s3Key} is not null and ${files.deletedAt} is null) as int)`,
     })
     .from(files)
-    .where(where);
+    .where(countWhere);
 
-  const data = await db
-    .select()
-    .from(files)
+  const rows = await selectRunFileRows()
     .where(where)
-    .orderBy(...runFilesOrderBy(filters.sort ?? "name", now))
+    .orderBy(
+      ...runFilesOrderBy(filters.sort ?? "name", filters.order ?? "asc", now)
+    )
     .limit(safePerPage)
     .offset(offset);
+  const data = rows.map((row) => toRunFileRow(row, now));
 
   return {
-    data: data.map((file) => ({
-      ...file,
-      stalledProcessing: isStalledProcessing(file, now),
-    })),
+    data,
+    deletedCount,
     downloadableCount,
     pagination: {
       page: safePage,
@@ -1047,6 +1220,7 @@ export async function buildRunFilesQuery(
       total,
       total_pages: Math.ceil(total / safePerPage),
     },
+    related: await loadRelatedFiles(runInternalId, data, now),
   };
 }
 
@@ -1058,7 +1232,6 @@ export interface RunFileStats {
   active: number;
   // Files awaiting an upload request (status = detected).
   detected: number;
-  dismissed: number;
   failed: number;
   // Files still on the instrument PC that are waiting for an upload or a
   // request: detected or upload_requested. Leaves out upload_failed files,
@@ -1106,7 +1279,6 @@ export async function getRunFileStats(
   const [row] = await db
     .select({
       active: sql<number>`cast(count(*) filter (where ${activeNotDeleted}) as int)`,
-      dismissed: sql<number>`cast(count(*) filter (where ${files.deletedAt} is not null) as int)`,
       rawActive: sql<number>`cast(count(*) filter (where ${rawActiveNotDeleted}) as int)`,
       // bigint can arrive as a string from node-pg; Number() at the boundary.
       rawTotalSizeBytes: sql<
@@ -1242,10 +1414,13 @@ export async function getFilteredFileIds(
 export async function getRunFilesPage(
   runInternalId: string,
   {
+    includeDeleted = false,
     page,
     perPage,
     statuses,
   }: {
+    // Deleted files are left out unless asked for.
+    includeDeleted?: boolean;
     page: number;
     perPage: number;
     statuses?: RunFile["status"][];
@@ -1263,13 +1438,13 @@ export async function getRunFilesPage(
   const safePage = Math.max(page, 1);
   const offset = (safePage - 1) * safePerPage;
 
-  const where =
+  const where = and(
+    eq(files.instrumentRunId, runInternalId),
+    includeDeleted ? undefined : isNull(files.deletedAt),
     statuses && statuses.length > 0
-      ? and(
-          eq(files.instrumentRunId, runInternalId),
-          inArray(files.status, statuses)
-        )
-      : eq(files.instrumentRunId, runInternalId);
+      ? inArray(files.status, statuses)
+      : undefined
+  );
 
   const [{ total }] = await db
     .select({ total: sql<number>`count(*)::int` })

@@ -1,7 +1,7 @@
 import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
-import { touchRuns } from "@/lib/api/touch-runs";
 import { UPLOAD_ARRIVED_RESET } from "@/lib/api/upload-state";
-import { db } from "@/lib/db";
+import { type DbExecutor, db } from "@/lib/db";
+import { hasPgErrorCode, UNIQUE_VIOLATION } from "@/lib/db/pg-error";
 import { files, instrumentRuns } from "@/lib/db/schema";
 import { PRE_UPLOAD_FILE_STATUSES } from "@/lib/runs/file-buckets";
 
@@ -59,6 +59,176 @@ export async function adoptPreUploadFile(
     return { kind: "dismissed" };
   }
   return { kind: "moved_on", row: current };
+}
+
+// How a file is deleted: when, and by whom.
+export interface FileDeletion {
+  deletedAt: Date;
+  deletedBy: string | null;
+  deletedByToken: string | null;
+}
+
+// How a processed file made from `sourceFileId` is to be saved: deleted the
+// same way as its source when the source is deleted, and null otherwise. An
+// output of a raw file that was deleted while it processed is saved deleted,
+// so the two stay together.
+//
+// Call it first in the transaction that writes the output. The share lock on
+// the source makes `deleteFiles`, which locks the source for update, wait for
+// that transaction, or makes this wait for the delete and then read it. Either
+// way the output can't be saved active beside a deleted source, and the delete
+// finds an output committed before it as a linked file. Locking the raw file
+// before its output is the order `deleteFiles` uses, so the two can't wait for
+// each other. `restoreFiles` locks the other way round only when it brings a
+// deleted output back with its deleted source. If that ever meets a revive of
+// the same output, Postgres ends one with a deadlock error, a 500 that the
+// Lambda retries.
+export async function lockSourceDeletion(
+  executor: DbExecutor,
+  sourceFileId: number | null
+): Promise<FileDeletion | null> {
+  if (sourceFileId === null) {
+    return null;
+  }
+  const [source] = await executor
+    .select({
+      deletedAt: files.deletedAt,
+      deletedBy: files.deletedBy,
+      deletedByToken: files.deletedByToken,
+    })
+    .from(files)
+    .where(eq(files.id, sourceFileId))
+    .for("share");
+  return source?.deletedAt
+    ? {
+        deletedAt: source.deletedAt,
+        deletedBy: source.deletedBy,
+        deletedByToken: source.deletedByToken,
+      }
+    : null;
+}
+
+// Links an existing processed file to the raw file it was made from, when it
+// has no source yet: an output written before `source_file_id` existed, which
+// the backfill could not match, gets linked on its next reprocess. A source
+// that is already set is never replaced. Returns the row as it is now.
+export async function fillMissingSource(
+  file: FileRow,
+  sourceFileId: number | null
+): Promise<FileRow> {
+  if (
+    sourceFileId === null ||
+    file.category !== "processed" ||
+    file.sourceFileId !== null
+  ) {
+    return file;
+  }
+  const [filled] = await db
+    .update(files)
+    .set({ sourceFileId })
+    .where(
+      and(
+        eq(files.id, file.id),
+        eq(files.category, "processed"),
+        isNull(files.sourceFileId)
+      )
+    )
+    .returning();
+  return filled ?? file;
+}
+
+export interface RevivedFileValues {
+  contentType: string | null;
+  sizeBytes: number | null;
+  // The raw file the output was made from. The output is saved deleted when
+  // that file is deleted (`lockSourceDeletion`).
+  sourceFileId: number | null;
+}
+
+// What `reviveProcessedFile` did:
+// - `revived`: the row is a fresh `uploaded` output again.
+// - `unchanged`: the row was no longer deleted when the update ran, because a
+//   restore or another revive got there first; `row` is how it is now.
+// - `conflict`: another active file now holds the row's filename or path, so it
+//   can't be active again.
+export type ReviveResult =
+  | { kind: "revived"; row: FileRow }
+  | { kind: "unchanged"; row: FileRow | null }
+  | { kind: "conflict" };
+
+// A processor wrote a processed file whose S3 key belongs to a deleted row:
+// reprocessing made the same output again, over the old object. The row
+// becomes the new output, so the file isn't left hidden and the processor
+// isn't left holding a deleted row.
+//
+// Only a deleted processed row is revived. The write checks that, so a row
+// that was restored in the meantime is left as the restore made it. What the
+// earlier run of the processor reported is reset, as it is on a new row. The
+// row keeps its ID and its creation time. It stays deleted, the way its source
+// is, when the source is deleted.
+export async function reviveProcessedFile(
+  fileId: number,
+  values: RevivedFileValues
+): Promise<ReviveResult> {
+  try {
+    const revived = await db.transaction(async (tx) => {
+      const deletion = await lockSourceDeletion(tx, values.sourceFileId);
+      const [row] = await tx
+        .update(files)
+        .set({
+          ...UPLOAD_ARRIVED_RESET,
+          status: "uploaded",
+          uploadedAt: new Date(),
+          contentType: values.contentType,
+          sizeBytes: values.sizeBytes,
+          sourceFileId: values.sourceFileId,
+          metadata: {},
+          processedAt: null,
+          processingStartedAt: null,
+          queuedAt: null,
+          dispatchId: null,
+          stallRequeues: 0,
+          deletedAt: deletion?.deletedAt ?? null,
+          deletedBy: deletion?.deletedBy ?? null,
+          deletedByToken: deletion?.deletedByToken ?? null,
+        })
+        .where(
+          and(
+            eq(files.id, fileId),
+            eq(files.category, "processed"),
+            isNotNull(files.deletedAt)
+          )
+        )
+        .returning();
+      return row;
+    });
+    if (revived) {
+      return { kind: "revived", row: revived };
+    }
+  } catch (error) {
+    // A unique violation ends the transaction, so it is caught out here.
+    if (hasPgErrorCode(error, UNIQUE_VIOLATION)) {
+      return { kind: "conflict" };
+    }
+    throw error;
+  }
+  const [current] = await db
+    .select()
+    .from(files)
+    .where(eq(files.id, fileId))
+    .limit(1);
+  return { kind: "unchanged", row: current ?? null };
+}
+
+// Fetches a file by numeric ID, deleted or not. A deleted file stays readable
+// by its ID, as it stays downloadable.
+export async function getFileById(fileId: number): Promise<FileRow | null> {
+  const [file] = await db
+    .select()
+    .from(files)
+    .where(eq(files.id, fileId))
+    .limit(1);
+  return file ?? null;
 }
 
 // Fetches an active (not soft-deleted) file by numeric ID.
@@ -133,8 +303,12 @@ export type FileDownloadLookup =
   | { ok: false; reason: "not_found" | "not_uploaded" };
 
 // Resolves a file ID into the S3 coordinates needed to produce a pre-signed
-// download URL. Returns `not_found` when the file or its parent run is
-// soft-deleted, and `not_uploaded` when the file hasn't reached S3 yet.
+// download URL. Returns `not_found` when the file doesn't exist or its parent
+// run is soft-deleted, and `not_uploaded` when the file hasn't reached S3 yet.
+//
+// A soft-deleted file is found. Its object stays in storage, and someone who
+// deleted a file by mistake can still open or download it by its ID. The lists,
+// "Download all" and "Download filtered" leave deleted files out on their own.
 export async function lookupFileForDownload(
   fileId: number
 ): Promise<FileDownloadLookup> {
@@ -145,14 +319,13 @@ export async function lookupFileForDownload(
       filename: files.filename,
       s3Bucket: files.s3Bucket,
       s3Key: files.s3Key,
-      deletedAt: files.deletedAt,
       instrumentRunId: files.instrumentRunId,
     })
     .from(files)
     .where(eq(files.id, fileId))
     .limit(1);
 
-  if (!file || file.deletedAt) {
+  if (!file) {
     return { ok: false, reason: "not_found" };
   }
 
@@ -178,93 +351,6 @@ export async function lookupFileForDownload(
     runUuid: file.instrumentRunId,
     s3Bucket: file.s3Bucket,
     s3Key: file.s3Key,
-  };
-}
-
-export type DismissFileResult =
-  | {
-      ok: true;
-      id: number;
-      filename: string;
-      deletedAt: Date;
-      // True when the file was already soft-deleted, so the call made no change.
-      // Lets `dismiss_file` / DELETE stay idempotent (success, not 409).
-      alreadyApplied: boolean;
-    }
-  | {
-      ok: false;
-      status: number;
-      code: "NOT_FOUND" | "CONFLICT";
-      message: string;
-    };
-
-// Pre-upload dismiss only — once a file is on S3, deletion stays at the run boundary.
-// Shared by REST DELETE `/files/:id` and MCP `dismiss_file`.
-export async function dismissFile(fileId: number): Promise<DismissFileResult> {
-  const [file] = await db
-    .select()
-    .from(files)
-    .where(eq(files.id, fileId))
-    .limit(1);
-
-  if (!file) {
-    return {
-      ok: false,
-      status: 404,
-      code: "NOT_FOUND",
-      message: `File '${fileId}' not found`,
-    };
-  }
-
-  if (file.deletedAt) {
-    // Idempotent: already dismissed, so report success with the existing
-    // deletion timestamp instead of a 409 conflict.
-    return {
-      ok: true,
-      id: file.id,
-      filename: file.filename,
-      deletedAt: file.deletedAt,
-      alreadyApplied: true,
-    };
-  }
-
-  if (!PRE_UPLOAD_FILE_STATUSES.includes(file.status)) {
-    return {
-      ok: false,
-      status: 409,
-      code: "CONFLICT",
-      message: `Cannot dismiss a file in '${file.status}' status — only ${PRE_UPLOAD_FILE_STATUSES.map((s) => `'${s}'`).join(" or ")} files can be dismissed`,
-    };
-  }
-
-  // The update checks again what the read above saw. The processor can adopt
-  // the file in between, and a file that reached S3 must not be left as a
-  // dismissed row that holds its S3 key.
-  const now = new Date();
-  const [updated] = await db
-    .update(files)
-    .set({ deletedAt: now })
-    .where(
-      and(
-        eq(files.id, fileId),
-        isNull(files.deletedAt),
-        inArray(files.status, [...PRE_UPLOAD_FILE_STATUSES])
-      )
-    )
-    .returning({ id: files.id });
-  if (!updated) {
-    // The row changed after the read. Decide again from what it is now: it is
-    // dismissed already, or it is past the point where a dismiss is allowed.
-    return await dismissFile(fileId);
-  }
-  await touchRuns([file.instrumentRunId]);
-
-  return {
-    ok: true,
-    id: file.id,
-    filename: file.filename,
-    deletedAt: now,
-    alreadyApplied: false,
   };
 }
 

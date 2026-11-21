@@ -1,6 +1,5 @@
 "use client";
 
-import { Loader2, RotateCw, Upload, X } from "lucide-react";
 import {
   type ComponentProps,
   lazy,
@@ -12,19 +11,7 @@ import {
 import { toast } from "sonner";
 import { LoadErrorBoundary } from "@/components/load-error-boundary";
 import { TruncatedTooltip } from "@/components/truncated-tooltip";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -38,28 +25,19 @@ import type { RunFileRow } from "@/lib/api/instrument-runs";
 import { formatDateTime } from "@/lib/date";
 import type { InstrumentType } from "@/lib/db/schema";
 import { preloader } from "@/lib/preload";
-import { isRequestableFileStatus } from "@/lib/runs/file-buckets";
-import { canReprocessFile } from "@/lib/runs/reprocessable-statuses";
-import { filePreviewKind } from "@/lib/runs/run-file-types";
+import { selectAllTargets } from "@/lib/runs/file-bar-actions";
+import { previewFilesOf } from "@/lib/runs/preview-files";
 import { cn, formatBytes } from "@/lib/utils";
-import type { PreviewableFile } from "./file-preview-dialog";
 import { FilePreviewLoading } from "./file-preview-loading";
 import {
   FileSelectAllCheckbox,
   FileSelectCheckbox,
 } from "./file-select-checkbox";
 import { buildFileRef, useFileSelection } from "./file-selection-provider";
-import { FileStatusColumnHeader } from "./file-status-column-header";
+import { DELETED_BADGE_CLASS, DELETED_TEXT_CLASS } from "./file-status-config";
 import { FileStatusIndicator } from "./file-status-indicator";
-import { WatcherGatedUploadButton } from "./watcher-gated-upload-button";
-
-const DOWNLOADABLE_STATUSES = new Set([
-  "uploaded",
-  "queued",
-  "processing",
-  "completed",
-  "failed",
-]);
+import { FileStatusLegendButton } from "./file-status-legend";
+import { FilesSortHeader } from "./files-sort-header";
 
 const CATEGORY_BADGE_CLASSES: Record<string, string> = {
   raw: "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300",
@@ -74,25 +52,17 @@ const CATEGORY_BADGE_CLASSES: Record<string, string> = {
 function FileColumnHeaders() {
   return (
     <>
-      <TableHead>File name</TableHead>
+      <FilesSortHeader field="name" label="File name" />
       <TableHead>Type</TableHead>
-      <TableHead>Size</TableHead>
-      <TableHead>Created</TableHead>
-      <TableHead>
-        <FileStatusColumnHeader />
-      </TableHead>
+      <FilesSortHeader align="end" field="size" label="Size" />
+      <FilesSortHeader align="end" field="date" label="Created" />
+      <FilesSortHeader
+        field="status"
+        label="Status"
+        trailing={<FileStatusLegendButton />}
+      />
     </>
   );
-}
-
-function previewableFileOf(file: RunFileRow): PreviewableFile | null {
-  if (!DOWNLOADABLE_STATUSES.has(file.status)) {
-    return null;
-  }
-  const kind = filePreviewKind(file);
-  return kind
-    ? { category: file.category, filename: file.filename, id: file.id, kind }
-    : null;
 }
 
 // The dialog pulls in the CSV parser and the colony table. Most visits never
@@ -106,23 +76,38 @@ const loadFilePreviewDialog = () =>
 const FilePreviewDialog = lazy(loadFilePreviewDialog);
 const preloadFilePreviewDialog = preloader(loadFilePreviewDialog);
 
-// Shared by both table variants. Navigation covers only the files on the
-// current page, in table order.
-function useFilePreview(files: RunFileRow[]) {
+// Shared by both table variants. Every file opens, and previous and next step
+// through the files on the current page, in table order. The files off the page
+// that the open file links to open in the same window, one by one, but the
+// buttons do not step through them.
+function useFilePreview({
+  files,
+  instrumentId,
+  isDeleted,
+  relatedFiles,
+  runId,
+}: {
+  files: RunFileRow[];
+  instrumentId: string;
+  // A deleted run is read-only, so the window offers no Delete or Restore.
+  isDeleted: boolean;
+  relatedFiles: RunFileRow[];
+  runId: string;
+}) {
   const [openFileId, setOpenFileId] = useState<number | null>(null);
   // Stays mounted after the first open so closing still plays its animation.
   const [hasOpened, setHasOpened] = useState(false);
-  const previewable = useMemo(
-    () =>
-      files
-        .map(previewableFileOf)
-        .filter((f): f is PreviewableFile => f !== null),
-    [files]
+  const previewFiles = useMemo(() => previewFilesOf(files), [files]);
+  const relatedPreviewFiles = useMemo(
+    () => previewFilesOf(relatedFiles),
+    [relatedFiles]
   );
-  const isOpenFileListed = previewable.some((f) => f.id === openFileId);
+  const isOpenFileListed =
+    previewFiles.some((f) => f.id === openFileId) ||
+    relatedPreviewFiles.some((f) => f.id === openFileId);
 
-  // Closes the dialog when its file leaves the page, e.g. it was dismissed in
-  // another tab and the auto-refresh dropped it.
+  // Closes the dialog when its file is gone, e.g. it was deleted in another
+  // tab while deleted files are hidden and the auto-refresh dropped it.
   useEffect(() => {
     if (openFileId !== null && !isOpenFileListed) {
       setOpenFileId(null);
@@ -145,7 +130,9 @@ function useFilePreview(files: RunFileRow[]) {
         }
       >
         <FilePreviewDialog
-          files={previewable}
+          files={previewFiles}
+          instrumentId={instrumentId}
+          isRunDeleted={isDeleted}
           onOpenChange={(open) => {
             if (!open) {
               setOpenFileId(null);
@@ -153,6 +140,8 @@ function useFilePreview(files: RunFileRow[]) {
           }}
           onSelect={setOpenFileId}
           openFileId={openFileId}
+          relatedFiles={relatedPreviewFiles}
+          runId={runId}
         />
       </Suspense>
     </LoadErrorBoundary>
@@ -166,8 +155,9 @@ function useFilePreview(files: RunFileRow[]) {
   return { dialog, openPreview };
 }
 
-// Checkboxes and row actions are buttons inside the row. A click on those
-// should change the selection or run the action, not also open the preview.
+// A click anywhere on the row opens the file, except in the cell that holds the
+// selection checkbox: a click there changes the selection and nothing else.
+// That cell marks itself with `data-row-control` to opt out.
 function FileTableRow({
   className,
   file,
@@ -177,76 +167,73 @@ function FileTableRow({
   file: RunFileRow;
   onPreview: (fileId: number) => void;
 }) {
-  const previewable = previewableFileOf(file) !== null;
   return (
     <TableRow
       {...props}
-      className={cn("group", previewable && "cursor-pointer", className)}
-      onClick={
-        previewable
-          ? (event) => {
-              const target = event.target;
-              if (
-                target instanceof Element &&
-                target.closest("button, a, input, [role='checkbox']")
-              ) {
-                return;
-              }
-              onPreview(file.id);
-            }
-          : undefined
-      }
+      className={cn("cursor-pointer", className)}
+      onClick={(event) => {
+        const target = event.target;
+        if (target instanceof Element && target.closest("[data-row-control]")) {
+          return;
+        }
+        onPreview(file.id);
+      }}
+      onMouseEnter={preloadFilePreviewDialog}
     />
   );
 }
 
-function FileInfoCells({
-  file,
-  onPreview,
-}: {
-  file: RunFileRow;
-  onPreview: (fileId: number) => void;
-}) {
+function FileInfoCells({ file }: { file: RunFileRow }) {
   const timeZone = useViewerTimeZone();
-  const previewable = previewableFileOf(file);
+  // A deleted row reads as gray text, a gray type badge, and "Deleted" with a
+  // trash icon. Not faded: half opacity drops the text below the contrast it
+  // needs.
+  const deleted = file.deletedAt !== null;
+  const mutedText = deleted ? DELETED_TEXT_CLASS : "text-muted-foreground";
   return (
     <>
       {/* Long instrument filenames cut off with an ellipsis instead of pushing
-          the status and action columns off screen. The title shows the rest. */}
-      <TableCell className="max-w-sm py-2 font-mono text-sm">
-        {previewable ? (
-          <TruncatedTooltip text={file.filename}>
-            <button
-              className="block max-w-full cursor-pointer truncate text-left"
-              onClick={() => onPreview(file.id)}
-              onFocus={preloadFilePreviewDialog}
-              onMouseEnter={preloadFilePreviewDialog}
-              type="button"
-            >
-              {file.filename}
-            </button>
-          </TruncatedTooltip>
-        ) : (
-          <span className="block truncate" title={file.filename}>
-            {file.filename}
-          </span>
+          the status column off screen. The tooltip shows the rest. The button
+          is how a keyboard reaches the file; its click bubbles to the row,
+          which opens it. */}
+      <TableCell
+        className={cn(
+          "max-w-sm py-2 font-mono text-sm",
+          deleted && DELETED_TEXT_CLASS
         )}
+      >
+        <TruncatedTooltip text={file.filename}>
+          <button
+            className="block max-w-full cursor-pointer truncate text-left"
+            data-file-id={file.id}
+            onFocus={preloadFilePreviewDialog}
+            type="button"
+          >
+            {file.filename}
+          </button>
+        </TruncatedTooltip>
       </TableCell>
       <TableCell className="py-2">
         <Badge
           className={cn(
             "capitalize",
-            CATEGORY_BADGE_CLASSES[file.category] ??
-              "bg-slate-100 text-slate-700 dark:bg-slate-950 dark:text-slate-300"
+            deleted
+              ? DELETED_BADGE_CLASS
+              : (CATEGORY_BADGE_CLASSES[file.category] ??
+                  "bg-slate-100 text-slate-700 dark:bg-slate-950 dark:text-slate-300")
           )}
         >
           {file.category}
         </Badge>
       </TableCell>
-      <TableCell className="py-2 text-muted-foreground text-sm tabular-nums">
+      <TableCell
+        className={cn("py-2 text-right text-sm tabular-nums", mutedText)}
+      >
         {formatBytes(file.sizeBytes)}
       </TableCell>
-      <TableCell className="py-2 text-muted-foreground text-sm tabular-nums">
+      <TableCell
+        className={cn("py-2 text-right text-sm tabular-nums", mutedText)}
+      >
         {file.fileCreatedAt
           ? formatDateTime(file.fileCreatedAt, timeZone)
           : file.createdAt
@@ -260,172 +247,43 @@ function FileInfoCells({
   );
 }
 
-function ReprocessAction({
-  file,
-  isPending,
-  onReprocess,
-}: {
-  file: RunFileRow;
-  isPending: boolean;
-  onReprocess: (id: number) => void;
-}) {
-  return (
-    <AlertDialog>
-      <AlertDialogTrigger asChild>
-        <Button
-          className="h-6 gap-1 px-2 text-xs"
-          disabled={isPending}
-          size="sm"
-          variant="outline"
-        >
-          {isPending ? (
-            <Loader2 className="size-3 animate-spin" />
-          ) : (
-            <RotateCw className="size-3" />
-          )}
-          Reprocess
-        </Button>
-      </AlertDialogTrigger>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>Reprocess file?</AlertDialogTitle>
-          <AlertDialogDescription>
-            {file.stalledProcessing ? (
-              <>
-                Processing never finished for{" "}
-                <strong className="font-mono">{file.filename}</strong>.
-                Reprocessing will queue it to try again. Any existing report
-                data for this file will be cleared.
-              </>
-            ) : (
-              <>
-                <strong className="font-mono">{file.filename}</strong> will be
-                queued for reprocessing and will start when a processing slot is
-                free. Any existing report data for this file will be cleared.
-              </>
-            )}
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction onClick={() => onReprocess(file.id)}>
-            Reprocess
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-  );
-}
-
-function UploadDismissActions({
-  file,
-  isPending,
-  onUpload,
-  onDismiss,
-}: {
-  file: RunFileRow;
-  isPending: boolean;
-  onUpload: (id: number) => void;
-  onDismiss: (id: number) => void;
-}) {
-  return (
-    <>
-      <WatcherGatedUploadButton
-        className="h-6 gap-1 px-2 text-xs"
-        disabled={isPending}
-        onClick={() => onUpload(file.id)}
-        size="sm"
-        variant="outline"
-      >
-        <Upload className="size-3" />
-        Upload
-      </WatcherGatedUploadButton>
-      <AlertDialog>
-        <AlertDialogTrigger asChild>
-          <Button
-            className="h-6 gap-1 px-2 text-muted-foreground text-xs"
-            disabled={isPending}
-            size="sm"
-            variant="ghost"
-          >
-            <X className="size-3" />
-            Dismiss
-          </Button>
-        </AlertDialogTrigger>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Dismiss file?</AlertDialogTitle>
-            <AlertDialogDescription>
-              <strong className="font-mono">{file.filename}</strong> will be
-              soft-deleted. The watcher will skip it on future scans.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => onDismiss(file.id)}>
-              Dismiss
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </>
-  );
-}
-
 // ---------------------------------------------------------------------------
-// Read-only variant: no selection column, no upload/dismiss. Reprocessing is
-// still allowed for uploaded/completed/failed/stalled raw files so operators
-// can recover report data or kick stuck uploads without restoring the run.
+// Read-only variant, for a deleted run: no selection column, so nothing on the
+// page changes the run's files. Rows still open the file window.
 // ---------------------------------------------------------------------------
-
-export interface ReadOnlyRunFilesTableProps {
-  files: RunFileRow[];
-  instrumentType: InstrumentType;
-  isFilePending: (id: number) => boolean;
-  onReprocess: (id: number) => void;
-}
 
 export function ReadOnlyRunFilesTable({
   files,
-  instrumentType,
-  isFilePending,
-  onReprocess,
-}: ReadOnlyRunFilesTableProps) {
-  const { dialog, openPreview } = useFilePreview(files);
+  instrumentId,
+  relatedFiles,
+  runId,
+}: {
+  files: RunFileRow[];
+  instrumentId: string;
+  relatedFiles: RunFileRow[];
+  runId: string;
+}) {
+  const { dialog, openPreview } = useFilePreview({
+    files,
+    instrumentId,
+    isDeleted: true,
+    relatedFiles,
+    runId,
+  });
   return (
     <>
       <Table>
         <TableHeader>
           <TableRow className="hover:bg-transparent">
             <FileColumnHeaders />
-            <TableHead className="w-0" />
           </TableRow>
         </TableHeader>
         <TableBody>
-          {files.map((file) => {
-            const isDismissed = file.deletedAt !== null;
-            return (
-              <FileTableRow
-                className={isDismissed ? "opacity-50" : undefined}
-                file={file}
-                key={file.id}
-                onPreview={openPreview}
-              >
-                <FileInfoCells file={file} onPreview={openPreview} />
-                <TableCell className="py-2 pr-3">
-                  {canReprocessFile(file, instrumentType) ? (
-                    <div className="flex items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
-                      <ReprocessAction
-                        file={file}
-                        isPending={isFilePending(file.id)}
-                        onReprocess={onReprocess}
-                      />
-                    </div>
-                  ) : null}
-                </TableCell>
-              </FileTableRow>
-            );
-          })}
+          {files.map((file) => (
+            <FileTableRow file={file} key={file.id} onPreview={openPreview}>
+              <FileInfoCells file={file} />
+            </FileTableRow>
+          ))}
         </TableBody>
       </Table>
       {dialog}
@@ -434,124 +292,69 @@ export function ReadOnlyRunFilesTable({
 }
 
 // ---------------------------------------------------------------------------
-// Editable variant: adds a selection column (for bulk upload/dismiss/reprocess
-// /download flows) and per-row upload/dismiss/reprocess buttons. Selection
-// state is read from FileSelectionProvider so the table doesn't carry a
-// prop bag — consumers compose the table inside a provider and the bulk
-// action bar reads from the same context.
+// Editable variant: adds a selection column. Rows have no buttons of their own;
+// every action goes through the bar that floats at the bottom of the window
+// while files are selected. Selection state is read from FileSelectionProvider
+// so the table doesn't carry a prop bag — consumers compose the table inside a
+// provider and the bulk action bar reads from the same context.
 // ---------------------------------------------------------------------------
-
-export interface EditableRunFilesTableProps {
-  files: RunFileRow[];
-  instrumentType: InstrumentType;
-  isFilePending: (id: number) => boolean;
-  onDismiss: (id: number) => void;
-  onReprocess: (id: number) => void;
-  onUpload: (id: number) => void;
-}
 
 export function EditableRunFilesTable({
   files,
+  instrumentId,
   instrumentType,
-  isFilePending,
-  onUpload,
-  onDismiss,
-  onReprocess,
-}: EditableRunFilesTableProps) {
+  relatedFiles,
+  runId,
+}: {
+  files: RunFileRow[];
+  instrumentId: string;
+  instrumentType: InstrumentType;
+  relatedFiles: RunFileRow[];
+  runId: string;
+}) {
   const { meta } = useFileSelection();
-  const { dialog, openPreview } = useFilePreview(files);
+  const { dialog, openPreview } = useFilePreview({
+    files,
+    instrumentId,
+    isDeleted: false,
+    relatedFiles,
+    runId,
+  });
 
   // Pre-compute the FileRef for each visible row once so the select-all
   // header, the per-row checkbox, and the row-state styling all see the
-  // same selectable set.
-  const refsByFileId = new Map<number, ReturnType<typeof buildFileRef>>();
-  const visibleSelectableRefs: NonNullable<ReturnType<typeof buildFileRef>>[] =
-    [];
-  for (const file of files) {
-    const ref = buildFileRef(file, instrumentType);
-    refsByFileId.set(file.id, ref);
-    if (ref) {
-      visibleSelectableRefs.push(ref);
-    }
-  }
-
-  const showSelectionColumn = visibleSelectableRefs.length > 0;
-  const hasBulkSelection = meta.count > 0;
+  // same selectable set. Every row can be selected, deleted ones too, so they
+  // can be restored.
+  const refs = files.map((file) => buildFileRef(file, instrumentType));
+  const selectAllRefs = selectAllTargets(refs);
 
   return (
     <>
       <Table>
         <TableHeader>
           <TableRow className="hover:bg-transparent">
-            {showSelectionColumn && (
-              <TableHead className="w-10 pr-0 pl-3">
-                <FileSelectAllCheckbox refs={visibleSelectableRefs} />
-              </TableHead>
-            )}
+            <TableHead className="w-10 pr-0 pl-3">
+              <FileSelectAllCheckbox refs={selectAllRefs} />
+            </TableHead>
             <FileColumnHeaders />
-            <TableHead className="w-0" />
           </TableRow>
         </TableHeader>
         <TableBody>
-          {files.map((file) => {
-            const isDismissed = file.deletedAt !== null;
-            const ref = refsByFileId.get(file.id) ?? null;
-            const isSelected = ref ? meta.isSelected(ref.id) : false;
-            const canDoUploadDismiss =
-              !isDismissed && isRequestableFileStatus(file.status);
-            const canDoReprocess = canReprocessFile(file, instrumentType);
-
-            // Reveal classes: hide per-row actions while a bulk selection is
-            // active (the bar is the single entry point) but keep the JSX
-            // mounted so the actions column doesn't collapse and shift
-            // sibling columns. We stay in the opacity-0 baseline in both
-            // states — the only thing that changes is whether the hover/
-            // focus reveal rules are in the class list — so the browser
-            // never has to interpolate between an in-flight hover fade-in
-            // and a different hide mechanism, which is what was producing
-            // a brief "all actions visible" flash on the click frame.
-            const revealClass = hasBulkSelection
-              ? "opacity-0 pointer-events-none"
-              : "opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity";
-
+          {files.map((file, index) => {
+            const ref = refs[index];
             return (
               <FileTableRow
-                className={isDismissed ? "opacity-50" : undefined}
-                data-state={isSelected ? "selected" : undefined}
+                data-state={meta.isSelected(ref.id) ? "selected" : undefined}
                 file={file}
                 key={file.id}
                 onPreview={openPreview}
               >
-                {showSelectionColumn && (
-                  <TableCell className="py-2 pr-0 pl-3">
-                    {ref ? (
-                      <FileSelectCheckbox fileRef={ref} />
-                    ) : (
-                      <div className="size-4" />
-                    )}
-                  </TableCell>
-                )}
-                <FileInfoCells file={file} onPreview={openPreview} />
-                <TableCell className="py-2 pr-3">
-                  {canDoUploadDismiss ? (
-                    <div className={`flex items-center gap-1 ${revealClass}`}>
-                      <UploadDismissActions
-                        file={file}
-                        isPending={isFilePending(file.id)}
-                        onDismiss={onDismiss}
-                        onUpload={onUpload}
-                      />
-                    </div>
-                  ) : canDoReprocess ? (
-                    <div className={`flex items-center gap-1 ${revealClass}`}>
-                      <ReprocessAction
-                        file={file}
-                        isPending={isFilePending(file.id)}
-                        onReprocess={onReprocess}
-                      />
-                    </div>
-                  ) : null}
+                {/* A click in the cell that holds the checkbox changes the
+                    selection and nothing else. */}
+                <TableCell className="py-2 pr-0 pl-3" data-row-control>
+                  <FileSelectCheckbox fileRef={ref} />
                 </TableCell>
+                <FileInfoCells file={file} />
               </FileTableRow>
             );
           })}

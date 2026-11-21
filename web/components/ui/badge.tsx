@@ -1,7 +1,7 @@
 import { cva, type VariantProps } from "class-variance-authority";
 import { Slot } from "radix-ui";
 import type * as React from "react";
-
+import { RED_BADGE_COLORS } from "@/lib/ui-classes";
 import { cn } from "@/lib/utils";
 
 const badgeVariants = cva(
@@ -13,8 +13,7 @@ const badgeVariants = cva(
           "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300 [a]:hover:bg-blue-100 dark:[a]:hover:bg-blue-900",
         secondary:
           "bg-slate-100 text-slate-700 dark:bg-slate-950 dark:text-slate-300 [a]:hover:bg-slate-100 dark:[a]:hover:bg-slate-900",
-        destructive:
-          "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300 [a]:hover:bg-red-100 dark:[a]:hover:bg-red-900",
+        destructive: `${RED_BADGE_COLORS} [a]:hover:bg-red-100 dark:[a]:hover:bg-red-800`,
         outline:
           "bg-slate-100 text-slate-700 dark:bg-slate-950 dark:text-slate-300 [a]:hover:bg-slate-100 dark:[a]:hover:bg-slate-900",
         ghost:

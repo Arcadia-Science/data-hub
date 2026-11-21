@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  fileFormatName,
   filePreviewKind,
+  filePreviewMedia,
   fileStem,
   isCsvFile,
   isImageFile,
@@ -213,5 +215,48 @@ describe("filePreviewKind", () => {
     expect(isPreviewableFile({ filename: "a.json", contentType: null })).toBe(
       true
     );
+  });
+});
+
+describe("filePreviewMedia", () => {
+  it.each([
+    ["a.jpg", null, "image"],
+    ["a.JPEG", null, "image"],
+    ["a.png", "binary/octet-stream", "image"],
+    ["a.webp", null, "image"],
+    ["a.gif", null, "image"],
+    ["clip.mp4", "binary/octet-stream", "video"],
+    ["report.PDF", "binary/octet-stream", "pdf"],
+    ["no-extension", "image/png", "image"],
+    ["no-extension", "video/mp4; codecs=avc1", "video"],
+    ["no-extension", "application/pdf", "pdf"],
+  ] as const)("%s (%s) is shown as %s", (filename, contentType, expected) => {
+    expect(filePreviewMedia({ filename, contentType })).toBe(expected);
+  });
+
+  it.each([
+    ["capture.tif", "image/tiff"],
+    ["capture.tiff", null],
+    ["figure.svg", "image/svg+xml"],
+    ["clip.mov", "video/quicktime"],
+    ["data.csv", "text/csv"],
+    ["notes.txt", null],
+  ])("%s (%s) is not shown as media", (filename, contentType) => {
+    expect(filePreviewMedia({ filename, contentType })).toBeNull();
+  });
+});
+
+describe("fileFormatName", () => {
+  it("names a TIFF by its full name and other formats by their extension", () => {
+    expect(fileFormatName("s001_A.tif")).toBe("TIFF");
+    expect(fileFormatName("s001_A.TIFF")).toBe("TIFF");
+    expect(fileFormatName("stack.nd2")).toBe("ND2");
+    expect(fileFormatName("archive.tar.gz")).toBe("GZ");
+  });
+
+  it("names nothing for a file with no extension", () => {
+    expect(fileFormatName("README")).toBeNull();
+    expect(fileFormatName(".hidden")).toBeNull();
+    expect(fileFormatName("trailing.")).toBeNull();
   });
 });

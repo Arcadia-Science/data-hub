@@ -1,35 +1,35 @@
 ---
-title: Overview
+title: API overview
 description: Authenticate to the Data Hub REST API, make a first request, and understand pagination, filtering, token attribution, and errors.
 contentType: Reference
 ---
 
 <Audience>Developers and integrators</Audience>
 
-The Data Hub API is served by the web application at `/api/v1/`. The watcher, Lambda, and dashboard all call it. Data Hub is self-hosted, so the base URL is your deployment host plus `/api/v1`. Examples use `https://datahub.example.com`; substitute your host.
+The Data Hub web app serves the REST API at `/api/v1/`. The watcher, the Lambda, and the web app all call it. Data Hub is self-hosted, so the base URL is your deployment’s host plus `/api/v1`. Examples use `https://datahub.example.com`; replace it with your host.
 
-Per-endpoint request and response shapes live in the generated pages under this section (same sidebar). Each deployment also publishes OpenAPI 3.1 at `/api/v1/openapi.json`.
+The generated pages in this **API** section of the sidebar describe each endpoint’s request and response. Each deployment also publishes an OpenAPI 3.1 document at `/api/v1/openapi.json`.
 
 ## Authentication [#authentication]
 
-Two methods (full model in [Security and permissions](/docs/security)):
+The REST API accepts two kinds of credentials, and [Security and permissions](/docs/security) describes the full model:
 
-- **Session cookies**: web dashboard (Google OAuth). Session callers implicitly hold every scope.
-- **Bearer tokens**: `Authorization: Bearer dhub_…` for the watcher, the Lambda, and scripts
+- **Session cookies**: the web app uses these after someone signs in with Google. Scopes apply only to tokens, so a signed-in session passes every scope check.
+- **Bearer tokens**: the watcher, the Lambda, and scripts send `Authorization: Bearer dhub_…`
 
 ```sh
 curl https://datahub.example.com/api/v1/instruments \
   -H "Authorization: Bearer dhub_your_token_here"
 ```
 
-Every token request needs a [scope](/docs/security#token-scopes). A missing scope returns `403 FORBIDDEN`. Some mutations also require the admin role; see [Admin-gated operations](/docs/security#admin-gated-operations).
+Every token request needs a [scope](/docs/security#token-scopes), and a missing scope returns `403 FORBIDDEN`. Some actions that change data also need the admin role; see [Admin-gated operations](/docs/security#admin-gated-operations).
 
-Some routes accept only one of the two methods:
+Some routes accept only one of the two kinds of credentials:
 
 - The routes the watcher and the Lambda call accept only tokens, and return `401 UNAUTHORIZED` to a session. These cover watcher registration and heartbeats, upload links, file updates, run creation and updates, and instrument creation.
 - Claiming runs, sending feedback, reviewing feedback, and managing tokens need a signed-in person, so tokens can’t call them.
 
-Mint tokens in the UI: [Issue and revoke tokens](/docs/manage-tokens).
+Admins create tokens in the web app; see [Issue and revoke tokens](/docs/manage-tokens).
 
 ## First request [#first-request]
 
@@ -40,25 +40,37 @@ curl https://datahub.example.com/api/v1/instruments \
   -H "Authorization: Bearer dhub_your_token_here"
 ```
 
-Fetch the OpenAPI document (no auth required):
+Fetch the OpenAPI document, which needs no credentials:
 
 ```sh
 curl https://datahub.example.com/api/v1/openapi.json
 ```
 
-The document covers the integrator surface: instruments, runs, comments, lab notebooks, files, watchers, archive jobs, search, and `POST /notifications/dispatch`. Routes that only the dashboard uses are left out: `/tokens`, `/users`, `/feedback`, `/settings/*`, and the notification inbox. The MCP transport is documented separately.
+The document covers the routes that integrations use:
+
+- instruments
+- runs
+- comments
+- lab notebooks
+- files
+- watchers
+- archive jobs
+- search
+- `POST /notifications/dispatch`
+
+It leaves out the routes that only the web app uses: `/tokens`, `/users`, `/feedback`, `/settings/*`, and the notification inbox. The MCP server has its own docs; see [MCP](#mcp).
 
 ## Instruments and their watcher [#instrument-connection]
 
-An instrument has at most one active watcher, so `GET /instruments` and `GET /instruments/:id` describe it with one object, not counts:
+An instrument has at most one active watcher, so `GET /instruments` and `GET /instruments/:id` describe it with one object instead of counts:
 
-- `watcher`: the instrument’s active watcher, or `null` when it has none. It carries `id`, `status`, `status_reason`, `last_heartbeat_at`, `file_patterns`, `upload_mode`, and `config_state`. With the `watchers:read` scope it also carries the fields that say where the watcher runs: `hostname`, `os_info`, `version`, `watch_directory`, and `shared_computer_with`. A token that has `instruments:read` but not `watchers:read` gets the watcher without those five fields; they are missing from the object, not `null`. A signed-in browser session has every scope, so it always gets them.
-- `connection`: whether new files can reach Data Hub. `state` is `online`, `restarting`, `connecting`, or `offline`, and `reason` says why it is offline (`folder_missing`, `unresponsive`, `never_checked_in`, `stopped`, `no_watcher`, or `deregistered`) and is `null` otherwise. The rules are the ones behind the badge in the web app; see [Instrument status](/docs/concepts#instrument-status). `connection` ignores the instrument’s own `status`, so a `pending` instrument can be `online`. The web app shows **Pending** or **Retired** first, and `connection.state` only after that.
+- `watcher`: the instrument’s active watcher, or `null` when it has none. It includes `id`, `status`, `status_reason`, `last_heartbeat_at`, `file_patterns`, `upload_mode`, and `config_state`. With the `watchers:read` scope, it also includes five fields that say where the watcher runs: `hostname`, `os_info`, `version`, `watch_directory`, and `shared_computer_with`. A token that has `instruments:read` but not `watchers:read` gets the watcher without those five fields. The fields are missing from the object, not set to `null`. A signed-in browser session passes every scope check, so it always gets them.
+- `connection`: whether new files can reach Data Hub. `state` is `online`, `restarting`, `connecting`, or `offline`. `reason` says why the instrument is offline (`folder_missing`, `unresponsive`, `never_checked_in`, `stopped`, `no_watcher`, or `deregistered`), and is `null` otherwise. The rules are the same ones behind the badge in the web app; see [Instrument status](/docs/concepts#instrument-status). `connection` ignores the instrument’s own `status`, so a `pending` instrument can be `online`. The web app shows **Pending** or **Retired** first, and `connection.state` only after that.
 - `past_watcher_count`: how many deregistered watchers the instrument has had.
 
-`GET /instruments/:id` still returns `watcher_count`, but it is deprecated. It keeps its old value for now. A later release will remove it, and the changelog will announce the date first. Read `watcher` instead, which is `null` when there is none.
+`GET /instruments/:id` still returns `watcher_count`, but it’s deprecated. It keeps its old value for now. A later release will remove it, and the changelog will announce the date first. Read `watcher` instead, which is `null` when there’s no watcher.
 
-`GET /search` returns the same instrument results as the `global_search` MCP tool. An instrument result now carries `connection`, and its `watcherStatus` and `lastWatcherHeartbeatAt` are deprecated. They keep their old values for now, and `connection` replaces them.
+`GET /search` returns the same instrument results as the `global_search` MCP tool. An instrument result now includes `connection`, which replaces the deprecated `watcherStatus` and `lastWatcherHeartbeatAt`. Those two fields keep their old values for now.
 
 ## Actions taken by a token [#actions-taken-by-a-token]
 
@@ -66,30 +78,49 @@ A token acts under its own name, not as a person, so responses name the token wh
 
 - A comment posted by a token has `user: null` and a `token` object with the token’s `id` and `name`. A comment posted by a person has `token: null`.
 - A run deleted by a token has `deleted_by_token` set, alongside `deleted_at`.
+- A file deleted by a token has `deleted_by_token` set, alongside `deleted_at`, and `deleted_by` null. A file deleted by a person has `deleted_by` set to their user ID and `deleted_by_token` null.
 - A lab notebook created, last edited, or deleted by a token has `created_by_token`, `updated_by_token`, or `deleted_by_token` set, and the matching person field null. A run added to a lab notebook by a token has `linked_by_token` set and `linked_by` null.
 
 Read both fields when you display who did something. See [How a token acts](/docs/manage-tokens#how-a-token-acts).
 
+## Deleted files [#deleted-files]
+
+Deleting a file hides it from its run. The file stays in storage, records who deleted it, and can be restored. A deleted file is left out of the run’s downloads and of the `files` that `GET /instruments/:id/runs/:runId` returns. Pass `include_deleted=true` to that route to list deleted files too, each with `deleted_at` and who deleted it. A deleted file keeps its ID, so you can still download it by ID.
+
+- `DELETE /files/:id` deletes one file, and `POST /files/:id/restore` brings it back. Pass `include_linked=true` to take along the files linked to it. For a raw file, those are the processed files made from it and the `run.json` saved with its capture, which a delete takes only when every raw file in that folder is being deleted. A restore also brings back the raw file a processed file was made from.
+- `POST /instruments/:id/runs/:runId/files/delete` and `.../files/restore` take `file_ids` (1 to 100) and `include_linked`, and answer with a result for each file in the order you sent them. A file that can’t be changed, for example because it’s still processing or another file now has its name, gets a `409` result and doesn’t stop the others.
+- `GET /instruments/:id/runs/:runId/files/linked?file_ids=1,2` lists the files that a delete would take along, so you can show them first. Add `for=restore` to list the deleted files a restore would bring back.
+
+All of them need the `files:delete` scope. A file that’s queued or processing can’t be deleted until it finishes, and the files of a deleted run can’t be deleted or restored.
+
 ## Send notifications [#send-notifications]
 
-`POST /notifications/dispatch` sends a short message to chosen people, with an optional link to a run. It needs a token with the `notifications:create` scope. Each person’s **Service notifications** setting decides whether the message appears in the notification bell, as a Slack direct message, or both. The message shows the token’s name as its sender. Request fields are on the generated [dispatch notifications](/docs/api/notifications/dispatchNotifications) page.
+`POST /notifications/dispatch` sends a short message to chosen people, with an optional link to a run. It needs a token with the `notifications:create` scope. Each person’s **Service notifications** setting decides whether the message appears in the notification bell, as a Slack direct message, or both. The message shows the token’s name as its sender. The generated [dispatch notifications](/docs/api/notifications/dispatchNotifications) page lists the request fields.
 
 ## Pagination and filtering [#pagination-and-filtering]
 
-List endpoints that return pages (notably run search) accept:
+Run search (`GET /instrument-runs` and `GET /instruments/:id/runs`) and the lab notebook list (`GET /lab-notebooks`) return results in pages. They accept:
 
-- `page`: 1-based page index
-- `per_page`: page size, 1 to 100
+- `page`: the page number, starting at 1
+- `per_page`: page size, 1 to 100 for runs and 1 to 200 for lab notebooks
 
-Responses include pagination metadata such as `page`, `per_page`, `total`, and `total_pages`.
+Responses include pagination fields such as `page`, `per_page`, `total`, and `total_pages`.
 
-Run report items page by index instead, with `offset` and `limit` (max 200). Their responses return `offset`, `limit`, and `total`.
+Run report items use `offset` and `limit` (up to 200) instead. Their responses return `offset`, `limit`, and `total`.
 
-Run search also supports filters (instrument, date range, attribution via `ran_by`, lab notebooks, and instrument-specific metadata). Exact query parameters are on each generated operation page in the sidebar under this **API** section.
+Run search can also filter by:
+
+- instrument
+- date range
+- who ran it (`ran_by`)
+- lab notebook
+- instrument-specific metadata
+
+Each generated endpoint page in this **API** section lists the exact query parameters.
 
 ## Error responses [#error-responses]
 
-Errors use a nested envelope:
+Errors come back inside an `error` object:
 
 ```json
 {
@@ -101,10 +132,18 @@ Errors use a nested envelope:
 }
 ```
 
-Common codes: `VALIDATION_ERROR` (400), `UNAUTHORIZED` (401), `FORBIDDEN` (403), `NOT_FOUND` (404), `CONFLICT` (409). Scope failures use `code: "FORBIDDEN"` with a message naming the missing scope.
+The common codes are:
 
-Feedback routes have two more. `LINEAR_UNAVAILABLE` (502) means Data Hub couldn’t reach Linear, where reports are stored. `FEEDBACK_NOT_CONFIGURED` (503) means no admin has connected Linear yet; see [Set up integrations](/docs/integrations#linear).
+- `VALIDATION_ERROR` (400)
+- `UNAUTHORIZED` (401)
+- `FORBIDDEN` (403)
+- `NOT_FOUND` (404)
+- `CONFLICT` (409)
+
+A missing scope returns `code: "FORBIDDEN"` with a message that names the scope.
+
+Feedback routes have two more codes. `LINEAR_UNAVAILABLE` (502) means Data Hub couldn’t reach Linear, where reports are stored. `FEEDBACK_NOT_CONFIGURED` (503) means no admin has connected Linear yet; see [Set up integrations](/docs/integrations#linear).
 
 ## MCP [#mcp]
 
-`GET` and `POST` `/mcp/v1` expose the MCP server over Streamable HTTP, outside the `/api/v1` tree. Clients authenticate with OAuth rather than a personal access token, and hold `read` to connect plus `write` to call any tool that changes data. See [MCP overview](/docs/mcp).
+The MCP server answers `GET` and `POST` requests at `/mcp/v1` over Streamable HTTP, outside `/api/v1`. Clients sign in with OAuth instead of a personal access token. They need the `read` scope to connect and the `write` scope to call any tool that changes data. See [MCP overview](/docs/mcp).
