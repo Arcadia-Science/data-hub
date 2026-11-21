@@ -3,13 +3,11 @@
 import { Download, Search, Upload } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { debounce, useQueryStates } from "nuqs";
+import { type TransitionStartFunction, useTransition } from "react";
 import { toast } from "sonner";
 import { PaginationNav } from "@/components/pagination-nav";
 import { useRunDownloadClaimPrompt } from "@/components/runs/claim-prompt/run-claim-target";
-import {
-  FilesFilterCombobox,
-  type FilesFilterOption,
-} from "@/components/runs/files-filter-combobox";
+import { FileFiltersCombobox } from "@/components/runs/file-filters-combobox";
 import { RunSectionHeading } from "@/components/runs/run-section-heading";
 import {
   TablePendingBoundary,
@@ -18,30 +16,21 @@ import {
 } from "@/components/table-pending";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { useArchiveDownload } from "@/hooks/use-archive-download";
 import type {
-  FilesCategoryFilter,
-  FilesLifecycleFilter,
-  FilesSortField,
   RunFileRow,
   RunFileStats,
   RunFilesPage,
 } from "@/lib/api/instrument-runs";
 import type { InstrumentType } from "@/lib/db/schema";
 import { buildArchiveHref } from "@/lib/runs/archive-href";
+import { narrowsFileDownload } from "@/lib/runs/file-filters";
 import {
   REPROCESS_REQUEST_CONCURRENCY,
   settleWithConcurrency,
 } from "@/lib/runs/settle-with-concurrency";
 import { dismissFiles, requestFileUploads } from "@/lib/runs/upload-requests";
-import { runDetailSearchParams } from "@/lib/search-params";
+import { filesShowDeleted, runDetailSearchParams } from "@/lib/search-params";
 import { FileBulkActionBar } from "./file-bulk-action-bar";
 import {
   type FileRef,
@@ -56,7 +45,6 @@ import {
   EditableRunFilesTable,
   ReadOnlyRunFilesTable,
 } from "./run-files-table";
-import { type TrackFiles, usePendingFiles } from "./use-pending-files";
 import {
   UploadReasonLine,
   WatcherGatedUploadButton,
@@ -77,26 +65,9 @@ function formatFilesSectionCount(stats: RunFileStats): string | undefined {
   return parts.length > 0 ? parts.join(", ") : undefined;
 }
 
-const FILES_CATEGORY_OPTIONS: FilesFilterOption<FilesCategoryFilter>[] = [
-  { value: "raw", label: "Raw" },
-  { value: "processed", label: "Processed" },
-];
-
-// "Processing" is in-flight work only; files past the stall cutoff answer to
-// "Stalled" instead, matching what the status column labels them.
-const FILES_STATUS_OPTIONS: FilesFilterOption<FilesLifecycleFilter>[] = [
-  { value: "not_uploaded", label: "Not uploaded" },
-  { value: "waiting_upload", label: "Waiting to upload" },
-  { value: "upload_failed", label: "Upload failed" },
-  { value: "uploaded", label: "Uploaded" },
-  { value: "queued", label: "Queued" },
-  { value: "processing", label: "Processing" },
-  { value: "stalled", label: "Stalled" },
-  { value: "completed", label: "Completed" },
-  { value: "failed", label: "Failed" },
-];
-
 interface RunFilesSectionProps {
+  // Deleted files that match the current search and filters, shown or not.
+  deletedCount: number;
   // Current page of the server-paginated, filtered, sorted file list.
   files: RunFileRow[];
   // Downloadable files matching the active table filters (S3-backed).
@@ -156,6 +127,7 @@ export function RunFilesSection(props: RunFilesSectionProps) {
 }
 
 function RunFilesSectionContent({
+  deletedCount,
   files,
   filteredDownloadableCount,
   pagination,
@@ -170,13 +142,13 @@ function RunFilesSectionContent({
   const { actions: archiveActions } = useArchiveDownload();
   const promptClaim = useRunDownloadClaimPrompt();
   // Mutation transition (upload/dismiss/reprocess), distinct from the table's
-  // navigation transition below. `track` also records which files an action
-  // covers, so only their rows lock while it runs.
-  const { isFilePending, isPending, track } = usePendingFiles();
+  // navigation transition below. It disables the bar and Upload all while a
+  // request runs.
+  const [isPending, startAction] = useTransition();
 
   // All search / filter / sort / page state lives in the URL. `shallow:false`
   // triggers the RSC refetch and `startTransition` ties it to the table's
-  // stale treatment. Discrete controls (status/sort/dismissed/page) update
+  // stale treatment. Discrete controls (filters/sort/page) update
   // immediately; the free-text search debounces its URL writes per-keystroke
   // (see the input's onChange below). Every filter/sort change also resets
   // `files_page` to 1 so the user never lands on an out-of-range page
@@ -186,23 +158,23 @@ function RunFilesSectionContent({
     shallow: false,
     startTransition: tableStartTransition,
   });
+  const showDeleted = filesShowDeleted(filters);
 
   // The archive route resolves the active filters to a downloadable file set
-  // server-side, so "Download all" honors search/category/status/dismissed
-  // across every page (not just the rows currently on screen). With no
-  // filters active we omit the params so the route's default "all
-  // downloadable files" path runs. Arrays use comma format to match nuqs
-  // `parseAsArrayOf`.
-  const isFilterActive =
-    filters.files_search.trim() !== "" ||
-    filters.files_category.length > 0 ||
-    filters.files_status.length > 0 ||
-    filters.files_dismissed;
+  // server-side, so "Download all" honors search/category/status across every
+  // page (not just the rows currently on screen). With no filters active we
+  // omit the params so the route's default "all downloadable files" path runs.
+  // Showing deleted files is not one of them: an archive never holds a deleted
+  // file. Arrays use comma format to match nuqs `parseAsArrayOf`.
+  const isFilterActive = narrowsFileDownload({
+    search: filters.files_search,
+    categories: filters.files_category,
+    statuses: filters.files_status,
+  });
   const downloadHref = buildArchiveHref(instrumentId, runId, {
     search: filters.files_search,
     categories: filters.files_category,
     statuses: filters.files_status,
-    dismissed: filters.files_dismissed,
   });
 
   // Count of downloadable active files in the whole run (uploaded/processing/
@@ -220,14 +192,6 @@ function RunFilesSectionContent({
   // the run, not only the page on screen. A deleted run is read-only and can't
   // queue uploads.
   const uploadAllCount = isDeleted ? 0 : stats.detected + stats.uploadFailed;
-  // The rows of this page that Upload all covers, so they show a spinner.
-  const uploadAllPageIds = files
-    .filter(
-      (file) =>
-        (file.status === "detected" || file.status === "upload_failed") &&
-        file.deletedAt === null
-    )
-    .map((file) => file.id);
 
   return (
     <div className="flex flex-col gap-2">
@@ -241,10 +205,9 @@ function RunFilesSectionContent({
                 enabledTooltip={`Request upload for ${uploadAllCount} ${uploadAllCount === 1 ? "file" : "files"} still on the instrument PC`}
                 onClick={() =>
                   handleUploadAll(
-                    uploadAllPageIds,
                     instrumentId,
                     runId,
-                    track,
+                    startAction,
                     router,
                     autoRefreshActions.restart
                   )
@@ -262,11 +225,13 @@ function RunFilesSectionContent({
         title="Files"
       />
       <div className="rounded-lg border bg-background dark:bg-muted">
-        {/* Toolbar: search, filter, sort */}
-        <div className="flex items-center gap-2 border-b px-3 py-2">
-          <div className="relative flex-1">
+        {/* Toolbar: search, filters, download. Sorting is on the column
+            headers. */}
+        <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2">
+          <div className="relative min-w-0 flex-1 basis-60">
             <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
+              aria-label="Search files"
               className="h-8 pl-8 text-xs"
               name="files_search"
               onChange={(e) =>
@@ -284,72 +249,27 @@ function RunFilesSectionContent({
               value={filters.files_search}
             />
           </div>
-          <FilesFilterCombobox
-            aria-label="Filter by file type"
-            items={FILES_CATEGORY_OPTIONS}
-            onValueChange={(next) =>
+          <FileFiltersCombobox
+            categories={filters.files_category}
+            deletedCount={deletedCount}
+            onCategoriesChange={(next) =>
               setFilters({ files_category: next, files_page: 1 })
             }
-            placeholder="Type"
-            value={filters.files_category}
-          />
-          <FilesFilterCombobox
-            aria-label="Filter by file status"
-            items={FILES_STATUS_OPTIONS}
-            onValueChange={(next) =>
+            onShowDeletedChange={(next) =>
+              // The old param goes with it, so turning the filter off works for
+              // a saved link that used `files_dismissed`.
+              setFilters({
+                files_deleted: next,
+                files_dismissed: false,
+                files_page: 1,
+              })
+            }
+            onStatusesChange={(next) =>
               setFilters({ files_status: next, files_page: 1 })
             }
-            placeholder="Status"
-            value={filters.files_status}
+            showDeleted={showDeleted}
+            statuses={filters.files_status}
           />
-          <Select
-            onValueChange={(v) =>
-              setFilters({ files_sort: v as FilesSortField, files_page: 1 })
-            }
-            value={filters.files_sort}
-          >
-            <SelectTrigger className="h-8 text-sm" size="sm">
-              <SelectValue>
-                Sort:{" "}
-                {filters.files_sort === "name"
-                  ? "Name"
-                  : filters.files_sort === "size"
-                    ? "Size"
-                    : filters.files_sort === "date"
-                      ? "Date"
-                      : "Status"}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem className="text-sm" value="name">
-                Sort: Name
-              </SelectItem>
-              <SelectItem className="text-sm" value="size">
-                Sort: Size
-              </SelectItem>
-              <SelectItem className="text-sm" value="date">
-                Sort: Date
-              </SelectItem>
-              <SelectItem className="text-sm" value="status">
-                Sort: Status
-              </SelectItem>
-            </SelectContent>
-          </Select>
-          {stats.dismissed > 0 && (
-            <Button
-              className="h-8 text-sm"
-              onClick={() =>
-                setFilters({
-                  files_dismissed: !filters.files_dismissed,
-                  files_page: 1,
-                })
-              }
-              size="sm"
-              variant={filters.files_dismissed ? "secondary" : "ghost"}
-            >
-              {filters.files_dismissed ? "Hide dismissed" : "Show dismissed"}
-            </Button>
-          )}
           {downloadableCount > 0 &&
             !(isFilterActive && filteredDownloadableCount === 0) && (
               <Button
@@ -373,17 +293,6 @@ function RunFilesSectionContent({
             )}
         </div>
 
-        {/* Bulk action bar — provider-driven, only renders when something
-            is selected. Read-only runs skip the provider entirely above. */}
-        {!isDeleted && (
-          <BulkActionBarHost
-            instrumentId={instrumentId}
-            isPending={isPending}
-            runId={runId}
-            track={track}
-          />
-        )}
-
         {/* Dense file table — server-paginated, dimmed while a navigation is
             in flight. */}
         <TablePendingBoundary>
@@ -392,43 +301,11 @@ function RunFilesSectionContent({
               No files match your filters.
             </p>
           ) : isDeleted ? (
-            <ReadOnlyRunFilesTable
-              files={files}
-              instrumentType={instrumentType}
-              isFilePending={isFilePending}
-              onReprocess={(id) =>
-                handleSingleReprocess(
-                  id,
-                  track,
-                  router,
-                  autoRefreshActions.restart
-                )
-              }
-            />
+            <ReadOnlyRunFilesTable files={files} />
           ) : (
             <EditableRunFilesTable
               files={files}
               instrumentType={instrumentType}
-              isFilePending={isFilePending}
-              onDismiss={(id) => handleSingleDismiss(id, track, router)}
-              onReprocess={(id) =>
-                handleSingleReprocess(
-                  id,
-                  track,
-                  router,
-                  autoRefreshActions.restart
-                )
-              }
-              onUpload={(id) =>
-                handleSingleUpload(
-                  id,
-                  instrumentId,
-                  runId,
-                  track,
-                  router,
-                  autoRefreshActions.restart
-                )
-              }
             />
           )}
         </TablePendingBoundary>
@@ -439,8 +316,8 @@ function RunFilesSectionContent({
             {pagination.total === 0
               ? `Showing 0 of ${stats.active}`
               : `Showing ${from}–${to} of ${pagination.total}`}
-            {stats.dismissed > 0 && filters.files_dismissed
-              ? ` (+${stats.dismissed} dismissed)`
+            {showDeleted && deletedCount > 0
+              ? `, including ${deletedCount} deleted`
               : ""}
           </span>
           <span>
@@ -458,6 +335,18 @@ function RunFilesSectionContent({
         pageParam="files_page"
         totalPages={pagination.total_pages}
       />
+
+      {/* The bar floats at the bottom of the window, so it can sit anywhere.
+          It is provider-driven and only renders when something is selected.
+          Read-only runs skip the provider entirely above. */}
+      {!isDeleted && (
+        <BulkActionBarHost
+          instrumentId={instrumentId}
+          isPending={isPending}
+          runId={runId}
+          startAction={startAction}
+        />
+      )}
     </div>
   );
 }
@@ -472,12 +361,12 @@ function BulkActionBarHost({
   instrumentId,
   runId,
   isPending,
-  track,
+  startAction,
 }: {
   instrumentId: string;
   runId: string;
   isPending: boolean;
-  track: TrackFiles;
+  startAction: TransitionStartFunction;
 }) {
   const router = useRouter();
   const { actions: archiveActions } = useArchiveDownload();
@@ -489,7 +378,7 @@ function BulkActionBarHost({
     if (ids.length === 0) {
       return;
     }
-    track(ids, async () => {
+    startAction(async () => {
       // Batched: a selection can span pages and exceed one request's limit.
       const result = await requestFileUploads(instrumentId, runId, ids);
       if (!result.ok) {
@@ -510,7 +399,7 @@ function BulkActionBarHost({
     if (ids.length === 0) {
       return;
     }
-    track(ids, async () => {
+    startAction(async () => {
       const { failed } = await dismissFiles(ids);
       if (failed > 0) {
         toast.error(`${failed} file(s) failed to dismiss`);
@@ -526,7 +415,7 @@ function BulkActionBarHost({
     if (ids.length === 0) {
       return;
     }
-    track(ids, async () => {
+    startAction(async () => {
       // A few requests at a time: every request queues a file and may start
       // Lambda processing, so sending all of them at once is a burst.
       const results = await settleWithConcurrency(
@@ -590,55 +479,16 @@ function BulkActionBarHost({
   );
 }
 
-// ---------------------------------------------------------------------------
-// Per-row single-file handlers. Kept as standalone functions (no closures
-// over component state) so the table receives stable callback identities
-// across renders.
-// ---------------------------------------------------------------------------
-
-function handleSingleUpload(
-  fileId: number,
-  instrumentId: string,
-  runId: string,
-  track: TrackFiles,
-  router: ReturnType<typeof useRouter>,
-  onWorkStarted: () => void
-) {
-  track([fileId], async () => {
-    const res = await fetch(
-      `/api/v1/instruments/${instrumentId}/runs/${encodeURIComponent(runId)}/request-upload`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ file_ids: [fileId] }),
-      }
-    );
-    if (!res.ok) {
-      const body = await res.json().catch(() => null);
-      toast.error(body?.error?.message ?? "Failed to request upload");
-      // The badge was read at page load, so a refusal means the page is out
-      // of date: refresh it so the buttons and the line match the server.
-      router.refresh();
-      return;
-    }
-    toast.success("Upload requested");
-    onWorkStarted();
-    router.refresh();
-  });
-}
-
 // Queues every `detected` file of the run through the run-level endpoint that
-// the runs list also uses. `pageFileIds` are only the rows on screen, which
-// lock while the request runs.
+// the runs list also uses.
 function handleUploadAll(
-  pageFileIds: number[],
   instrumentId: string,
   runId: string,
-  track: TrackFiles,
+  startAction: TransitionStartFunction,
   router: ReturnType<typeof useRouter>,
   onWorkStarted: () => void
 ) {
-  track(pageFileIds, async () => {
+  startAction(async () => {
     const res = await fetch(
       `/api/v1/instruments/${instrumentId}/runs/${encodeURIComponent(runId)}/request-upload-all`,
       { method: "POST" }
@@ -662,51 +512,6 @@ function handleUploadAll(
           : `Upload requested for ${queued} files`
       );
     }
-    onWorkStarted();
-    router.refresh();
-  });
-}
-
-function handleSingleDismiss(
-  fileId: number,
-  track: TrackFiles,
-  router: ReturnType<typeof useRouter>
-) {
-  track([fileId], async () => {
-    const res = await fetch(`/api/v1/files/${fileId}`, {
-      method: "DELETE",
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => null);
-      toast.error(body?.error?.message ?? "Failed to dismiss file");
-      return;
-    }
-    toast.success("File dismissed");
-    router.refresh();
-  });
-}
-
-function handleSingleReprocess(
-  fileId: number,
-  track: TrackFiles,
-  router: ReturnType<typeof useRouter>,
-  onWorkStarted: () => void
-) {
-  track([fileId], async () => {
-    const res = await fetch(`/api/v1/files/${fileId}/reprocess`, {
-      method: "POST",
-    });
-    const body = await res.json().catch(() => null);
-    if (!res.ok) {
-      toast.error(body?.error?.message ?? "Failed to start reprocessing");
-      return;
-    }
-    // The file shows Queued when it did not start right away.
-    toast.success(
-      body?.status === "queued"
-        ? "File queued for reprocessing"
-        : "Reprocessing started"
-    );
     onWorkStarted();
     router.refresh();
   });

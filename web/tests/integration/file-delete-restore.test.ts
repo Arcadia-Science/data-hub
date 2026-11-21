@@ -9,7 +9,11 @@ import {
   uniqueLinkedFiles,
 } from "@/lib/api/file-deletion";
 import { reviveProcessedFile } from "@/lib/api/files";
-import { getRunFileStats, getRunFilesPage } from "@/lib/api/instrument-runs";
+import {
+  buildRunFilesQuery,
+  getRunFileStats,
+  getRunFilesPage,
+} from "@/lib/api/instrument-runs";
 import { taggedFilename } from "@/lib/api/run-file-identity";
 import { WATCHER_VERSION_HEADER } from "@/lib/api/watcher-compat";
 import { clearAutoUploadMarks } from "@/lib/api/watchers";
@@ -210,6 +214,15 @@ async function runFilenames(run: TestRun, { deleted }: { deleted: boolean }) {
     .filter((row) => (row.deletedAt !== null) === deleted)
     .map((row) => row.filename)
     .sort();
+}
+
+// The deleted files the run page counts beside "Show deleted files".
+async function deletedCountOf(runInternalId: string) {
+  const page = await buildRunFilesQuery(runInternalId, {
+    page: 1,
+    perPage: 100,
+  });
+  return page.deletedCount;
 }
 
 // The ENG-2154 shape. One capture folder holds the original, an uploaded copy
@@ -796,8 +809,8 @@ describe("Deleting and restoring files", () => {
         active: 11,
         rawActive: 5,
         processedActive: 6,
-        dismissed: 0,
       });
+      expect(await deletedCountOf(run.id)).toBe(0);
 
       const outcome = await deleteFiles([copy.id, tagged.id], asToken(), {
         includeLinked: true,
@@ -834,8 +847,8 @@ describe("Deleting and restoring files", () => {
         active: 4,
         rawActive: 2,
         processedActive: 2,
-        dismissed: 7,
       });
+      expect(await deletedCountOf(run.id)).toBe(7);
 
       // Neither the REST detail nor the file page lists the deleted files.
       const detail = await api(
@@ -1776,8 +1789,8 @@ describe("Deleting and restoring files", () => {
         active: 1,
         rawActive: 1,
         rawTotalSizeBytes: 300,
-        dismissed: 1,
       });
+      expect(await deletedCountOf(run.id)).toBe(1);
       const res = await api(
         `/api/v1/instrument-runs?instrument_id=${instrumentId}&per_page=100`,
         { token }

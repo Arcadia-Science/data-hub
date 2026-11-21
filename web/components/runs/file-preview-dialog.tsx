@@ -20,14 +20,7 @@ import {
 } from "@/components/ui/dialog";
 import { trackClientEvent } from "@/lib/analytics/track-client";
 import { type FilePreview, loadFilePreview } from "@/lib/runs/file-preview";
-import type { FilePreviewKind } from "@/lib/runs/run-file-types";
-
-export interface PreviewableFile {
-  category: string;
-  filename: string;
-  id: number;
-  kind: FilePreviewKind;
-}
+import type { PreviewFile } from "@/lib/runs/preview-files";
 
 type LoadState =
   | { fileId: number; status: "ready"; preview: FilePreview }
@@ -39,7 +32,7 @@ export function FilePreviewDialog({
   onSelect,
   openFileId,
 }: {
-  files: PreviewableFile[];
+  files: PreviewFile[];
   onOpenChange: (open: boolean) => void;
   onSelect: (fileId: number) => void;
   openFileId: number | null;
@@ -65,8 +58,13 @@ export function FilePreviewDialog({
     // the file changed or the dialog closed is ignored.
     const id = requestId.current + 1;
     requestId.current = id;
-    if (currentId === null || currentKind === null) {
+    if (currentId === null) {
       cacheRef.current.clear();
+      return;
+    }
+    // A file the window can't show has nothing to load. The cache stays, so
+    // stepping past it and back doesn't fetch the neighbors again.
+    if (currentKind === null) {
       return;
     }
     void retryNonce;
@@ -159,7 +157,7 @@ export function FilePreviewDialog({
               {current?.filename}
             </DialogTitle>
             <div className="flex shrink-0 items-center gap-1">
-              {current && (
+              {current?.downloadable && (
                 <Button asChild variant="outline">
                   <a
                     download={current.filename}
@@ -196,7 +194,8 @@ export function FilePreviewDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="flex min-w-0 flex-col gap-2">
-          {state === null && (
+          {current && current.kind === null && <NoPreview file={current} />}
+          {current && current.kind !== null && state === null && (
             <LoadingSkeleton className="h-72 w-full" label="Loading preview…" />
           )}
           {state?.status === "error" && (
@@ -231,6 +230,28 @@ export function FilePreviewDialog({
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// What a file shows when the window can't display its contents, so a click on
+// any row still opens something.
+function NoPreview({ file }: { file: PreviewFile }) {
+  return (
+    <div className="flex h-72 flex-col items-center justify-center gap-1 rounded-md border border-dashed bg-muted/20 p-6 text-center text-sm">
+      {file.downloadable ? (
+        <>
+          <p>This file can’t be previewed here.</p>
+          <p className="text-muted-foreground">Use Download to save it.</p>
+        </>
+      ) : (
+        <>
+          <p>This file isn’t in Data Hub yet.</p>
+          <p className="text-muted-foreground">
+            Once it uploads, you can download it here.
+          </p>
+        </>
+      )}
+    </div>
   );
 }
 

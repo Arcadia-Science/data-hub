@@ -58,21 +58,19 @@ function FileStatusLegendContent() {
   );
 }
 
-export function FileStatusColumnHeader() {
+// The help button beside the Status column's sort button. It opens the legend
+// of every status.
+export function FileStatusLegendButton() {
   const [open, setOpen] = useState(false);
 
   return (
     <Popover onOpenChange={setOpen} open={open}>
       <PopoverTrigger
         aria-label="About file status"
-        className="inline-flex h-8 cursor-help items-center gap-1.5 font-medium text-foreground"
+        className="inline-flex size-6 cursor-help items-center justify-center rounded-md text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
         type="button"
       >
-        Status
-        <CircleHelp
-          aria-hidden="true"
-          className="size-3 text-muted-foreground"
-        />
+        <CircleHelp aria-hidden="true" className="size-3.5" />
       </PopoverTrigger>
       <PopoverContent
         align="center"

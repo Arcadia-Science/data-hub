@@ -129,9 +129,15 @@ Per-type inputs and outputs are in [Instrument data preprocessing](/docs/instrum
 
 ![Plate reader run detail with kinetic traces and comments](/images/plate-reader-run-details-2.webp)
 
-### Filter the files table [#filter-files]
+### Search, filter, and sort the files table [#filter-files]
 
-The files table has separate **Type** and **Status** filters. Use them to show, for example, only failed files or only processed CSVs. **Download all** and the run archive include only the files the filters show.
+Type in **Search files** to find files by name. Choose **Add filter** to narrow the table by **Type**, which is **Raw** or **Processed**, or by **Status**. Use them to show, for example, only failed files or only processed CSVs. A number on the button says how many filters are on.
+
+**Show deleted files**, at the top of the same menu, lists the run’s deleted files too, with how many match your search and filters. A status filter never lists a deleted file, even one that was completed before it was deleted.
+
+To sort, choose a column heading (**File name**, **Size**, **Created**, or **Status**) and then **Sort ascending** or **Sort descending**. The table starts sorted by file name, A to Z. Raw and processed files sort together in one list. The arrow beside a heading shows which column the table is sorted by, and in which direction.
+
+The search, filters, and sort are part of the page’s address, so you can send someone a link to the table as you see it. With a search or filter on, **Download all** becomes **Download filtered**, and its zip holds only the files they show. A deleted file is never in it.
 
 ### Live file updates [#live-file-updates]
 
@@ -155,9 +161,9 @@ A lab notebook gathers the runs behind one notebook page, such as a Notion or Go
 
 From the files table you can:
 
-- Preview a CSV, TSV, JSON, or other text file by selecting its row. The preview shows the first 1 MB of the file. Use the back and forward buttons to move between previewable files on the same page of the table. **Download** in that window saves the file
-- Select files and choose **Download** in the bar that appears above the files table. One file downloads directly. Two or more come as a single zip, which builds in the background like **Download all**
-- Choose **Download all** to build a zip of active files in the run, with any active file filters applied
+- Open any file by selecting its row, anywhere except the checkbox. A CSV, TSV, JSON, or other text file shows its first 1 MB. Any other file says it can’t be previewed there, and a file that hasn’t reached Data Hub yet says so. The back and forward buttons step through the files on the same page of the table, in the order the table shows them. **Download** in that window saves the file
+- Select files and choose **Download** in the bar at the bottom of the window. One file downloads directly. Two or more come as a single zip, which builds in the background like **Download all**
+- Choose **Download all** to build a zip of the run's files, or **Download filtered** when a search or filter is on. Deleted files are left out
 
 ![File preview window showing the first rows of a processed CSV, with a Download button and buttons for the next and previous file](/images/csv-preview.webp)
 
@@ -182,7 +188,9 @@ The checkbox in the header row selects every run on the page, and **Clear** drop
 
 The selection stays when you move to another page of the same results. It clears when you change the search, a filter, or the sort, so the bar never acts on runs from a list you are no longer looking at.
 
-The files table on a run page works the same way: select files to get **Upload**, **Dismiss**, **Reprocess**, and **Download** for only those files. Its **Upload** follows the instrument’s badge, like the other [Upload buttons](#request-upload). Its selection also clears when you change the files search, a filter, or the sort.
+The files table on a run page works the same way, with the same bar at the bottom of the window. Its rows have no buttons of their own either. Select the checkboxes of the files you want to act on, and the bar offers **Upload**, **Download**, **Reprocess**, and **Dismiss** for only those files. Its **Upload** follows the instrument’s badge, like the other [Upload buttons](#request-upload). The selection stays when you move to another page of the table, and it clears when you change the files search, a filter, or the sort.
+
+The files table of a deleted run has no checkboxes, so nothing in it can be uploaded, reprocessed, or dismissed until you restore the run. Its rows still open the file window.
 
 ![Run list with several runs selected and the bulk action bar open](/images/bulk-actions.webp)
 
@@ -198,11 +206,10 @@ Only the author of a comment can edit it. Authors can delete their own comments,
 
 Reprocessing runs server-side processing again. Use it after a file failed or stalled, or after an engineer fixes the code that reads a file type. The stored result doesn’t change until you reprocess.
 
-- On the run page, hover over a file and choose **Reprocess**.
-- To reprocess several files, select them in the files table and choose **Reprocess** in the bar.
+- On the run page, select one or more files in the files table and choose **Reprocess** in the bar at the bottom of the window.
 - To reprocess whole runs, select them in a run list and choose **Reprocess** in the bar.
 
-Reprocessing sends only the original instrument files. Files Data Hub generated, such as videos, previews, and CSVs, have no **Reprocess** button and are rebuilt from the originals. Reprocessed files go through a queue; see [How reprocessing is queued](#reprocess-queue).
+Reprocessing sends only the original instrument files. Files Data Hub generated, such as videos, previews, and CSVs, can’t be reprocessed themselves and are rebuilt from the originals. Reprocessed files go through a queue; see [How reprocessing is queued](#reprocess-queue).
 
 **Delete** marks the run deleted without removing its stored files. Anyone signed in can delete or restore a run. To find a deleted run, turn on **Show deleted runs** under **Add filter**, then open it and choose **Restore**.
 
@@ -210,7 +217,7 @@ Files that were queued for reprocessing when the run was deleted stay queued but
 
 Deleting a run also cancels the uploads that were requested for its files, so the watcher stops trying to send them, and those files go back to **Not uploaded**. Restoring the run doesn’t bring the requests back, so choose **Upload** again if you still want the files; see [Request an upload](#request-upload).
 
-While a run is deleted, Data Hub refuses a watcher’s reports of it, so the watcher’s new files aren’t added. After you restore the run, restart the watcher to send them, or choose **Upload** on a file to have the watcher send that file without a restart. Watchers before 1.4.3 also send them when another file of the run finishes. See [A run was deleted on Data Hub](/docs/troubleshoot-a-watcher#a-run-was-deleted-on-data-hub).
+While a run is deleted, Data Hub refuses a watcher’s reports of it, so the watcher’s new files aren’t added. After you restore the run, restart the watcher to send them, or select the file and choose **Upload** to have the watcher send that file without a restart. Watchers before 1.4.3 also send them when another file of the run finishes. See [A run was deleted on Data Hub](/docs/troubleshoot-a-watcher#a-run-was-deleted-on-data-hub).
 
 ![Deleted run page with a red banner naming who deleted it and when, and a Restore button](/images/deleted-run.webp)
 
@@ -226,7 +233,7 @@ Reprocessing starts at most 10 files at a time, counted across all runs and inst
 
 Files that arrive from a watcher upload count toward the 10, but they start right away and never wait in the queue. A file that has been processing for more than 20 minutes without finishing stops counting, so one stuck file doesn’t hold up the queue.
 
-A large run takes several rounds. For example, reprocessing a run of 80 files starts 10 files, and the other 70 show **Queued** until slots open. You can leave the page, because the queue keeps running. A queued file has no **Reprocess** button.
+A large run takes several rounds. For example, reprocessing a run of 80 files starts 10 files, and the other 70 show **Queued** until slots open. You can leave the page, because the queue keeps running. A queued file can’t be reprocessed.
 
 The engineer who deploys Data Hub can change the limit of 10 with the `PROCESSING_CONCURRENCY_LIMIT` environment variable; see the [web application environment variables](https://github.com/Arcadia-Science/data-hub/blob/production/docs/developer/getting-started.md#web-application).
 
@@ -240,14 +247,14 @@ The watcher reports every file it finds, but some files stay on the instrument P
 
 A file that the watcher found but nobody requested reads **Not uploaded**. To ask the watcher to send files, do one of these:
 
-- Choose **Upload** on one file
+- Select one or more files and choose **Upload** in the bar at the bottom of the window
 - Choose **Upload all** at the top of the **Files** section, for every file in the run that reads **Not uploaded** or **Upload failed**
 
 A requested file reads **Uploading** until it arrives. The watcher picks up requests within a minute.
 
 On an instrument that uploads automatically, a new file reads **Waiting to upload** until the watcher sends it. This needs watcher 1.4.5 or later; with an older watcher the file reads **Not uploaded** for the minute or two before it arrives.
 
-The **Upload** and **Upload all** buttons on a run page follow the instrument’s badge. When one is turned off, the reason shows beside it:
+The **Upload** action in the files bar and the **Upload all** button on a run page follow the instrument’s badge. When one is turned off, the reason shows beside it:
 
 | Badge | Upload buttons | Beside them |
 | --- | --- | --- |
@@ -283,7 +290,7 @@ For a requested file, the watcher checks three times, about a minute apart, befo
 
 A red notice above the **Files** section lists the files that couldn’t upload, one block per reason and folder. Each block says why and when the watcher gave up. The run reads **Upload failed** until every such file is uploaded or dismissed, and the watcher’s activity shows one **Couldn’t upload** entry per run and reason.
 
-Once the cause is fixed on the PC, choose **Upload again** in the block, or **Upload** on a single file, to try again. If the files are gone for good, choose **Dismiss these files**.
+Once the cause is fixed on the PC, choose **Upload again** in the block, or select a file and choose **Upload**, to try again. If the files are gone for good, choose **Dismiss these files**.
 
 Whoever requested the files gets one notification per run and reason, in the app and, if they connected Slack, as a direct message. See [Configure notifications](/docs/configure-notifications).
 

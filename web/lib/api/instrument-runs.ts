@@ -866,16 +866,22 @@ export type { FilesLifecycleFilter } from "@/lib/runs/file-lifecycle-filter";
 
 export type FilesSortField = "name" | "size" | "date" | "status";
 
+export type FilesSortOrder = "asc" | "desc";
+
 // Filter inputs shared by the paginated query and the archive-download
 // "download what you filtered" resolution. Empty arrays mean "no filter".
 export interface RunFilesFilter {
   categories?: FilesCategoryFilter[];
-  includeDismissed?: boolean;
+  // Deleted files are left out unless asked for. A status filter never
+  // matches a deleted file, so it leaves them out either way.
+  includeDeleted?: boolean;
   search?: string;
   statuses?: FilesLifecycleFilter[];
 }
 
 export type RunFilesListFilters = RunFilesFilter & {
+  // The direction of `sort`. Defaults to ascending.
+  order?: FilesSortOrder;
   page: number;
   perPage: number;
   sort?: FilesSortField;
@@ -936,7 +942,7 @@ export function runFilesWhere(
 ): SQL[] {
   const conditions: SQL[] = [eq(files.instrumentRunId, runInternalId)];
 
-  if (!filters.includeDismissed) {
+  if (!filters.includeDeleted) {
     conditions.push(isNull(files.deletedAt));
   }
 
@@ -950,12 +956,16 @@ export function runFilesWhere(
     conditions.push(inArray(files.category, filters.categories));
   }
 
+  // The status buckets describe files that are in play, and a deleted file
+  // shows "Deleted" whatever its status was. So a deleted file never matches a
+  // status, and "Completed" does not list a file that was completed before it
+  // was deleted.
   if (filters.statuses && filters.statuses.length > 0) {
     const statusOr = or(
       ...filters.statuses.map((status) => fileStatusCondition(status, now))
     );
     if (statusOr) {
-      conditions.push(statusOr);
+      conditions.push(isNull(files.deletedAt), statusOr);
     }
   }
 
@@ -972,29 +982,40 @@ function fileStatusCondition(status: FilesLifecycleFilter, now: Date): SQL {
   return fileInRunBucketSql(status, now);
 }
 
-// Category-first ordering (raw before processed, matching the old
-// `compareByCategory`) then the chosen field. Date sorts on
-// coalesce(file_created_at, created_at) to match the displayed "Created"
-// column; size coalesces NULL to 0 like the old numeric comparator.
-function runFilesOrderBy(sort: FilesSortField, now: Date): SQL[] {
-  const categoryFirst = sql`(${files.category} = 'raw') desc`;
+// Orders by the chosen column and nothing else, so a header sort reads the same
+// as the column it sorts. Date sorts on coalesce(file_created_at, created_at) to
+// match the displayed "Created" column; size coalesces NULL to 0 like the old
+// numeric comparator. Rows that tie on the column come back in file id order,
+// whichever way the column runs, so a page boundary never repeats or skips a
+// file between requests.
+function runFilesOrderBy(
+  sort: FilesSortField,
+  order: FilesSortOrder,
+  now: Date
+): SQL[] {
+  const direction = order === "desc" ? sql`desc` : sql`asc`;
+  const tiebreaker = sql`${files.id} asc`;
   switch (sort) {
     case "size":
-      return [categoryFirst, sql`coalesce(${files.sizeBytes}, 0) asc`];
+      return [sql`coalesce(${files.sizeBytes}, 0) ${direction}`, tiebreaker];
     case "date":
       return [
-        categoryFirst,
-        sql`coalesce(${files.fileCreatedAt}, ${files.createdAt}) asc`,
+        sql`coalesce(${files.fileCreatedAt}, ${files.createdAt}) ${direction}`,
+        tiebreaker,
       ];
     case "status":
-      return [categoryFirst, sql`${statusSortRank(now)} asc`];
+      return [sql`${statusSortRank(now)} ${direction}`, tiebreaker];
     default:
-      return [categoryFirst, sql`${files.filename} asc`];
+      return [sql`${files.filename} ${direction}`, tiebreaker];
   }
 }
 
 export interface RunFilesPage {
   data: RunFileRow[];
+  // Deleted files that match the current search and filters, shown or not.
+  // This is the count beside "Show deleted files". A status filter matches no
+  // deleted file, so it is 0 then.
+  deletedCount: number;
   // Files in the current filter that have S3 keys and can be zipped by the
   // archive route (matches `loadDownloadableFiles` after id resolution).
   downloadableCount: number;
@@ -1018,20 +1039,30 @@ export async function buildRunFilesQuery(
   const now = new Date();
 
   const where = and(...runFilesWhere(runInternalId, filters, now));
+  // The counts read deleted rows too, so one query gives the total, the number
+  // of deleted files behind the filter, and the downloadable files.
+  const countWhere = and(
+    ...runFilesWhere(runInternalId, { ...filters, includeDeleted: true }, now)
+  );
 
-  const [{ total, downloadableCount }] = await db
+  const [{ total, deletedCount, downloadableCount }] = await db
     .select({
-      total: sql<number>`cast(count(*) as int)`,
+      total: filters.includeDeleted
+        ? sql<number>`cast(count(*) as int)`
+        : sql<number>`cast(count(*) filter (where ${files.deletedAt} is null) as int)`,
+      deletedCount: sql<number>`cast(count(*) filter (where ${files.deletedAt} is not null) as int)`,
       downloadableCount: sql<number>`cast(count(*) filter (where ${files.s3Bucket} is not null and ${files.s3Key} is not null and ${files.deletedAt} is null) as int)`,
     })
     .from(files)
-    .where(where);
+    .where(countWhere);
 
   const data = await db
     .select()
     .from(files)
     .where(where)
-    .orderBy(...runFilesOrderBy(filters.sort ?? "name", now))
+    .orderBy(
+      ...runFilesOrderBy(filters.sort ?? "name", filters.order ?? "asc", now)
+    )
     .limit(safePerPage)
     .offset(offset);
 
@@ -1040,6 +1071,7 @@ export async function buildRunFilesQuery(
       ...file,
       stalledProcessing: isStalledProcessing(file, now),
     })),
+    deletedCount,
     downloadableCount,
     pagination: {
       page: safePage,
@@ -1058,7 +1090,6 @@ export interface RunFileStats {
   active: number;
   // Files awaiting an upload request (status = detected).
   detected: number;
-  dismissed: number;
   failed: number;
   // Files still on the instrument PC that are waiting for an upload or a
   // request: detected or upload_requested. Leaves out upload_failed files,
@@ -1106,7 +1137,6 @@ export async function getRunFileStats(
   const [row] = await db
     .select({
       active: sql<number>`cast(count(*) filter (where ${activeNotDeleted}) as int)`,
-      dismissed: sql<number>`cast(count(*) filter (where ${files.deletedAt} is not null) as int)`,
       rawActive: sql<number>`cast(count(*) filter (where ${rawActiveNotDeleted}) as int)`,
       // bigint can arrive as a string from node-pg; Number() at the boundary.
       rawTotalSizeBytes: sql<

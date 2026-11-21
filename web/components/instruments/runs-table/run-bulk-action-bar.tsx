@@ -10,6 +10,7 @@ import {
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
+import { BulkActionBarShell } from "@/components/bulk-action-bar-shell";
 import { DisabledReasonButton } from "@/components/disabled-reason-button";
 import { DeleteRunsDialog } from "@/components/runs/delete-runs-dialog";
 import {
@@ -18,7 +19,6 @@ import {
 } from "@/components/runs/notebook-link-bulk-dialogs";
 import { ReprocessRunsDialog } from "@/components/runs/reprocess-runs-dialog";
 import { Button } from "@/components/ui/button";
-import { useSidebar } from "@/components/ui/sidebar";
 import {
   Tooltip,
   TooltipContent,
@@ -34,17 +34,14 @@ import {
 } from "@/lib/runs/attribution-requests";
 import { removeRunsSummary } from "@/lib/runs/notebook-outcomes";
 import { removeRunsFromNotebook } from "@/lib/runs/notebook-requests";
-import { cn } from "@/lib/utils";
 
 import { type RunRef, useRunSelection } from "./run-selection-provider";
 
 // ---------------------------------------------------------------------------
-// Bulk action bar shown as a floating card pinned to the center bottom of
-// the viewport when at least one run is selected. Floating (rather than
-// inline above the table) so the table doesn't jump down on the user after
-// the first selection. The original BulkAttributionBar only surfaced
-// attribution actions; this extends it with upload / download / reprocess
-// / delete.
+// Bulk action bar shown when at least one run is selected. `BulkActionBarShell`
+// draws the floating card, which the run page's files table shares. The
+// original BulkAttributionBar only surfaced attribution actions; this extends
+// it with upload / download / reprocess / delete.
 //
 // Per product clarification, an action is shown only when every selected
 // run supports it — a mixed selection collapses back to attribution +
@@ -99,7 +96,6 @@ export function RunBulkActionBar({ notebook }: { notebook?: BulkBarNotebook }) {
   const router = useRouter();
   const { actions: archiveActions } = useArchiveDownload();
   const claimPrompt = useClaimPrompt();
-  const { state: sidebarState, isMobile } = useSidebar();
   const [isPending, startTransition] = useTransition();
   const [reprocessOpen, setReprocessOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -229,180 +225,155 @@ export function RunBulkActionBar({ notebook }: { notebook?: BulkBarNotebook }) {
     eligibleFileCount: r.stats.reprocessableFileCount,
   }));
 
-  // On desktop the expanded sidebar reserves space on the left, so anchor the
-  // bar's left edge to the sidebar's right edge so it spans the full main
-  // panel width. On mobile the sidebar is an overlay sheet, so the main panel
-  // already spans the full viewport.
-  const offsetForSidebar = !isMobile && sidebarState === "expanded";
-
   return (
     <>
-      <div
-        aria-label="Bulk actions for selected runs"
-        className={cn(
-          "fade-in slide-in-from-bottom-4 fixed right-0 bottom-6 z-50 mx-auto flex max-w-6xl animate-in items-center justify-between gap-4 rounded-lg border bg-popover px-8 py-2.5 text-popover-foreground shadow-2xl transition-[left] duration-200 ease-linear",
-          offsetForSidebar ? "left-[var(--sidebar-width)]" : "left-0"
-        )}
-        role="region"
+      <BulkActionBarShell
+        ariaLabel="Bulk actions for selected runs"
+        count={meta.count}
+        noun="run"
+        onClear={() => actions.clear()}
+        pending={isPending}
       >
-        <div className="text-sm">
-          <span className="font-medium">{meta.count}</span>{" "}
-          <span className="text-muted-foreground">
-            {meta.count === 1 ? "run" : "runs"} selected
-          </span>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
+        <Button
+          disabled={isPending}
+          onClick={() => runAttribution("PUT", "Claimed")}
+          size="sm"
+          type="button"
+          variant="default"
+        >
+          I ran these
+        </Button>
+        <Button
+          disabled={isPending}
+          onClick={() => runAttribution("DELETE", "Removed attribution from")}
+          size="sm"
+          type="button"
+          variant="outline"
+        >
+          Remove my attribution
+        </Button>
+
+        {meta.allCanLink &&
+          (tooManyToLink ? (
+            <DisabledReasonButton
+              className="gap-1.5"
+              reason={tooManyReason}
+              size="sm"
+              variant="outline"
+            >
+              <NotebookPen className="size-3.5" />
+              {addLabel}
+            </DisabledReasonButton>
+          ) : (
+            <Button
+              className="gap-1.5"
+              disabled={isPending}
+              onClick={() => setAddToNotebookOpen(true)}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              <NotebookPen className="size-3.5" />
+              {addLabel}
+            </Button>
+          ))}
+
+        {meta.allCanLink && notebook ? (
+          <RemoveFromThisNotebookButton
             disabled={isPending}
-            onClick={() => runAttribution("PUT", "Claimed")}
-            size="sm"
-            type="button"
-            variant="default"
-          >
-            I ran these
-          </Button>
+            disabledReason={removeFromThisReason}
+            onClick={() => removeFromThisNotebook(notebook)}
+          />
+        ) : null}
+
+        {meta.allCanLink &&
+          !notebook &&
+          anyInNotebook &&
+          (tooManyToLink ? (
+            <DisabledReasonButton
+              reason={tooManyReason}
+              size="sm"
+              variant="outline"
+            >
+              Remove from lab notebook
+            </DisabledReasonButton>
+          ) : (
+            <Button
+              disabled={isPending}
+              onClick={() => setRemoveFromNotebooksOpen(true)}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              Remove from lab notebook
+            </Button>
+          ))}
+
+        {meta.allCanUpload && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                className="gap-1.5"
+                disabled={isPending}
+                onClick={runUpload}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                <ArrowUpToLine className="size-3.5" />
+                Upload
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Request upload for selected runs</TooltipContent>
+          </Tooltip>
+        )}
+
+        {meta.allCanDownload && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                className="gap-1.5"
+                onClick={handleDownload}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                <ArrowDownToLine className="size-3.5" />
+                Download
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Download zip archive for each run</TooltipContent>
+          </Tooltip>
+        )}
+
+        {meta.allCanReprocess && (
           <Button
+            className="gap-1.5"
             disabled={isPending}
-            onClick={() => runAttribution("DELETE", "Removed attribution from")}
+            onClick={() => setReprocessOpen(true)}
             size="sm"
             type="button"
             variant="outline"
           >
-            Remove my attribution
+            <RotateCw className="size-3.5" />
+            Reprocess
           </Button>
+        )}
 
-          {meta.allCanLink &&
-            (tooManyToLink ? (
-              <DisabledReasonButton
-                className="gap-1.5"
-                reason={tooManyReason}
-                size="sm"
-                variant="outline"
-              >
-                <NotebookPen className="size-3.5" />
-                {addLabel}
-              </DisabledReasonButton>
-            ) : (
-              <Button
-                className="gap-1.5"
-                disabled={isPending}
-                onClick={() => setAddToNotebookOpen(true)}
-                size="sm"
-                type="button"
-                variant="outline"
-              >
-                <NotebookPen className="size-3.5" />
-                {addLabel}
-              </Button>
-            ))}
-
-          {meta.allCanLink && notebook ? (
-            <RemoveFromThisNotebookButton
-              disabled={isPending}
-              disabledReason={removeFromThisReason}
-              onClick={() => removeFromThisNotebook(notebook)}
-            />
-          ) : null}
-
-          {meta.allCanLink &&
-            !notebook &&
-            anyInNotebook &&
-            (tooManyToLink ? (
-              <DisabledReasonButton
-                reason={tooManyReason}
-                size="sm"
-                variant="outline"
-              >
-                Remove from lab notebook
-              </DisabledReasonButton>
-            ) : (
-              <Button
-                disabled={isPending}
-                onClick={() => setRemoveFromNotebooksOpen(true)}
-                size="sm"
-                type="button"
-                variant="outline"
-              >
-                Remove from lab notebook
-              </Button>
-            ))}
-
-          {meta.allCanUpload && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  className="gap-1.5"
-                  disabled={isPending}
-                  onClick={runUpload}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                >
-                  <ArrowUpToLine className="size-3.5" />
-                  Upload
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Request upload for selected runs</TooltipContent>
-            </Tooltip>
-          )}
-
-          {meta.allCanDownload && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  className="gap-1.5"
-                  onClick={handleDownload}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                >
-                  <ArrowDownToLine className="size-3.5" />
-                  Download
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Download zip archive for each run</TooltipContent>
-            </Tooltip>
-          )}
-
-          {meta.allCanReprocess && (
-            <Button
-              className="gap-1.5"
-              disabled={isPending}
-              onClick={() => setReprocessOpen(true)}
-              size="sm"
-              type="button"
-              variant="outline"
-            >
-              <RotateCw className="size-3.5" />
-              Reprocess
-            </Button>
-          )}
-
-          {meta.allCanDelete && (
-            <Button
-              className="gap-1.5 text-destructive hover:text-destructive"
-              disabled={isPending}
-              onClick={() => setDeleteOpen(true)}
-              size="sm"
-              type="button"
-              variant="outline"
-            >
-              <Trash2 className="size-3.5" />
-              Delete
-            </Button>
-          )}
-
+        {meta.allCanDelete && (
           <Button
+            className="gap-1.5 text-destructive hover:text-destructive"
             disabled={isPending}
-            onClick={() => actions.clear()}
+            onClick={() => setDeleteOpen(true)}
             size="sm"
             type="button"
-            variant="ghost"
+            variant="outline"
           >
-            Clear
+            <Trash2 className="size-3.5" />
+            Delete
           </Button>
-        </div>
-      </div>
+        )}
+      </BulkActionBarShell>
 
       <ReprocessRunsDialog
         onComplete={() => actions.clear()}

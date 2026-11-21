@@ -63,11 +63,11 @@ function RunFilesSectionSkeleton({ rows = 3 }: { rows?: number }) {
     <div className="flex flex-col gap-2">
       <h2 className="font-semibold text-sm">Files</h2>
       <div className="rounded-lg border bg-background dark:bg-muted">
-        <div className="flex items-center gap-2 border-b px-3 py-2">
-          <div className="relative min-w-0 flex-1">
+        {/* Search files, Add filter, and Download, as in the loaded toolbar. */}
+        <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2">
+          <div className="relative min-w-0 flex-1 basis-60">
             <Skeleton className="h-8 w-full" />
           </div>
-          <Skeleton className="h-8 w-24 shrink-0" />
           <Skeleton className="h-8 w-28 shrink-0" />
           <Skeleton className="h-8 w-36 shrink-0" />
         </div>
@@ -77,8 +77,8 @@ function RunFilesSectionSkeleton({ rows = 3 }: { rows?: number }) {
               <TableHead className="w-10 pr-0 pl-3" />
               <TableHead>File name</TableHead>
               <TableHead>Type</TableHead>
-              <TableHead>Size</TableHead>
-              <TableHead>Created</TableHead>
+              <TableHead className="text-right">Size</TableHead>
+              <TableHead className="text-right">Created</TableHead>
               <TableHead>Status</TableHead>
             </TableRow>
           </TableHeader>
@@ -95,10 +95,10 @@ function RunFilesSectionSkeleton({ rows = 3 }: { rows?: number }) {
                   <Skeleton className="h-5 w-16 rounded-full" />
                 </TableCell>
                 <TableCell className="py-2">
-                  <Skeleton className="h-4 w-12" />
+                  <Skeleton className="ml-auto h-4 w-12" />
                 </TableCell>
                 <TableCell className="py-2">
-                  <Skeleton className="h-4 w-28" />
+                  <Skeleton className="ml-auto h-4 w-28" />
                 </TableCell>
                 <TableCell className="py-2">
                   <Skeleton className="h-5 w-20 rounded-full" />
