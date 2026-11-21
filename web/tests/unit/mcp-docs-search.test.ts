@@ -25,6 +25,10 @@ const GOLDEN_QUESTIONS: Array<{ question: string; pages: string[] }> = [
     question: "what does the stalled run status mean",
     pages: ["browse-runs", "concepts"],
   },
+  {
+    question: "how do I add a run to a lab notebook",
+    pages: ["lab-notebooks"],
+  },
   { question: "how do I make someone an admin", pages: ["manage-members"] },
   { question: "who is allowed to sign in", pages: ["security"] },
   { question: "connect Claude Code to Data Hub", pages: ["mcp"] },

@@ -6,13 +6,13 @@ contentType: How-to
 
 <Audience>Administrators</Audience>
 
-Each instrument’s watcher has its own page, under the instrument, with the watcher’s activity, health, and settings. **Settings → Watchers** lists every watcher in one table, below the form that rolls out new versions. Cutting releases and advertising versions is separate: [Roll out watcher releases](/docs/watcher-releases).
+Each instrument’s watcher has its own page, under the instrument, with the watcher’s activity, health, and settings. **Settings → Watchers** lists every watcher in one table, below the form for choosing which version watchers update to. Publishing a new version is covered in [Roll out watcher releases](/docs/watcher-releases).
 
-Members can open a watcher’s page too, but only to read it. Only admins see the settings form, **Restore**, **Deregister**, and **Settings → Watchers**. What scientists see about an instrument, the status badge and its notices, is in [Check that new files will arrive](/docs/browse-runs#check-files-will-arrive).
+Members can open a watcher’s page too, but only to read it. Only admins see the settings form, **Restore**, **Deregister**, and **Settings → Watchers**. [Check that new files will arrive](/docs/browse-runs#check-files-will-arrive) describes what everyone else sees: the instrument’s status badge and its notices.
 
 ## Open a watcher’s page [#the-watcher-page]
 
-The watcher is part of its instrument, so its page lives at `/instruments/<instrument ID>/watcher`. To open it:
+The watcher is part of its instrument, so its page is at `/instruments/your_instrument_id/watcher`. To open it:
 
 - Select the status badge beside the instrument’s name
 - Choose **Watcher** from the three-dot menu on the instrument page, or from a row’s menu on **Instruments**
@@ -23,11 +23,11 @@ The heading reads **Watcher for** and the instrument’s name, with the watcher�
 
 - **Computer**: the name of the instrument PC
 - **Operating system**
-- **Version**: followed by **Up to date** when it matches the **Latest version** under **Settings → Watchers**, or **Update available** and the latest version when it is lower
+- **Version**: followed by **Up to date** when it matches the **Latest version** under **Settings → Watchers**, or **Update available** and the latest version when it’s lower
 - **Last heartbeat**: how long ago, with the exact time when you hover over it
 - **Upload mode**: **Automatic** or **Manual**
 
-When another active watcher reports the same computer name, compared without regard to capital letters as Windows does, the summary adds a line naming the other instrument or instruments. It says that restarting the computer affects them too, because one PC can run several watchers and restarting it takes every instrument on it offline. Deregistered watchers don’t count.
+One PC can run watchers for several instruments. When another active watcher reports the same computer name (ignoring capital letters, as Windows does), the summary names the other instruments and warns that restarting the computer takes them offline too. Deregistered watchers don’t count.
 
 Below the summary, links switch between **Activity**, **Health**, and **Settings**. They are separate addresses, so you can share a link to one: `/watcher` is **Activity**, `/watcher/health` is **Health**, and `/watcher/settings` is **Settings**.
 
@@ -41,38 +41,44 @@ A past watcher opens read-only. Its badge reads **Deregistered**, a notice expla
 
 When an instrument has no current watcher, because its watcher was deregistered or the instrument was retired, `/watcher` opens on its most recent past watcher with that notice. Admins also see **Connect a new watcher**, which opens [Set up an instrument](/docs/set-up-an-instrument). An instrument that never had a watcher shows “No watcher has connected yet.”
 
-### Links from before the move [#old-links]
+### Old watcher links [#old-links]
 
-Links to the old watcher pages still work. `/watchers/<watcher ID>` goes to the instrument’s watcher page, on the matching tab: `?tab=logs` opens **Activity**, `?tab=status` opens **Health**, and `?tab=configuration` opens **Settings**. A deregistered watcher opens as a past watcher. `/watchers` goes to **Settings → Watchers** for admins, on its **Deregistered** tab if the link asked for it, and to **Instruments** for members.
+Watcher pages used to have their own addresses, and links to them still work:
+
+- `/watchers/your_watcher_id` opens the instrument’s watcher page, on the matching tab: `?tab=logs` opens **Activity**, `?tab=status` opens **Health**, and `?tab=configuration` opens **Settings**. A deregistered watcher opens as a past watcher
+- `/watchers` opens **Settings → Watchers** for admins, on its **Deregistered** tab if the link asked for it, and **Instruments** for members
 
 ## Monitor watcher health [#monitor-watcher-health]
 
-Each watcher sends a [heartbeat](/docs/concepts#heartbeat) every 60 seconds with version, instrument, watch directory, upload mode, activity counters, and uptime.
+Each watcher sends a [heartbeat](/docs/concepts#heartbeat) to Data Hub every 60 seconds, reporting its version, instrument, watch folder, upload mode, upload counts, and how long it has been running.
 
 ### Status [#watcher-status-badge]
 
-The badge beside the page heading, and in the **Status** column of **Settings → Watchers**, shows the watcher’s state:
+The badge beside the page heading, and in the **Status** column of **Settings → Watchers**, shows the watcher’s state: **Online**, **Waiting: folder not found**, **Unresponsive**, **Stopped**, **Registered**, or **Deregistered**. [Watcher status](/docs/concepts#watcher-status) explains when each one shows. Hover over the badge for details, such as which folder a watcher in **Waiting: folder not found** is looking for.
 
-- **Online**: a heartbeat arrived in the last 5 minutes
-- **Waiting: folder not found**: running, but its watch folder is missing, or went missing while it ran. Hover over the badge to see which folder
-- **Unresponsive**: no heartbeat for more than 5 minutes, or more than 15 for a watcher that stopped for a Windows restart, a shutdown, or an automatic update
-- **Stopped**: shut down cleanly. A stop you chose stays **Stopped** until the watcher starts again, and a stop for a Windows restart, a shutdown, or an automatic update turns **Unresponsive** after 15 minutes
-- **Registered**: no first heartbeat yet
-- **Deregistered**: a past watcher
-
-See [Watcher status](/docs/concepts#watcher-status). The instrument’s own badge, **Online**, **Restarting**, **Connecting**, or **Offline**, is a simpler summary of the same state, built for the people who use the instrument; see [Instrument status](/docs/concepts#instrument-status).
+The instrument’s own badge (**Online**, **Restarting**, **Connecting**, or **Offline**) is a simpler summary of the same state, for the people who use the instrument; see [Instrument status](/docs/concepts#instrument-status).
 
 ### Activity [#activity]
 
 **Activity** is the watcher’s event log. The heading shows how many events fall in the date range, which starts at **Last 7 days**. Use the **Event type** filter and the date range picker to narrow it. The page shows the first 20 events, and **Show more** loads more.
 
-Each event is a row with a label, a plain message, and when it happened. Run IDs in a message link to the run. Select a row to expand it. The expanded row shows details such as the file’s size, the run, and the number of upload parts, with the exact time. Admins also see the raw event, as the watcher sent it, which is the primary tool for remote diagnosis. Members see the plain version only.
+Each event is a row with a label, a plain message, and when it happened. Run IDs in a message link to the run. Select a row to expand it and see details such as the file’s size, the run, the number of upload parts, and the exact time. Admins also see the raw event as the watcher sent it, which is the most detailed record of what happened on the PC. Members see only the plain version.
 
-The labels are **Started**, **Stopped**, **File uploaded**, **Upload failed**, **Run reported**, **Settings synced**, **Error**, **Update started**, **Update finished**, **Update failed**, **Uploads cancelled**, and **Couldn’t upload**. Some events get a more specific label, such as **Missed heartbeat** for an error that says the watcher checked in again after missing some, or **File not ready**, for a file that can’t be read yet, which the watcher tries again. Choosing **Upload failed** in the event type filter leaves out **File not ready** events, because those files haven’t failed. An event of any other type gets a label written from its name. The raw event keeps the type names the docs and the API use, such as `watcher_started`, `run_reported`, `file_uploaded`, `update_*`, and `error` with a `details.kind` discriminator.
+The labels are **Started**, **Stopped**, **File uploaded**, **Upload failed**, **Run reported**, **Settings synced**, **Error**, **Update started**, **Update finished**, **Update failed**, **Uploads cancelled**, and **Couldn’t upload**. An event of any other type gets a label made from its name. Some events get a more specific label:
 
-Data Hub adds `upload_requests_cancelled`, shown as **Uploads cancelled**, when someone deletes a run that has requested uploads. It adds `uploads_failed`, shown as **Couldn’t upload**, when watcher 1.4.5 or later reports files it gave up on: one event per run and reason, such as “Couldn’t upload 129 files in run X: folder no longer on the instrument PC”. The files read **Upload failed**; see [When an upload fails](/docs/browse-runs#upload-failed). Older watchers log a “Queued file missing” and a “Gave up uploading” error for each file instead. From watcher 1.3.0, a `file_uploaded` event reports `size_bytes`, `part_count`, `prep_seconds` (hashing the file and requesting its upload link), and `upload_seconds` (sending the file to storage). Divide `size_bytes` by `upload_seconds` to get the upload speed.
+- **Missed heartbeat**: an error saying the watcher checked in again after missing some heartbeats
+- **File not ready**: a file the watcher can’t read yet and will try again. Choosing **Upload failed** in the **Event type** filter leaves these out, because those files haven’t failed
 
-Events are the primary remote-diagnosis tool. For operator-side symptoms, see [Troubleshoot a watcher](/docs/troubleshoot-a-watcher).
+The raw event keeps the type names the docs and the API use, such as `watcher_started`, `run_reported`, `file_uploaded`, `update_*`, and `error` with a `details.kind` field that says which error it was.
+
+Data Hub records two events itself:
+
+- `upload_requests_cancelled`, shown as **Uploads cancelled**, when someone deletes a run that has requested uploads
+- `uploads_failed`, shown as **Couldn’t upload**, when the watcher reports files it gave up on: one event per run and reason, such as “Couldn’t upload 129 files in run X: folder no longer on the instrument PC”. The files read **Upload failed**; see [When an upload fails](/docs/browse-runs#upload-failed). Watchers before 1.4.5 log a “Queued file missing” and a “Gave up uploading” error for each file instead
+
+A `file_uploaded` event reports `size_bytes`, `part_count`, `prep_seconds` (time spent hashing the file and requesting its upload link), and `upload_seconds` (time spent sending the file to storage). Divide `size_bytes` by `upload_seconds` to get the upload speed.
+
+For problems on the PC, see [Troubleshoot a watcher](/docs/troubleshoot-a-watcher).
 
 ### Health [#health]
 
@@ -80,7 +86,15 @@ Events are the primary remote-diagnosis tool. For operator-side symptoms, see [T
 
 - Four counts: **Files uploaded**, **Upload failures**, **Restarts** (with the reason, for example “All for automatic updates”), and **Missed heartbeats** (with how long each took to recover). A missed heartbeat is an error event that says the watcher checked in again after missing some
 - A bar chart of files uploaded per day
-- **Connectivity**, a grid with one row for each day and one block for each 30 minutes, in your time zone, which the caption names. Green is checked in, gray is restarted for an update, amber is a missed heartbeat that recovered, red is unresponsive, and light gray is no data yet. A block that holds a heartbeat but went quiet for a long stretch with nothing to explain it, such as an outage that is still going, is red too. On a day the clocks change, a block for a half hour that didn’t happen is light gray. Hover over a block to see what happened and when
+- **Connectivity**: a grid with one row per day and one block per 30 minutes, in your time zone, which the caption names. Hover over a block to see what happened and when
+
+The connectivity grid uses these colors:
+
+- **Green**: checked in
+- **Gray**: restarted for an update
+- **Amber**: missed a heartbeat and recovered
+- **Red**: unresponsive. A block that holds a heartbeat but is followed by a long silence with nothing to explain it, such as an outage that’s still going on, is red too
+- **Light gray**: no data yet, or a half hour that didn’t happen because the clocks changed
 
 A watcher that shows amber blocks every few hours, or red blocks in the middle of the night, points at the PC or its network rather than at Data Hub.
 
@@ -88,7 +102,7 @@ A watcher that shows amber blocks every few hours, or red blocks in the middle o
 
 ## See every watcher at once [#all-watchers]
 
-**Settings → Watchers**, which only admins see, has the release form from [Roll out watcher releases](/docs/watcher-releases) at the top and the list of **All watchers** below it. There is one watcher per instrument. The heading carries a rollout pill, “14 out of 16 on the latest version” for example. It is green when every watcher runs the latest version or a newer one, and amber otherwise, so you can watch a release catch up.
+**Settings → Watchers**, which only admins see, has the release form from [Roll out watcher releases](/docs/watcher-releases) at the top and the list of **All watchers** below it, one row per instrument’s watcher. The list’s heading shows how far a release has spread, for example “14 out of 16 on the latest version”. It’s green when every watcher runs the latest version or a newer one, and amber otherwise.
 
 The **Active** tab has one row for each watcher:
 
@@ -106,7 +120,7 @@ The **Deregistered** tab lists past watchers, with the **Instrument**, **Compute
 
 ## Change a watcher’s settings [#change-a-watchers-config]
 
-Admins can change a watcher’s settings from the web app, without visiting the instrument PC. This needs watcher 1.4.0 or later. For older watchers the form is turned off with a note to update the watcher.
+Admins can change a watcher’s settings from the web app, without going to the instrument PC.
 
 Open the watcher’s page and choose the **Settings** tab. It shows:
 
@@ -128,9 +142,9 @@ The form checks each value as you type. **Preview with recent files** shows whic
 After you save:
 
 1. A **Change pending** notice appears at the top of the tab.
-2. Within about a minute, the watcher’s next heartbeat tells it a change is waiting. The watcher fetches it.
+2. Within about a minute, the watcher learns from its next heartbeat that a change is waiting, and fetches it.
 3. The watcher checks the change, including that the new folder exists and can be read. If a check fails, it keeps its current settings and a **Change rejected** notice gives the reason, both on the **Settings** tab and as an `error` event.
-4. Otherwise it saves the new settings to `config.yaml`, waits up to two minutes for the uploads it’s sending, and restarts its watching with the new settings. The change shows as **Applied**, and **Current settings** updates. A file that hadn’t finished uploading, such as a large file partway through, uploads again from the start after the change, unless the change moved the watch folder or switched to manual uploads.
+4. Otherwise it saves the new settings to `config.yaml`, waits up to two minutes for the uploads it’s sending, and starts watching again with the new settings. The change shows as **Applied**, and **Current settings** updates. A file that hadn’t finished uploading, such as a large file partway through, uploads again from the start after the change, unless the change moved the watch folder or switched to manual uploads.
 
 If the new settings match more files, the watcher reports files that are already on the PC as detected, but doesn’t upload them. To upload them, use **Upload** on the run page; see [Request uploads](#request-uploads). New files after the change follow the upload mode.
 
@@ -140,11 +154,11 @@ The same form also opens from the notice on an instrument page that says Data Hu
 
 ### Edits made on the PC [#edits-on-the-pc]
 
-An edit made on the PC while the watcher is running, such as with `data-hub-watcher config edit`, is saved to `config.yaml` and recorded in the history at once, as **Applied**. The watcher reads `config.yaml` only when it starts, though, so it keeps running its previous settings until it restarts. Until then the **Settings** tab shows **Edited on PC — restart pending**, and **Settings → Watchers** shows **Edited on PC, restart pending**. With watcher 1.4.0 and later, **Current settings** shows what the watcher is running, from the revision it reports in its heartbeat.
+An edit made on the PC while the watcher is running, such as with `data-hub-watcher config edit`, is saved to `config.yaml` and recorded in the history at once, as **Applied**. The watcher reads `config.yaml` only when it starts, though, so it keeps running its previous settings until it restarts. Until then the **Settings** tab shows **Edited on PC — restart pending**, and **Settings → Watchers** shows **Edited on PC, restart pending**. **Current settings** shows what the watcher is running, from the settings revision it reports in its heartbeat.
 
 ### History and restore [#config-history]
 
-The **History** card records every change, whether it came from Data Hub or from the config file on the PC (such as `data-hub-watcher config edit`). Each entry has its revision number, its state, who made it, or **From the instrument PC**, when, and a one-line summary of what changed. To go back to an earlier version, click **Restore** on it. That saves its settings as a new change, and never edits the history.
+The **History** card records every change, whether it came from Data Hub or from the config file on the PC (such as `data-hub-watcher config edit`). Each entry has its revision number, its state, who made it, or **From the instrument PC**, when, and a one-line summary of what changed. To go back to an earlier version, choose **Restore** on it. That saves its settings as a new change, and never edits the history.
 
 When two admins edit the same watcher at once, the second save is refused with a message to reload, so neither overwrites the other unseen.
 
@@ -162,34 +176,49 @@ Each instrument can have at most one active watcher. Deregister the old one when
 - **Web app**: open the watcher’s page, choose **Deregister** from its three-dot menu, or choose **Deregister** from the watcher’s row menu in **Settings → Watchers**. The dialog asks you to stop the watcher service on the PC first
 - **API**: `DELETE /api/v1/watchers/:watcherId` (requires `watchers:admin`)
 
-Deregistration is a soft-delete: heartbeats, events, and runs stay with the instrument, under its past watchers and on the **Deregistered** tab of **Settings → Watchers**. The instrument’s badge reads **Offline** until a new watcher registers, and its page says when the watcher was deregistered and by whom. A watcher removed through the API with a token shows that token’s name as the one that removed it.
+Deregistration is a soft delete: heartbeats, events, and runs stay with the instrument, under its past watchers and on the **Deregistered** tab of **Settings → Watchers**. The instrument’s badge reads **Offline** until a new watcher registers, and its page says when the watcher was deregistered and by whom. A watcher removed through the API with a token shows that token’s name as the one that removed it.
 
-A running watcher that is deregistered stops by itself within about three minutes (watcher 1.4.3 and later). It doesn’t come back on its own. The Windows service isn’t restarted either, and a start is refused. To use the PC again, run `data-hub-watcher init` on the instrument PC. Older watchers keep running and getting errors until someone stops them on the PC. See [Troubleshoot a watcher](/docs/troubleshoot-a-watcher#the-watcher-was-deregistered).
+A running watcher that’s deregistered stops by itself within about three minutes, and doesn’t start again: Windows doesn’t restart the service, and starting it is refused. To use the PC again, run `data-hub-watcher init` on it. Watchers before 1.4.3 keep running and getting errors until someone stops them on the PC. See [Troubleshoot a watcher](/docs/troubleshoot-a-watcher#the-watcher-was-deregistered).
 
 Retiring an instrument also deregisters its watcher automatically; see [Retire an instrument](/docs/retire-an-instrument). `init` is refused for a retired instrument, so reactivate it before anyone runs `data-hub-watcher init` on the PC again (see [Reactivate](/docs/retire-an-instrument#reactivate)).
 
-You don’t need to deregister a watcher just because its token was revoked. Re-running `data-hub-watcher init` with a new token takes over the existing registration; see [After revoking a token](/docs/manage-tokens#after-revoking-a-token).
+You don’t need to deregister a watcher only because its token was revoked. Re-running `data-hub-watcher init` with a new token takes over the existing registration; see [After revoking a token](/docs/manage-tokens#after-revoking-a-token).
 
 ## Request uploads [#request-uploads]
 
 **Upload** on a run page, or on selected runs in a run list, asks the watcher to send files that are still on the instrument PC. The watcher polls the server’s upload queue once a minute and uploads the files that were requested.
 
 - In **manual** upload mode, every file waits in this queue until someone requests it.
-- In **auto** upload mode, files upload on their own, and the queue covers files that need another try. This works with watcher 1.2.1 and later; older watchers in auto mode never pick up requests, so the file shows **Uploading** and stays that way.
+- In **auto** upload mode, files upload on their own, and the queue holds files someone asks for again, such as ones whose upload failed.
 
 The **Upload** buttons on a run page follow the instrument’s badge. They work while it reads **Online** or **Restarting**, and are turned off for **Connecting**, **Offline**, **Pending**, and **Retired**, with the reason beside the button. Data Hub also refuses a request for such an instrument. See [Request an upload](/docs/browse-runs#request-upload).
 
-When a watcher stops cleanly and shows as **Stopped**, Data Hub cancels its pending requests and the files go back to `detected`, because nothing is left to upload them. Two stops are the exception, because the watcher is expected back: restarting the instrument PC or a full shutdown (watcher 1.4.1 and later), and a watcher that stops to install an automatic update (watcher 1.4.2 and later). The instrument reads **Restarting**, and the requests stay queued for the watcher to upload once it is running again. Data Hub cancels them only if no heartbeat arrives for about 15 minutes. At that point the watcher shows as **Unresponsive** instead of **Stopped**, and the instrument reads **Offline**. See [When the PC restarts or shuts down](/docs/windows-service#when-the-pc-restarts-or-shuts-down).
+### When Data Hub cancels a request [#when-requests-are-cancelled]
 
-Deleting a run also cancels the pending requests for that run’s files, and the files go back to `detected`. Data Hub records an `upload_requests_cancelled` event on the instrument’s watcher with the run and the number of files, and you can filter **Activity** by **Uploads cancelled** to find it. That event covers only cancellations caused by deleting a run. The other cancellations in this section, such as a watcher stopping or being removed or a change of watch folder, still show under their own event types. Restoring the run doesn’t bring the requests back, so request the uploads again. Other runs on the instrument keep their requests.
+Data Hub cancels pending upload requests, and the files go back to **Not uploaded**, in these cases:
 
-## Approving manual uploads [#approving-manual-uploads]
+- **The watcher stops cleanly**, for example with `data-hub-watcher service stop` or a `self-update` you start by hand. It shows **Stopped**, and nothing is left to upload the files
+- **The watcher doesn’t come back after a PC restart, a shutdown, or an automatic update.** These stops are expected to be short, so the requests wait and the instrument reads **Restarting**. If no heartbeat arrives for about 15 minutes, Data Hub cancels them, the watcher shows **Unresponsive**, and the instrument reads **Offline**. See [When the PC restarts or shuts down](/docs/windows-service#when-the-pc-restarts-or-shuts-down)
+- **Someone deletes the run.** Data Hub records an `upload_requests_cancelled` event on the watcher with the run and the number of files; filter **Activity** by **Uploads cancelled** to find it. Restoring the run doesn’t bring the requests back, so request the uploads again. Other runs on the instrument keep their requests
+- **Someone deregisters the watcher**
+- **Someone changes the instrument’s watch folder**, from the web app or on the PC, so the watcher doesn’t look for files at paths that no longer apply
+- **A requested file keeps failing**, because it’s missing on disk or its upload fails. The watcher tries it on at most three checks before Data Hub cancels it, and requesting it again gives it three new tries. Before watcher 1.4.3, a request made right after a cancellation was cancelled at once
 
-For instruments in [manual upload mode](/docs/concepts#upload-mode), the watcher reports runs but waits for server approval before uploading file bytes. The instrument’s page carries a note, “Files upload when someone requests them,” beside its file patterns. Approve a file with **Upload**, or choose **Dismiss** to tell the watcher not to upload it. To act on several files at once, select them in the files table and use the bar that appears.
+Each cancellation shows on the watcher’s **Activity** tab under its own event type. Watchers before 1.4.1 don’t report a PC restart, and watchers before 1.4.2 don’t report an automatic update, so those stops cancel requests at once.
+
+## Approve or dismiss files [#approving-manual-uploads]
+
+For instruments in [manual upload mode](/docs/concepts#upload-mode), the watcher reports runs but uploads a file only after someone approves it. The instrument’s page shows a note beside its file patterns: “Files upload when someone requests them.” Approve a file with **Upload**, or choose **Dismiss** to tell the watcher not to upload it. To act on several files at once, select them in the files table and use the bar that appears.
 
 ![Run page for a manual-upload instrument with its waiting files selected and a bar offering Upload and Dismiss](/images/manual-upload.webp)
 
-Safeguards that keep the queue healthy:
+**Dismiss** also works on a file whose upload failed, on any instrument. A dismissed file stays dismissed, even if the watcher reports it again. Dismissing differs from deleting: the file never reached Data Hub storage, so there’s nothing to restore.
 
-- Changing an instrument’s watch folder, from the web app or on the PC, reverts pending upload requests to `detected` so stale paths drain instead of erroring
-- A queued file that keeps failing (missing on disk or failing to upload) is retried on at most three polls, then cancelled server-side, and a file requested again gets three new tries (before watcher 1.4.3, a request made right after the cancellation was cancelled at once)
+### When a dismissed path gets a new file [#dismissed-path-new-file]
+
+The watcher reports each path only once, so a new file that the instrument later writes at a dismissed file’s path doesn’t appear on its own. It appears when the watcher reports that path again: after `data-hub-watcher state forget`, or when the watcher starts without its saved record of what it has reported, for example after a reinstall. Data Hub then treats it as a new file if its size or creation time differs from the dismissed file’s. On Linux, the modification time stands in for the creation time.
+
+Because Data Hub compares only size and time, two cases can surprise you:
+
+- A new file the same size as the dismissed one counts as the same file when it keeps the old creation time, so it stays dismissed. On Windows and macOS this happens when the instrument overwrites the file in place. On Windows it can also happen when the file is deleted and written again, or saved through a temporary copy, within about 15 seconds.
+- Copying a folder, for example with Explorer or `xcopy` on Windows or `cp` without `-p` on Linux, gives the copies new times. After you replace an instrument PC or restore its folder from a backup, a new watcher that scans the copied folder reports the files you dismissed as new files. Dismiss them again.

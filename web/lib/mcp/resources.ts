@@ -57,7 +57,7 @@ function filterOptionsDescription(instrumentType: InstrumentType): string {
 }
 
 // Clients such as Claude Desktop show only a resource's name in their attach
-// menu, and three docs pages share the title "Overview".
+// menu, so a title that two docs pages share gets the page's slug added.
 function docsPageResourceList() {
   const seen = new Set<string>();
   return listDocPages().map(({ page, title, description }) => {

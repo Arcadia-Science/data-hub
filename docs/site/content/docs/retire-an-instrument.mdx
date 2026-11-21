@@ -6,19 +6,19 @@ contentType: How-to
 
 <Audience>Administrators</Audience>
 
-Retire an instrument when it is decommissioned or out of service for a long stretch. Retirement sets status to `inactive` (shown as **Retired**), removes it from the sidebar and dashboard lists of live instruments, and stops new uploads. Nothing is deleted from storage; you can reactivate later.
+Retire an instrument when it’s taken out of service for good or for a long time. Retiring sets its status to `inactive`, shown as **Retired**, and stops new uploads. The instrument leaves the sidebar and the home page’s list of instruments. Nothing is deleted from storage, and you can reactivate it later.
 
 ## What retirement does
 
 When you retire an instrument:
 
-- Status becomes `inactive` (UI: **Retired**), with `retiredAt` / `retiredBy` audit fields
-- It stops accepting new runs and watchers
-- Its badge reads **Retired**, and its Upload buttons on run pages are turned off
-- All existing runs and files stay browsable
-- Its watcher is deregistered in the same request so it stops checking in. The watcher stays on the instrument’s watcher page as a past watcher
+- Its status becomes `inactive`, shown as **Retired**. Data Hub records who retired it and when, and the instrument page shows both.
+- It stops accepting new runs and watchers.
+- Its badge reads **Retired**, and the **Upload** buttons on its run pages are turned off.
+- All existing runs and files stay browsable.
+- Its watcher is deregistered in the same request, so it stops checking in. The watcher stays on the instrument’s watcher page as a past watcher.
 
-Instrument IDs stay permanent. Retire rather than trying to rename or delete an instrument that has already produced data.
+An instrument’s ID never changes. To stop using an instrument that has already produced data, retire it instead of trying to rename or delete it.
 
 ## Retire from the web app
 
@@ -33,7 +33,7 @@ Open the three-dot menu, which only admins see, and choose **Retire**. The row m
 </Step>
 
 <Step>
-Confirm in the dialog. It lists how many runs are kept, says nothing is deleted from storage, and, when the instrument has a watcher, says its watcher will be deregistered so it stops checking in.
+Read the window that opens, then choose **Retire instrument**. The window says how many runs are kept and that nothing is deleted from storage. When the instrument has a watcher, it also says the watcher will be deregistered so it stops checking in.
 </Step>
 
 </Steps>
@@ -44,9 +44,9 @@ The instrument moves to the **Retired** tab on **Instruments**.
 
 ## Reactivate
 
-From a retired instrument’s page, open the three-dot menu and choose **Reactivate**. The row menu on the **Retired** tab has the same item. Status returns to `active` and the instrument reappears in the sidebar and dashboard.
+From a retired instrument’s page, open the three-dot menu and choose **Reactivate**. The row menu on the **Retired** tab has the same item. The status returns to `active`, and the instrument appears in the sidebar and on the home page again.
 
-The watcher deregistered at retirement does **not** reconnect automatically. An operator must re-register it (usually `data-hub-watcher init` on the instrument PC) after reactivation. Until then the instrument’s badge reads **Offline**, with a notice that it isn’t connected to a watcher, and admins can follow **Connect a watcher** to [Set up an instrument](/docs/set-up-an-instrument).
+After you reactivate, an operator has to register a watcher again by running `data-hub-watcher init` on the instrument PC. The watcher that was deregistered at retirement stays disconnected. Until a new one registers, the badge reads **Offline** and a notice says the instrument isn’t connected to a watcher. Admins can choose **Connect a watcher** to open [Set up an instrument](/docs/set-up-an-instrument).
 
 ## Via the API
 
@@ -64,4 +64,4 @@ curl -X PATCH https://datahub.example.com/api/v1/instruments/bio-rad-cfx96 \
   -d '{"status":"active"}'
 ```
 
-Session callers need the admin role; bearer tokens need `instruments:write`.
+Signed-in users need the admin role. Scripts that use a token need the `instruments:write` scope.

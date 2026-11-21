@@ -1,26 +1,28 @@
 ---
-title: Browse and analyze runs
-description: Use the web app to find runs, check that new files will arrive, inspect processed results, claim attribution, download files, comment, and manage run lifecycle.
+title: Browse runs
+description: Use the web app to find runs, check that new files will arrive, read processed results, claim your runs, download files, comment, and reprocess or delete runs.
 contentType: How-to
 ---
 
 <Audience>Everyone</Audience>
 
-After instruments are uploading, the web app is where you find runs and act on them: inspect results, claim work, download files, and leave lab notes. The sections below follow the order you’ll use them in.
+Once instruments are uploading, use the web app to find runs and work with them: read results, claim your runs, download files, and leave lab notes. Lab notebooks have their own page, [Lab notebooks](/docs/lab-notebooks).
 
 ## Orient yourself in the app [#find-a-run]
 
 The sidebar and the home page are the two starting points for daily work.
 
-**Home** lists recent runs across instruments, most recent first, with counts for today and this week at the top. The **Runs needing attention** card beside them counts runs whose upload failed, whose processing failed, or whose processing stalled, of any age. When it isn’t zero, choose it to list those runs. Filter by date range, who ran it, and instrument-specific metadata when it’s available, then page through results. Below the runs, Home shows up to four of today’s comments; use the date picker to see comments from a different range.
+**Home** lists recent runs across instruments, newest first, with counts for today and this week at the top. Filter by date range, who ran it, and instrument-specific metadata when it’s available, then page through the results. Below the runs, Home shows up to four of today’s comments; use the date picker to see comments from another range.
 
-![Home dashboard with instrument status and recent runs](/images/home.webp)
+The **Runs needing attention** card beside the counts shows how many runs, of any age, failed to upload, failed processing, or stalled. When it isn’t zero, choose it to list those runs.
+
+![Home page with instrument status and recent runs](/images/home.webp)
 
 **Instruments** in the sidebar lists five instruments, and **View all** opens the full list. Each instrument’s page starts with its name and a status badge that says whether new files can arrive; see [Check that new files will arrive](#check-files-will-arrive). Under the name are the folder its watcher reads from and the file patterns it uploads, then a runs table with column filters that match the instrument type (for example wavelengths on a plate reader).
 
 ![Plate reader instrument page with the runs table and column filters](/images/plate-reader-runs-table.webp)
 
-**My runs** lists runs you’ve claimed, so you can return to your own work without re-filtering the full dashboard. Its **Runs needing attention** card counts only your runs.
+**My runs** lists runs you’ve claimed, so you can return to your own work without filtering every run. Its **Runs needing attention** card counts only your runs.
 
 ![My runs page listing runs attributed to the signed-in user](/images/my-runs.webp)
 
@@ -37,19 +39,19 @@ Home and the instrument pages share the same four controls:
 - **Add filter**: filter by run status, or turn on **Show deleted runs**
 - **Column headers**: sort by **Run Started**, **Last Updated**, size, who ran it, or any instrument-specific column
 
-The **Lab Notebook** column header filters the list by [lab notebook](#lab-notebook). Pick **In any lab notebook** or **In no lab notebook**, or pick one of the lab notebooks it lists to see only that lab notebook's runs. Each lab notebook shows how many of the listed runs it holds. Type in the menu's search box to narrow the list.
+The **Lab Notebook** column header filters the list by lab notebook, or to runs in none; see [Find runs by lab notebook](/docs/lab-notebooks#find-runs).
 
 **Run Started** is when the instrument acquired the run. **Last Updated** changes when the run’s files change, or when someone edits, claims, or comments on it, or adds it to or removes it from a lab notebook. The default order is newest run first. The sort order is saved in the page link, so a link you share opens with the same order.
 
 ### What each run status means [#run-status]
 
-A run’s status tells you how far its files have got from the instrument to the dashboard:
+A run’s status tells you how far its files have got from the instrument to the web app:
 
 | Status | Meaning |
 | --- | --- |
 | Failed | At least one file failed processing. The file’s row on the run page gives the reason. |
 | Stalled | At least one file has been processing for more than 20 minutes without finishing. Reprocess it to try again. |
-| Upload failed | The watcher gave up on at least one file, for example because its folder is no longer on the instrument PC. See [When an upload fails](/docs/browse-runs#upload-failed). |
+| Upload failed | The watcher gave up on at least one file, for example because its folder is no longer on the instrument PC. See [When an upload fails](#upload-failed). |
 | Waiting to upload | Files are on their way from the instrument PC: someone requested them, or the watcher uploads them on its own. |
 | Uploaded | The files are in storage. Processing hasn’t started, or this instrument type has no processor. |
 | Queued | You chose **Reprocess**, and the files are waiting for a free processing slot. They start as other files finish. |
@@ -69,19 +71,21 @@ If a file you saved on the instrument PC hasn’t shown up, start with the badge
 | Badge | What it means |
 | --- | --- |
 | **Online** | New files upload automatically. For an instrument in manual upload mode, new files upload when someone requests them. |
-| **Restarting** | The instrument PC is restarting or updating. This usually takes a minute or two, and you don’t need to do anything. |
-| **Connecting** | The watcher was just set up and hasn’t checked in yet. If it hasn’t checked in after 15 minutes, the badge turns **Offline**. |
+| **Restarting** | The instrument PC is restarting or the watcher is updating. Either takes a minute or two, and you don’t need to do anything. |
+| **Connecting** | The watcher was set up recently and hasn’t checked in yet. If it hasn’t checked in after 15 minutes, the badge turns **Offline**. |
 | **Offline** | New files won’t appear right now. A notice under the instrument’s name says why. |
 | **Pending** | An admin hasn’t confirmed this instrument yet. Admins see a card in place of the runs table; members see one line. |
 | **Retired** | The instrument no longer takes new runs. Its runs stay browsable. |
 
-Hover over the badge, or focus it with the keyboard, for a short explanation. Select it to open the instrument’s watcher page, where anyone signed in can read its activity, health, and settings. Only admins can change anything there. The watcher is the program on the instrument PC that finds new files and uploads them; [Concepts](/docs/concepts#instrument-status) has the full rules for each badge.
+Hover over the badge, or focus it with the keyboard, for a short explanation. [Concepts](/docs/concepts#instrument-status) has the full rules for each badge.
+
+Select the badge to open the instrument’s watcher page. The watcher is the program on the instrument PC that finds new files and uploads them. Anyone signed in can read its activity, health, and settings there, and only admins can change them.
 
 ![Instrument page with an Online badge and its explanation in a tooltip](/images/instrument-status-badge.webp)
 
 ### When the badge reads Offline [#when-offline]
 
-A red notice sits between the instrument’s name and its runs. It says what happened in plain words:
+A red notice between the instrument’s name and its runs says what happened:
 
 | Notice | What happened |
 | --- | --- |
@@ -91,7 +95,7 @@ A red notice sits between the instrument’s name and its runs. It says what hap
 | **Uploads from this instrument are paused** | Someone stopped the watcher on the PC. New files appear once it’s started again. |
 | **This instrument isn’t connected to a watcher** | The instrument never had a watcher, or its watcher was deregistered, which the notice dates and credits. Admins can choose **Connect a watcher**, which opens [Set up an instrument](/docs/set-up-an-instrument). |
 
-**See details** opens the watcher’s **Activity** tab. Members see only that link, and none when there is no watcher to look at. Tell an admin what the notice says, or send them the link: the [troubleshooting guide](/docs/troubleshoot-a-watcher#instrument-shows-offline) covers each reason.
+**See details** opens the watcher’s **Activity** tab. Members see only that link, or no link when there’s no watcher. To get it fixed, tell an admin what the notice says or send them the link. [Troubleshoot a watcher](/docs/troubleshoot-a-watcher#instrument-shows-offline) covers each reason.
 
 ![Instrument page with a red Offline badge and a notice that the watcher can’t find its watch folder, with Change folder and See details](/images/instrument-offline-notice.webp)
 
@@ -99,23 +103,21 @@ An instrument in manual upload mode, whatever its badge says, shows a blue note 
 
 ## Search the workspace [#search]
 
-Press **⌘&nbsp;K** (macOS) or **Ctrl&nbsp;K** (Windows/Linux) to open global search from any page. Results are grouped into runs, lab notebooks, files, instruments, users, and comments. That means you can also look up a colleague’s work or the text of a lab note. A file hit opens the parent run with the files table already filtered to that file.
-
-[Lab notebooks](#lab-notebook) match on their name, description, or link. Paste a lab notebook page’s URL to find its lab notebook, even when your copy of the link differs from the one saved, then open the lab notebook to see all of its runs. The arrow beside a lab notebook opens the lab notebook itself.
+Press **⌘&nbsp;K** (macOS) or **Ctrl&nbsp;K** (Windows/Linux) to open global search from any page. Results are grouped into runs, lab notebooks, files, instruments, users, and comments, so you can also look up a colleague’s work or the text of a lab note. Selecting a file opens its run with the files table filtered to that file. Lab notebooks match on their name, description, or notebook page link; see [Find runs by lab notebook](/docs/lab-notebooks#find-runs).
 
 ![Global search modal with results for runs and files](/images/search-modal.webp)
 
 ## Open a run and inspect results [#open-run-detail]
 
-Each run has a details page at `/instruments/your_instrument_id/runs/your_run_id`. The arrows beside the run name step you to the next or previous run without going back to the list.
+Each run has a page at `/instruments/your_instrument_id/runs/your_run_id`. The arrows beside the run name step you to the next or previous run without going back to the list.
 
-The top of the page lists who ran it, the number of raw files, and their total size. Below that, the **Lab Notebooks** section lists the lab notebooks the run is in; see [Add runs to a lab notebook](#lab-notebook). What you see after that depends on the instrument type and whether a processor ran:
+The top of the page lists who ran it, the number of raw files, and their total size. Below that, the **Lab Notebooks** section lists the lab notebooks the run is in; see [Lab notebooks](/docs/lab-notebooks#add-runs). What you see after that depends on the instrument type and whether a processor ran:
 
 - Metadata tags for extracted fields, such as experiment type, wavelength, or temperature
 - Processed reports such as tables, images, PDFs, and videos, including interactive plate maps for plate readers and a video player for DishCam runs
 - A files table of everything in the run, labeled Raw or Processed, with each file’s size and status
 
-Click a metadata tag to open the instrument’s runs table filtered to that value. For example, clicking a wavelength tag lists every run on that instrument recorded at the same wavelength.
+Select a metadata tag to open the instrument’s runs table filtered to that value. For example, selecting a wavelength tag lists every run on that instrument recorded at the same wavelength.
 
 Reports with many images, PDFs, or spectra show one item at a time. Search by filename to jump anywhere in the run, or use the arrows to step through it. The counter beside the arrows shows your position out of the total. Plate maps with more than 12 columns, such as 384-well plates, scroll sideways inside the plate.
 
@@ -137,51 +139,23 @@ While files are uploading, queued, or processing, the run page checks for update
 
 ## Claim who ran it [#claim-who-ran-it]
 
-Use **Claim** on the run details page to attribute yourself. You can claim or unclaim your own user only, so nobody else can attribute a run to you. Claims show on the run and appear in “ran by” filters on Home and elsewhere. API tokens can’t claim runs; a signed-in person has to.
+Choose **Claim** on the run page to put your name on the run. You can only claim or unclaim a run for yourself, so nobody else can put your name on a run. Your claim shows on the run and in the “ran by” filters. API tokens can’t claim runs; a signed-in person has to.
 
 ### Asked after a download [#claim-prompt]
 
-When you download a run archive or a file from a run nobody has claimed, Data Hub asks **Did you run this?** in a card near the bottom of the page. Choose **I ran this** to claim the run, or **Not me** so that browser doesn’t ask about the run again. Downloading several runs from a runs list asks once about all the unclaimed ones, and **I ran these** claims them all.
+When you download a run archive or a file from a run nobody has claimed, Data Hub asks **Did you run this?** in a card near the bottom of the page. Choose **I ran this** to claim the run, or **Not me** so this browser doesn’t ask about the run again. Downloading several runs from a runs list asks once about all the unclaimed ones, and **I ran these** claims them all.
 
-An AI assistant connected to the [MCP server](/docs/mcp) learns the same thing when it downloads from an unclaimed run, so it can ask you and claim the run for you.
+An AI assistant connected to the [MCP server](/docs/mcp) is told when it downloads from an unclaimed run, so it can ask you and claim the run for you.
 
 ## Add runs to a lab notebook [#lab-notebook]
 
-A lab notebook in Data Hub stands for one lab notebook page, such as a Notion or Google Docs page. Adding a run to it lets whoever analyzes the run read how the experiment was set up, and gathers the lab notebook's runs from every instrument in one place. A run can be in several lab notebooks.
-
-On the run page, choose **Add to lab notebook** in the **Lab Notebooks** section. Type a lab notebook's name to pick one Data Hub already has, or paste the page's link. A link to a page that has no lab notebook yet creates one: give it a name, which starts as a name worked out from the link. For a Notion page, that's its title. Leave **Make me the owner** ticked to own a lab notebook you create this way. Tick **I ran this run** to claim the run at the same time. Each lab notebook shows who added the run. Its name opens the [lab notebook's page](#notebook-page) in Data Hub, and the arrow beside it opens the lab notebook itself. Use its **⋯** menu to copy the lab notebook's link or remove the run from it.
-
-- A run can be in up to 20 lab notebooks.
-- Each page has one lab notebook, with one name that every run in it shares. Two links count as the same page when they differ only in `http` or `https`, `www.`, a trailing slash, the part after `#`, or tracking parameters such as `utm_source`. Notion links count as the same page when they have the same page ID, so a link copied before the page was renamed still finds its lab notebook.
-- Anyone signed in can add runs to a lab notebook or remove them.
-- A deleted run stays in its lab notebooks, but they can't change until the run is restored.
-- A deleted lab notebook keeps its runs, and restoring it brings them back. Pasting a deleted lab notebook's link offers to restore it.
-
-Runs tables show each run's first lab notebook in the **Lab Notebook** column, with **+1**, **+2**, and so on when there are more. Filter that column to **In no lab notebook** to find runs that still need one, or to a lab notebook to find all of its runs. To add many runs at once, select them and choose **Add to lab notebook**; see [Act on several runs at once](#bulk-actions).
-
-### A lab notebook's page [#notebook-page]
-
-Each lab notebook has a page in Data Hub that lists its runs from every instrument. Open it from a lab notebook's name anywhere in Data Hub, or from **Lab Notebooks** in the sidebar, which lists the lab notebooks you opened last and the ones that most recently got a run. **View all** opens the list of every lab notebook, with its owner, run count, instruments, and newest run. Search it by name, or paste a lab notebook's link to find its page. Choose **New lab notebook** there to create a lab notebook before it has any runs.
-
-The page shows the lab notebook's description and owner above its runs, which you can search, filter, and act on like any runs table. **Open lab notebook** opens the lab notebook itself. From the **⋯** menu:
-
-- **Edit details** changes the lab notebook's name, description, owner, or link. The name is shared by every run in it. A link can't point to a page that another lab notebook already has.
-- **Copy page link** copies the address of the Data Hub page. Paste it into the lab notebook, so the lab notebook and its data point at each other.
-- **Delete** takes the lab notebook off its runs and out of lists and search. The page stays, with **Restore**, which brings the lab notebook back with all of its runs.
-
-Select runs on the page and choose **Remove from this lab notebook** to take them out.
-
-### From scripts and AI assistants [#lab-notebook-api]
-
-Scripts manage lab notebooks through the [REST API](/docs/api)'s `/lab-notebooks` endpoints. Listing and reading lab notebooks needs the `runs:read` scope. Creating, editing, deleting, and restoring them, and adding or removing their runs, needs `lab-notebooks:write`. A token that registered a watcher can add or remove only its own instrument's runs, and can't create, edit, delete, or restore lab notebooks. The run lists take `has_lab_notebook` to list runs in any lab notebook or in none, and `lab_notebook_id` to list one lab notebook's runs. Run responses list each run's `lab_notebooks`.
-
-An AI assistant connected to the [MCP server](/docs/mcp) can do the same with the `list_lab_notebooks`, `get_lab_notebook`, `create_lab_notebook`, `update_lab_notebook`, `delete_lab_notebook`, `restore_lab_notebook`, `add_runs_to_lab_notebook`, and `remove_runs_from_lab_notebook` tools. The `search_runs` tool filters by lab notebook with `hasLabNotebook` and `labNotebookId`.
+A lab notebook gathers the runs behind one notebook page, such as a Notion or Google Docs page, from every instrument. On a run page, choose **Add to lab notebook** in the **Lab Notebooks** section. To add several runs at once, select them in a runs list and choose **Add to lab notebook** in the action bar. [Lab notebooks](/docs/lab-notebooks) covers adding runs, finding them, and each lab notebook’s page.
 
 ## Download files [#download-files]
 
 From the files table you can:
 
-- Preview a CSV, TSV, JSON, or other text file by clicking its row. The preview shows the first 1 MB of the file. Use the back and forward buttons to move between previewable files on the same page of the table. **Download** in that window saves the file
+- Preview a CSV, TSV, JSON, or other text file by selecting its row. The preview shows the first 1 MB of the file. Use the back and forward buttons to move between previewable files on the same page of the table. **Download** in that window saves the file
 - Select files and choose **Download** in the bar that appears above the files table. One file downloads directly. Two or more come as a single zip, which builds in the background like **Download all**
 - Choose **Download all** to build a zip of active files in the run, with any active file filters applied
 
@@ -198,23 +172,25 @@ Select the checkbox on one or more run rows to open an action bar at the bottom 
 - **Upload**: ask the watcher to upload files that are still on the instrument PC. Data Hub refuses the request for a run whose instrument isn’t **Online** or **Restarting**, and a message says how many failed; see [Request an upload](#request-upload)
 - **Download**: download a zip of each selected run
 - **Reprocess**: run server-side processing again, including on runs whose files have stalled
-- **Add to lab notebook**: add every selected run to the same [lab notebook](#lab-notebook). Runs already in it are skipped
+- **Add to lab notebook**: add every selected run to the same [lab notebook](/docs/lab-notebooks). Runs already in it are skipped
 - **Remove from lab notebook**: choose from the lab notebooks the selected runs are in, and remove every selected run from them
 - **Delete**: mark the selected runs deleted
 
-**Upload**, **Download**, **Reprocess**, **Delete**, and the lab notebook actions appear only when every selected run allows them. For example, **Reprocess** is hidden if one of the selected runs belongs to an instrument type with no processor, and the lab notebook actions are hidden if a selected run is deleted. **Remove from lab notebook** also needs at least one selected run to be in a lab notebook. The lab notebook actions work on up to 100 runs at a time. The checkbox in the header row selects every run on the page, and **Clear** drops the selection.
+**Upload**, **Download**, **Reprocess**, **Delete**, and the lab notebook actions appear only when every selected run allows them. For example, **Reprocess** is hidden if one of the selected runs belongs to an instrument type with no processor, and the lab notebook actions are hidden if a selected run is deleted. **Remove from lab notebook** also needs at least one selected run to be in a lab notebook, and the lab notebook actions work on up to 100 runs at a time.
+
+The checkbox in the header row selects every run on the page, and **Clear** drops the selection.
 
 The selection stays when you move to another page of the same results. It clears when you change the search, a filter, or the sort, so the bar never acts on runs from a list you are no longer looking at.
 
-The files table on a run page works the same way: select files to get **Upload**, **Dismiss**, **Reprocess**, and **Download** for just those files. Its **Upload** follows the instrument’s badge, like the other [Upload buttons](#request-upload). Its selection also clears when you change the files search, a filter, or the sort.
+The files table on a run page works the same way: select files to get **Upload**, **Dismiss**, **Reprocess**, and **Download** for only those files. Its **Upload** follows the instrument’s badge, like the other [Upload buttons](#request-upload). Its selection also clears when you change the files search, a filter, or the sort.
 
 ![Run list with several runs selected and the bulk action bar open](/images/bulk-actions.webp)
 
 ## Comment on a run [#comment]
 
-The comments thread on run details is for lab notes and follow-ups. Comment activity can notify people who claimed the run or already commented, and clicking a comment notification scrolls to that comment. Set preferences under **Settings → Notifications**; see [Configure notifications](/docs/configure-notifications).
+The comment thread on a run page is for lab notes and follow-ups. A new comment can notify the people who claimed the run or already commented on it, and choosing a comment notification scrolls to that comment. Set preferences under **Settings → Notifications**; see [Configure notifications](/docs/configure-notifications).
 
-Only the author of a comment can edit it. Authors can delete their own comments, and workspace admins can delete any comment. Comments posted by a script through an API token show the token’s name with a key icon instead of a person.
+Only the author of a comment can edit it. Authors can delete their own comments, and admins can delete any comment. Comments posted by a script through an API token show the token’s name with a key icon instead of a person.
 
 ![Gel doc processed image with a lab comment on the run](/images/gel-doc-run-comments.webp)
 
@@ -226,11 +202,13 @@ Reprocessing runs server-side processing again. Use it after a file failed or st
 - To reprocess several files, select them in the files table and choose **Reprocess** in the bar.
 - To reprocess whole runs, select them in a run list and choose **Reprocess** in the bar.
 
-Reprocessing sends only the original instrument files. Files Data Hub generated, such as videos, previews, and CSVs, have no **Reprocess** button and are rebuilt from the originals. Reprocessed files go through a queue; see [How reprocessing is queued](/docs/browse-runs#reprocess-queue).
+Reprocessing sends only the original instrument files. Files Data Hub generated, such as videos, previews, and CSVs, have no **Reprocess** button and are rebuilt from the originals. Reprocessed files go through a queue; see [How reprocessing is queued](#reprocess-queue).
 
-**Delete** marks the run deleted without removing stored files. To find a deleted run again, turn on **Show deleted runs** under **Add filter**, then open it and choose **Restore**. Anyone signed in can delete or restore a run. Files that were queued for reprocessing when the run was deleted stay queued and don’t start while the run is deleted. If you restore the run, they start as processing slots free up.
+**Delete** marks the run deleted without removing its stored files. Anyone signed in can delete or restore a run. To find a deleted run, turn on **Show deleted runs** under **Add filter**, then open it and choose **Restore**.
 
-Deleting a run also cancels the uploads that were requested for its files, so the watcher stops trying to send them. Those files go back to **Not uploaded**. Restoring the run doesn’t bring the requests back. Choose **Upload** again if you still want the files. See [Request an upload](/docs/browse-runs#request-upload).
+Files that were queued for reprocessing when the run was deleted stay queued but don’t start. If you restore the run, they start as processing slots free up.
+
+Deleting a run also cancels the uploads that were requested for its files, so the watcher stops trying to send them, and those files go back to **Not uploaded**. Restoring the run doesn’t bring the requests back, so choose **Upload** again if you still want the files; see [Request an upload](#request-upload).
 
 While a run is deleted, Data Hub refuses a watcher’s reports of it, so the watcher’s new files aren’t added. After you restore the run, restart the watcher to send them, or choose **Upload** on a file to have the watcher send that file without a restart. Watchers before 1.4.3 also send them when another file of the run finishes. See [A run was deleted on Data Hub](/docs/troubleshoot-a-watcher#a-run-was-deleted-on-data-hub).
 
@@ -242,19 +220,30 @@ Reprocessing starts at most 10 files at a time, counted across all runs and inst
 
 - A file that can start right away shows **Processing**.
 - A file that has to wait shows **Queued**. It starts when another file finishes, and files that were queued earlier start first.
-- A run with queued files shows **Queued** in the runs list, unless a file in it failed, stalled, couldn’t upload, is waiting to upload, or is uploaded and not yet processing.
+- A run with queued files shows **Queued** in the runs list, unless another of its files has a status that comes earlier in the [status table](#run-status), such as **Failed**.
 - If Data Hub can’t send a file to the processor, or the processor ends with an error without saving a result, the file shows **Failed** with a message that says so, and the next queued file starts. Reprocess the failed file to try again.
 - To take the waiting files out of the queue, choose **Cancel queued** at the top of the run page. Each queued file shows **Failed** with a message that says the reprocess was cancelled, and you can reprocess it again. Files that have already started aren’t affected.
 
 Files that arrive from a watcher upload count toward the 10, but they start right away and never wait in the queue. A file that has been processing for more than 20 minutes without finishing stops counting, so one stuck file doesn’t hold up the queue.
 
-A large run takes several rounds. For example, reprocessing a run of 80 files starts 10 files, and the other 70 show **Queued** until slots open. You can leave the page, because the queue keeps running. A queued file has no **Reprocess** button. An admin who runs Data Hub can change the limit with the `PROCESSING_CONCURRENCY_LIMIT` variable; see the [web application environment variables](https://github.com/Arcadia-Science/data-hub/blob/production/docs/developer/getting-started.md#web-application).
+A large run takes several rounds. For example, reprocessing a run of 80 files starts 10 files, and the other 70 show **Queued** until slots open. You can leave the page, because the queue keeps running. A queued file has no **Reprocess** button.
 
-If a file that the queue started never finishes, for example because Data Hub restarted just as it started the file, it shows **Stalled** after 20 minutes. The queue then puts it back in line once. If it stalls a second time, it stays **Stalled** until you reprocess it.
+The engineer who deploys Data Hub can change the limit of 10 with the `PROCESSING_CONCURRENCY_LIMIT` environment variable; see the [web application environment variables](https://github.com/Arcadia-Science/data-hub/blob/production/docs/developer/getting-started.md#web-application).
+
+If a file that the queue started never finishes, for example because Data Hub restarted at the moment it started the file, it shows **Stalled** after 20 minutes. The queue then puts it back in line once. If it stalls a second time, it stays **Stalled** until you reprocess it.
+
+## Get files that are still on the instrument PC [#files-on-the-pc]
+
+The watcher reports every file it finds, but some files stay on the instrument PC until someone asks for them, and some fail to upload. The footer under a run’s files table counts the files still on the instrument PC, the files that couldn’t upload, and the files uploaded.
 
 ### Request an upload [#request-upload]
 
-A file that the watcher found but nobody requested reads **Not uploaded**. Choose **Upload** on that file to ask the watcher to send it, or **Upload all** at the top of the **Files** section to ask for every file in the run that is **Not uploaded** or **Upload failed**. A requested file reads **Uploading** until it arrives, and the watcher picks up the request within a minute. On instruments that upload automatically, this needs watcher 1.2.1 or later; see [Roll out watcher releases](/docs/watcher-releases#what-each-version-adds). The footer under the files table counts how many files are waiting on the instrument PC, how many couldn’t upload, and how many are uploaded.
+A file that the watcher found but nobody requested reads **Not uploaded**. To ask the watcher to send files, do one of these:
+
+- Choose **Upload** on one file
+- Choose **Upload all** at the top of the **Files** section, for every file in the run that reads **Not uploaded** or **Upload failed**
+
+A requested file reads **Uploading** until it arrives. The watcher picks up requests within a minute.
 
 On an instrument that uploads automatically, a new file reads **Waiting to upload** until the watcher sends it. This needs watcher 1.4.5 or later; with an older watcher the file reads **Not uploaded** for the minute or two before it arrives.
 
@@ -273,30 +262,32 @@ If the badge reads **Offline** and the run has files that are still on the instr
 
 ![Run page for an offline instrument, with a notice that four files are still on the instrument PC and a turned-off Upload all button with the reason beside it](/images/run-offline-notice.webp)
 
-Data Hub keeps a request made while the instrument is **Restarting** and the watcher uploads the files once it’s back. If no heartbeat arrives for about 15 minutes, Data Hub cancels the request and the files read **Not uploaded** again.
+A request made while the instrument reads **Restarting** waits, and the watcher uploads the files once it’s back. If the watcher doesn’t check in for about 15 minutes, Data Hub cancels the request and the files read **Not uploaded** again. [Request uploads](/docs/manage-watchers#request-uploads) lists every case that cancels a request.
 
 The **Upload** button on a runs list doesn’t follow the badge. Select runs and choose it to ask for every waiting file in them. For an instrument that is **Offline**, **Connecting**, **Pending**, or **Retired**, Data Hub refuses that run’s request, and a message reports how many runs failed. Choose **Upload** from the run page instead to see why.
 
-For instruments in [manual upload mode](/docs/concepts#upload-mode), every file waits for this approval. **Dismiss** tells the watcher not to upload a file. See [Manage the watcher fleet](/docs/manage-watchers#approving-manual-uploads).
+On an instrument in [manual upload mode](/docs/concepts#upload-mode), every file waits until someone chooses **Upload** for it. **Dismiss** tells the watcher not to upload a file. See [Manage the watcher fleet](/docs/manage-watchers#approving-manual-uploads).
+
+![Run page for a manual-upload instrument with its waiting files selected and a bar offering Upload and Dismiss](/images/manual-upload.webp)
 
 ### When an upload fails [#upload-failed]
 
 The watcher gives up on a file when it can’t send it. The file then reads **Upload failed**, and hovering over the status shows why:
 
-- **The folder is no longer on the instrument PC.** Someone renamed or moved the run’s folder after the watcher found it. The files under the new name usually arrive as a new run, so look for a run with the same start time and a similar name.
+- **The folder is no longer on the instrument PC.** Someone renamed or moved the run’s folder after the watcher found it. The watcher reports the folder under its new name as a new run, so look for a run with the same start time and a similar name.
 - **The file isn’t on the instrument PC.** The folder is there but the file was moved or deleted.
-- **The upload kept failing.** The watcher tried and the upload failed each time, usually a network problem. The message shows the last error.
+- **The upload kept failing.** The watcher tried and the upload failed each time, for example because of a network problem. The message shows the last error.
 - **The path is outside the watch folder.** The watcher won’t upload a file outside the folder it watches.
 
 For a requested file, the watcher checks three times, about a minute apart, before it gives up. On an instrument that uploads automatically, it gives up as soon as an upload fails, and it tries again the next time it starts.
 
-A red notice above the **Files** section lists the files that couldn’t upload, one block per reason and folder. Each block says why and when the watcher gave up. Once the cause is fixed on the PC, choose **Upload again** in the block, or **Upload** on a single file, to try again. If the files are gone for good, choose **Dismiss these files**. The run reads **Upload failed** until every such file is uploaded or dismissed, and the watcher’s activity shows one “Couldn’t upload” entry per run and reason.
+A red notice above the **Files** section lists the files that couldn’t upload, one block per reason and folder. Each block says why and when the watcher gave up. The run reads **Upload failed** until every such file is uploaded or dismissed, and the watcher’s activity shows one **Couldn’t upload** entry per run and reason.
+
+Once the cause is fixed on the PC, choose **Upload again** in the block, or **Upload** on a single file, to try again. If the files are gone for good, choose **Dismiss these files**.
 
 Whoever requested the files gets one notification per run and reason, in the app and, if they connected Slack, as a direct message. See [Configure notifications](/docs/configure-notifications).
 
 Marking files **Upload failed** needs watcher 1.4.5 or later. An older watcher puts the file back to **Not uploaded** instead, without a reason; see [Roll out watcher releases](/docs/watcher-releases#what-each-version-adds).
-
-![Run page for a manual-upload instrument with its waiting files selected and a bar offering Upload and Dismiss](/images/manual-upload.webp)
 
 ## Use the same data outside the UI [#programmatic-access]
 

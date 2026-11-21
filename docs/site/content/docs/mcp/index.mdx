@@ -1,18 +1,18 @@
 ---
-title: Overview
+title: MCP overview
 description: Connect an AI client to Data Hub over the Model Context Protocol, including OAuth sign-in, the read and write scopes, and per-client setup.
 contentType: Landing
 ---
 
-<Audience>Developers and integrators</Audience>
+<Audience>Everyone</Audience>
 
-Data Hub exposes a Model Context Protocol (MCP) server at `/mcp/v1` so AI clients can query instruments, runs, files, and watcher health. Clients authenticate by sending you through a browser sign-in.
+Data Hub runs a Model Context Protocol (MCP) server at `/mcp/v1`. MCP is an open standard that lets AI assistants such as Claude use outside tools. An assistant connected to Data Hub can look up instruments, runs, files, and watcher health. When the assistant first connects, it opens your browser so you can sign in.
 
-Catalogs for [tools](/docs/mcp/tools), [prompts](/docs/mcp/prompts), and [resources](/docs/mcp/resources) are generated from the live server schema, so they match what your client discovers when it connects.
+The [tools](/docs/mcp/tools), [prompts](/docs/mcp/prompts), and [resources](/docs/mcp/resources) catalogs are generated from the live server, so they match what your client finds when it connects.
 
 ## Authentication
 
-The MCP server authenticates with OAuth. All you need to provide is the endpoint URL; for example, `https://datahub.example.com/mcp/v1`.
+The MCP server signs you in with OAuth. You give your client only the endpoint URL, for example `https://datahub.example.com/mcp/v1`.
 
 The first connection opens your browser:
 
@@ -27,31 +27,31 @@ Read the **Authorize application** screen. It names the client, the host it redi
 </Step>
 
 <Step>
-Click **Allow**.
+Choose **Allow**.
 </Step>
 
 </Steps>
 
 ![The Authorize application screen, naming the client, the host it redirects to, and the access it asks for, with Deny and Allow buttons](/images/mcp-consent.webp)
 
-Your client stores the access token it receives and renews it without asking again. **Allow** grants everything on the screen: there are no per-permission checkboxes, so click **Deny** if any line looks wrong.
+Your client stores the access token it receives and renews it without asking again. **Allow** grants everything on the screen at once, with no checkbox for each permission. If any line looks wrong, choose **Deny**.
 
 ### Scopes
 
-MCP uses two scopes rather than the `<resource>:<action>` scopes that gate REST requests:
+MCP uses two scopes of its own, instead of the REST API’s token scopes such as `runs:read`:
 
-- **`read`**: required to connect at all, and covers every read-only tool, resource, and prompt
-- **`write`**: additionally required by tools that change something, including claiming runs, commenting, managing lab notebooks, requesting uploads, reprocessing, and deleting
+- **`read`**: needed to connect at all, and covers every read-only tool, resource, and prompt
+- **`write`**: also needed by tools that change something, including claiming runs, commenting, managing lab notebooks, requesting uploads, reprocessing, and deleting
 
-Most clients ask for both, because the server advertises both. A client granted only `read` still connects and still reads; its first mutating tool call fails with a message naming the missing scope.
+Most clients ask for both, because the server offers both. A client granted only `read` still connects and still reads. The first tool that changes something fails with a message naming the missing scope.
 
-Each entry in the [tools catalog](/docs/mcp/tools) lists the scope its REST equivalent requires, which tells you what data the tool touches. Over MCP, only `read` and `write` are enforced.
+Each entry in the [tools catalog](/docs/mcp/tools) lists the scope that the matching REST route needs, which tells you what data the tool touches. Over MCP, Data Hub checks only `read` and `write`.
 
-The client acts as you, with your role. Admin-only actions, such as deleting someone else’s comment, work over MCP only when you are an admin. Claiming runs and sending feedback work because a signed-in person is behind the client, even though API tokens can’t do either.
+The client acts as you, with your role. Admin-only actions, such as deleting someone else’s comment, work over MCP only when you’re an admin. Claiming runs and sending feedback work because a signed-in person is behind the client, even though API tokens can’t do either.
 
 ## Connect a client
 
-Examples use `https://datahub.example.com`; substitute your deployment host.
+Examples use `https://datahub.example.com`; replace it with your deployment’s host.
 
 ### Claude Code
 
@@ -61,14 +61,14 @@ Register the server with [`claude mcp add`](https://code.claude.com/docs/en/mcp-
 claude mcp add --transport http --scope user data-hub https://datahub.example.com/mcp/v1
 ```
 
-Confirm that the server was added by running `claude mcp list`. Then, start a session with `claude` and run `/mcp` to authenticate.
+Run `claude mcp list` to confirm that the server was added. Then start a session with `claude` and run `/mcp` to sign in.
 
 ### Claude Desktop
 
-Remote servers go through **Settings → Connectors → Add custom connector**. The `claude_desktop_config.json` file handles local servers only. Paste `https://datahub.example.com/mcp/v1` as the URL, click **Add**, then click **Connect** to sign in. Leave the OAuth client fields under **Advanced settings** empty, since Data Hub registers clients on demand.
+Add Data Hub through **Settings → Connectors → Add custom connector**, because the `claude_desktop_config.json` file handles only local servers. Paste `https://datahub.example.com/mcp/v1` as the URL, choose **Add**, then choose **Connect** to sign in. Leave the OAuth client fields under **Advanced settings** empty, because Data Hub registers clients when they connect.
 
 <Callout type="info">
-Claude reaches your server from Anthropic’s infrastructure rather than from your own machine, so the deployment has to be reachable from the public internet. A deployment running on `localhost` can’t be added this way; use Claude Code or Cursor for local work.
+Claude connects to your server from Anthropic’s cloud, not from your own computer, so your deployment must be reachable from the public internet. You can’t add a deployment running on `localhost` this way; use Claude Code or Cursor for local work.
 </Callout>
 
 ### Cursor
@@ -85,26 +85,13 @@ Add the server to `.cursor/mcp.json` in your project, or to `~/.cursor/mcp.json`
 }
 ```
 
-Open **Settings → Tools & MCP**. The server appears with a **Needs authentication** label; click it to start the browser flow. The tools show up once you approve the grant.
+Open **Settings → Tools & MCP**. The server appears with a **Needs authentication** label; choose it to sign in through your browser. The tools appear once you approve access.
 
 ### Other clients
 
-Any client that speaks Streamable HTTP and the MCP authorization spec needs one setting, the URL `https://datahub.example.com/mcp/v1`. For local development, point at `http://localhost:3000/mcp/v1` instead.
+Any client that supports Streamable HTTP and the MCP authorization spec needs one setting: the URL `https://datahub.example.com/mcp/v1`. For local development, use `http://localhost:3000/mcp/v1` instead.
 
-Clients that speak MCP but not OAuth can bridge through [`mcp-remote`](https://www.npmjs.com/package/mcp-remote), which runs the browser flow on their behalf.
-
-## Instruments and their watcher [#instrument-connection]
-
-`list_instruments` and `get_instrument` describe an instrument’s one active watcher with a `watcher` object, which is `null` when it has none, and say whether new files can reach Data Hub with `connection`, whose `state` is `online`, `restarting`, `connecting`, or `offline`, with a `reason` when it is offline. Both also return `pastWatcherCount`. The fields match the REST API’s, in camelCase; see [Instruments and their watcher](/docs/api#instrument-connection). MCP signs you in with OAuth, not a token with chosen scopes, so `watcher` always includes where the watcher runs, as `list_watchers` and `get_watcher` do.
-
-These older fields still come back with the values they had, but are deprecated, and the [tools catalog](/docs/mcp/tools) marks each one with the field to use instead:
-
-- `watcherCount`, `watchersOnline`, `lastWatcherHeartbeatAt`, and `activeWatcherId`, from both tools
-- `watchersOffline`, `activeWatcherHostname`, `activeWatcherWatchDirectory`, and `activeWatcherDeregistered`, from `get_instrument` only
-- `hasDeregisteredWatcher`, from `list_instruments` only
-- the top-level `filePatterns`, from both tools, which `watcher.filePatterns` replaces
-- `watcherStatus` and `lastWatcherHeartbeatAt` on an instrument result of `global_search`, which `connection` replaces
-- `watcherStatus` on each instrument of `get_system_status`, which now returns `connection` as well and which `connection` replaces
+Clients that support MCP but not OAuth can connect through [`mcp-remote`](https://www.npmjs.com/package/mcp-remote), which runs the browser sign-in for them.
 
 ## Questions about Data Hub [#questions-about-data-hub]
 
@@ -114,7 +101,11 @@ The assistant can answer questions about Data Hub itself, such as how to install
 - `read_doc` returns one docs page, or one section of a page, as Markdown
 - `search_changelog` lists changelog entries by date, or finds them by topic, and returns each one in full with a link that opens it in the Changelog
 
-Ask it what changed this week, what’s new since a date, or when something changed. Dates are calendar days, and both ends count. The answers come from the docs and changelog that ship with your deployment, so they match the version you run, including a staging deployment that is ahead of the published site. A change appears in the changelog once it has reached your deployment. Clients that let you attach resources by hand can also attach any docs page as `datahub://docs/<page>`, for example `datahub://docs/manage-tokens`.
+Ask it what changed this week, what’s new since a date, or when something changed. Dates are calendar days, and both the first and the last day count.
+
+The answers come from the docs and changelog that ship with your deployment, so they match the version you run. That includes a staging deployment that’s ahead of the published site. A change appears in the changelog once it has reached your deployment.
+
+Clients that let you attach resources by hand can also attach any docs page by its `datahub://docs/` address, for example `datahub://docs/manage-tokens`.
 
 The assistant reads the guides and the changelog. It doesn’t read the generated [API](/docs/api) endpoint pages or the [tools](/docs/mcp/tools), [prompts](/docs/mcp/prompts), and [resources](/docs/mcp/resources) catalogs, because the client already receives the catalog when it connects. When the docs don’t cover a question, the assistant says so and offers to [send feedback](#feedback) about the gap.
 
@@ -124,16 +115,34 @@ Clients that support MCP Apps, an extension of the Model Context Protocol, show 
 
 ## Feedback [#feedback]
 
-The assistant can send [feedback about Data Hub](/docs/send-feedback) for you, for example after a tool call fails. It shows you the draft first and sends it only after you agree. Sending feedback needs only the `read` scope. The assistant can also list the reports you sent and read one in full, by report ID or by Linear issue ID such as `ENG-1476`. Feedback tools return an error saying feedback isn’t set up until an admin [connects Linear](/docs/integrations#linear).
+The assistant can send [feedback about Data Hub](/docs/send-feedback) for you, for example after a tool call fails. It shows you the draft first and sends it only after you agree. Sending feedback needs only the `read` scope.
 
-Problems with one run’s data belong in a run comment instead, which the assistant can also post.
+The assistant can also list the reports you sent and read one in full, by report ID or by Linear issue ID such as `ENG-1476`. Until an admin [connects Linear](/docs/integrations#linear), the feedback tools return an error saying feedback isn’t set up.
+
+For a problem with one run’s data, ask the assistant to post a run comment instead.
+
+## Instruments and their watcher [#instrument-connection]
+
+<Audience>Developers and integrators</Audience>
+
+`list_instruments` and `get_instrument` describe an instrument’s watcher with these fields:
+
+- `watcher`: the instrument’s one active watcher, or `null` when it has none
+- `connection`: whether new files can reach Data Hub. Its `state` is `online`, `restarting`, `connecting`, or `offline`, with a `reason` when it’s offline.
+- `pastWatcherCount`: how many deregistered watchers the instrument has had
+
+The fields match the REST API’s, in camelCase; see [Instruments and their watcher](/docs/api#instrument-connection). MCP signs you in with OAuth, not with a token that has chosen scopes. So `watcher` always includes where the watcher runs, as `list_watchers` and `get_watcher` do.
+
+Some older fields still come back with the values they had, but they’re deprecated. The [tools catalog](/docs/mcp/tools) marks each one and names the field to use instead.
 
 ## Machine-readable catalog
 
-Fetch the same catalog these pages render from:
+<Audience>Developers and integrators</Audience>
+
+The catalog pages are built from a JSON document that you can fetch yourself:
 
 ```bash
 curl https://datahub.example.com/mcp/v1/schema.json
 ```
 
-It lists every tool, prompt, and resource, with JSON Schema for arguments and each tool's response. The schema document needs no authentication.
+It lists every tool, prompt, and resource, with JSON Schema for arguments and for each tool’s response. The document needs no sign-in.

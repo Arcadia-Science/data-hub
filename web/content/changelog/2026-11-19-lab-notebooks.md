@@ -1,6 +1,6 @@
 ---
 title: Each lab notebook page is now one lab notebook, shared by all its runs
-docs: https://datahub.arcadiascience.com/docs/browse-runs#lab-notebook
+docs: https://datahub.arcadiascience.com/docs/lab-notebooks
 ---
 
 A lab notebook in Data Hub is now its own record: one lab notebook page, with a name, an optional description and owner, and the runs in it from every instrument. Before, each run kept its own copy of a link with its own label. Existing links to the same page became one lab notebook, named after the label most of its runs used.

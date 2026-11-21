@@ -6,21 +6,30 @@ contentType: How-to
 
 <Audience>Everyone</Audience>
 
-Data Hub can notify you in the app and in Slack when new runs arrive, when an instrument goes offline, when someone comments on a run you care about, when files you requested couldn’t upload, when a script sends you a message, and when feedback you sent is closed. Open **Settings → Notifications** while signed in. Everything on that page is a personal choice that affects only you.
+Data Hub can notify you in the app and in Slack when:
+
+- New runs arrive
+- An instrument goes offline
+- Someone comments on a run you care about
+- Files you requested couldn’t upload
+- A script sends you a message
+- Feedback you sent is closed
+
+To choose, open **Settings → Notifications** while signed in. Everything on that page is a personal choice that affects only you.
 
 ![Settings Notifications page with in-app preferences and the notification bell](/images/notifications.webp)
 
-Connections that the whole workspace shares, such as the Slack channel for new runs and the Slack app behind direct messages, are under **Settings → Integrations** and only admins can change them. See [Set up integrations](/docs/integrations).
+Only admins can change the connections the whole workspace shares, such as the [Slack channel for new runs](/docs/integrations#slack-channel) and the [Slack app behind direct messages](/docs/integrations#slack-app). They’re under **Settings → Integrations**. See [Set up integrations](/docs/integrations).
 
-In-app and Slack preferences are independent: you can turn on either channel for a type without turning on the other.
+You set in-app and Slack notifications separately, so you can turn on either one for a type without the other.
 
 ## In-app preferences [#in-app-preferences]
 
 | Setting | Effect |
 | --- | --- |
-| **Mute new-run notifications** | Suppresses new-run notifications in the bell for every instrument. Offline alerts and your per-instrument choices stay as they are. |
+| **Mute new-run notifications** | Hides new-run notifications in the bell for every instrument. Offline alerts and your per-instrument choices stay as they are. |
 | **Instruments that go offline** | Notify when an instrument you subscribe to has been offline for 30 minutes, and again when it’s back online. See [When an instrument goes offline](#instrument-offline). |
-| **Comments on runs you ran** | Notify when someone comments on a run you are attributed to. |
+| **Comments on runs you ran** | Notify when someone comments on a run you’re attributed to. |
 | **Replies to your comments** | Notify when someone comments on a run you previously commented on. |
 | **Uploads that failed** | Notify when the watcher gives up on files you requested, for example because their folder is no longer on the instrument PC. You get one notification per run and reason. See [When an upload fails](/docs/browse-runs#upload-failed). |
 | **Service notifications** | Show messages that integrations and scripts send you through the API. |
@@ -29,15 +38,24 @@ In-app and Slack preferences are independent: you can turn on either channel for
 
 ### Per-instrument subscriptions [#per-instrument-subscriptions]
 
-Under **Per-instrument**, toggle the instruments you want to hear about. A subscription covers the instrument’s new runs and its outages. **Mute new-run notifications** silences only the new runs, so your subscriptions still bring offline alerts while it’s on. You can also subscribe from the notifications switch on an instrument’s page, or from the instruments table’s notifications column when that column is shown.
+Under **Per-instrument**, turn on the instruments you want to hear about. A subscription covers the instrument’s new runs and its outages. **Mute new-run notifications** silences only the new runs, so your subscriptions still bring offline alerts while it’s on. You can also subscribe from the notifications switch on an instrument’s page, or from the instruments table’s notifications column when that column is shown.
 
 ### When an instrument goes offline [#instrument-offline]
 
 When an instrument you subscribe to shows **Offline** for 30 minutes in a row, Data Hub tells you once, with the reason from the [notice on its page](/docs/troubleshoot-a-watcher). When its badge is **Online** again, you get a second notification that says how long it was offline.
 
-- Every reason counts: the watch folder is missing, the watcher stopped checking in, never checked in after it was set up, or was stopped, or the instrument has no watcher.
+Any reason for **Offline** counts:
+
+- The watch folder is missing
+- The watcher stopped checking in
+- The watcher never checked in after it was set up
+- Someone stopped the watcher
+- The instrument has no watcher
+
+Data Hub doesn’t send an alert in these cases:
+
 - A routine Windows restart or automatic update shows **Restarting** and doesn’t alert. A restart that doesn’t come back within 15 minutes turns **Offline**, and the 30 minutes start then.
-- You get no reminders while it stays offline. A change of reason during the outage doesn’t send a second alert.
+- You get no reminders while the instrument stays offline. A change of reason during the outage doesn’t send a second alert.
 - Retiring the instrument ends the outage without a message.
 
 ## The notification bell [#notification-bell]
@@ -45,7 +63,7 @@ When an instrument you subscribe to shows **Offline** for 30 minutes in a row, D
 The bell icon in the app lists recent notifications:
 
 - New runs are grouped by day and instrument, and each group expands to show its runs.
-- Clicking a comment notification opens the run and scrolls to that comment.
+- Choosing a comment notification opens the run and scrolls to that comment.
 - A failed-upload notification says how many files couldn’t upload and why, and opens the run.
 - An offline or back-online notification names the instrument and opens its page.
 - Messages sent by a script through an API token show the token’s name with a key icon.
@@ -56,7 +74,7 @@ The bell icon in the app lists recent notifications:
 
 Connect your Slack account on the same settings page to receive matching events as personal direct messages. After connecting, choose which types also go to Slack:
 
-- New instrument runs, for the instruments you subscribe to. The new-run mute applies only to the bell.
+- New instrument runs, for the instruments you subscribe to (the new-run mute applies only to the bell)
 - Instruments that go offline, for the instruments you subscribe to
 - Comments on runs you ran
 - Replies to your comments
@@ -65,14 +83,6 @@ Connect your Slack account on the same settings page to receive matching events 
 - Updates on your feedback
 - New feedback (admins only)
 
-Disconnect or reconnect from the same card. You have to connect with your organization’s Slack workspace; Data Hub rejects any other workspace.
+Disconnect or reconnect from the same card. You have to connect with your organization’s Slack workspace, and Data Hub rejects any other workspace.
 
 If **Connect to Slack** is missing or doesn’t finish, an admin hasn’t set up the Slack app yet. See [Slack app for direct messages](/docs/integrations#slack-app).
-
-## Workspace Slack channel [#workspace-slack-channel-admins]
-
-The shared Slack channel that gets a message whenever a new run is created is set by admins under **Settings → Integrations**. See [Slack channel for new runs](/docs/integrations#slack-channel).
-
-## Set up the Slack app for personal DMs [#set-up-the-slack-app-for-personal-dms]
-
-The Slack app setup, including scopes, redirect URLs, and where to enter its credentials, is in [Slack app for direct messages](/docs/integrations#slack-app).

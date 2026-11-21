@@ -6,23 +6,23 @@ contentType: Reference
 
 <Audience>Lab operators</Audience>
 
-Flags and subcommands for `data-hub-watcher`, generated from the Click CLI in the watcher package. For task walkthroughs see [Install and update the watcher](/docs/install-the-watcher), [Run as a Windows service](/docs/windows-service), and [Roll out watcher releases](/docs/watcher-releases).
+This page lists the flags and subcommands for `data-hub-watcher`, generated from the Click CLI in the watcher package. For step-by-step guides, see [Install and update the watcher](/docs/install-the-watcher), [Run as a Windows service](/docs/windows-service), and [Roll out watcher releases](/docs/watcher-releases).
 
 ## Command reference
 
-The catalog below lists every command, argument, and option from the installed CLI help text.
+This catalog comes from the installed CLI’s help text and lists every command, argument, and option.
 
 <WatcherCliCatalog />
 
 ## Interactive setup notes
 
-`init` and `config edit` prompt for values in the terminal. Those prompts are not CLI flags, so they do not appear in the catalog.
+`init` and `config edit` ask for values in the terminal. Those prompts aren’t CLI flags, so they don’t appear in the catalog.
 
-Keys must start with `dhub_`. The watcher strips zero-width and non-breaking-space characters that some Windows clipboards inject. See [Install and update the watcher → Configure](/docs/install-the-watcher#configure).
+API keys must start with `dhub_`. The watcher removes zero-width and non-breaking space characters, which some Windows clipboards add to a pasted key. See [Install and update the watcher → Configure](/docs/install-the-watcher#configure).
 
 ## Upload examples
 
-One-shot upload outside the watch loop:
+Upload files once, without running the watcher:
 
 ```sh
 data-hub-watcher upload --file /path/to/file.csv --run-id RUN001
@@ -30,15 +30,15 @@ data-hub-watcher upload
 data-hub-watcher upload --dry-run
 ```
 
-Pass both `--file` and `--run-id`, or omit both to process the server-side queue in manual mode.
+Pass both `--file` and `--run-id` to upload one file. Leave out both to work through the server’s upload queue, the way a manual-mode watcher does.
 
 ## Switching environments
 
-`config set-environment` (and `config edit` when the environment changes) can take `--api-base-url`, `--api-key`, `--show-key`, and `--no-register`. Preview switches require `--api-base-url` the first time. See [Watcher configuration → Switching environments](/docs/configuration-reference#switching-environments).
+`config set-environment` can take `--api-base-url`, `--api-key`, `--show-key`, and `--no-register`, and so can `config edit` when the environment changes. Switching to a preview deployment needs `--api-base-url` the first time. See [Watcher configuration → Switching environments](/docs/configuration-reference#switching-environments).
 
 ## Windows service notes
 
-`service` commands require Windows and the `windows-service` install extra. Use `--env-path` on `service install` and `service reinstall` when the service should load a non-default `.env` file. Full details are in [Run as a Windows service](/docs/windows-service).
+`service` commands need Windows and the `windows-service` install extra. Use `--env-path` on `service install` and `service reinstall` when the service should load a `.env` file other than the default one. [Run as a Windows service](/docs/windows-service) has the full details.
 
 ## Self-update examples
 
@@ -48,4 +48,4 @@ data-hub-watcher self-update --check
 data-hub-watcher self-update --force
 ```
 
-Upgrade behavior depends on how you installed the watcher. See [Install and update the watcher → Manual update](/docs/install-the-watcher#manual-update-self-update).
+How the upgrade works depends on how you installed the watcher. See [Install and update the watcher → Manual update](/docs/install-the-watcher#manual-update-self-update).
