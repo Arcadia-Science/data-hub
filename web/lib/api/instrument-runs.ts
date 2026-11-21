@@ -1242,10 +1242,13 @@ export async function getFilteredFileIds(
 export async function getRunFilesPage(
   runInternalId: string,
   {
+    includeDeleted = false,
     page,
     perPage,
     statuses,
   }: {
+    // Deleted files are left out unless asked for.
+    includeDeleted?: boolean;
     page: number;
     perPage: number;
     statuses?: RunFile["status"][];
@@ -1263,13 +1266,13 @@ export async function getRunFilesPage(
   const safePage = Math.max(page, 1);
   const offset = (safePage - 1) * safePerPage;
 
-  const where =
+  const where = and(
+    eq(files.instrumentRunId, runInternalId),
+    includeDeleted ? undefined : isNull(files.deletedAt),
     statuses && statuses.length > 0
-      ? and(
-          eq(files.instrumentRunId, runInternalId),
-          inArray(files.status, statuses)
-        )
-      : eq(files.instrumentRunId, runInternalId);
+      ? inArray(files.status, statuses)
+      : undefined
+  );
 
   const [{ total }] = await db
     .select({ total: sql<number>`count(*)::int` })

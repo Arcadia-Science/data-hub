@@ -11,7 +11,7 @@ import shutil
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 from urllib.parse import quote
 
 import psycopg2
@@ -169,6 +169,9 @@ class TestSpectraMaxHappyPath:
         assert raw_file["status"] == "completed"
         assert processed_file["filename"] == f"{run_id}_raw_well_data.csv"
         assert processed_file["status"] == "uploaded"
+        # The run is one export, so the CSV is linked to it.
+        rows = _file_rows(integration_env, run_id)
+        assert rows[processed_file["filename"]]["source_file_id"] == raw_file["id"]
 
         for key, value in expected_metadata.items():
             assert run["metadata"][key] == value
@@ -800,6 +803,170 @@ class TestFileReprocessing:
         processed_files = [f for f in run["files"] if f["category"] == "processed"]
         assert len(processed_files) == 1
         assert processed_files[0]["filename"] == f"{run_id}_raw_well_data.csv"
+
+
+# ------------------------------------------------------------------
+# Test 4e': Deleted files
+# ------------------------------------------------------------------
+
+
+_GEL_RUN_ID = "26.04.01_16.51.59"
+_GEL_FILENAME = f"{_GEL_RUN_ID}.tif"
+
+
+def _delete_file(env: IntegrationEnv, file_id: int) -> None:
+    resp = requests.delete(
+        f"{env.base_url}/api/v1/files/{file_id}",
+        headers={"Authorization": f"Bearer {env.api_token}"},
+        timeout=10,
+    )
+    resp.raise_for_status()
+
+
+def _file_rows(env: IntegrationEnv, run_id: str) -> dict[str, dict[str, Any]]:
+    """Every file of the run by name, deleted ones included, straight from the table."""
+    conn = psycopg2.connect(env.db_dsn)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT f.filename, f.id, f.status::text, f.deleted_at, f.deleted_by_token, "
+                "f.source_file_id FROM files f "
+                "JOIN instrument_runs r ON r.id = f.instrument_run_id WHERE r.run_id = %s",
+                (run_id,),
+            )
+            return {
+                name: {
+                    "id": file_id,
+                    "status": status,
+                    "deleted_at": deleted_at,
+                    "deleted_by_token": deleted_by_token,
+                    "source_file_id": source_file_id,
+                }
+                for name, file_id, status, deleted_at, deleted_by_token, source_file_id in cur
+            }
+    finally:
+        conn.close()
+
+
+class TestDeletedFiles:
+    @pytest.fixture()
+    def gel_doc_run(
+        self,
+        integration_env: IntegrationEnv,
+        make_s3_event: Callable[..., dict[str, Any]],
+        s3_fixture_files: dict[str, Path],
+        mock_context: MagicMock,
+    ) -> dict[str, Any]:
+        """A processed gel doc run: the raw TIFF is completed, and its PNG is linked to it."""
+        s3_key = f"azure-600-gel-doc/{_GEL_RUN_ID}/{_GEL_FILENAME}"
+        s3_fixture_files[s3_key] = _FIXTURES_DIR / "azure_600_gel_doc_example.tif"
+        event = make_s3_event("azure-600-gel-doc", _GEL_RUN_ID, _GEL_FILENAME)
+        lambda_handler(event, mock_context)
+        rows = _file_rows(integration_env, _GEL_RUN_ID)
+        assert rows[_GEL_FILENAME]["status"] == "completed"
+        assert rows[f"{_GEL_RUN_ID}.png"]["source_file_id"] == rows[_GEL_FILENAME]["id"]
+        return {"event": event, "rows": rows}
+
+    def test_the_output_is_linked_to_its_raw_file(
+        self, integration_env: IntegrationEnv, gel_doc_run: dict[str, Any]
+    ) -> None:
+        rows = gel_doc_run["rows"]
+        png = rows[f"{_GEL_RUN_ID}.png"]
+        assert png["source_file_id"] == rows[_GEL_FILENAME]["id"]
+        assert rows[_GEL_FILENAME]["source_file_id"] is None
+        assert png["deleted_at"] is None
+
+    def test_reprocessing_saves_a_deleted_preview_again_as_active(
+        self,
+        integration_env: IntegrationEnv,
+        gel_doc_run: dict[str, Any],
+        mock_context: MagicMock,
+    ) -> None:
+        png = gel_doc_run["rows"][f"{_GEL_RUN_ID}.png"]
+        _delete_file(integration_env, png["id"])
+        assert _file_rows(integration_env, _GEL_RUN_ID)[f"{_GEL_RUN_ID}.png"]["deleted_at"]
+
+        # The reprocess writes the PNG again over the old object. Without the
+        # revive, the API handed back the deleted row and the PATCH after it failed.
+        lambda_handler(gel_doc_run["event"], mock_context)
+
+        rows = _file_rows(integration_env, _GEL_RUN_ID)
+        assert rows[_GEL_FILENAME]["status"] == "completed"
+        revived = rows[f"{_GEL_RUN_ID}.png"]
+        # The same row, active again, and still the only PNG of the run.
+        assert revived["id"] == png["id"]
+        assert revived["deleted_at"] is None
+        assert revived["deleted_by_token"] is None
+        assert revived["status"] == "uploaded"
+        assert revived["source_file_id"] == rows[_GEL_FILENAME]["id"]
+        assert len(rows) == 2
+
+    def test_a_raw_file_deleted_before_it_is_processed_again_stops_without_an_error(
+        self,
+        integration_env: IntegrationEnv,
+        gel_doc_run: dict[str, Any],
+        mock_context: MagicMock,
+    ) -> None:
+        raw = gel_doc_run["rows"][_GEL_FILENAME]
+        _delete_file(integration_env, raw["id"])
+
+        # An S3 event for a deleted file: the handler returns instead of raising,
+        # so Lambda does not retry it.
+        assert lambda_handler(gel_doc_run["event"], mock_context) is None
+
+        rows = _file_rows(integration_env, _GEL_RUN_ID)
+        assert rows[_GEL_FILENAME]["deleted_at"] is not None
+        assert rows[_GEL_FILENAME]["status"] == "completed"
+        # Its output was not touched.
+        assert rows[f"{_GEL_RUN_ID}.png"]["deleted_at"] is None
+
+    def test_outputs_of_a_raw_file_deleted_while_it_processes_are_saved_deleted(
+        self,
+        integration_env: IntegrationEnv,
+        make_s3_event: Callable[..., dict[str, Any]],
+        s3_fixture_files: dict[str, Path],
+        mock_context: MagicMock,
+    ) -> None:
+        from data_hub_lambda.azure_600_gel_doc.image_processing import TIFFProcessor
+
+        run_id = "26.04.02_09.00.00"
+        filename = f"{run_id}.tif"
+        s3_fixture_files[f"azure-600-gel-doc/{run_id}/{filename}"] = (
+            _FIXTURES_DIR / "azure_600_gel_doc_example.tif"
+        )
+        export_figure = TIFFProcessor.export_figure
+
+        def _export_while_deleted(self: TIFFProcessor, *args: Any, **kwargs: Any) -> Path:
+            # Someone deletes the raw file in the middle of processing.
+            conn = psycopg2.connect(integration_env.db_dsn)
+            try:
+                with conn, conn.cursor() as cur:
+                    cur.execute(
+                        # Milliseconds, as the web app writes `deleted_at`, because it
+                        # copies the time through a JavaScript Date.
+                        "UPDATE files SET deleted_at = date_trunc('milliseconds', now()) "
+                        "WHERE filename = %s",
+                        (filename,),
+                    )
+            finally:
+                conn.close()
+            return export_figure(self, *args, **kwargs)
+
+        event = make_s3_event("azure-600-gel-doc", run_id, filename)
+        with patch.object(TIFFProcessor, "export_figure", _export_while_deleted):
+            # The final PATCH to the raw file is refused. The handler stops
+            # without raising, so Lambda does not retry.
+            assert lambda_handler(event, mock_context) is None
+
+        rows = _file_rows(integration_env, run_id)
+        raw = rows[filename]
+        output = rows[f"{run_id}.png"]
+        assert raw["deleted_at"] is not None
+        assert raw["status"] == "processing"
+        # The output is registered and saved deleted, the way its raw file is.
+        assert output["source_file_id"] == raw["id"]
+        assert output["deleted_at"] == raw["deleted_at"]
+        assert output["status"] == "uploaded"
 
 
 # ------------------------------------------------------------------

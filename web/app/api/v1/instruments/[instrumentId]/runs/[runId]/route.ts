@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 import { surfaceEvent, trackEvent } from "@/lib/analytics/track";
 import { actorRefFromAuth, actorToken, actorUser } from "@/lib/api/actor";
@@ -34,7 +34,7 @@ interface RouteContext {
 // GET /api/v1/instruments/:instrumentId/runs/:runId
 //
 // Full run detail — files (with pre-signed download URLs) and run-level
-// metadata.
+// metadata. Deleted files are left out.
 // ---------------------------------------------------------------------------
 
 export async function GET(request: NextRequest, { params }: RouteContext) {
@@ -59,7 +59,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
     db
       .select()
       .from(files)
-      .where(eq(files.instrumentRunId, run.id))
+      .where(and(eq(files.instrumentRunId, run.id), isNull(files.deletedAt)))
       .orderBy(files.createdAt),
     listNotebooksForRun(run.id),
   ]);

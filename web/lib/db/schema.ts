@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  type AnyPgColumn,
   bigint,
   bigserial,
   boolean,
@@ -914,13 +915,48 @@ export const files = pgTable(
     })
       .notNull()
       .defaultNow(),
-    // Per-file soft-delete for dismissing individual files. NULL means active.
+    // Per-file soft-delete. NULL means active. A deleted file keeps its row,
+    // its S3 object and its name, and a restore clears this column again.
     deletedAt: timestamp("deleted_at", {
       withTimezone: true,
       mode: "date",
     }),
+    // Who deleted the file: the signed-in user. NULL while active, and for a
+    // file deleted before this column existed or by a caller with no user.
+    // `set null` on user deletion so removing a user never blocks on history.
+    // Cleared again on restore.
+    deletedBy: text("deleted_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    // Set instead of `deletedBy` when a personal access token deleted the
+    // file. At most one of the two is set (`files_one_deleter`). Cleared
+    // again on restore.
+    deletedByToken: uuid("deleted_by_token").references(
+      () => personalAccessTokens.id,
+      { onDelete: "restrict" }
+    ),
+    // The raw file this processed file was made from, set by the Lambda when
+    // it registers the output. Deleting a raw file offers its linked files
+    // through this column. NULL for raw files, for outputs that more than one
+    // raw file can write (qPCR's, named for the run), and for a processed file
+    // that no single raw file could be matched to.
+    // `set null` because file rows are never hard-deleted, so this only fires
+    // if one is removed by hand.
+    sourceFileId: bigint("source_file_id", { mode: "number" }).references(
+      (): AnyPgColumn => files.id,
+      { onDelete: "set null" }
+    ),
   },
   (file) => [
+    check(
+      "files_one_deleter",
+      sql`num_nonnulls(${file.deletedBy}, ${file.deletedByToken}) <= 1`
+    ),
+    // Finds the processed files made from a raw file. Raw files have no
+    // source, so the index covers only the rows that do.
+    index("idx_files_source_file_id")
+      .on(file.sourceFileId)
+      .where(sql`${file.sourceFileId} is not null`),
     // Paths are unique per active row within a run, like filenames below. A
     // dismissed file (`deleted_at` set) gives up its path, so a different
     // file that a watcher later finds there can be stored.

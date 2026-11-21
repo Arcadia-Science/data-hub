@@ -363,6 +363,9 @@ export async function clearAutoUploadMarks(
     .where(
       and(
         isNotNull(files.autoUploadExpectedAt),
+        // A deleted file is out of the queue, and clearing its mark would
+        // move its run's "Last Updated" for a change nobody made.
+        isNull(files.deletedAt),
         inArray(
           files.instrumentRunId,
           db
@@ -392,6 +395,11 @@ export async function clearAutoUploadMarks(
  * It is also called when a run is deleted, with `runUuid` set to that run's
  * internal ID so that only the run's own requests are reverted.
  *
+ * `fileIds` narrows it to those files. Deleting files uses that, so a file
+ * that is deleted while it waits for an upload doesn't stay `upload_requested`
+ * for the day it is restored. Nothing is recorded for the watcher: it already
+ * leaves a deleted file out of its queue, and the files are reverted quietly.
+ *
  * It also clears the auto-upload mark on the same files: the watcher that said
  * it would upload them can no longer be counted on, so they read "Not
  * uploaded" rather than "Waiting to upload". If that watcher uploads them
@@ -403,8 +411,12 @@ export async function clearAutoUploadMarks(
 export async function revertPendingUploadRequests(
   instrumentId: string,
   executor: DbExecutor = db,
-  runUuid?: string
+  runUuid?: string,
+  fileIds?: readonly number[]
 ): Promise<number[]> {
+  if (fileIds?.length === 0) {
+    return [];
+  }
   const scope = and(
     inArray(
       files.instrumentRunId,
@@ -414,6 +426,7 @@ export async function revertPendingUploadRequests(
         .where(eq(instrumentRuns.instrumentId, instrumentId))
     ),
     runUuid === undefined ? undefined : eq(files.instrumentRunId, runUuid),
+    fileIds === undefined ? undefined : inArray(files.id, [...fileIds]),
     isNull(files.uploadedAt),
     isNull(files.deletedAt)
   );

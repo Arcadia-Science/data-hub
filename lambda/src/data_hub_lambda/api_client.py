@@ -35,6 +35,20 @@ class ApiError(Exception):
         self.detail = detail
 
 
+# `details.reason` on the 409 that the web app sends for a change to a file that
+# was deleted. Keep it equal to `FILE_DELETED_REASON` in `web/lib/api/errors.ts`.
+FILE_DELETED_REASON = "file_deleted"
+
+
+class FileDeletedError(ApiError):
+    """Raised when the Data Hub API refuses a change because the file was deleted.
+
+    Someone deleted the file after the processor started on it, or a processor
+    began on a file that is already deleted. The work can't be saved and no
+    retry will change that, so the handler logs this and stops.
+    """
+
+
 def _path_segment(value: str) -> str:
     """Percent-encode *value* so it is one literal segment of a URL path.
 
@@ -134,6 +148,12 @@ class DataHubClient:
         # show as a blank error in the UI.
         if not msg.strip():
             msg = f"Data Hub API returned HTTP {resp.status_code} with no error message"
+        if (
+            resp.status_code == 409
+            and detail is not None
+            and (detail.details or {}).get("reason") == FILE_DELETED_REASON
+        ):
+            raise FileDeletedError(msg, status_code=resp.status_code, detail=detail)
         raise ApiError(msg, status_code=resp.status_code, detail=detail)
 
     def _request(
@@ -326,12 +346,20 @@ class DataHubClient:
         content_type: str | None = None,
         size_bytes: int | None = None,
         category: str = "raw",
+        source_file_id: int | None = None,
     ) -> FileResponse:
         """Create a file record (idempotent on s3_key).
 
         The API creates the file in `uploaded` status because the file is
         already in S3 when the Lambda is triggered. If the watcher already
         created a record for this `s3_key`, the existing record is returned.
+
+        `source_file_id` is the raw file a `processed` file was made from. The
+        API links the two, so deleting the raw file offers this file too. A
+        processed file made from a deleted raw file comes back with
+        `deleted_at` set, and a processed file whose key a deleted row held
+        becomes the active output again. Check `deleted_at` on the result before
+        a PATCH, which a deleted file refuses.
         """
         payload: dict[str, Any] = {
             "s3_bucket": s3_bucket,
@@ -343,6 +371,8 @@ class DataHubClient:
             payload["content_type"] = content_type
         if size_bytes is not None:
             payload["size_bytes"] = size_bytes
+        if source_file_id is not None:
+            payload["source_file_id"] = source_file_id
 
         resp = self._request_with_retry(
             "POST",

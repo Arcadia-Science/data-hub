@@ -2,9 +2,9 @@ from __future__ import annotations
 import logging
 
 from data_hub_lambda.api_client import get_client
+from data_hub_lambda.processed_files import upload_processed
 from data_hub_lambda.raw_access import local_raw_file
 from data_hub_lambda.spectramax_plate_reader.utils import parse_metadata, parse_raw_well_data
-from data_hub_shared import s3_utils
 from data_hub_shared.config import config
 
 logger = logging.getLogger(__name__)
@@ -46,29 +46,22 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
             well_data = parse_raw_well_data(local_file_path)
             logger.info("Parsed %d well data rows.", len(well_data))
 
-            processed_bucket = config.AWS_S3_PROCESSED_DATA_BUCKET
             csv_filename = f"{run_id}_raw_well_data.csv"
             csv_path = config.LOCAL_PROCESSED_DATA_DIRPATH / instrument_id / run_id / csv_filename
             csv_path.parent.mkdir(parents=True, exist_ok=True)
             well_data.to_csv(csv_path, index=False)
 
-            csv_s3_key = f"{instrument_id}/{run_id}/{csv_filename}"
-            s3_utils.upload_file(csv_path, f"s3://{processed_bucket}/{csv_s3_key}")
-            logger.info("Uploaded processed CSV to s3://%s/%s", processed_bucket, csv_s3_key)
-
-            processed_file = client.create_file(
-                instrument_id=instrument_id,
-                run_id=run_id,
-                s3_bucket=processed_bucket or "",
-                s3_key=csv_s3_key,
-                filename=csv_filename,
-                category="processed",
+            # A SpectraMax run is one export, so the CSV is made from this file.
+            upload_processed(
+                client,
+                instrument_id,
+                run_id,
+                config.AWS_S3_PROCESSED_DATA_BUCKET or "",
+                csv_path,
+                "text/csv",
+                source_file_id=file_id,
             )
-            client.update_file(
-                processed_file.id,
-                size_bytes=csv_path.stat().st_size,
-                content_type="text/csv",
-            )
+            logger.info("Uploaded processed CSV %s", csv_filename)
 
             client.update_run(instrument_id, run_id, metadata=metadata)
             client.update_file(file_id, status="completed")

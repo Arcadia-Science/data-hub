@@ -210,7 +210,7 @@ export async function recordUploadFailures(
           uploadRequestedBy: null,
           autoUploadExpectedAt: null,
         })
-        .where(inArray(files.id, batch.fileIds));
+        .where(and(inArray(files.id, batch.fileIds), isNull(files.deletedAt)));
     }
 
     const groups = groupTargets(targets);

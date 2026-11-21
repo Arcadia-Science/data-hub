@@ -129,6 +129,16 @@ The Lambda reports to the web app through `DataHubClient` in `lambda/src/data_hu
 - `get_instrument` keeps its own shorter retry and a short-lived cache.
 - The client puts the instrument ID and the run ID into each URL path with `_path_segment`, which percent-encodes them. A run ID comes from the S3 key, so it can hold `#`, `?`, or `%`, and without the encoding the call reaches the wrong run or none. The handler first decodes the key of the S3 event with `unquote_plus`. See [Run IDs in URLs](conventions.md#run-ids-in-urls).
 
+#### Processed files and deleted files
+
+A processor registers each preview, video or table it makes with `upload_processed` in `lambda/src/data_hub_lambda/processed_files.py`. The helper uploads the file to the processed bucket and registers it through `create_file`, which sends the size and content type along. Pass `source_file_id` with the raw file's ID for the output of one raw file (DishCam, Hina, Epson, Azure 600, SpectraMax and Aunty do; a SpectraMax or Aunty run is a single export). The web app stores it in `files.source_file_id`, which is how deleting a raw file finds the processed files to offer with it. Leave it out when more than one raw file can write the output. qPCR leaves it out: its outputs are named for the run, so several of a run's files can write the same one.
+
+People can delete a file before the Lambda starts on it, or after its processing stalls (the web app refuses a queued or processing file), and can delete a processed file that a reprocess later writes again. So the Lambda has to cope with three cases:
+
+- **The key belongs to a deleted row.** The processor writes to S3 before it registers the file, so a reprocess has already replaced the object. `POST .../files` saves a deleted processed row at that key again as an active file, so the new output isn't left hidden. A deleted raw row is returned as it is.
+- **The raw file was deleted while it processed.** `POST .../files` saves the new output deleted, the way its source is, and returns `deleted_at`. The helper skips the `update_file` after the create when `deleted_at` is set, because a deleted file refuses a PATCH.
+- **A PATCH is refused.** `PATCH /api/v1/files/:fileId` on a deleted file answers 409 with `details.reason: "file_deleted"`. The client raises `FileDeletedError` for it, a subclass of `ApiError` that is not retried. `lambda_handler` catches it, logs it, and returns, so Lambda does not retry the S3 event. Any other `ApiError` is still raised.
+
 ### Function URL (archive build)
 
 The web app's `GET /api/v1/instruments/:instrumentId/runs/:runId/download-archive` route delegates zip building to the Lambda so download bytes never traverse Vercel. This shares the Function URL with manual reprocessing and is distinguished by a `type: "build_archive"` field in the request body:

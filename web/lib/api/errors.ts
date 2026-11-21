@@ -20,6 +20,10 @@ export const PAYLOAD_TOO_LARGE = "PAYLOAD_TOO_LARGE";
 // deleted. The message is for people; a client reads the reason to tell this
 // conflict from others.
 export const RUN_DELETED_REASON = "run_deleted";
+// `details.reason` on the 409 that refuses a change to a file that was deleted.
+// The Lambda reads it to tell a file deleted while it was being processed from
+// any other conflict: it stops quietly instead of retrying.
+export const FILE_DELETED_REASON = "file_deleted";
 // Paired with HTTP 404. Returned by the heartbeat route and `GET /watchers/{id}`
 // when the watcher's row exists but was deregistered (soft-deleted). The
 // heartbeat route sends it only to a caller that may act for the watcher (see
@@ -46,6 +50,12 @@ export function apiError(
 // message, details: { reason: "run_deleted" } } }`.
 export function runDeletedError(message: string) {
   return apiError(409, CONFLICT, message, { reason: RUN_DELETED_REASON });
+}
+
+// 409 for a change a deleted file can't take: `{ error: { code: "CONFLICT",
+// message, details: { reason: "file_deleted" } } }`.
+export function fileDeletedError(message: string) {
+  return apiError(409, CONFLICT, message, { reason: FILE_DELETED_REASON });
 }
 
 // Shared helpers return `{ ok: false, status, code, message }`; map them to

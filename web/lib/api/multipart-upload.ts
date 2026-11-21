@@ -229,6 +229,11 @@ export async function signPartUrls(
 async function markUploaded(file: MultipartFileContext): Promise<boolean> {
   // Only move a row that is still waiting. The Lambda can adopt the file
   // as soon as S3 finishes, and overwriting `processing` would hide that.
+  //
+  // This leaves out the `deleted_at` check on purpose. A file deleted while its
+  // upload ran still has to get its S3 key, because a deleted row holds its
+  // stored name through that key (`run-file-identity.ts`), and the name is
+  // what keeps the object from being overwritten by another file.
   const updated = await db
     .update(files)
     .set({

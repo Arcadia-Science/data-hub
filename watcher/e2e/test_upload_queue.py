@@ -1094,25 +1094,37 @@ def test_dismissed_files_leave_the_queue_and_are_not_uploaded(
     assert server.run_status(instrument_id, RUN) == "uploaded"  # the dismissed ones don't count
 
 
-@pytest.mark.covers("queue.uploaded_file->dismiss_refused")
-def test_an_uploaded_file_cannot_be_dismissed(
+@pytest.mark.covers("queue.uploaded_file->deleted_object_kept")
+def test_deleting_an_uploaded_file_keeps_its_object_and_a_rescan_adds_no_row(
     watcher: WatcherFactory,
     server: ServerView,
     admin: Admin,
     instrument_id: str,
     watch_dir: Path,
 ) -> None:
-    pc = watcher()
-    pc.start()
-    server.wait_for_watcher_status(pc.watcher_id, "watching")
-    content = write_run(watch_dir, RUN, {"a.csv": SMALL})["a.csv"]
-    row = server.wait_for_uploaded(instrument_id, RUN, f"{RUN}/a.csv", content=content)
+    pc = manual_watcher(watcher, server)
+    detected = detect_run(server, instrument_id, watch_dir, RUN, {"a.csv": SMALL})["a.csv"]
+    admin.request_upload(instrument_id, RUN, [detected.row.id]).raise_for_status()
+    row = server.wait_for_uploaded(instrument_id, RUN, f"{RUN}/a.csv", content=detected.content)
 
-    refused = admin.dismiss_file(row.id)
-    assert refused.status_code == 409 and refused.error_code == "CONFLICT", refused
+    deleted = admin.dismiss_file(row.id)
+    assert deleted.status_code == 200, deleted
+    assert deleted.body["already_applied"] is False
+    assert deleted.body["deleted_at"] is not None
     kept = server.file(instrument_id, RUN, f"{RUN}/a.csv", include_deleted=True)
-    assert kept is not None and kept.deleted_at is None and kept.status == "uploaded"
-    assert server.read_object(instrument_id, RUN, "a.csv") == content
+    assert kept is not None and kept.deleted_at is not None and kept.status == "uploaded"
+    assert server.read_object(instrument_id, RUN, "a.csv") == detected.content
+
+    # The PC forgets the folder and reports it again. The server knows the file by its
+    # path, size and creation time, so the report adds nothing and the object is not rewritten.
+    assert pc.stop() == 0
+    forgotten = pc.run_cli("state", "forget", "--prefix", RUN, "--yes")
+    assert forgotten.returncode == 0, forgotten.output
+    pc.start()
+    server.wait_for_events(pc.watcher_id, event_type="run_reported", count=2)
+    assert [f.id for f in server.files(instrument_id, RUN, include_deleted=True)] == [row.id]
+    assert server.files(instrument_id, RUN) == []
+    assert server.read_object(instrument_id, RUN, "a.csv") == detected.content
 
 
 @pytest.mark.covers("queue.deleted_run_file->not_listed")

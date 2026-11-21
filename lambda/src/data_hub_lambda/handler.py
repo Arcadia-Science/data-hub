@@ -11,7 +11,7 @@ from aws_lambda_typing.context import Context
 from aws_lambda_typing.events.s3 import S3Event
 
 from data_hub_lambda import archive_builder
-from data_hub_lambda.api_client import ApiError, get_client
+from data_hub_lambda.api_client import ApiError, FileDeletedError, get_client
 from data_hub_lambda.deadline import record_invocation_deadline
 from data_hub_lambda.processors import get_processor, matches_any_processor_gate
 from data_hub_shared.logger import get_named_logger
@@ -477,6 +477,16 @@ def lambda_handler(event: dict[str, Any], context: Context) -> dict[str, Any] | 
         )
         processor.process_file(instrument_id, run_id, filename)
 
+    except FileDeletedError as exc:
+        # The file was deleted while it was processed, or before this started.
+        # Nothing can be saved to a deleted file and a retry would meet the same
+        # answer, so stop here and don't raise: that would make Lambda retry.
+        logger.info(
+            "File %s in run %s was deleted; stopping without a retry: %s",
+            filename,
+            run_id,
+            exc.message,
+        )
     except ApiError:
         # Auth / exhausted-retry failures: re-raise so Lambda retries (S3)
         # or returns 500 (Function URL). Do not swallow.
