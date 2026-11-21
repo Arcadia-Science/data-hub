@@ -26,11 +26,8 @@ describe("buildArchiveHref", () => {
         search: " blot ",
         categories: ["raw", "processed"],
         statuses: ["failed"],
-        dismissed: true,
       })
-    ).toBe(
-      `${base}?search=blot&category=raw%2Cprocessed&status=failed&dismissed=true`
-    );
+    ).toBe(`${base}?search=blot&category=raw%2Cprocessed&status=failed`);
   });
 
   it("leaves out empty filters", () => {
@@ -39,7 +36,6 @@ describe("buildArchiveHref", () => {
         search: "  ",
         categories: [],
         statuses: [],
-        dismissed: false,
       })
     ).toBe(base);
   });

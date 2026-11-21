@@ -1,10 +1,13 @@
+import { createLoader } from "nuqs/server";
 import { describe, expect, it } from "vitest";
 import {
   clearedInstrumentFilters,
+  filesShowDeleted,
   hasActiveFilters,
   hasActiveInstrumentFilters,
   INSTRUMENT_NULLABLE_FILTER_KEYS,
   instrumentDetailSearchParams,
+  runDetailSearchParams,
 } from "@/lib/search-params";
 
 const noDashboardFilters = {
@@ -128,5 +131,56 @@ describe("clearedInstrumentFilters", () => {
     expect(cleared.search).toBe("");
     expect(cleared.ran_by).toBeNull();
     expect(hasActiveInstrumentFilters(cleared)).toBe(false);
+  });
+});
+
+const load = createLoader(runDetailSearchParams);
+
+describe("run page files table params", () => {
+  it("sorts by file name, ascending, and hides deleted files by default", () => {
+    expect(load("")).toMatchObject({
+      files_sort: "name",
+      files_order: "asc",
+      files_deleted: false,
+      files_dismissed: false,
+    });
+  });
+
+  it("reads the order and the deleted files choice from the URL", () => {
+    expect(
+      load("?files_sort=size&files_order=desc&files_deleted=true")
+    ).toMatchObject({
+      files_sort: "size",
+      files_order: "desc",
+      files_deleted: true,
+    });
+  });
+
+  it("falls back to ascending for an order it does not know", () => {
+    expect(load("?files_order=sideways").files_order).toBe("asc");
+  });
+
+  it("keeps the order and the deleted files choice out of the URL at their defaults", () => {
+    expect(runDetailSearchParams.files_order.clearOnDefault).toBe(true);
+    expect(runDetailSearchParams.files_deleted.clearOnDefault).toBe(true);
+  });
+});
+
+describe("filesShowDeleted", () => {
+  it("is off unless a param turns it on", () => {
+    expect(
+      filesShowDeleted({ files_deleted: false, files_dismissed: false })
+    ).toBe(false);
+  });
+
+  it("shows deleted files for the new param", () => {
+    expect(
+      filesShowDeleted({ files_deleted: true, files_dismissed: false })
+    ).toBe(true);
+  });
+
+  it("still shows deleted files for a saved link with files_dismissed", () => {
+    const params = load("?files_dismissed=true");
+    expect(filesShowDeleted(params)).toBe(true);
   });
 });

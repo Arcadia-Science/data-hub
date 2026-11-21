@@ -43,6 +43,7 @@ export interface RunDetailProps {
   fileStats: RunFileStats;
   // Current page of the server-paginated files table.
   files: RunFileRow[];
+  filesDeletedCount: RunFilesPage["deletedCount"];
   filesDownloadableCount: RunFilesPage["downloadableCount"];
   filesPagination: RunFilesPage["pagination"];
   instrumentId: string;
