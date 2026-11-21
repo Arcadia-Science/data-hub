@@ -133,7 +133,7 @@ Per-type inputs and outputs are in [Instrument data preprocessing](/docs/instrum
 
 Type in **Search files** to find files by name. Choose **Add filter** to narrow the table by **Type**, which is **Raw** or **Processed**, or by **Status**. Use them to show, for example, only failed files or only processed CSVs. A number on the button says how many filters are on.
 
-**Show deleted files**, at the top of the same menu, lists the run’s deleted files too, with how many match your search and filters. A status filter never lists a deleted file, even one that was completed before it was deleted.
+**Show deleted files**, at the top of the same menu, lists the run’s deleted files too, with how many match your search and filters. A status filter never lists a deleted file, even one that was completed before it was deleted. The line under the table also offers the deleted files: when some match and are hidden, it says **Show 6 deleted**, and once they’re listed it reads “Showing 1–15 of 15, including 6 deleted” with a **Hide deleted** link. See [Delete and restore files](#delete-files).
 
 To sort, choose a column heading (**File name**, **Size**, **Created**, or **Status**) and then **Sort ascending** or **Sort descending**. The table starts sorted by file name, A to Z. Raw and processed files sort together in one list. The arrow beside a heading shows which column the table is sorted by, and in which direction.
 
@@ -161,13 +161,48 @@ A lab notebook gathers the runs behind one notebook page, such as a Notion or Go
 
 From the files table you can:
 
-- Open any file by selecting its row, anywhere except the checkbox. A CSV, TSV, JSON, or other text file shows its first 1 MB. Any other file says it can’t be previewed there, and a file that hasn’t reached Data Hub yet says so. The back and forward buttons step through the files on the same page of the table, in the order the table shows them. **Download** in that window saves the file
+- Open any file by selecting its row, anywhere except the checkbox. A CSV, TSV, JSON, or other text file shows its first 1 MB. A JPG, PNG, WebP, or GIF image, an MP4 video, and a PDF show as they are. Any other file says, for example, “TIFF files can’t be previewed here”, and links to its preview image when it has one. A file that hasn’t reached Data Hub yet says so. The window also lists the file’s path, when it was created, uploaded, and processed, and the files linked to it. For a raw file those are the videos and preview images made from it and the `run.json` saved with its capture. For a processed file it is the raw file it was made from. Select a linked file to open it in the same window. The back and forward buttons step through the files on the same page of the table, in the order the table shows them. **Download** in that window saves the file
 - Select files and choose **Download** in the bar at the bottom of the window. One file downloads directly. Two or more come as a single zip, which builds in the background like **Download all**
 - Choose **Download all** to build a zip of the run's files, or **Download filtered** when a search or filter is on. Deleted files are left out
 
 ![File preview window showing the first rows of a processed CSV, with a Download button and buttons for the next and previous file](/images/csv-preview.webp)
 
 Large zips build in the background. When one isn’t ready yet, Data Hub tells you how long to wait before trying again.
+
+## Delete and restore files [#delete-files]
+
+Delete a file that shouldn’t be in the run, such as a duplicate upload that stops your analysis from reading the run. Anyone signed in can delete and restore files. A delete hides a file and remembers who did it. It doesn’t erase anything: the file stays in storage, and you can restore it later.
+
+A deleted file is hidden from the run’s files table, from the file counts and size at the top of the page, from every download zip, and from the API. A script can still ask for deleted files; see [Deleted files](/docs/api#deleted-files).
+
+### Delete files [#delete-files-how]
+
+1. Select the checkboxes of the files in the files table, then choose **Delete** in the bar at the bottom of the window. Or open a file and choose **Delete** in its window.
+2. A window lists the files and their sizes. Read it, then choose **Delete N files**. **Cancel** is selected when the window opens, so pressing Enter right away cancels instead of deleting.
+3. A message says “Deleted N files” with **Undo**. It stays for 10 seconds. **Undo** restores exactly the files that delete removed.
+
+When you delete a raw file, Data Hub offers to delete the files linked to it too. They’re listed under **Also delete N linked files**, and the box is checked. Uncheck it to delete only the files you selected. A raw file’s linked files are the videos and preview images made from it, and the `run.json` saved with its capture. A `run.json` is offered only when every raw file in its folder is being deleted, so a capture that keeps another file keeps its `run.json`. A file that is already deleted isn’t listed. The number on the red button counts the linked files while the box is checked.
+
+A few more rules:
+
+- **Delete** isn’t offered for a file that is queued or being processed. Wait for processing to finish. A file whose processing stalled can be deleted.
+- A file that never reached Data Hub, one that reads **Not uploaded**, **Waiting to upload**, **Upload failed**, or **Uploading**, can be deleted too. Any upload that was requested for it is cancelled. See [Approve or delete files](/docs/manage-watchers#approving-manual-uploads) for what the watcher does when it reports that file again.
+- If some files can’t be deleted, the message says how many were, and how many failed.
+- Files you deleted stay deleted if the run is later deleted and restored. Deleting a run doesn’t change the state of its files.
+
+### Find and open deleted files [#deleted-files]
+
+Choose **Show deleted files** under **Add filter**, or **Show N deleted** under the table. A deleted file shows in gray, with a gray type badge and **Deleted** in the **Status** column. Hover over **Deleted**, or focus it with the keyboard, to see who deleted the file and when, for example “Deleted by Ada Lovelace on Nov 19, 2026 at 10:42 AM”. A file deleted by a script shows the token’s name. A file deleted before Data Hub recorded who did it shows only the date.
+
+Open a deleted file to see a red banner with who deleted it and when. You can still download it and preview it there, and its linked files show **Deleted** beside them.
+
+### Restore files [#restore-files]
+
+Select the deleted files in the table, then choose **Restore** in the bar. The bar says how many deleted files are selected. Or open a deleted file and choose **Restore** in its banner.
+
+If deleted files are linked to the ones you restore, Data Hub asks first and offers **Also restore N linked files**, with the box checked. A restored output brings back the raw file it was made from, and a restored raw file brings back its deleted videos and preview images and its `run.json`. With nothing linked, the file comes back at once and a message says “Restored N files”.
+
+Data Hub can’t restore a file when another file in the run now uses its name or path, for example because the instrument wrote a new file there. The message says which file holds it. The other files you selected still come back.
 
 ## Act on several runs at once [#bulk-actions]
 
@@ -188,9 +223,9 @@ The checkbox in the header row selects every run on the page, and **Clear** drop
 
 The selection stays when you move to another page of the same results. It clears when you change the search, a filter, or the sort, so the bar never acts on runs from a list you are no longer looking at.
 
-The files table on a run page works the same way, with the same bar at the bottom of the window. Its rows have no buttons of their own either. Select the checkboxes of the files you want to act on, and the bar offers **Upload**, **Download**, **Reprocess**, and **Dismiss** for only those files. Its **Upload** follows the instrument’s badge, like the other [Upload buttons](#request-upload). The selection stays when you move to another page of the table, and it clears when you change the files search, a filter, or the sort.
+The files table on a run page works the same way, with the same bar at the bottom of the window. Its rows have no buttons of their own either. Select the checkboxes of the files you want to act on, and the bar offers **Upload**, **Download**, **Reprocess**, and **Delete**, in that order, for only those files. Its **Upload** follows the instrument’s badge, like the other [Upload buttons](#request-upload). **Delete** isn’t offered for a file that is queued or being processed. When every selected file is deleted, the bar says how many deleted files are selected and offers **Restore** instead. A selection that mixes deleted files with others has only **Clear**. The checkbox in the header row selects the files on the page that aren’t deleted, or the deleted ones when the page has only those. The selection stays when you move to another page of the table, and it clears when you change the files search, a filter, or the sort.
 
-The files table of a deleted run has no checkboxes, so nothing in it can be uploaded, reprocessed, or dismissed until you restore the run. Its rows still open the file window.
+The files table of a deleted run has no checkboxes, so nothing in it can be uploaded, reprocessed, deleted, or restored until you restore the run. Its rows still open the file window.
 
 ![Run list with several runs selected and the bulk action bar open](/images/bulk-actions.webp)
 
@@ -211,7 +246,7 @@ Reprocessing runs server-side processing again. Use it after a file failed or st
 
 Reprocessing sends only the original instrument files. Files Data Hub generated, such as videos, previews, and CSVs, can’t be reprocessed themselves and are rebuilt from the originals. Reprocessed files go through a queue; see [How reprocessing is queued](#reprocess-queue).
 
-**Delete** marks the run deleted without removing its stored files. Anyone signed in can delete or restore a run. To find a deleted run, turn on **Show deleted runs** under **Add filter**, then open it and choose **Restore**.
+**Delete run** marks the run deleted without removing its stored files. Anyone signed in can delete or restore a run. To find a deleted run, turn on **Show deleted runs** under **Add filter**, then open it and choose **Restore**.
 
 Files that were queued for reprocessing when the run was deleted stay queued but don’t start. If you restore the run, they start as processing slots free up.
 
@@ -273,9 +308,9 @@ A request made while the instrument reads **Restarting** waits, and the watcher 
 
 The **Upload** button on a runs list doesn’t follow the badge. Select runs and choose it to ask for every waiting file in them. For an instrument that is **Offline**, **Connecting**, **Pending**, or **Retired**, Data Hub refuses that run’s request, and a message reports how many runs failed. Choose **Upload** from the run page instead to see why.
 
-On an instrument in [manual upload mode](/docs/concepts#upload-mode), every file waits until someone chooses **Upload** for it. **Dismiss** tells the watcher not to upload a file. See [Manage the watcher fleet](/docs/manage-watchers#approving-manual-uploads).
+On an instrument in [manual upload mode](/docs/concepts#upload-mode), every file waits until someone chooses **Upload** for it. **Delete** tells the watcher not to upload a file. See [Manage the watcher fleet](/docs/manage-watchers#approving-manual-uploads).
 
-![Run page for a manual-upload instrument with its waiting files selected and a bar offering Upload and Dismiss](/images/manual-upload.webp)
+![Run page for a manual-upload instrument with its waiting files selected and a bar offering Upload and Delete](/images/manual-upload.webp)
 
 ### When an upload fails [#upload-failed]
 
@@ -288,9 +323,9 @@ The watcher gives up on a file when it can’t send it. The file then reads **Up
 
 For a requested file, the watcher checks three times, about a minute apart, before it gives up. On an instrument that uploads automatically, it gives up as soon as an upload fails, and it tries again the next time it starts.
 
-A red notice above the **Files** section lists the files that couldn’t upload, one block per reason and folder. Each block says why and when the watcher gave up. The run reads **Upload failed** until every such file is uploaded or dismissed, and the watcher’s activity shows one **Couldn’t upload** entry per run and reason.
+A red notice above the **Files** section lists the files that couldn’t upload, one block per reason and folder. Each block says why and when the watcher gave up. The run reads **Upload failed** until every such file is uploaded or deleted, and the watcher’s activity shows one **Couldn’t upload** entry per run and reason.
 
-Once the cause is fixed on the PC, choose **Upload again** in the block, or select a file and choose **Upload**, to try again. If the files are gone for good, choose **Dismiss these files**.
+Once the cause is fixed on the PC, choose **Upload again** in the block, or select a file and choose **Upload**, to try again. If the files are gone for good, choose **Delete these files**.
 
 Whoever requested the files gets one notification per run and reason, in the app and, if they connected Slack, as a direct message. See [Configure notifications](/docs/configure-notifications).
 

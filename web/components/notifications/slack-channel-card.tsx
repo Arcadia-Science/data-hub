@@ -35,6 +35,7 @@ import {
   slackChannelWebhookFormSchema,
   slackWebhookUrlSchema,
 } from "@/lib/slack/webhook-url";
+import { GREEN_BADGE_COLORS } from "@/lib/ui-classes";
 import { formatRelativeTime } from "@/lib/utils";
 
 export function SlackChannelSectionHeader({
@@ -47,9 +48,7 @@ export function SlackChannelSectionHeader({
       <div className="flex items-center justify-between gap-2">
         <h2 className="font-semibold text-lg tracking-tight">Slack channel</h2>
         {configured ? (
-          <Badge className="bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300">
-            Configured
-          </Badge>
+          <Badge className={GREEN_BADGE_COLORS}>Configured</Badge>
         ) : null}
       </div>
       <p className="text-muted-foreground text-sm">

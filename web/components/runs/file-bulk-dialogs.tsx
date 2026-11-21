@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useReturnFocus } from "@/hooks/use-return-focus";
 
-// The confirmations for the files bar's Dismiss and Reprocess. The bar owns the
+// The confirmation for the files bar's Reprocess. The bar owns the
 // open state, because a dialog opened from state has no trigger for Radix to
 // return focus to, so `useReturnFocus` hands it back to the bar's button.
 
@@ -21,35 +21,6 @@ interface BulkFilesDialogProps {
   onConfirm: () => void;
   onOpenChange: (open: boolean) => void;
   open: boolean;
-}
-
-export function DismissFilesDialog({
-  count,
-  onConfirm,
-  onOpenChange,
-  open,
-}: BulkFilesDialogProps) {
-  const returnFocus = useReturnFocus();
-  const noun = count === 1 ? "file" : "files";
-  return (
-    <AlertDialog onOpenChange={onOpenChange} open={open}>
-      <AlertDialogContent {...returnFocus}>
-        <AlertDialogHeader>
-          <AlertDialogTitle>
-            Dismiss {count} {noun}?
-          </AlertDialogTitle>
-          <AlertDialogDescription>
-            The selected files will be soft-deleted. The watcher will skip them
-            on future scans.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction onClick={onConfirm}>Dismiss</AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-  );
 }
 
 export function ReprocessFilesDialog({

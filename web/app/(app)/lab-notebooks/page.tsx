@@ -23,7 +23,8 @@ export const metadata: Metadata = {
   twitter: { title: "Lab Notebooks" },
 };
 
-const NOTEBOOKS_PER_PAGE = 50;
+// Matches the page size of an instrument's runs list.
+const NOTEBOOKS_PER_PAGE = 10;
 
 type NotebooksParams = Awaited<
   ReturnType<typeof notebooksIndexParamsCache.parse>

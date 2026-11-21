@@ -1,3 +1,4 @@
+import { ImageZoom } from "fumadocs-ui/components/image-zoom";
 import type { ImageProps, StaticImageData } from "next/image";
 import Image from "next/image";
 
@@ -35,6 +36,8 @@ function getStaticImageData(
   return src;
 }
 
+// Clicking an image opens the original file in a modal that fills the window.
+// Click it again or press Escape to close it.
 export function DocsImage({
   alt,
   height,
@@ -49,20 +52,22 @@ export function DocsImage({
   const heightPx = toPixel(height) ?? staticImage?.height;
 
   return (
-    <Image
-      alt={alt}
-      placeholder={placeholder ?? (staticImage ? "blur" : "empty")}
-      sizes={sizes}
-      src={src}
-      {...props}
-      height={heightPx}
-      style={{
-        ...responsiveStyle,
-        ...(widthPx && heightPx
-          ? { aspectRatio: `${widthPx} / ${heightPx}` }
-          : {}),
-      }}
-      width={widthPx}
-    />
+    <ImageZoom alt={alt} src={src}>
+      <Image
+        alt={alt}
+        placeholder={placeholder ?? (staticImage ? "blur" : "empty")}
+        sizes={sizes}
+        src={src}
+        {...props}
+        height={heightPx}
+        style={{
+          ...responsiveStyle,
+          ...(widthPx && heightPx
+            ? { aspectRatio: `${widthPx} / ${heightPx}` }
+            : {}),
+        }}
+        width={widthPx}
+      />
+    </ImageZoom>
   );
 }

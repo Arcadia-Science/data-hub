@@ -1,6 +1,6 @@
 ---
 title: A different file at the path of a dismissed file is now detected
-docs: https://datahub.arcadiascience.com/docs/concepts#dismiss
+docs: https://datahub.arcadiascience.com/docs/concepts#delete-file
 ---
 
 Dismissing a file kept its path taken in that run. If a watcher later reported a different file at the same path, for example after the instrument wrote a new file there and the watcher's record of the folder was cleared, Data Hub dropped the report without an error. The new file never appeared, and on instruments that upload automatically its upload request was refused.

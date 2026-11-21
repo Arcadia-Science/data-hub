@@ -25,11 +25,12 @@ import type {
 import type { InstrumentType } from "@/lib/db/schema";
 import { buildArchiveHref } from "@/lib/runs/archive-href";
 import { narrowsFileDownload } from "@/lib/runs/file-filters";
+import { filesFooter } from "@/lib/runs/files-footer";
 import {
   REPROCESS_REQUEST_CONCURRENCY,
   settleWithConcurrency,
 } from "@/lib/runs/settle-with-concurrency";
-import { dismissFiles, requestFileUploads } from "@/lib/runs/upload-requests";
+import { requestFileUploads } from "@/lib/runs/upload-requests";
 import { filesShowDeleted, runDetailSearchParams } from "@/lib/search-params";
 import { FileBulkActionBar } from "./file-bulk-action-bar";
 import {
@@ -45,6 +46,7 @@ import {
   EditableRunFilesTable,
   ReadOnlyRunFilesTable,
 } from "./run-files-table";
+import { useFileDeleteRestore } from "./use-file-delete-restore";
 import {
   UploadReasonLine,
   WatcherGatedUploadButton,
@@ -77,6 +79,9 @@ interface RunFilesSectionProps {
   instrumentType: InstrumentType;
   isDeleted: boolean;
   pagination: RunFilesPage["pagination"];
+  // Files that are not on this page but that the file window reaches through
+  // the linked files of the ones that are.
+  relatedFiles: RunFileRow[];
   runId: string;
   // Aggregate per-run counts used for the footer summary, filter labels, and
   // the in-flight auto-refresh signal — independent of the current filter.
@@ -131,6 +136,7 @@ function RunFilesSectionContent({
   files,
   filteredDownloadableCount,
   pagination,
+  relatedFiles,
   stats,
   instrumentId,
   instrumentType,
@@ -141,7 +147,7 @@ function RunFilesSectionContent({
   const { actions: autoRefreshActions } = useRunAutoRefresh();
   const { actions: archiveActions } = useArchiveDownload();
   const promptClaim = useRunDownloadClaimPrompt();
-  // Mutation transition (upload/dismiss/reprocess), distinct from the table's
+  // Mutation transition (upload/delete/reprocess), distinct from the table's
   // navigation transition below. It disables the bar and Upload all while a
   // request runs.
   const [isPending, startAction] = useTransition();
@@ -182,11 +188,14 @@ function RunFilesSectionContent({
   // adding processing covers the full downloadable set.
   const downloadableCount = stats.uploaded + stats.processing;
 
-  const from =
-    pagination.total === 0
-      ? 0
-      : (pagination.page - 1) * pagination.per_page + 1;
-  const to = Math.min(pagination.page * pagination.per_page, pagination.total);
+  const footer = filesFooter({
+    activeTotal: stats.active,
+    deletedCount,
+    page: pagination.page,
+    perPage: pagination.per_page,
+    showDeleted,
+    total: pagination.total,
+  });
 
   // The files Upload all queues: every `detected` or `upload_failed` file of
   // the run, not only the page on screen. A deleted run is read-only and can't
@@ -301,24 +310,47 @@ function RunFilesSectionContent({
               No files match your filters.
             </p>
           ) : isDeleted ? (
-            <ReadOnlyRunFilesTable files={files} />
+            <ReadOnlyRunFilesTable
+              files={files}
+              instrumentId={instrumentId}
+              relatedFiles={relatedFiles}
+              runId={runId}
+            />
           ) : (
             <EditableRunFilesTable
               files={files}
+              instrumentId={instrumentId}
               instrumentType={instrumentType}
+              relatedFiles={relatedFiles}
+              runId={runId}
             />
           )}
         </TablePendingBoundary>
 
         {/* Summary footer */}
         <div className="flex items-center justify-between gap-2 border-t px-3 py-2 text-muted-foreground text-sm tabular-nums">
-          <span>
-            {pagination.total === 0
-              ? `Showing 0 of ${stats.active}`
-              : `Showing ${from}–${to} of ${pagination.total}`}
-            {showDeleted && deletedCount > 0
-              ? `, including ${deletedCount} deleted`
-              : ""}
+          <span className="flex flex-wrap items-center gap-x-1.5">
+            <span>{footer.summary}</span>
+            {footer.link && (
+              <>
+                <span aria-hidden="true">&middot;</span>
+                <button
+                  className="rounded-sm font-medium text-foreground underline decoration-border underline-offset-4 outline-none hover:decoration-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                  onClick={() =>
+                    setFilters({
+                      // The old param goes with it, so hiding works for a saved
+                      // link that used `files_dismissed`.
+                      files_deleted: footer.link?.show ?? false,
+                      files_dismissed: false,
+                      files_page: 1,
+                    })
+                  }
+                  type="button"
+                >
+                  {footer.link.label}
+                </button>
+              </>
+            )}
           </span>
           <span>
             {stats.pending} waiting on the instrument PC &middot;{" "}
@@ -395,22 +427,6 @@ function BulkActionBarHost({
     });
   }
 
-  function handleBulkDismiss(ids: number[]) {
-    if (ids.length === 0) {
-      return;
-    }
-    startAction(async () => {
-      const { failed } = await dismissFiles(ids);
-      if (failed > 0) {
-        toast.error(`${failed} file(s) failed to dismiss`);
-      } else {
-        toast.success(`Dismissed ${ids.length} file(s)`);
-      }
-      actions.clear();
-      router.refresh();
-    });
-  }
-
   function handleBulkReprocess(ids: number[]) {
     if (ids.length === 0) {
       return;
@@ -468,14 +484,28 @@ function BulkActionBarHost({
     promptClaim();
   }
 
+  // Delete and Restore ask first when something is linked, and their messages
+  // come with an Undo, so the dialogs and the requests live in one hook that
+  // the file window shares. The selection clears once the request is done.
+  const { askDelete, askRestore, dialogs } = useFileDeleteRestore({
+    instrumentId,
+    runId,
+    startAction,
+  });
+  const clearSelection = { onSettled: () => actions.clear() };
+
   return (
-    <FileBulkActionBar
-      isPending={isPending}
-      onDismiss={handleBulkDismiss}
-      onDownload={handleBulkDownload}
-      onReprocess={handleBulkReprocess}
-      onUpload={handleBulkUpload}
-    />
+    <>
+      <FileBulkActionBar
+        isPending={isPending}
+        onDelete={(targets) => askDelete(targets, clearSelection)}
+        onDownload={handleBulkDownload}
+        onReprocess={handleBulkReprocess}
+        onRestore={(targets) => askRestore(targets, clearSelection)}
+        onUpload={handleBulkUpload}
+      />
+      {dialogs}
+    </>
   );
 }
 

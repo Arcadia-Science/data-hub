@@ -1,6 +1,6 @@
 "use client";
 
-import { TriangleAlert, Upload, X } from "lucide-react";
+import { Trash2, TriangleAlert, Upload } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useId, useState } from "react";
 import { toast } from "sonner";
@@ -18,8 +18,12 @@ import {
 import { Button } from "@/components/ui/button";
 import { useViewerTimeZone } from "@/components/viewer-time-zone-provider";
 import { formatLastCheckIn } from "@/lib/instruments/problem-notice";
+import { inBatches } from "@/lib/runs/run-file-requests";
 import type { UploadFailureGroup } from "@/lib/runs/upload-failure";
-import { dismissFiles, requestFileUploads } from "@/lib/runs/upload-requests";
+import { requestFileUploads } from "@/lib/runs/upload-requests";
+import { DELETE_CONFIRM_CLASS } from "./file-action-dialog";
+import { deleteFilesAndOfferUndo } from "./file-action-flows";
+import { useBumpReportItems } from "./report-items-provider";
 import { WatcherGatedUploadButton } from "./watcher-gated-upload-button";
 
 function filesPhrase(count: number): string {
@@ -29,7 +33,7 @@ function filesPhrase(count: number): string {
 /**
  * Says which of this run's files the watcher gave up on and why, one block per
  * reason and folder (see `groupUploadFailures`), above the Files section. Each
- * block asks for those files again or dismisses them. Hidden when the run has
+ * block asks for those files again or deletes them. Hidden when the run has
  * no `upload_failed` files; the layout leaves it out for a deleted run.
  */
 export function UploadFailedNotice({
@@ -44,7 +48,8 @@ export function UploadFailedNotice({
   const router = useRouter();
   const timeZone = useViewerTimeZone();
   const titleId = useId();
-  // The block whose request or dismissal is running, so its buttons lock.
+  const onFilesChanged = useBumpReportItems();
+  // The block whose request or delete is running, so its buttons lock.
   const [busy, setBusy] = useState<number | null>(null);
 
   if (groups.length === 0) {
@@ -67,16 +72,19 @@ export function UploadFailedNotice({
     router.refresh();
   }
 
-  async function dismiss(index: number, group: UploadFailureGroup) {
+  async function deleteGroup(index: number, group: UploadFailureGroup) {
     setBusy(index);
-    const { failed } = await dismissFiles(group.fileIds);
-    if (failed > 0) {
-      toast.error(`${filesPhrase(failed)} couldn't be dismissed`);
-    } else {
-      toast.success(`Dismissed ${filesPhrase(group.fileIds.length)}`);
-    }
+    // These files never reached storage, so nothing is linked to them. The
+    // message says how it went and offers Undo, as it does in the files table.
+    await deleteFilesAndOfferUndo({
+      instrumentId,
+      runId,
+      batches: inBatches(group.fileIds),
+      includeLinked: false,
+      onFilesChanged,
+      refresh: () => router.refresh(),
+    });
     setBusy(null);
-    router.refresh();
   }
 
   return (
@@ -136,25 +144,30 @@ export function UploadFailedNotice({
                     size="sm"
                     variant="ghost"
                   >
-                    <X aria-hidden="true" className="size-3.5" />
-                    Dismiss these files
+                    <Trash2 aria-hidden="true" className="size-3.5" />
+                    Delete these files
                   </Button>
                 </AlertDialogTrigger>
                 <AlertDialogContent>
                   <AlertDialogHeader>
                     <AlertDialogTitle>
-                      Dismiss {filesPhrase(group.fileIds.length)}?
+                      Delete {filesPhrase(group.fileIds.length)}?
                     </AlertDialogTitle>
                     <AlertDialogDescription>
-                      The files will be soft-deleted from this run, and the
-                      watcher won’t try to upload them again. Do this when the
-                      files are gone from the instrument PC for good.
+                      The files will be hidden from this run, and the watcher
+                      won’t try to upload them again. You can restore them
+                      later. Do this when the files are gone from the instrument
+                      PC for good.
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>
                     <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction onClick={() => dismiss(index, group)}>
-                      Dismiss
+                    <AlertDialogAction
+                      className={DELETE_CONFIRM_CLASS}
+                      onClick={() => deleteGroup(index, group)}
+                      variant="destructive"
+                    >
+                      Delete
                     </AlertDialogAction>
                   </AlertDialogFooter>
                 </AlertDialogContent>

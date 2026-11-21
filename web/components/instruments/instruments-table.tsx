@@ -17,6 +17,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { InstrumentListItem } from "@/lib/api/instruments";
+import { TABLE_EDGE_PADDING } from "@/lib/ui-classes";
 
 /**
  * Placeholder that mirrors `InstrumentsTable` column layout and row height
@@ -41,7 +42,7 @@ function InstrumentsTableSkeletonFrame({
       className="rounded-lg border bg-background dark:bg-muted"
       role="status"
     >
-      <Table>
+      <Table className={TABLE_EDGE_PADDING}>
         <TableHeader>
           <TableRow>
             <TableHead>Instrument</TableHead>
@@ -165,7 +166,7 @@ export function InstrumentsTable({
 
   return (
     <div className="rounded-lg border bg-background dark:bg-muted">
-      <Table>
+      <Table className={TABLE_EDGE_PADDING}>
         <TableHeader>
           <TableRow>
             <TableHead>Instrument</TableHead>

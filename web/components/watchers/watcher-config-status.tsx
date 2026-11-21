@@ -16,6 +16,7 @@ import type {
   ConfigRevision,
   ConfigRevisionStatus,
 } from "@/lib/api/watcher-config/revisions";
+import { GREEN_BADGE_COLORS, RED_BADGE_COLORS } from "@/lib/ui-classes";
 import { cn } from "@/lib/utils";
 import {
   type ConfigNoticeKind,
@@ -35,13 +36,12 @@ const STATUS_BADGES: Record<
   applied: {
     label: "Applied",
     Icon: CircleCheck,
-    className:
-      "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300",
+    className: GREEN_BADGE_COLORS,
   },
   rejected: {
     label: "Rejected",
     Icon: CircleAlert,
-    className: "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300",
+    className: RED_BADGE_COLORS,
   },
   superseded: {
     label: "Superseded",

@@ -32,6 +32,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useUnsavedChangesWarning } from "@/hooks/use-unsaved-changes-warning";
+import { GREEN_BADGE_COLORS } from "@/lib/ui-classes";
 
 // ---------------------------------------------------------------------------
 // Section header — lives above the card, matching the page-level
@@ -57,7 +58,7 @@ function SectionHeader({
           revoked ? (
             <Badge variant="destructive">Reconnect required</Badge>
           ) : (
-            <Badge className="bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300">
+            <Badge className={GREEN_BADGE_COLORS}>
               Connected{slackTeamName ? ` · ${slackTeamName}` : ""}
             </Badge>
           )

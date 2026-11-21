@@ -67,7 +67,7 @@ export function FileStatusLegendButton() {
     <Popover onOpenChange={setOpen} open={open}>
       <PopoverTrigger
         aria-label="About file status"
-        className="inline-flex size-6 cursor-help items-center justify-center rounded-md text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+        className="-ml-1 inline-flex size-6 cursor-help items-center justify-center rounded-md text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
         type="button"
       >
         <CircleHelp aria-hidden="true" className="size-3.5" />

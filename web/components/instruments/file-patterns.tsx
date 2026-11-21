@@ -7,6 +7,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { CODE_BADGE_COLORS } from "@/lib/ui-classes";
 import { cn } from "@/lib/utils";
 
 /** A badge for a literal value, such as a file pattern or a folder path. */
@@ -17,7 +18,8 @@ export function CodeBadge({
   return (
     <Badge
       className={cn(
-        "bg-slate-200 font-mono font-normal text-slate-800 text-xs dark:bg-slate-700 dark:text-slate-100",
+        CODE_BADGE_COLORS,
+        "font-mono font-normal text-xs",
         className
       )}
       variant="outline"

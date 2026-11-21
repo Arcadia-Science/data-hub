@@ -1,6 +1,14 @@
 "use client";
 
-import { createContext, type ReactNode, use, useEffect } from "react";
+import {
+  createContext,
+  type ReactNode,
+  use,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { useReportDataSource } from "@/components/runs/report-data-source-provider";
 import {
   type UseReportItemsResult,
@@ -27,6 +35,34 @@ const ReportItemsContext = createContext<ReportItemsContextValue | null>(null);
 const ReportPersistKeyContext = createContext<string | undefined>(undefined);
 
 const ReportViewerPageContext = createContext<ReportItemsPage | null>(null);
+
+// Counts the deletes and restores of files on a run page, so the report below
+// the files table loads its items again after one. Outside the provider the
+// count stays 0 and nothing reloads.
+const ReportItemsVersionContext = createContext<{
+  bump: () => void;
+  version: number;
+}>({ bump: () => undefined, version: 0 });
+
+export function ReportItemsVersionProvider({
+  children,
+}: {
+  children: ReactNode;
+}) {
+  const [version, setVersion] = useState(0);
+  const bump = useCallback(() => setVersion((current) => current + 1), []);
+  const value = useMemo(() => ({ bump, version }), [bump, version]);
+  return (
+    <ReportItemsVersionContext.Provider value={value}>
+      {children}
+    </ReportItemsVersionContext.Provider>
+  );
+}
+
+// Tells the run page's report that files were deleted or restored.
+export function useBumpReportItems(): () => void {
+  return use(ReportItemsVersionContext).bump;
+}
 
 export function ReportPersistKeyProvider({
   children,
@@ -80,10 +116,12 @@ export function ReportItemsProvider({
 }) {
   const dataSource = useReportDataSource();
   const persistKey = use(ReportPersistKeyContext);
+  const { version } = use(ReportItemsVersionContext);
   const { state, actions } = useReportItems({
     fetchReportItems: dataSource.fetchReportItems,
     initialPage,
     kind,
+    version,
   });
 
   useEffect(() => {

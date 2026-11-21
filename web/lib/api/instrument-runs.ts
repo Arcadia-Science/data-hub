@@ -10,6 +10,7 @@ import {
   ilike,
   inArray,
   isNull,
+  notInArray,
   or,
   sql,
 } from "drizzle-orm";
@@ -22,6 +23,7 @@ import {
   formatHinaSizes,
 } from "@/components/runs/run-metadata-badges";
 import { type Actor, resolveActor } from "@/lib/api/actor";
+import { folderSql, isSidecarSql } from "@/lib/api/file-link-sql";
 import { escapeLikePattern } from "@/lib/api/like-pattern";
 import { runNotebookToWire } from "@/lib/api/notebook-wire";
 import {
@@ -51,6 +53,7 @@ import {
   filePendingUploadSql,
 } from "@/lib/runs/file-buckets.sql";
 import type { FilesLifecycleFilter } from "@/lib/runs/file-lifecycle-filter";
+import { folderOfPath, isSidecarFilename, pathOf } from "@/lib/runs/file-links";
 import {
   isQpcrMeltingDerivativesFile,
   isQpcrMeltingPlateFile,
@@ -840,8 +843,13 @@ export type RunDetail = NonNullable<
 export type RunFile = typeof files.$inferSelect;
 
 // Run-page file row with stall decided on the server so the files table
-// does not re-read the clock during hydration.
-export type RunFileRow = RunFile & { stalledProcessing: boolean };
+// does not re-read the clock during hydration, and the deleter named so a
+// deleted row can say who deleted it. `deleter` is null for a file that is not
+// deleted and for one deleted before Data Hub recorded who did it.
+export type RunFileRow = RunFile & {
+  deleter: Actor | null;
+  stalledProcessing: boolean;
+};
 
 // Server-truth row shape for the paginated runs list. Derived from
 // buildRunListQuery's return type so any column added to the Drizzle
@@ -1025,6 +1033,143 @@ export interface RunFilesPage {
     total: number;
     total_pages: number;
   };
+  // The files the file window can reach through the linked files of the page's
+  // files, when they are not on the page: deleted or not, whatever the filters.
+  // See `loadRelatedFiles`.
+  related: RunFileRow[];
+}
+
+// A file row with the names of whoever deleted it, as the files table needs it.
+// A deleter that is a user comes from `users`, and a token from
+// `personal_access_tokens`, the way a run's deleter is read in
+// `lookupRunByNaturalKey`.
+function selectRunFileRows() {
+  return db
+    .select({
+      file: files,
+      deletedByName: users.name,
+      deletedByEmail: users.email,
+      deletedByImage: users.image,
+      deletedByTokenName: personalAccessTokens.name,
+      deletedByTokenRevokedAt: personalAccessTokens.revokedAt,
+    })
+    .from(files)
+    .leftJoin(users, eq(users.id, files.deletedBy))
+    .leftJoin(
+      personalAccessTokens,
+      eq(personalAccessTokens.id, files.deletedByToken)
+    );
+}
+
+function toRunFileRow(
+  row: Awaited<ReturnType<typeof selectRunFileRows>>[number],
+  now: Date
+): RunFileRow {
+  const { file } = row;
+  return {
+    ...file,
+    stalledProcessing: isStalledProcessing(file, now),
+    deleter: resolveActor({
+      userId: file.deletedBy,
+      userName: row.deletedByName,
+      userEmail: row.deletedByEmail,
+      userImage: row.deletedByImage,
+      tokenId: file.deletedByToken,
+      tokenName: row.deletedByTokenName,
+      tokenRevokedAt: row.deletedByTokenRevokedAt,
+    }),
+  };
+}
+
+// The most files each of the two lookups in `loadRelatedFiles` returns. Files
+// already on the page don't count toward it. A raw file has a handful of
+// outputs, so the cap only guards a run that has far more. The window then
+// lists the ones it has.
+const RELATED_FILES_LIMIT = 200;
+
+// The files of a run that the file window can reach from a page of files
+// through its Linked files, and that are not on the page. A raw file links to
+// the processed files made from it and to the sidecars in its folder. A
+// processed file links to the raw file it was made from, and that file links on
+// to its other outputs. So this loads the raw files the page's processed files
+// came from, and then the outputs and sidecars of every raw file in play.
+// Deleted files are included: the window lists them as deleted.
+async function loadRelatedFiles(
+  runInternalId: string,
+  page: readonly RunFileRow[],
+  now: Date
+): Promise<RunFileRow[]> {
+  const onPage = new Set(page.map((file) => file.id));
+  const sourceIds = [
+    ...new Set(
+      page.flatMap((file) =>
+        file.category === "processed" &&
+        file.sourceFileId !== null &&
+        !onPage.has(file.sourceFileId)
+          ? [file.sourceFileId]
+          : []
+      )
+    ),
+  ];
+  const sources =
+    sourceIds.length === 0
+      ? []
+      : (
+          await selectRunFileRows().where(
+            and(
+              eq(files.instrumentRunId, runInternalId),
+              inArray(files.id, sourceIds)
+            )
+          )
+        ).map((row) => toRunFileRow(row, now));
+
+  const raws = [...page, ...sources].filter(
+    (file) => file.category === "raw" && !isSidecarFilename(file.filename)
+  );
+  if (raws.length === 0) {
+    return sources;
+  }
+  const folders = [...new Set(raws.map((file) => folderOfPath(pathOf(file))))];
+  const offPage = notInArray(files.id, [...onPage]);
+  const [outputs, sidecars] = await Promise.all([
+    selectRunFileRows()
+      .where(
+        and(
+          eq(files.instrumentRunId, runInternalId),
+          eq(files.category, "processed"),
+          inArray(
+            files.sourceFileId,
+            raws.map((file) => file.id)
+          ),
+          offPage
+        )
+      )
+      .orderBy(asc(files.id))
+      .limit(RELATED_FILES_LIMIT),
+    selectRunFileRows()
+      .where(
+        and(
+          eq(files.instrumentRunId, runInternalId),
+          eq(files.category, "raw"),
+          isSidecarSql,
+          inArray(folderSql, folders),
+          offPage
+        )
+      )
+      .orderBy(asc(files.id))
+      .limit(RELATED_FILES_LIMIT),
+  ]);
+
+  const related = new Map<number, RunFileRow>();
+  for (const file of [
+    ...sources,
+    ...[...outputs, ...sidecars].map((row) => toRunFileRow(row, now)),
+  ]) {
+    if (!onPage.has(file.id)) {
+      related.set(file.id, file);
+    }
+  }
+  return [...related.values()];
 }
 
 export async function buildRunFilesQuery(
@@ -1056,21 +1201,17 @@ export async function buildRunFilesQuery(
     .from(files)
     .where(countWhere);
 
-  const data = await db
-    .select()
-    .from(files)
+  const rows = await selectRunFileRows()
     .where(where)
     .orderBy(
       ...runFilesOrderBy(filters.sort ?? "name", filters.order ?? "asc", now)
     )
     .limit(safePerPage)
     .offset(offset);
+  const data = rows.map((row) => toRunFileRow(row, now));
 
   return {
-    data: data.map((file) => ({
-      ...file,
-      stalledProcessing: isStalledProcessing(file, now),
-    })),
+    data,
     deletedCount,
     downloadableCount,
     pagination: {
@@ -1079,6 +1220,7 @@ export async function buildRunFilesQuery(
       total,
       total_pages: Math.ceil(total / safePerPage),
     },
+    related: await loadRelatedFiles(runInternalId, data, now),
   };
 }
 

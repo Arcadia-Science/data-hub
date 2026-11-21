@@ -1,7 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildRunFilesQuery, getRunFileStats } from "@/lib/api/instrument-runs";
 import { files, instrumentRuns, instruments } from "@/lib/db/schema";
-import { closeTestDb, getTestDb, resetDb } from "@/tests/integration/helpers";
+import {
+  closeTestDb,
+  getTestDb,
+  resetDb,
+  seedTestUser,
+} from "@/tests/integration/helpers";
 
 const instrumentId = "run-files-filter-instrument";
 
@@ -491,5 +496,288 @@ describe("Run files deleted files", () => {
     // r2.tif and r2.jpg are in storage, but deleted.
     expect(hidden.downloadableCount).toBe(2);
     expect(shown.downloadableCount).toBe(2);
+  });
+});
+
+describe("Run files deleter names", () => {
+  let runInternalId: string;
+  const deletedAt = new Date("2026-11-10T09:00:00Z");
+
+  beforeAll(async () => {
+    runInternalId = await insertRun("run-files-deleter-run");
+    const person = await seedTestUser({
+      name: "Casey Rivera",
+      email: "casey.deleter@example.com",
+    });
+    const owner = await seedTestUser({ tokenName: "cleanup-script" });
+    await getTestDb()
+      .insert(files)
+      .values([
+        {
+          instrumentRunId: runInternalId,
+          filename: "a-by-person.tif",
+          category: "raw",
+          status: "completed",
+          deletedAt,
+          deletedBy: person.userId,
+        },
+        {
+          instrumentRunId: runInternalId,
+          filename: "b-by-token.tif",
+          category: "raw",
+          status: "completed",
+          deletedAt,
+          deletedByToken: owner.tokenId,
+        },
+        // Deleted before Data Hub recorded who did it.
+        {
+          instrumentRunId: runInternalId,
+          filename: "c-nobody.tif",
+          category: "raw",
+          status: "detected",
+          deletedAt,
+        },
+        {
+          instrumentRunId: runInternalId,
+          filename: "d-active.tif",
+          category: "raw",
+          status: "completed",
+        },
+      ]);
+  });
+
+  async function deleterOf(filename: string) {
+    const page = await buildRunFilesQuery(runInternalId, {
+      page: 1,
+      perPage: 100,
+      includeDeleted: true,
+    });
+    const file = page.data.find((row) => row.filename === filename);
+    if (!file) {
+      throw new Error(`${filename} is not on the page`);
+    }
+    return file.deleter;
+  }
+
+  it("names the person who deleted a file", async () => {
+    const deleter = await deleterOf("a-by-person.tif");
+    expect(deleter?.kind).toBe("user");
+    expect(deleter?.kind === "user" && deleter.user.displayName).toBe(
+      "Casey Rivera"
+    );
+  });
+
+  it("names the token that deleted a file", async () => {
+    const deleter = await deleterOf("b-by-token.tif");
+    expect(deleter?.kind).toBe("token");
+    expect(deleter?.kind === "token" && deleter.token.name).toBe(
+      "cleanup-script"
+    );
+  });
+
+  it("has no deleter for a file deleted before it was recorded, or one that is not deleted", async () => {
+    expect(await deleterOf("c-nobody.tif")).toBeNull();
+    expect(await deleterOf("d-active.tif")).toBeNull();
+  });
+});
+
+describe("Run files the window can reach", () => {
+  let runInternalId: string;
+  const deletedAt = new Date("2026-11-10T09:00:00Z");
+  const ids: Record<string, number> = {};
+
+  beforeAll(async () => {
+    runInternalId = await insertRun("run-files-related-run");
+    const other = await insertRun("run-files-related-other-run");
+    // Two captures in different folders, each with a video, a preview image
+    // and a sidecar, as in a DishCam run. The second capture's outputs are
+    // deleted.
+    const rows = await getTestDb()
+      .insert(files)
+      .values([
+        {
+          instrumentRunId: runInternalId,
+          filename: "s001_A.tif",
+          relativePath: "cap_one/s001_A.tif",
+          category: "raw",
+          status: "completed",
+        },
+        {
+          instrumentRunId: runInternalId,
+          filename: "run.json",
+          relativePath: "cap_one/run.json",
+          category: "raw",
+          status: "uploaded",
+        },
+        // A second sidecar in the same folder, as when a re-upload lands in
+        // another capture's folder.
+        {
+          instrumentRunId: runInternalId,
+          filename: "run~aaaaaaaa.json",
+          relativePath: "cap_one/run~aaaaaaaa.json",
+          category: "raw",
+          status: "uploaded",
+        },
+        {
+          instrumentRunId: runInternalId,
+          filename: "s001_A_1.tif",
+          relativePath: "cap_two/s001_A_1.tif",
+          category: "raw",
+          status: "completed",
+        },
+        {
+          instrumentRunId: runInternalId,
+          filename: "run~0a1b2c3d.json",
+          relativePath: "cap_two/run~0a1b2c3d.json",
+          category: "raw",
+          status: "uploaded",
+          deletedAt,
+        },
+        // Another run's sidecar in a folder of the same name stays out.
+        {
+          instrumentRunId: other,
+          filename: "run.json",
+          relativePath: "cap_two/run.json",
+          category: "raw",
+          status: "uploaded",
+        },
+      ])
+      .returning({ id: files.id, filename: files.filename });
+    for (const row of rows) {
+      ids[row.filename] = row.id;
+    }
+    const outputs = await getTestDb()
+      .insert(files)
+      .values([
+        {
+          instrumentRunId: runInternalId,
+          filename: "s001_A.mp4",
+          category: "processed",
+          status: "uploaded",
+          sourceFileId: ids["s001_A.tif"],
+        },
+        {
+          instrumentRunId: runInternalId,
+          filename: "s001_A_1.mp4",
+          category: "processed",
+          status: "uploaded",
+          sourceFileId: ids["s001_A_1.tif"],
+          deletedAt,
+        },
+        {
+          instrumentRunId: runInternalId,
+          filename: "s001_A_1.jpg",
+          category: "processed",
+          status: "uploaded",
+          sourceFileId: ids["s001_A_1.tif"],
+          deletedAt,
+        },
+      ])
+      .returning({ id: files.id, filename: files.filename });
+    for (const row of outputs) {
+      ids[row.filename] = row.id;
+    }
+  });
+
+  async function relatedTo(search: string) {
+    const page = await buildRunFilesQuery(runInternalId, {
+      page: 1,
+      perPage: 100,
+      search,
+    });
+    return {
+      onPage: page.data.map((file) => file.filename).sort(),
+      related: page.related.map((file) => file.filename).sort(),
+    };
+  }
+
+  it("lists the outputs and the sidecar of a raw file on the page, deleted ones too", async () => {
+    // Deleted files are off the page, because the search is the only filter and
+    // deleted files are hidden. They are still reachable.
+    const { onPage, related } = await relatedTo("s001_A_1.tif");
+    expect(onPage).toEqual(["s001_A_1.tif"]);
+    expect(related).toEqual([
+      "run~0a1b2c3d.json",
+      "s001_A_1.jpg",
+      "s001_A_1.mp4",
+    ]);
+  });
+
+  it("leaves out the sidecar of another folder and of another run", async () => {
+    const { related } = await relatedTo("s001_A.tif");
+    expect(related).toEqual(["run.json", "run~aaaaaaaa.json", "s001_A.mp4"]);
+  });
+
+  it("follows a processed file to its raw file, and on to that file's other outputs", async () => {
+    const { onPage, related } = await relatedTo("s001_A.mp4");
+    expect(onPage).toEqual(["s001_A.mp4"]);
+    // The raw file it was made from, and the sidecars of that file's folder.
+    expect(related).toEqual(["run.json", "run~aaaaaaaa.json", "s001_A.tif"]);
+
+    const outputOfDeleted = await buildRunFilesQuery(runInternalId, {
+      page: 1,
+      perPage: 100,
+      search: "s001_A_1.jpg",
+      includeDeleted: true,
+    });
+    expect(outputOfDeleted.related.map((file) => file.filename).sort()).toEqual(
+      ["run~0a1b2c3d.json", "s001_A_1.mp4", "s001_A_1.tif"]
+    );
+  });
+
+  it("does not repeat a file that is on the page", async () => {
+    const page = await buildRunFilesQuery(runInternalId, {
+      page: 1,
+      perPage: 100,
+      includeDeleted: true,
+    });
+    const onPage = new Set(page.data.map((file) => file.id));
+    expect(page.related.filter((file) => onPage.has(file.id))).toEqual([]);
+    expect(page.related).toEqual([]);
+  });
+
+  it("has nothing related for a sidecar, even when another sidecar shares its folder", async () => {
+    const { onPage, related } = await relatedTo("run~aaaaaaaa.json");
+    expect(onPage).toEqual(["run~aaaaaaaa.json"]);
+    expect(related).toEqual([]);
+  });
+});
+
+describe("Run files the window can reach, past a page of outputs", () => {
+  it("does not let the outputs on the page use up the lookup's cap", async () => {
+    const runInternalId = await insertRun("run-files-related-many-outputs");
+    const [raw] = await getTestDb()
+      .insert(files)
+      .values({
+        instrumentRunId: runInternalId,
+        filename: "big.tif",
+        relativePath: "cap/big.tif",
+        category: "raw",
+        status: "completed",
+      })
+      .returning({ id: files.id });
+    // 250 outputs of one raw file, inserted in name order, so the 100 on the
+    // first page have the lowest IDs.
+    await getTestDb()
+      .insert(files)
+      .values(
+        Array.from({ length: 250 }, (_, i) => ({
+          instrumentRunId: runInternalId,
+          filename: `big_out_${String(i).padStart(3, "0")}.csv`,
+          category: "processed" as const,
+          status: "uploaded" as const,
+          sourceFileId: raw.id,
+        }))
+      );
+
+    const page = await buildRunFilesQuery(runInternalId, {
+      page: 1,
+      perPage: 100,
+      search: "big_out",
+    });
+
+    expect(page.data).toHaveLength(100);
+    // The raw file and the 150 outputs that are not on the page.
+    expect(page.related).toHaveLength(151);
   });
 });

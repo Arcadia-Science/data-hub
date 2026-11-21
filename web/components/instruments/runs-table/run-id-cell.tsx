@@ -1,6 +1,7 @@
 import { Badge } from "@/components/ui/badge";
 import type { RunListRow } from "@/lib/api/instrument-runs";
-
+import { CODE_BADGE_COLORS } from "@/lib/ui-classes";
+import { cn } from "@/lib/utils";
 import { RunCommentCount } from "./run-comment-count";
 import { RunIdLabel } from "./run-id-label";
 import { RunStatusIcon } from "./run-status-icon";
@@ -16,7 +17,10 @@ export function RunIdCell({ href, run }: { href: string; run: RunListRow }) {
         <RunCommentCount count={run.comment_count} />
       </div>
       {isDeleted ? (
-        <Badge className="ml-1.5 font-normal" variant="outline">
+        <Badge
+          className={cn("ml-1.5 font-normal", CODE_BADGE_COLORS)}
+          variant="outline"
+        >
           deleted
         </Badge>
       ) : null}
