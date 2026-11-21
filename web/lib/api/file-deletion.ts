@@ -340,7 +340,8 @@ export interface FileActionFailure {
   status: 404 | 409;
 }
 
-function notFound(id: number): FileActionFailure {
+// The result for an ID that names no file, or no file of the run asked about.
+export function notFound(id: number): FileActionFailure {
   return {
     ok: false,
     id,

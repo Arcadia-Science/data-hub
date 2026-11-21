@@ -11,9 +11,12 @@ import {
 } from "../registry";
 import {
   createFileBody,
+  fileActionBody,
+  fileActionQuery,
+  fileDeleted,
   fileDetail,
-  fileDismissed,
   fileReprocessed,
+  fileRestored,
   multipartAbortBody,
   multipartAbortResponse,
   multipartCompleteBody,
@@ -21,6 +24,10 @@ import {
   multipartPartUrlsBody,
   multipartPartUrlsResponse,
   patchFileBody,
+  runFilesDeleted,
+  runFilesLinked,
+  runFilesLinkedQuery,
+  runFilesRestored,
 } from "../schemas/files";
 
 const fileParams = z.object({ fileId: fileIdParam });
@@ -67,11 +74,55 @@ registry.registerPath({
   path: "/files/{fileId}",
   operationId: "deleteFile",
   summary: "Delete a file",
-  description: `Requires scope \`files:delete\`. Deletes the file from its run, whether or not it was uploaded. The file stays in storage and its row records who deleted it. Returns \`409\` while the file is queued or processing, unless its processing has stalled (wait for processing to finish), and \`409\` (\`details.reason: run_deleted\`) when the run was deleted. Deleting a file that is already deleted succeeds with \`already_applied: true\`. ${WATCHER_TOKEN_OWN_INSTRUMENT}`,
+  description: `Requires scope \`files:delete\`. Deletes the file from its run, whether or not it was uploaded. The file stays in storage, its row records who deleted it, and \`POST /files/{fileId}/restore\` brings it back. Deleted files are left out of the run's file lists and downloads. Pass \`include_linked=true\` to delete the files linked to it too: for a raw file, the processed files made from it and the \`run.json\` saved with its capture when every raw file in that folder is being deleted. \`linked\` lists them. Returns \`409\` while the file is queued or processing, unless its processing has stalled (wait for processing to finish), and \`409\` (\`details.reason: run_deleted\`) when the run was deleted. Deleting a file that is already deleted succeeds with \`already_applied: true\`. ${WATCHER_TOKEN_OWN_INSTRUMENT}`,
   tags: ["Files"],
   security: bearerSecurity,
-  request: { params: fileParams },
-  responses: responses("Deletion result.", fileDismissed),
+  request: { params: fileParams, query: fileActionQuery },
+  responses: responses("Deletion result.", fileDeleted),
+});
+registry.registerPath({
+  method: "post",
+  path: "/files/{fileId}/restore",
+  operationId: "restoreFile",
+  summary: "Restore a file",
+  description: `Requires scope \`files:delete\`. Brings a deleted file back to its run and clears who deleted it. Pass \`include_linked=true\` to restore the deleted files linked to it too, which \`linked\` lists, each with its own result. Returns \`409\` (\`details.reason: path_in_use\`, with \`details.held_by\` naming the file) when another file of the run now has this file's name or path, and \`409\` (\`details.reason: run_deleted\`) when the run was deleted. Restoring a file that isn't deleted succeeds with \`already_applied: true\`. ${WATCHER_TOKEN_OWN_INSTRUMENT}`,
+  tags: ["Files"],
+  security: bearerSecurity,
+  request: { params: fileParams, query: fileActionQuery },
+  responses: responses("Restore result.", fileRestored),
+});
+registry.registerPath({
+  method: "post",
+  path: "/instruments/{instrumentId}/runs/{runId}/files/delete",
+  operationId: "deleteRunFiles",
+  summary: "Delete several files of a run",
+  description: `Requires scope \`files:delete\`. Deletes up to 100 files of one run, as \`DELETE /files/{fileId}\` does for one. The response lists a result for each file in the order sent, so one that can't be deleted doesn't stop the others: \`404\` for an ID that isn't a file of this run, \`409\` for a file that is queued or processing (\`details.reason: file_processing\`) or whose run was deleted (\`details.reason: run_deleted\`). Set \`include_linked\` to delete the files linked to them too; \`linked\` lists those. The request itself returns \`404\` only when the run doesn't exist. ${WATCHER_TOKEN_OWN_INSTRUMENT}`,
+  tags: ["Files"],
+  security: bearerSecurity,
+  request: { params: runParams, body: body(fileActionBody) },
+  responses: responses("Results for each file.", runFilesDeleted),
+});
+registry.registerPath({
+  method: "post",
+  path: "/instruments/{instrumentId}/runs/{runId}/files/restore",
+  operationId: "restoreRunFiles",
+  summary: "Restore several files of a run",
+  description: `Requires scope \`files:delete\`. Restores up to 100 deleted files of one run, as \`POST /files/{fileId}/restore\` does for one. The response lists a result for each file in the order sent, so one that can't come back doesn't stop the others: \`404\` for an ID that isn't a file of this run, \`409\` (\`details.reason: path_in_use\`, with \`details.held_by\` naming the file) when another file of the run now has its name or path, and \`409\` (\`details.reason: run_deleted\`) when the run was deleted. Set \`include_linked\` to restore the deleted files linked to them too; \`linked\` lists those, each with its own result. The request itself returns \`404\` only when the run doesn't exist. ${WATCHER_TOKEN_OWN_INSTRUMENT}`,
+  tags: ["Files"],
+  security: bearerSecurity,
+  request: { params: runParams, body: body(fileActionBody) },
+  responses: responses("Results for each file.", runFilesRestored),
+});
+registry.registerPath({
+  method: "get",
+  path: "/instruments/{instrumentId}/runs/{runId}/files/linked",
+  operationId: "listLinkedRunFiles",
+  summary: "List the files linked to some files of a run",
+  description: `Requires scope \`files:delete\`. Lists what a delete (the default) or a restore (\`for=restore\`) would take along with each file, grouped by the file you asked about, so you can show it before you act. For a delete, a raw file's linked files are the active processed files made from it and the \`run.json\` saved with its capture, which is listed only when every raw file in that folder is among the files asked about. For a restore, they are the deleted ones, and a deleted \`run.json\` comes back when any raw file of its folder does. A deleted processed file's linked file is the deleted raw file it was made from. ${WATCHER_TOKEN_OWN_INSTRUMENT}`,
+  tags: ["Files"],
+  security: bearerSecurity,
+  request: { params: runParams, query: runFilesLinkedQuery },
+  responses: responses("Linked files.", runFilesLinked),
 });
 registry.registerPath({
   method: "get",

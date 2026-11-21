@@ -9,6 +9,7 @@ import {
   NOT_FOUND,
   runDeletedError,
 } from "@/lib/api/errors";
+import { loadTokenRefs, tokenRefFor } from "@/lib/api/file-deleters";
 import {
   foldEarlierAcquiredAt,
   lookupRunByNaturalKey,
@@ -34,7 +35,8 @@ interface RouteContext {
 // GET /api/v1/instruments/:instrumentId/runs/:runId
 //
 // Full run detail — files (with pre-signed download URLs) and run-level
-// metadata. Deleted files are left out.
+// metadata. Deleted files are left out unless `?include_deleted=true`, and each
+// file reports `deleted_at` and who deleted it, the way the run does.
 // ---------------------------------------------------------------------------
 
 export async function GET(request: NextRequest, { params }: RouteContext) {
@@ -55,14 +57,24 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
     );
   }
 
+  const includeDeleted =
+    request.nextUrl.searchParams.get("include_deleted") === "true";
   const [fileRows, runNotebooks] = await Promise.all([
     db
       .select()
       .from(files)
-      .where(and(eq(files.instrumentRunId, run.id), isNull(files.deletedAt)))
+      .where(
+        and(
+          eq(files.instrumentRunId, run.id),
+          includeDeleted ? undefined : isNull(files.deletedAt)
+        )
+      )
       .orderBy(files.createdAt),
     listNotebooksForRun(run.id),
   ]);
+  const deleterTokens = await loadTokenRefs(
+    fileRows.map((f) => f.deletedByToken)
+  );
 
   // Generate short-lived pre-signed URLs only for files that have been
   // uploaded to S3 (s3Key is non-null). Detected/queued files get null.
@@ -92,6 +104,8 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
       created_at: f.createdAt,
       file_created_at: f.fileCreatedAt,
       deleted_at: f.deletedAt,
+      deleted_by: f.deletedBy,
+      deleted_by_token: tokenRefFor(deleterTokens, f.deletedByToken),
     }))
   );
 

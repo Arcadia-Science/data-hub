@@ -30,6 +30,12 @@ export const mcpRunFileSchema = z.object({
   uploadedAt: isoDateTime.nullable(),
   processedAt: isoDateTime.nullable(),
   stalled: z.boolean(),
+  // Set when the file is deleted. A list leaves deleted files out unless asked.
+  deletedAt: isoDateTime.nullable(),
+  // The user ID of the person who deleted the file, or the token that did,
+  // the way get_run reports a run's deleter.
+  deletedBy: z.string().nullable(),
+  deletedByToken: mcpActorTokenSchema.nullable(),
 });
 
 /** Failure summary attached via `get_run` include=failure_summary / report. */

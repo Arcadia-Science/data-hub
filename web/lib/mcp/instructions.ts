@@ -9,8 +9,7 @@ import { FEEDBACK_APP } from "@/lib/feedback-app";
 export const MCP_SERVER_INSTRUCTIONS = `
 Data Hub collects files from lab instruments, processes them, and groups them
 into runs. This server covers instruments, runs, files, watchers (the program
-on each instrument PC that uploads files), who ran what, and Data Hub's own
-documentation.
+on each instrument PC that uploads files), who ran what, and Data Hub's docs.
 
 How-to questions about Data Hub itself (setup, watchers, tokens, permissions):
 call search_docs, then read_doc on the best match, and link the page in your
@@ -19,13 +18,13 @@ the entries. Leave out its query to list changes by date.
 
 Writes act as the signed-in user and need the write scope, or fail with
 "Token is missing required scope: write"; ask the user to re-authorize
-instead of retrying. Confirm before deleting (a run, comment, or lab notebook),
-dismissing, unclaiming, reprocessing, cancelling queued files, or changing a
-watcher's config.
+instead of retrying. Confirm before delete_files, restore_files, deleting a run,
+comment or lab notebook, dismissing, unclaiming, reprocessing, cancelling
+queued files, or changing a watcher's config.
 
 Dates: dateFrom/dateTo are inclusive UTC days, matched on a run's acquired
-time, or its created time when that is missing. The dashboard uses the
-viewer's timezone, so its daily counts can differ.
+time (its created time when missing). The dashboard uses the viewer's
+timezone, so its daily counts can differ.
 
 Stalled runs recover with reprocess_run. Not-uploaded runs need
 request_run_upload_all and a watcher that is online or restarting.

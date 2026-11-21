@@ -80,7 +80,7 @@ export const SCOPE_METADATA: Record<Scope, ScopeMeta> = {
   },
   "files:delete": {
     label: "Delete files",
-    description: "Delete files.",
+    description: "Delete and restore files in a run.",
     destructive: true,
   },
   "files:reprocess": {

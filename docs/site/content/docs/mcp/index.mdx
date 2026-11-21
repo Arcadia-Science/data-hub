@@ -41,7 +41,7 @@ Your client stores the access token it receives and renews it without asking aga
 MCP uses two scopes of its own, instead of the REST API’s token scopes such as `runs:read`:
 
 - **`read`**: needed to connect at all, and covers every read-only tool, resource, and prompt
-- **`write`**: also needed by tools that change something, including claiming runs, commenting, managing lab notebooks, requesting uploads, reprocessing, and deleting
+- **`write`**: also needed by tools that change something, including claiming runs, commenting, managing lab notebooks, requesting uploads, reprocessing, and deleting and restoring runs and files
 
 Most clients ask for both, because the server offers both. A client granted only `read` still connects and still reads. The first tool that changes something fails with a message naming the missing scope.
 
@@ -108,6 +108,14 @@ The answers come from the docs and changelog that ship with your deployment, so 
 Clients that let you attach resources by hand can also attach any docs page by its `datahub://docs/` address, for example `datahub://docs/manage-tokens`.
 
 The assistant reads the guides and the changelog. It doesn’t read the generated [API](/docs/api) endpoint pages or the [tools](/docs/mcp/tools), [prompts](/docs/mcp/prompts), and [resources](/docs/mcp/resources) catalogs, because the client already receives the catalog when it connects. When the docs don’t cover a question, the assistant says so and offers to [send feedback](#feedback) about the gap.
+
+## Delete and restore files [#delete-and-restore-files]
+
+`delete_files` deletes up to 100 files of one run, and `restore_files` brings deleted files back. Both answer with a result for each file, so one that can’t be changed doesn’t stop the others. They change only the files you name, unless the assistant passes `includeLinked: true` to take along the files linked to them: for a raw file, the processed files made from it, and the `run.json` saved with its capture when every raw file in that folder is being deleted. The assistant is told to check with you before it does.
+
+A deleted file stays in storage and records who deleted it. `list_run_files` leaves deleted files out unless you pass `includeDeleted: true`, and then shows when each was deleted and by whom. `get_file` still finds a deleted file by its ID. A file that’s still being processed can’t be deleted until it finishes.
+
+`dismiss_file` is deprecated. It deletes one file by its ID, and it will be removed. Use `delete_files` instead.
 
 ## Interactive run reports [#interactive-run-reports]
 
