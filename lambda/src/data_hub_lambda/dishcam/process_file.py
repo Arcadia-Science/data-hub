@@ -468,6 +468,7 @@ def _encode_tiff(
                 processed_bucket,
                 mp4_path,
                 "video/mp4",
+                source_file_id=tiff_id,
             )
             upload_processed(
                 client,
@@ -476,6 +477,7 @@ def _encode_tiff(
                 processed_bucket,
                 poster_path,
                 "image/jpeg",
+                source_file_id=tiff_id,
             )
 
             if not _update_file_status(client, tiff_id, "completed", metadata=stack_metadata):

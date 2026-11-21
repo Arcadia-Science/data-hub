@@ -56,6 +56,10 @@ class FileResponse(BaseModel):
     uploaded_at: datetime | None = None
     processed_at: datetime | None = None
     created_at: datetime | None = None
+    # Set when the file is deleted. The API refuses a PATCH to such a file, so
+    # callers that got it back from `create_file` leave it alone. Defaults to
+    # None so a server that has not shipped the field yet still parses.
+    deleted_at: datetime | None = None
 
 
 class RunDetailFile(BaseModel):

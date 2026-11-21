@@ -269,6 +269,8 @@ export async function requestRunUploads(input: {
   }
   const fileIds = rawFileIds as number[];
 
+  // Deleted files are read on purpose: the loop below refuses them by name
+  // (`File N has been deleted`) rather than reporting them as missing.
   const requestedFiles = await db
     .select()
     .from(files)

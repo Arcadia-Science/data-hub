@@ -20,6 +20,7 @@ from data_hub_lambda.api_client import (
     DEFAULT_TIMEOUT,
     ApiError,
     DataHubClient,
+    FileDeletedError,
 )
 from data_hub_lambda.deadline import (
     ProcessingDeadlineError,
@@ -195,6 +196,123 @@ class TestErrorMessage:
             client.update_file(7, status="failed", error_message="x")
 
         assert str(exc_info.value) == "Data Hub API returned HTTP 500 with no error message"
+
+
+def _file_deleted() -> requests.Response:
+    """The 409 the web app sends for a change to a deleted file."""
+    return _response(
+        409,
+        body={
+            "error": {
+                "code": "CONFLICT",
+                "message": "Cannot update a soft-deleted file",
+                "details": {"reason": "file_deleted"},
+            }
+        },
+    )
+
+
+class TestFileDeleted:
+    def test_a_409_with_the_file_deleted_reason_raises_file_deleted_error(
+        self, client: DataHubClient
+    ) -> None:
+        _send(client, _file_deleted())
+
+        with pytest.raises(FileDeletedError) as exc_info:
+            client.update_file(7, status="completed")
+
+        assert str(exc_info.value) == "Cannot update a soft-deleted file"
+        assert exc_info.value.status_code == 409
+        assert exc_info.value.detail is not None
+        assert exc_info.value.detail.details == {"reason": "file_deleted"}
+
+    def test_it_is_an_api_error_so_a_409_check_still_sees_it(self, client: DataHubClient) -> None:
+        _send(client, _file_deleted())
+
+        with pytest.raises(ApiError) as exc_info:
+            client.update_file(7, status="processing")
+
+        assert isinstance(exc_info.value, FileDeletedError)
+
+    def test_it_is_not_retried(self, client: DataHubClient, sleep: MagicMock) -> None:
+        session = _send(client, _file_deleted())
+
+        with pytest.raises(FileDeletedError):
+            client.update_file(7, status="completed")
+
+        assert session.call_count == 1
+        sleep.assert_not_called()
+
+    def test_another_409_stays_a_plain_api_error(self, client: DataHubClient) -> None:
+        _send(
+            client,
+            _response(409, body={"error": {"code": "CONFLICT", "message": "Cannot transition"}}),
+        )
+
+        with pytest.raises(ApiError) as exc_info:
+            client.update_file(7, status="completed")
+
+        assert not isinstance(exc_info.value, FileDeletedError)
+
+    def test_a_409_for_a_deleted_run_stays_a_plain_api_error(self, client: DataHubClient) -> None:
+        _send(
+            client,
+            _response(
+                409,
+                body={
+                    "error": {
+                        "code": "CONFLICT",
+                        "message": "Cannot add files to a soft-deleted run",
+                        "details": {"reason": "run_deleted"},
+                    }
+                },
+            ),
+        )
+
+        with pytest.raises(ApiError) as exc_info:
+            client.create_file("inst", "run-1", "bucket", "inst/run-1/a.nd2", "a.nd2")
+
+        assert not isinstance(exc_info.value, FileDeletedError)
+
+    def test_a_create_response_carries_deleted_at(self, client: DataHubClient) -> None:
+        _send(client, _response(200, body={**FILE, "deleted_at": "2026-11-20T10:00:00.000Z"}))
+
+        created = client.create_file("inst", "run-1", "bucket", "inst/run-1/a.nd2", "a.nd2")
+
+        assert created.deleted_at is not None
+        assert created.deleted_at.year == 2026
+
+    def test_a_response_without_deleted_at_parses_as_active(self, client: DataHubClient) -> None:
+        # A server that has not shipped the field yet.
+        _send(client, _response(200, body=FILE))
+
+        created = client.create_file("inst", "run-1", "bucket", "inst/run-1/a.nd2", "a.nd2")
+
+        assert created.deleted_at is None
+
+
+class TestSourceFileId:
+    def test_create_file_sends_the_source(self, client: DataHubClient) -> None:
+        session = _send(client, _response(201, body=FILE))
+
+        client.create_file(
+            "inst",
+            "run-1",
+            "bucket",
+            "inst/run-1/a.jpg",
+            "a.jpg",
+            category="processed",
+            source_file_id=41,
+        )
+
+        assert session.call_args.kwargs["json"]["source_file_id"] == 41
+
+    def test_create_file_sends_no_source_by_default(self, client: DataHubClient) -> None:
+        session = _send(client, _response(201, body=FILE))
+
+        client.create_file("inst", "run-1", "bucket", "inst/run-1/a.nd2", "a.nd2")
+
+        assert "source_file_id" not in session.call_args.kwargs["json"]
 
 
 # A run ID is a folder name in the S3 key, so it can hold characters that mean

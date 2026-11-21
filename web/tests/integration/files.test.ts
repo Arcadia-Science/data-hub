@@ -32,6 +32,7 @@ import {
 // Tests drive each through its full lifecycle to verify the state machine.
 describe("Files API", () => {
   let token: string;
+  let tokenId: string;
   // Use a processable instrument_type so reprocess eligibility reaches
   // the Lambda-config check (see `isProcessableInstrumentType`).
   const instrumentId = "akta-fplc";
@@ -43,7 +44,7 @@ describe("Files API", () => {
 
   beforeAll(async () => {
     await resetDb();
-    ({ token } = await seedTestUser());
+    ({ token, tokenId } = await seedTestUser());
 
     const db = getTestDb();
     await db.insert(instruments).values({
@@ -970,15 +971,115 @@ describe("Files API", () => {
     expect(data.deleted_at).toBeTruthy();
   });
 
-  // Once a file has been uploaded to S3, it can only be removed via the
-  // run-level DELETE. Per-file DELETE is limited to pre-upload states so
-  // soft-deletion stays coherent at the run boundary.
-  it("DELETE rejects dismissal of uploaded files", async () => {
-    const res = await api(`/api/v1/files/${fileId}`, {
-      method: "DELETE",
-      token,
+  // A file that reached S3 can be deleted too. Its row records the token that
+  // did it, and the object stays in the bucket. These tests use runs of their
+  // own, because `fileId` must stay active for the reprocess tests below.
+  describe("DELETE of a file that is past upload", () => {
+    async function seedUploadedFile(runName: string, filename: string) {
+      const deleteRunId = `delete-${runName}`;
+      await api(`/api/v1/instruments/${instrumentId}/runs`, {
+        method: "POST",
+        token,
+        body: { run_id: deleteRunId, source: "lambda" },
+      });
+      const created = await api(
+        `/api/v1/instruments/${instrumentId}/runs/${deleteRunId}/files`,
+        {
+          method: "POST",
+          token,
+          body: {
+            s3_bucket: TEST_RAW_BUCKET,
+            s3_key: `${instrumentId}/${deleteRunId}/${filename}`,
+            filename,
+            size_bytes: 10,
+          },
+        }
+      );
+      expect(created.status).toBe(201);
+      return { runId: deleteRunId, file: await created.json() };
+    }
+
+    it("soft-deletes an uploaded file and records the token that did it", async () => {
+      const { file } = await seedUploadedFile("uploaded", "data.csv");
+      expect(file.status).toBe("uploaded");
+
+      const res = await api(`/api/v1/files/${file.id}`, {
+        method: "DELETE",
+        token,
+      });
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.deleted_at).toBeTruthy();
+      expect(data.already_applied).toBe(false);
+      fileDismissed.parse(data);
+
+      const [row] = await getTestDb()
+        .select()
+        .from(schemaFiles)
+        .where(eq(schemaFiles.id, file.id));
+      expect(row.deletedAt).not.toBeNull();
+      expect(row.deletedBy).toBeNull();
+      expect(row.deletedByToken).toBe(tokenId);
+      // The row keeps its S3 location, so the object stays reachable.
+      expect(row.s3Key).toBe(file.s3_key);
+      expect(row.status).toBe("uploaded");
     });
-    expect(res.status).toBe(409);
+
+    it.each([
+      "queued",
+      "processing",
+    ] as const)("returns 409 for a file that is %s", async (status) => {
+      const { file } = await seedUploadedFile(status, "data.csv");
+      await getTestDb()
+        .update(schemaFiles)
+        .set({
+          status,
+          processingStartedAt: status === "processing" ? new Date() : null,
+          queuedAt: status === "queued" ? new Date() : null,
+        })
+        .where(eq(schemaFiles.id, file.id));
+
+      const res = await api(`/api/v1/files/${file.id}`, {
+        method: "DELETE",
+        token,
+      });
+      expect(res.status).toBe(409);
+      const data = await res.json();
+      expect(data.error.code).toBe("CONFLICT");
+      expect(data.error.message).toContain("Wait for processing to finish");
+      expect(data.error.details.reason).toBe("file_processing");
+
+      const [row] = await getTestDb()
+        .select({ deletedAt: schemaFiles.deletedAt })
+        .from(schemaFiles)
+        .where(eq(schemaFiles.id, file.id));
+      expect(row.deletedAt).toBeNull();
+    });
+
+    it("returns 409 with run_deleted for a file of a deleted run", async () => {
+      const { runId: goneRunId, file } = await seedUploadedFile(
+        "gone",
+        "data.csv"
+      );
+      await api(`/api/v1/instruments/${instrumentId}/runs/${goneRunId}`, {
+        method: "DELETE",
+        token,
+      });
+
+      const res = await api(`/api/v1/files/${file.id}`, {
+        method: "DELETE",
+        token,
+      });
+      expect(res.status).toBe(409);
+      const data = await res.json();
+      expect(data.error.details.reason).toBe("run_deleted");
+
+      const [row] = await getTestDb()
+        .select({ deletedAt: schemaFiles.deletedAt })
+        .from(schemaFiles)
+        .where(eq(schemaFiles.id, file.id));
+      expect(row.deletedAt).toBeNull();
+    });
   });
 
   it("DELETE returns 404 for nonexistent file", async () => {
