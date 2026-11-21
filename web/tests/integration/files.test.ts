@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { adoptPreUploadFile } from "@/lib/api/files";
-import { fileDetail, fileDismissed, runReprocessed } from "@/lib/api/openapi";
+import { fileDeleted, fileDetail, runReprocessed } from "@/lib/api/openapi";
 import {
   instrumentRuns,
   instruments,
@@ -957,7 +957,8 @@ describe("Files API", () => {
     const data = await res.json();
     expect(data.deleted_at).toBeTruthy();
     expect(data.already_applied).toBe(false);
-    fileDismissed.parse(data);
+    expect(data.linked).toEqual([]);
+    fileDeleted.parse(data);
   });
 
   it("DELETE is idempotent — re-dismissing an already-deleted file succeeds", async () => {
@@ -1011,7 +1012,13 @@ describe("Files API", () => {
       const data = await res.json();
       expect(data.deleted_at).toBeTruthy();
       expect(data.already_applied).toBe(false);
-      fileDismissed.parse(data);
+      // The response names the token the way a deleted run does.
+      expect(data.deleted_by).toBeNull();
+      expect(data.deleted_by_token).toEqual({
+        id: tokenId,
+        name: expect.any(String),
+      });
+      fileDeleted.parse(data);
 
       const [row] = await getTestDb()
         .select()

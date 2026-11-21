@@ -1,4 +1,9 @@
 import type { AuthInfo } from "@modelcontextprotocol/server";
+import {
+  loadTokenRefs,
+  type TokenRef,
+  tokenRefFor,
+} from "@/lib/api/file-deleters";
 import { lookupRunByNaturalKey, type RunFile } from "@/lib/api/instrument-runs";
 import { userIsAdmin } from "@/lib/api/user-admin";
 import { isStalledProcessing } from "@/lib/runs/stalled-processing";
@@ -37,8 +42,12 @@ export function getMcpUserId(
 // Trim a file row to the fields useful to an LLM listing a run's files.
 // Internal S3 location (`s3Bucket`/`s3Key`) and the potentially large
 // `metadata` jsonb are intentionally dropped — callers that need full detail
-// for a specific file use the `get_file` tool.
-export function toMcpFile(f: RunFile) {
+// for a specific file use the `get_file` tool. `deleterTokens` names the token
+// behind `deletedByToken`; see `toMcpFiles`.
+export function toMcpFile(
+  f: RunFile,
+  deleterTokens: ReadonlyMap<string, TokenRef>
+) {
   return {
     id: f.id,
     filename: f.filename,
@@ -53,7 +62,19 @@ export function toMcpFile(f: RunFile) {
     uploadedAt: f.uploadedAt,
     processedAt: f.processedAt,
     stalled: isStalledProcessing(f),
+    // Set only on a deleted file, which a list shows when asked to. Read like
+    // a run's deleter: a user ID, or the token's id and name.
+    deletedAt: f.deletedAt,
+    deletedBy: f.deletedBy,
+    deletedByToken: tokenRefFor(deleterTokens, f.deletedByToken),
   };
+}
+
+// `toMcpFile` for a list of rows, naming the tokens that deleted any of them
+// with one query.
+export async function toMcpFiles(rows: readonly RunFile[]) {
+  const deleterTokens = await loadTokenRefs(rows.map((f) => f.deletedByToken));
+  return rows.map((f) => toMcpFile(f, deleterTokens));
 }
 
 // Reads `users.is_admin` on every call. Unlike `requireMcpWrite`, a missing

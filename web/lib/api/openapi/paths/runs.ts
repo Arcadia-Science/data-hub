@@ -23,6 +23,7 @@ import {
   runCreated,
   runDeleted,
   runDetail,
+  runDetailQuery,
   runListQuery,
   runListResponse,
   runQueuedCancelled,
@@ -100,10 +101,10 @@ registry.registerPath({
   path: "/instruments/{instrumentId}/runs/{runId}",
   operationId: "getInstrumentRun",
   summary: "Get a run",
-  description: scoped("runs:read"),
+  description: `${scoped("runs:read")} Deleted files are left out unless you pass \`include_deleted=true\`.`,
   tags: tag,
   security: bearerSecurity,
-  request: { params: runParams },
+  request: { params: runParams, query: runDetailQuery },
   responses: ok("Run detail.", runDetail),
 });
 registry.registerPath({

@@ -43,7 +43,7 @@ interface Fixture {
 
 interface RouteCase {
   body?: (f: Fixture) => unknown;
-  method: "POST" | "PATCH" | "DELETE";
+  method: "GET" | "POST" | "PATCH" | "DELETE";
   name: string;
   path: (f: Fixture) => string;
 }
@@ -179,9 +179,36 @@ const ROUTES: RouteCase[] = [
     path: (f) => `${RUN_PATH}/comments/${f.commentId}`,
   },
   {
-    name: "dismiss a file",
+    name: "delete a file",
     method: "DELETE",
     path: (f) => `/api/v1/files/${f.fileId}`,
+  },
+  {
+    name: "delete a file and its linked files",
+    method: "DELETE",
+    path: (f) => `/api/v1/files/${f.fileId}?include_linked=true`,
+  },
+  {
+    name: "restore a file",
+    method: "POST",
+    path: (f) => `/api/v1/files/${f.fileId}/restore`,
+  },
+  {
+    name: "delete several files of a run",
+    method: "POST",
+    path: () => `${RUN_PATH}/files/delete`,
+    body: (f) => ({ file_ids: [f.fileId], include_linked: true }),
+  },
+  {
+    name: "restore several files of a run",
+    method: "POST",
+    path: () => `${RUN_PATH}/files/restore`,
+    body: (f) => ({ file_ids: [f.fileId], include_linked: true }),
+  },
+  {
+    name: "list the files linked to some files of a run",
+    method: "GET",
+    path: (f) => `${RUN_PATH}/files/linked?file_ids=${f.fileId}`,
   },
   {
     name: "delete a run",

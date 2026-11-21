@@ -494,5 +494,32 @@ describe("MCP OAuth authorization-code flow", () => {
     expect(claimData.result.content[0].text).toMatch(
       /missing required scope: write/
     );
+
+    // Deleting and restoring files are writes too. The run doesn't need to
+    // exist: the scope check comes first.
+    for (const [name, args] of [
+      [
+        "delete_files",
+        { instrumentId, runId: "does-not-matter", fileIds: [1] },
+      ],
+      [
+        "restore_files",
+        { instrumentId, runId: "does-not-matter", fileIds: [1] },
+      ],
+      ["dismiss_file", { fileId: 1 }],
+    ] as const) {
+      const res = await api("/mcp/v1", {
+        method: "POST",
+        token: accessToken,
+        headers: MCP_HEADERS,
+        body: jsonRpc("tools/call", { name, arguments: args }),
+      });
+      expect(res.status).toBe(200);
+      const data = await parseSseResponse(res);
+      expect(data.result?.isError, name).toBe(true);
+      expect(data.result.content[0].text, name).toMatch(
+        /missing required scope: write/
+      );
+    }
   });
 });

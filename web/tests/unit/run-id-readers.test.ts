@@ -26,7 +26,7 @@ function paramDestructurings(source: string): string[] {
 
 describe("files that read a run ID from the route", () => {
   it("covers the run routes and the run page", () => {
-    expect(RUN_ID_FILES.length).toBeGreaterThanOrEqual(14);
+    expect(RUN_ID_FILES.length).toBeGreaterThanOrEqual(17);
     expect(RUN_ID_FILES).toContain(
       path.join(
         "(app)",
@@ -42,6 +42,24 @@ describe("files that read a run ID from the route", () => {
         file.endsWith(`${path.sep}restore${path.sep}route.ts`)
       )
     ).toBe(true);
+  });
+
+  it("covers the routes that delete, restore and list the linked files of a run's files", () => {
+    const filesRoute = (name: string) =>
+      path.join(
+        "api",
+        "v1",
+        "instruments",
+        "[instrumentId]",
+        "runs",
+        "[runId]",
+        "files",
+        name,
+        "route.ts"
+      );
+    for (const name of ["delete", "restore", "linked"]) {
+      expect(RUN_ID_FILES).toContain(filesRoute(name));
+    }
   });
 
   it.each(RUN_ID_FILES)("%s reads the run ID with readRunIdParam", (file) => {
