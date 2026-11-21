@@ -76,7 +76,7 @@ function statusesAtStage(stage: FileUploadStage): FileStatus[] {
 }
 
 // Files still only on the instrument PC. These can be requested for upload,
-// dismissed, or adopted by an upload that arrives later.
+// deleted, or adopted by an upload that arrives later.
 export const PRE_UPLOAD_FILE_STATUSES: readonly FileStatus[] =
   statusesAtStage("pre_upload");
 

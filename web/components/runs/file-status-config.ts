@@ -14,6 +14,16 @@ import {
 } from "lucide-react";
 import type { RunFileRow } from "@/lib/api/instrument-runs";
 
+// The gray of a deleted file's text, #6b6b6b in light mode: 5.3 to 1 against a
+// white row and 5.0 to 1 against a selected one. Fading the whole row to half
+// opacity, as deleted rows used to be, dropped the text to about 3.7 to 1. The
+// dark theme's muted text is 5.9 to 1 against its row.
+export const DELETED_TEXT_CLASS = "text-[#6b6b6b] dark:text-muted-foreground";
+
+// The gray type badge of a deleted file: #5c5c5c on #f0f0f0 is 5.9 to 1.
+export const DELETED_BADGE_CLASS =
+  "bg-[#f0f0f0] text-[#5c5c5c] dark:bg-muted dark:text-muted-foreground";
+
 export type FileStatusDisplayKey =
   | "not_uploaded"
   | "waiting_upload"
@@ -25,7 +35,7 @@ export type FileStatusDisplayKey =
   | "stalled"
   | "completed"
   | "failed"
-  | "dismissed";
+  | "deleted";
 
 export type FileStatusLegendSectionKey =
   | "waiting"
@@ -52,7 +62,7 @@ export function getFileStatusKey(
   >
 ): FileStatusDisplayKey {
   if (file.deletedAt !== null) {
-    return "dismissed";
+    return "deleted";
   }
   if (file.stalledProcessing) {
     return "stalled";
@@ -150,11 +160,11 @@ export const FILE_STATUS_CONFIG: Record<
     Icon: CircleAlert,
     className: "text-destructive",
   },
-  dismissed: {
-    label: "Dismissed",
-    description: "removed from queue",
+  deleted: {
+    label: "Deleted",
+    description: "hidden from this run, can be restored",
     Icon: Trash2,
-    className: "text-muted-foreground opacity-60",
+    className: DELETED_TEXT_CLASS,
   },
 };
 
@@ -181,6 +191,6 @@ export const FILE_STATUS_LEGEND_SECTIONS: {
   {
     key: "removed",
     title: "Removed",
-    statuses: ["dismissed"],
+    statuses: ["deleted"],
   },
 ];

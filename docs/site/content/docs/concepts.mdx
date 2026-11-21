@@ -151,15 +151,17 @@ How files get from the instrument to cloud storage:
 
 What the watcher does with files already in the watch folder the first time it connects to an environment. In `production` it uploads them (`full`). In `staging` and `preview` it records them and skips them (`new-only`), so test environments don’t fill up with old files. See the [Configuration reference](/docs/configuration-reference#initial-scan).
 
-### Dismiss [#dismiss]
+### Delete a file [#delete-file]
 
-Dismissing a file that the watcher found but didn’t upload, or one whose upload failed, tells the watcher not to upload it. A dismissed file stays dismissed, even if the watcher reports it again. Dismissing differs from deleting: the file never reached Data Hub storage, so there’s nothing to restore.
+Deleting a file hides it from its run, from downloads, and from the API, and remembers who deleted it. The file stays in storage, and **Restore** brings it back. Anyone signed in can delete and restore files. Deleting a raw file can also delete the files linked to it, such as the videos and preview images made from it.
 
-[Approve or dismiss files](/docs/manage-watchers#approving-manual-uploads) explains how, and when a new file at the same path shows up again.
+A deleted file keeps its name and path in the run. If the watcher reports the same file again, it stays deleted. A different file at the same path is added as a new file. When the file never reached Data Hub storage, for example one the watcher found but didn’t upload, or one whose upload failed, deleting it also tells the watcher not to upload it.
+
+[Delete and restore files](/docs/browse-runs#delete-files) explains how. [Approve or delete files](/docs/manage-watchers#approving-manual-uploads) covers what happens when a new file shows up at the same path.
 
 ### Soft delete [#soft-delete]
 
-Data Hub marks things deleted instead of erasing them, so their history stays for auditing. Deleting a run hides it from run lists without removing its stored files, and **Show deleted runs** brings it back into view. It also cancels any uploads that were requested for the run’s files, and restoring the run doesn’t bring them back. Deregistering a watcher keeps its events and heartbeats. Anyone signed in can restore a deleted run from the run page.
+Data Hub marks things deleted instead of erasing them, so their history stays for auditing. Deleting a run hides it from run lists without removing its stored files, and **Show deleted runs** brings it back into view. It also cancels any uploads that were requested for the run’s files, and restoring the run doesn’t bring them back. Deregistering a watcher keeps its events and heartbeats. Anyone signed in can restore a deleted run from the run page. Deleting a file works the same way; see [Delete a file](#delete-file).
 
 ## People and access [#people-and-access]
 

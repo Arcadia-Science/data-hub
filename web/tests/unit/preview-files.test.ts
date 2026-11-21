@@ -70,3 +70,57 @@ describe("previewFilesOf", () => {
     expect(entry.kind).toBe("csv");
   });
 });
+
+describe("previewFilesOf media", () => {
+  it("shows images, MP4 video, and PDFs as they are", () => {
+    const [jpg, png, webp, gif, mp4, pdf] = previewFilesOf([
+      row({ id: 1, filename: "a.jpg" }),
+      row({ id: 2, filename: "b.PNG" }),
+      row({ id: 3, filename: "c.webp" }),
+      row({ id: 4, filename: "d.gif" }),
+      row({ id: 5, filename: "e.mp4" }),
+      row({ id: 6, filename: "f.pdf" }),
+    ]);
+    expect([jpg, png, webp, gif].map((entry) => entry.media)).toEqual([
+      "image",
+      "image",
+      "image",
+      "image",
+    ]);
+    expect(mp4.media).toBe("video");
+    expect(pdf.media).toBe("pdf");
+    // They load themselves, not as text.
+    expect([jpg, mp4, pdf].map((entry) => entry.kind)).toEqual([
+      null,
+      null,
+      null,
+    ]);
+  });
+
+  it("leaves a TIFF without a way to show it", () => {
+    const [tif] = previewFilesOf([
+      row({ id: 1, filename: "capture.tif", contentType: "image/tiff" }),
+    ]);
+    expect(tif.media).toBeNull();
+    expect(tif.kind).toBeNull();
+  });
+
+  it("shows nothing for a file still on the instrument PC", () => {
+    const [entry] = previewFilesOf([
+      row({ id: 1, filename: "a.jpg", status: "detected" }),
+    ]);
+    expect(entry.media).toBeNull();
+  });
+
+  it("keeps a deleted picture viewable", () => {
+    const [entry] = previewFilesOf([
+      row({ id: 1, filename: "a.jpg", deletedAt: new Date() }),
+    ]);
+    expect(entry.media).toBe("image");
+  });
+
+  it("carries the row so the window can list its details", () => {
+    const source = row({ id: 1, filename: "a.jpg" });
+    expect(previewFilesOf([source])[0].row).toBe(source);
+  });
+});

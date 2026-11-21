@@ -622,6 +622,9 @@ describe("same-named files from different folders", () => {
 
       const upload = await requestUpload(runId, reported(1));
       expect(upload.status).toBe(409);
+      expect((await upload.json()).error.message).toContain(
+        "A deleted file may already use that path."
+      );
       const rows = await runFiles(runId);
       expect(rows).toHaveLength(1);
       expect(rows[0]?.deleted_at).toBeTruthy();

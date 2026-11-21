@@ -136,7 +136,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     return apiError(
       409,
       CONFLICT,
-      `Cannot store a file for '${incoming.relativePath}'. A dismissed file may already use that path.`
+      `Cannot store a file for '${incoming.relativePath}'. A deleted file may already use that path.`
     );
   }
 

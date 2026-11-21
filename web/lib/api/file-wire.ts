@@ -4,10 +4,10 @@ import type {
   DeletedLinkedFile,
   FileActionFailure,
   LinkedFile,
-  LinkedFileRelation,
   RestoredLinkedFile,
   RestoreFileResult,
 } from "@/lib/api/file-deletion";
+import type { LinkedFileRelation } from "@/lib/runs/file-links";
 
 // The REST shape of deleting and restoring files. A person and a token sit in
 // separate fields, the way the runs API reports who deleted a run: `deleted_by`

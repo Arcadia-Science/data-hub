@@ -1,15 +1,11 @@
-import { settleWithConcurrency } from "@/lib/runs/settle-with-concurrency";
-
-// Client-side calls that request or dismiss uploads of a run's files, shared
-// by the files table and the run page's "couldn't upload" banner so both send
-// the same requests. Client-safe: plain `fetch`, no server imports.
+// Client-side calls that request uploads of a run's files, shared by the files
+// table and the run page's "couldn't upload" banner so both send the same
+// requests. Deleting files has its own calls in `run-file-requests.ts`.
+// Client-safe: plain `fetch`, no server imports.
 
 // The most file IDs one POST .../request-upload takes. The route refuses more
 // (`requestRunUploads`), so larger requests go in batches of this size.
 export const MAX_UPLOAD_FILE_IDS = 100;
-
-// Dismiss sends one DELETE per file; this many run at a time.
-const DISMISS_CONCURRENCY = 5;
 
 export type RequestUploadsResult =
   | { ok: true }
@@ -41,21 +37,4 @@ export async function requestFileUploads(
     }
   }
   return { ok: true };
-}
-
-// Dismisses `fileIds`, a few at a time. Returns how many failed.
-export async function dismissFiles(
-  fileIds: readonly number[]
-): Promise<{ failed: number }> {
-  const results = await settleWithConcurrency(
-    fileIds,
-    DISMISS_CONCURRENCY,
-    (fileId) => fetch(`/api/v1/files/${fileId}`, { method: "DELETE" })
-  );
-  const failed = results.filter(
-    (result) =>
-      result.status === "rejected" ||
-      (result.status === "fulfilled" && !result.value.ok)
-  ).length;
-  return { failed };
 }

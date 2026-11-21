@@ -22,7 +22,7 @@ export interface AnalyticsEvents {
   comment_edited: SurfaceEvent;
   file_downloaded: SurfaceEvent & { category: string };
   // Sent from the browser, so it has no `user_id`. `kind` is csv, tsv, json,
-  // or text.
+  // text, image, video, or pdf.
   file_previewed: { category: string; kind: string };
   file_reprocessed: SurfaceEvent;
   mcp_connect: {
