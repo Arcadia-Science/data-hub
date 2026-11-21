@@ -220,6 +220,17 @@ export async function reviveProcessedFile(
   return { kind: "unchanged", row: current ?? null };
 }
 
+// Fetches a file by numeric ID, deleted or not. A deleted file stays readable
+// by its ID, as it stays downloadable.
+export async function getFileById(fileId: number): Promise<FileRow | null> {
+  const [file] = await db
+    .select()
+    .from(files)
+    .where(eq(files.id, fileId))
+    .limit(1);
+  return file ?? null;
+}
+
 // Fetches an active (not soft-deleted) file by numeric ID.
 export async function getActiveFileById(
   fileId: number

@@ -40,7 +40,7 @@ import {
   requireMcpWrite,
   resolveAttributionTarget,
   structuredResult,
-  toMcpFile,
+  toMcpFiles,
 } from "@/lib/mcp/tools/helpers";
 import { validateSearchRunsMetadataFilters } from "@/lib/mcp/validate-run-filters";
 import { expandRunStatusFilters } from "@/lib/runs/run-status";
@@ -148,8 +148,8 @@ export function registerRunTools(server: McpServer) {
       if (extras.has("files")) {
         tasks.push(
           getRunFilesPage(run.id, { page: 1, perPage: 50 }).then(
-            ({ data, pagination }) => {
-              payload.files = data.map(toMcpFile);
+            async ({ data, pagination }) => {
+              payload.files = await toMcpFiles(data);
               payload.filesPagination = pagination;
             }
           )
@@ -191,7 +191,7 @@ export function registerRunTools(server: McpServer) {
   server.registerTool(
     listRunFilesTool.name,
     toolRegistrationConfig(listRunFilesTool),
-    async ({ instrumentId, runId, status, page, perPage }) => {
+    async ({ instrumentId, runId, status, includeDeleted, page, perPage }) => {
       const run = await lookupRunByNaturalKey(instrumentId, runId);
       if (!run) {
         return errorResult(
@@ -201,9 +201,10 @@ export function registerRunTools(server: McpServer) {
       const { data, pagination } = await getRunFilesPage(run.id, {
         page: page ?? 1,
         perPage: perPage ?? 50,
+        includeDeleted: includeDeleted ?? false,
         ...(status ? { statuses: status } : {}),
       });
-      return structuredResult({ data: data.map(toMcpFile), pagination });
+      return structuredResult({ data: await toMcpFiles(data), pagination });
     }
   );
 

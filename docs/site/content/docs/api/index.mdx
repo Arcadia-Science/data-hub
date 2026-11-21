@@ -78,9 +78,20 @@ A token acts under its own name, not as a person, so responses name the token wh
 
 - A comment posted by a token has `user: null` and a `token` object with the token’s `id` and `name`. A comment posted by a person has `token: null`.
 - A run deleted by a token has `deleted_by_token` set, alongside `deleted_at`.
+- A file deleted by a token has `deleted_by_token` set, alongside `deleted_at`, and `deleted_by` null. A file deleted by a person has `deleted_by` set to their user ID and `deleted_by_token` null.
 - A lab notebook created, last edited, or deleted by a token has `created_by_token`, `updated_by_token`, or `deleted_by_token` set, and the matching person field null. A run added to a lab notebook by a token has `linked_by_token` set and `linked_by` null.
 
 Read both fields when you display who did something. See [How a token acts](/docs/manage-tokens#how-a-token-acts).
+
+## Deleted files [#deleted-files]
+
+Deleting a file hides it from its run. The file stays in storage, records who deleted it, and can be restored. A deleted file is left out of the run’s downloads and of the `files` that `GET /instruments/:id/runs/:runId` returns. Pass `include_deleted=true` to that route to list deleted files too, each with `deleted_at` and who deleted it. A deleted file keeps its ID, so you can still download it by ID.
+
+- `DELETE /files/:id` deletes one file, and `POST /files/:id/restore` brings it back. Pass `include_linked=true` to take along the files linked to it. For a raw file, those are the processed files made from it and the `run.json` saved with its capture, which a delete takes only when every raw file in that folder is being deleted. A restore also brings back the raw file a processed file was made from.
+- `POST /instruments/:id/runs/:runId/files/delete` and `.../files/restore` take `file_ids` (1 to 100) and `include_linked`, and answer with a result for each file in the order you sent them. A file that can’t be changed, for example because it’s still processing or another file now has its name, gets a `409` result and doesn’t stop the others.
+- `GET /instruments/:id/runs/:runId/files/linked?file_ids=1,2` lists the files that a delete would take along, so you can show them first. Add `for=restore` to list the deleted files a restore would bring back.
+
+All of them need the `files:delete` scope. A file that’s queued or processing can’t be deleted until it finishes, and the files of a deleted run can’t be deleted or restored.
 
 ## Send notifications [#send-notifications]
 

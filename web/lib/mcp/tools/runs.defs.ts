@@ -160,7 +160,7 @@ export const listRunFilesTool = {
   scope: "runs:read",
   title: "List Run Files",
   description:
-    "List files associated with a run (raw uploads and processed artifacts) with their status, category, and size. Paginated — runs can have thousands of files. Filter by status to gather fileIds for request_run_upload (e.g. status=['detected', 'upload_failed']). An upload_failed file is one the watcher gave up on; its errorMessage and uploadFailureReason say why. Use get_file for full per-file detail including metadata and S3 location.",
+    "List files associated with a run (raw uploads and processed artifacts) with their status, category, and size. Paginated — runs can have thousands of files. Deleted files are left out unless includeDeleted is true; each deleted file has deletedAt and who deleted it, and restore_files brings it back. Filter by status to gather fileIds for request_run_upload (e.g. status=['detected', 'upload_failed']). An upload_failed file is one the watcher gave up on; its errorMessage and uploadFailureReason say why. Use get_file for full per-file detail including metadata and S3 location.",
   outputSchema: listRunFilesOutputSchema,
   inputSchema: {
     instrumentId: z.string().describe("Instrument identifier"),
@@ -171,6 +171,10 @@ export const listRunFilesTool = {
       .describe(
         "Filter to one or more file statuses (OR'd). 'queued' files are waiting for a free processing slot after a reprocess request. Omit to return all statuses."
       ),
+    includeDeleted: z
+      .boolean()
+      .optional()
+      .describe("Include deleted files (default: false)"),
     page: z
       .number()
       .int()

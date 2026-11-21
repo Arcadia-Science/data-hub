@@ -949,7 +949,18 @@
               "string",
               "null"
             ],
-            "format": "date-time"
+            "format": "date-time",
+            "description": "Set when the file is deleted. The run lists deleted files only with `include_deleted=true`."
+          },
+          "deleted_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The user ID of the person who deleted the file."
+          },
+          "deleted_by_token": {
+            "$ref": "#/components/schemas/TokenActor"
           }
         },
         "required": [
@@ -973,7 +984,9 @@
           "download_url",
           "created_at",
           "file_created_at",
-          "deleted_at"
+          "deleted_at",
+          "deleted_by",
+          "deleted_by_token"
         ]
       },
       "RunUpdated": {
@@ -1748,6 +1761,569 @@
           "processing_started_at",
           "created_at",
           "file_created_at",
+          "deleted_at"
+        ]
+      },
+      "FileDeleted": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "deleted_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deleted_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The user ID of the person who deleted the file."
+          },
+          "deleted_by_token": {
+            "$ref": "#/components/schemas/TokenActor"
+          },
+          "already_applied": {
+            "type": "boolean",
+            "description": "True when the file was already deleted, so nothing changed. `deleted_at` and the deleter are then the first delete's."
+          },
+          "linked": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LinkedFileDeleted"
+            },
+            "description": "The files deleted with this one, when `include_linked=true`. Files that were already deleted aren't listed."
+          }
+        },
+        "required": [
+          "id",
+          "filename",
+          "deleted_at",
+          "deleted_by",
+          "deleted_by_token",
+          "already_applied",
+          "linked"
+        ]
+      },
+      "LinkedFileDeleted": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "id": {
+            "type": "integer"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "relation": {
+            "type": "string",
+            "enum": [
+              "video",
+              "preview_image",
+              "output",
+              "sidecar",
+              "made_from"
+            ],
+            "description": "How the linked file relates to the file it came with. `video`, `preview_image` and `output` are files made from a raw file, `sidecar` is the `run.json` saved with its capture, and `made_from` is the raw file a processed file was made from (restoring only)."
+          },
+          "already_applied": {
+            "type": "boolean",
+            "enum": [
+              false
+            ]
+          },
+          "deleted_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "ok",
+          "id",
+          "filename",
+          "relation",
+          "already_applied",
+          "deleted_at"
+        ]
+      },
+      "FileRestored": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "deleted_at": {
+            "type": "null"
+          },
+          "already_applied": {
+            "type": "boolean",
+            "description": "True when the file wasn't deleted, so nothing changed."
+          },
+          "linked": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LinkedFileRestored"
+            },
+            "description": "The deleted files restored with this one, when `include_linked=true`, and the ones that couldn't be."
+          }
+        },
+        "required": [
+          "id",
+          "filename",
+          "deleted_at",
+          "already_applied",
+          "linked"
+        ]
+      },
+      "LinkedFileRestored": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "ok": {
+                "type": "boolean",
+                "enum": [
+                  true
+                ]
+              },
+              "id": {
+                "type": "integer"
+              },
+              "filename": {
+                "type": "string"
+              },
+              "deleted_at": {
+                "type": "null"
+              },
+              "already_applied": {
+                "type": "boolean",
+                "description": "True when the file wasn't deleted, so nothing changed."
+              },
+              "relation": {
+                "type": "string",
+                "enum": [
+                  "video",
+                  "preview_image",
+                  "output",
+                  "sidecar",
+                  "made_from"
+                ],
+                "description": "How the linked file relates to the file it came with. `video`, `preview_image` and `output` are files made from a raw file, `sidecar` is the `run.json` saved with its capture, and `made_from` is the raw file a processed file was made from (restoring only)."
+              }
+            },
+            "required": [
+              "ok",
+              "id",
+              "filename",
+              "deleted_at",
+              "already_applied",
+              "relation"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "ok": {
+                "type": "boolean",
+                "enum": [
+                  false
+                ]
+              },
+              "id": {
+                "type": "integer"
+              },
+              "filename": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The file's name, or null when there is no such file."
+              },
+              "status": {
+                "type": "integer",
+                "description": "`404` or `409`."
+              },
+              "error": {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "details": {
+                    "type": "object",
+                    "additionalProperties": {}
+                  }
+                },
+                "required": [
+                  "code",
+                  "message"
+                ]
+              },
+              "relation": {
+                "type": "string",
+                "enum": [
+                  "video",
+                  "preview_image",
+                  "output",
+                  "sidecar",
+                  "made_from"
+                ],
+                "description": "How the linked file relates to the file it came with. `video`, `preview_image` and `output` are files made from a raw file, `sidecar` is the `run.json` saved with its capture, and `made_from` is the raw file a processed file was made from (restoring only)."
+              }
+            },
+            "required": [
+              "ok",
+              "id",
+              "filename",
+              "status",
+              "error",
+              "relation"
+            ]
+          }
+        ]
+      },
+      "RunFilesDeleted": {
+        "type": "object",
+        "properties": {
+          "instrument_id": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FileDeleteResult"
+            },
+            "description": "One result per file, in the order sent, repeated IDs dropped. A file that can't be deleted has `ok: false` and doesn't stop the others."
+          },
+          "linked": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LinkedFileDeleted"
+            },
+            "description": "The files deleted along with the requested ones, when `include_linked` was true."
+          },
+          "counts": {
+            "type": "object",
+            "properties": {
+              "deleted": {
+                "type": "integer"
+              },
+              "already_deleted": {
+                "type": "integer"
+              },
+              "failed": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "deleted",
+              "already_deleted",
+              "failed"
+            ]
+          }
+        },
+        "required": [
+          "instrument_id",
+          "run_id",
+          "results",
+          "linked",
+          "counts"
+        ]
+      },
+      "FileDeleteResult": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "ok": {
+                "type": "boolean",
+                "enum": [
+                  true
+                ]
+              },
+              "id": {
+                "type": "integer"
+              },
+              "filename": {
+                "type": "string"
+              },
+              "deleted_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "deleted_by": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The user ID of the person who deleted the file."
+              },
+              "deleted_by_token": {
+                "$ref": "#/components/schemas/TokenActor"
+              },
+              "already_applied": {
+                "type": "boolean",
+                "description": "True when the file was already deleted, so nothing changed. `deleted_at` and the deleter are then the first delete's."
+              }
+            },
+            "required": [
+              "ok",
+              "id",
+              "filename",
+              "deleted_at",
+              "deleted_by",
+              "deleted_by_token",
+              "already_applied"
+            ]
+          },
+          {
+            "$ref": "#/components/schemas/FileActionFailure"
+          }
+        ]
+      },
+      "FileActionFailure": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "enum": [
+              false
+            ]
+          },
+          "id": {
+            "type": "integer"
+          },
+          "filename": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The file's name, or null when there is no such file."
+          },
+          "status": {
+            "type": "integer",
+            "description": "`404` or `409`."
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {
+                "type": "object",
+                "additionalProperties": {}
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ]
+          }
+        },
+        "required": [
+          "ok",
+          "id",
+          "filename",
+          "status",
+          "error"
+        ]
+      },
+      "RunFilesRestored": {
+        "type": "object",
+        "properties": {
+          "instrument_id": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FileRestoreResult"
+            },
+            "description": "One result per file, in the order sent, repeated IDs dropped. A file that can't come back has `ok: false` and doesn't stop the others."
+          },
+          "linked": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LinkedFileRestored"
+            },
+            "description": "The deleted files restored along with the requested ones, when `include_linked` was true, and the ones that couldn't be."
+          },
+          "counts": {
+            "type": "object",
+            "properties": {
+              "restored": {
+                "type": "integer"
+              },
+              "already_restored": {
+                "type": "integer"
+              },
+              "failed": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "restored",
+              "already_restored",
+              "failed"
+            ]
+          }
+        },
+        "required": [
+          "instrument_id",
+          "run_id",
+          "results",
+          "linked",
+          "counts"
+        ]
+      },
+      "FileRestoreResult": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "ok": {
+                "type": "boolean",
+                "enum": [
+                  true
+                ]
+              },
+              "id": {
+                "type": "integer"
+              },
+              "filename": {
+                "type": "string"
+              },
+              "deleted_at": {
+                "type": "null"
+              },
+              "already_applied": {
+                "type": "boolean",
+                "description": "True when the file wasn't deleted, so nothing changed."
+              }
+            },
+            "required": [
+              "ok",
+              "id",
+              "filename",
+              "deleted_at",
+              "already_applied"
+            ]
+          },
+          {
+            "$ref": "#/components/schemas/FileActionFailure"
+          }
+        ]
+      },
+      "RunFilesLinked": {
+        "type": "object",
+        "properties": {
+          "instrument_id": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "file_id": {
+                  "type": "integer"
+                },
+                "linked": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LinkedFile"
+                  }
+                }
+              },
+              "required": [
+                "file_id",
+                "linked"
+              ]
+            },
+            "description": "The linked files of each file asked about. A file with none is left out. A file linked to several of them, such as a `run.json` shared by the raw files of one folder, is listed under each."
+          }
+        },
+        "required": [
+          "instrument_id",
+          "run_id",
+          "groups"
+        ]
+      },
+      "LinkedFile": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "size_bytes": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "raw",
+              "processed"
+            ]
+          },
+          "relation": {
+            "type": "string",
+            "enum": [
+              "video",
+              "preview_image",
+              "output",
+              "sidecar",
+              "made_from"
+            ],
+            "description": "How the linked file relates to the file it came with. `video`, `preview_image` and `output` are files made from a raw file, `sidecar` is the `run.json` saved with its capture, and `made_from` is the raw file a processed file was made from (restoring only)."
+          },
+          "deleted_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "filename",
+          "size_bytes",
+          "category",
+          "relation",
           "deleted_at"
         ]
       },
@@ -3316,7 +3892,7 @@
       "get": {
         "operationId": "getInstrumentRun",
         "summary": "Get a run",
-        "description": "Requires scope `runs:read`.",
+        "description": "Requires scope `runs:read`. Deleted files are left out unless you pass `include_deleted=true`.",
         "tags": [
           "Runs"
         ],
@@ -3345,6 +3921,20 @@
             "description": "The run ID. Spaces at the start or end are ignored.",
             "name": "runId",
             "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ],
+              "description": "`true` also lists the run's deleted files, each with `deleted_at` and who deleted it. Default `false`."
+            },
+            "required": false,
+            "description": "`true` also lists the run's deleted files, each with `deleted_at` and who deleted it. Default `false`.",
+            "name": "include_deleted",
+            "in": "query"
           }
         ],
         "responses": {
@@ -6601,7 +7191,7 @@
       "delete": {
         "operationId": "deleteFile",
         "summary": "Delete a file",
-        "description": "Requires scope `files:delete`. Deletes the file from its run, whether or not it was uploaded. The file stays in storage and its row records who deleted it. Returns `409` while the file is queued or processing, unless its processing has stalled (wait for processing to finish), and `409` (`details.reason: run_deleted`) when the run was deleted. Deleting a file that is already deleted succeeds with `already_applied: true`. A token that registered a watcher may act only on instruments whose active watcher it registered, and gets 403 for any other.",
+        "description": "Requires scope `files:delete`. Deletes the file from its run, whether or not it was uploaded. The file stays in storage, its row records who deleted it, and `POST /files/{fileId}/restore` brings it back. Deleted files are left out of the run's file lists and downloads. Pass `include_linked=true` to delete the files linked to it too: for a raw file, the processed files made from it and the `run.json` saved with its capture when every raw file in that folder is being deleted. `linked` lists them. Returns `409` while the file is queued or processing, unless its processing has stalled (wait for processing to finish), and `409` (`details.reason: run_deleted`) when the run was deleted. Deleting a file that is already deleted succeeds with `already_applied: true`. A token that registered a watcher may act only on instruments whose active watcher it registered, and gets 403 for any other.",
         "tags": [
           "Files"
         ],
@@ -6619,6 +7209,20 @@
             "required": true,
             "name": "fileId",
             "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ],
+              "description": "`true` also deletes (or restores) the files linked to this one. Default `false`."
+            },
+            "required": false,
+            "description": "`true` also deletes (or restores) the files linked to this one. Default `false`.",
+            "name": "include_linked",
+            "in": "query"
           }
         ],
         "responses": {
@@ -6627,31 +7231,487 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "integer"
+                  "$ref": "#/components/schemas/FileDeleted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token does not have the required scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested resource was not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with resource state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/files/{fileId}/restore": {
+      "post": {
+        "operationId": "restoreFile",
+        "summary": "Restore a file",
+        "description": "Requires scope `files:delete`. Brings a deleted file back to its run and clears who deleted it. Pass `include_linked=true` to restore the deleted files linked to it too, which `linked` lists, each with its own result. Returns `409` (`details.reason: path_in_use`, with `details.held_by` naming the file) when another file of the run now has this file's name or path, and `409` (`details.reason: run_deleted`) when the run was deleted. Restoring a file that isn't deleted succeeds with `already_applied: true`. A token that registered a watcher may act only on instruments whose active watcher it registered, and gets 403 for any other.",
+        "tags": [
+          "Files"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "example": 1
+            },
+            "required": true,
+            "name": "fileId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ],
+              "description": "`true` also deletes (or restores) the files linked to this one. Default `false`."
+            },
+            "required": false,
+            "description": "`true` also deletes (or restores) the files linked to this one. Default `false`.",
+            "name": "include_linked",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Restore result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileRestored"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token does not have the required scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested resource was not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with resource state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/instruments/{instrumentId}/runs/{runId}/files/delete": {
+      "post": {
+        "operationId": "deleteRunFiles",
+        "summary": "Delete several files of a run",
+        "description": "Requires scope `files:delete`. Deletes up to 100 files of one run, as `DELETE /files/{fileId}` does for one. The response lists a result for each file in the order sent, so one that can't be deleted doesn't stop the others: `404` for an ID that isn't a file of this run, `409` for a file that is queued or processing (`details.reason: file_processing`) or whose run was deleted (`details.reason: run_deleted`). Set `include_linked` to delete the files linked to them too; `linked` lists those. The request itself returns `404` only when the run doesn't exist. A token that registered a watcher may act only on instruments whose active watcher it registered, and gets 403 for any other.",
+        "tags": [
+          "Files"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "example": "plate-reader"
+            },
+            "required": true,
+            "name": "instrumentId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "The run ID. Spaces at the start or end are ignored.",
+              "example": "run-2026-001"
+            },
+            "required": true,
+            "description": "The run ID. Spaces at the start or end are ignored.",
+            "name": "runId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0
                     },
-                    "filename": {
-                      "type": "string"
-                    },
-                    "deleted_at": {
-                      "type": [
-                        "string",
-                        "null"
-                      ],
-                      "format": "date-time"
-                    },
-                    "already_applied": {
-                      "type": "boolean"
-                    }
+                    "minItems": 1,
+                    "maxItems": 100,
+                    "description": "IDs of files in this run, 1 to 100. A repeated ID is handled once. An ID that isn't a file of this run gets a `404` result."
                   },
-                  "required": [
-                    "id",
-                    "filename",
-                    "deleted_at",
-                    "already_applied"
-                  ]
+                  "include_linked": {
+                    "type": "boolean",
+                    "description": "Also delete (or restore) the files linked to these. Default false."
+                  }
+                },
+                "required": [
+                  "file_ids"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Results for each file.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunFilesDeleted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token does not have the required scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested resource was not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with resource state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/instruments/{instrumentId}/runs/{runId}/files/restore": {
+      "post": {
+        "operationId": "restoreRunFiles",
+        "summary": "Restore several files of a run",
+        "description": "Requires scope `files:delete`. Restores up to 100 deleted files of one run, as `POST /files/{fileId}/restore` does for one. The response lists a result for each file in the order sent, so one that can't come back doesn't stop the others: `404` for an ID that isn't a file of this run, `409` (`details.reason: path_in_use`, with `details.held_by` naming the file) when another file of the run now has its name or path, and `409` (`details.reason: run_deleted`) when the run was deleted. Set `include_linked` to restore the deleted files linked to them too; `linked` lists those, each with its own result. The request itself returns `404` only when the run doesn't exist. A token that registered a watcher may act only on instruments whose active watcher it registered, and gets 403 for any other.",
+        "tags": [
+          "Files"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "example": "plate-reader"
+            },
+            "required": true,
+            "name": "instrumentId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "The run ID. Spaces at the start or end are ignored.",
+              "example": "run-2026-001"
+            },
+            "required": true,
+            "description": "The run ID. Spaces at the start or end are ignored.",
+            "name": "runId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0
+                    },
+                    "minItems": 1,
+                    "maxItems": 100,
+                    "description": "IDs of files in this run, 1 to 100. A repeated ID is handled once. An ID that isn't a file of this run gets a `404` result."
+                  },
+                  "include_linked": {
+                    "type": "boolean",
+                    "description": "Also delete (or restore) the files linked to these. Default false."
+                  }
+                },
+                "required": [
+                  "file_ids"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Results for each file.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunFilesRestored"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token does not have the required scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested resource was not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with resource state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/instruments/{instrumentId}/runs/{runId}/files/linked": {
+      "get": {
+        "operationId": "listLinkedRunFiles",
+        "summary": "List the files linked to some files of a run",
+        "description": "Requires scope `files:delete`. Lists what a delete (the default) or a restore (`for=restore`) would take along with each file, grouped by the file you asked about, so you can show it before you act. For a delete, a raw file's linked files are the active processed files made from it and the `run.json` saved with its capture, which is listed only when every raw file in that folder is among the files asked about. For a restore, they are the deleted ones, and a deleted `run.json` comes back when any raw file of its folder does. A deleted processed file's linked file is the deleted raw file it was made from. A token that registered a watcher may act only on instruments whose active watcher it registered, and gets 403 for any other.",
+        "tags": [
+          "Files"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "example": "plate-reader"
+            },
+            "required": true,
+            "name": "instrumentId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "The run ID. Spaces at the start or end are ignored.",
+              "example": "run-2026-001"
+            },
+            "required": true,
+            "description": "The run ID. Spaces at the start or end are ignored.",
+            "name": "runId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Comma-separated file IDs, 1 to 100. An ID that isn't a file of this run is left out.",
+              "example": "12,13"
+            },
+            "required": true,
+            "description": "Comma-separated file IDs, 1 to 100. An ID that isn't a file of this run is left out.",
+            "name": "file_ids",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "delete",
+                "restore"
+              ],
+              "description": "`delete` (the default) lists the active files a delete would take along. `restore` lists the deleted files a restore would bring back."
+            },
+            "required": false,
+            "description": "`delete` (the default) lists the active files a delete would take along. `restore` lists the deleted files a restore would bring back.",
+            "name": "for",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Linked files.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunFilesLinked"
                 }
               }
             }

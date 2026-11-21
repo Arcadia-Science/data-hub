@@ -11,8 +11,10 @@ import {
   NOT_FOUND,
   VALIDATION_ERROR,
 } from "@/lib/api/errors";
+import { nameDeleters } from "@/lib/api/file-batch";
 import { deleteFiles } from "@/lib/api/file-deletion";
 import { dispatchQueuedFiles } from "@/lib/api/file-reprocessing";
+import { deletedFileToWire, linkedDeleteToWire } from "@/lib/api/file-wire";
 import { patchFileBody, readJsonBody } from "@/lib/api/openapi";
 import { runFileS3Key } from "@/lib/api/run-file-location";
 import { touchRuns } from "@/lib/api/touch-runs";
@@ -319,9 +321,12 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
 //
 // Soft-deletes one file in any state a person can see it in, uploaded files
 // included. The file keeps its row and its S3 object, records who deleted it,
-// and can be restored. A file that is queued or processing is refused until
-// processing finishes, and so is any file of a deleted run. Deleting a file
-// that is already deleted succeeds with `already_applied`.
+// and can be restored (POST .../restore). A file that is queued or processing
+// is refused until processing finishes, and so is any file of a deleted run.
+// Deleting a file that is already deleted succeeds with `already_applied`.
+//
+// `?include_linked=true` deletes the files linked to it too, which the response
+// lists in `linked`.
 //
 // A token that registered a watcher may delete only its own instrument's files,
 // like PATCH above.
@@ -344,12 +349,15 @@ export async function DELETE(request: NextRequest, { params }: RouteContext) {
     return denied;
   }
 
-  const { results } = await deleteFiles(
+  const { results, linked } = await deleteFiles(
     [numericId],
     actorRefFromAuth(authResult),
-    { includeLinked: false }
+    {
+      includeLinked:
+        request.nextUrl.searchParams.get("include_linked") === "true",
+    }
   );
-  const result = results[0];
+  const [result] = await nameDeleters(results);
 
   if (!result?.ok) {
     return result
@@ -358,9 +366,7 @@ export async function DELETE(request: NextRequest, { params }: RouteContext) {
   }
 
   return Response.json({
-    id: result.id,
-    filename: result.filename,
-    deleted_at: result.deletedAt,
-    already_applied: result.alreadyApplied,
+    ...deletedFileToWire(result),
+    linked: linked.map(linkedDeleteToWire),
   });
 }

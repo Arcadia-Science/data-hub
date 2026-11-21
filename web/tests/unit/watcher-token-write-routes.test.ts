@@ -39,7 +39,7 @@ const TOKEN_WRITE_ROUTES = (
 
 describe("write routes a token can reach", () => {
   it("finds the routes the watcher calls", () => {
-    expect(TOKEN_WRITE_ROUTES.length).toBeGreaterThanOrEqual(30);
+    expect(TOKEN_WRITE_ROUTES.length).toBeGreaterThanOrEqual(37);
     expect(TOKEN_WRITE_ROUTES).toContain(
       path.join(
         "v1",
@@ -53,10 +53,42 @@ describe("write routes a token can reach", () => {
     );
   });
 
+  it("finds the routes that delete and restore files", () => {
+    const run = ["v1", "instruments", "[instrumentId]", "runs", "[runId]"];
+    for (const route of [
+      path.join("v1", "files", "[fileId]", "restore", "route.ts"),
+      path.join(...run, "files", "delete", "route.ts"),
+      path.join(...run, "files", "restore", "route.ts"),
+    ]) {
+      expect(TOKEN_WRITE_ROUTES).toContain(route);
+    }
+  });
+
   it.each(
     TOKEN_WRITE_ROUTES.filter((file) => !(file in EXEMPT))
   )("%s limits a watcher's token", (file) => {
     const source = readFileSync(path.join(API_DIR, file), "utf8");
+    expect(source).toMatch(OWNERSHIP_CHECK);
+  });
+
+  // Listing a run's linked files changes nothing, so it is not a write route.
+  // It needs `files:delete` and shows only what a delete would take, so it
+  // limits a watcher's token the way the delete does.
+  it("limits a watcher's token when it lists the files a delete would take", () => {
+    const source = readFileSync(
+      path.join(
+        API_DIR,
+        "v1",
+        "instruments",
+        "[instrumentId]",
+        "runs",
+        "[runId]",
+        "files",
+        "linked",
+        "route.ts"
+      ),
+      "utf8"
+    );
     expect(source).toMatch(OWNERSHIP_CHECK);
   });
 

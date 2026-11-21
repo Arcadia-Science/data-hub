@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { LinkedFileRelation } from "@/lib/api/file-deletion";
 import {
   archiveJobStatusEnum,
   fileCategoryEnum,
@@ -32,6 +33,16 @@ export const runStatusFilterSchema = z.enum([
 export const runSourceSchema = z.enum(["lambda", "watcher"]);
 export const fileCategorySchema = z.enum(fileCategoryEnum.enumValues);
 export const fileStatusSchema = z.enum(fileStatusEnum.enumValues);
+// How a linked file relates to the file it was found from. The values are the
+// ones `findLinkedFiles` reports, and the type import keeps the two in step.
+export const LINKED_FILE_RELATIONS = [
+  "video",
+  "preview_image",
+  "output",
+  "sidecar",
+  "made_from",
+] as const satisfies readonly LinkedFileRelation[];
+export const linkedFileRelationSchema = z.enum(LINKED_FILE_RELATIONS);
 export const uploadFailureReasonSchema = z.enum(
   uploadFailureReasonEnum.enumValues
 );
