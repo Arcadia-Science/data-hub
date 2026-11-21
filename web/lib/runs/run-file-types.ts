@@ -82,6 +82,69 @@ export function isPreviewableFile(file: RunFileIdentity): boolean {
   return filePreviewKind(file) !== null;
 }
 
+// The pictures, videos, and documents the file window shows as they are.
+export type FilePreviewMedia = "image" | "video" | "pdf";
+
+const SHOWN_IMAGE_EXTENSION = /\.(jpe?g|png|webp|gif)$/i;
+const SHOWN_IMAGE_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+]);
+const SHOWN_VIDEO_EXTENSION = /\.mp4$/i;
+
+/**
+ * How the file window shows a file that is not text: a JPG, PNG, WebP, or GIF
+ * image, an MP4 video, or a PDF. A TIFF is an image to a browser only in
+ * Safari, so it is not shown. As in `filePreviewKind`, the extension comes
+ * before the stored content type, because watcher uploads are often stored as
+ * `binary/octet-stream`.
+ */
+export function filePreviewMedia(
+  file: RunFileIdentity
+): FilePreviewMedia | null {
+  const contentType =
+    file.contentType?.split(";")[0].trim().toLowerCase() ?? null;
+  if (SHOWN_IMAGE_EXTENSION.test(file.filename)) {
+    return "image";
+  }
+  if (SHOWN_VIDEO_EXTENSION.test(file.filename)) {
+    return "video";
+  }
+  if (PDF_EXTENSION.test(file.filename)) {
+    return "pdf";
+  }
+  if (contentType !== null && SHOWN_IMAGE_TYPES.has(contentType)) {
+    return "image";
+  }
+  if (contentType === "video/mp4") {
+    return "video";
+  }
+  if (contentType === "application/pdf") {
+    return "pdf";
+  }
+  return null;
+}
+
+// The name of a file's format as the window says it, for "TIFF files can't be
+// previewed here". Null for a file with no extension to name.
+const FORMAT_NAMES: Record<string, string> = {
+  tif: "TIFF",
+  tiff: "TIFF",
+  jpg: "JPEG",
+  jpeg: "JPEG",
+};
+
+export function fileFormatName(filename: string): string | null {
+  const dot = filename.lastIndexOf(".");
+  if (dot <= 0 || dot === filename.length - 1) {
+    return null;
+  }
+  const extension = filename.slice(dot + 1).toLowerCase();
+  return FORMAT_NAMES[extension] ?? extension.toUpperCase();
+}
+
 type PosterSourceFile = Pick<
   RunFile,
   "category" | "contentType" | "deletedAt" | "filename" | "id"

@@ -12,7 +12,7 @@ const SCOPE_LABELS: Record<string, string> = {
   offline_access: "Stay connected when you're offline",
   read: "Read instrument runs and files",
   write:
-    "Claim runs, comment, delete runs, dismiss files, and reprocess data on your behalf",
+    "Claim runs, comment, delete runs, delete and restore files, and reprocess data on your behalf",
 };
 
 function scopeLabel(scope: string) {

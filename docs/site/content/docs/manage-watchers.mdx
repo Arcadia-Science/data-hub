@@ -206,19 +206,19 @@ Data Hub cancels pending upload requests, and the files go back to **Not uploade
 
 Each cancellation shows on the watcher’s **Activity** tab under its own event type. Watchers before 1.4.1 don’t report a PC restart, and watchers before 1.4.2 don’t report an automatic update, so those stops cancel requests at once.
 
-## Approve or dismiss files [#approving-manual-uploads]
+## Approve or delete files [#approving-manual-uploads]
 
-For instruments in [manual upload mode](/docs/concepts#upload-mode), the watcher reports runs but uploads a file only after someone approves it. The instrument’s page shows a note beside its file patterns: “Files upload when someone requests them.” Select a file in the files table and choose **Upload** in the bar at the bottom of the window to approve it, or choose **Dismiss** to tell the watcher not to upload it. Select several files to act on all of them at once.
+For instruments in [manual upload mode](/docs/concepts#upload-mode), the watcher reports runs but uploads a file only after someone approves it. The instrument’s page shows a note beside its file patterns: “Files upload when someone requests them.” Select a file in the files table and choose **Upload** in the bar at the bottom of the window to approve it, or choose **Delete** to tell the watcher not to upload it. Select several files to act on all of them at once.
 
-![Run page for a manual-upload instrument with its waiting files selected and a bar offering Upload and Dismiss](/images/manual-upload.webp)
+![Run page for a manual-upload instrument with its waiting files selected and a bar offering Upload and Delete](/images/manual-upload.webp)
 
-**Dismiss** also works on a file whose upload failed, on any instrument. A dismissed file stays dismissed, even if the watcher reports it again. Dismissing differs from deleting: the file never reached Data Hub storage, so there’s nothing to restore.
+**Delete** also works on a file whose upload failed, on any instrument, and on a file that already reached Data Hub. A deleted file stays deleted, even if the watcher reports it again, and Data Hub keeps it in storage so you can restore it. Deleting a file that was waiting to upload cancels its upload request. [Delete and restore files](/docs/browse-runs#delete-files) covers the rest.
 
-### When a dismissed path gets a new file [#dismissed-path-new-file]
+### When a deleted path gets a new file [#deleted-path-new-file]
 
-The watcher reports each path only once, so a new file that the instrument later writes at a dismissed file’s path doesn’t appear on its own. It appears when the watcher reports that path again: after `data-hub-watcher state forget`, or when the watcher starts without its saved record of what it has reported, for example after a reinstall. Data Hub then treats it as a new file if its size or creation time differs from the dismissed file’s. On Linux, the modification time stands in for the creation time.
+The watcher reports each path only once, so a new file that the instrument later writes at a deleted file’s path doesn’t appear on its own. It appears when the watcher reports that path again: after `data-hub-watcher state forget`, or when the watcher starts without its saved record of what it has reported, for example after a reinstall. Data Hub then treats it as a new file if its size or creation time differs from the deleted file’s. On Linux, the modification time stands in for the creation time.
 
 Because Data Hub compares only size and time, two cases can surprise you:
 
-- A new file the same size as the dismissed one counts as the same file when it keeps the old creation time, so it stays dismissed. On Windows and macOS this happens when the instrument overwrites the file in place. On Windows it can also happen when the file is deleted and written again, or saved through a temporary copy, within about 15 seconds.
-- Copying a folder, for example with Explorer or `xcopy` on Windows or `cp` without `-p` on Linux, gives the copies new times. After you replace an instrument PC or restore its folder from a backup, a new watcher that scans the copied folder reports the files you dismissed as new files. Dismiss them again.
+- A new file the same size as the deleted one counts as the same file when it keeps the old creation time, so it stays deleted. On Windows and macOS this happens when the instrument overwrites the file in place. On Windows it can also happen when the file is deleted and written again, or saved through a temporary copy, within about 15 seconds.
+- Copying a folder, for example with Explorer or `xcopy` on Windows or `cp` without `-p` on Linux, gives the copies new times. After you replace an instrument PC or restore its folder from a backup, a new watcher that scans the copied folder reports the files you deleted as new files. Delete them again.

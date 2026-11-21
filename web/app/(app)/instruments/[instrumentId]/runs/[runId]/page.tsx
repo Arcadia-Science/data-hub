@@ -277,6 +277,7 @@ async function RunDetailContentBody({
             filesDeletedCount={filesPage.deletedCount}
             filesDownloadableCount={filesPage.downloadableCount}
             filesPagination={filesPage.pagination}
+            filesRelated={filesPage.related}
             instrumentId={instrumentId}
             notebooksSlot={
               <RunNotebookLinksSection

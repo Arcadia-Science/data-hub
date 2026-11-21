@@ -1,6 +1,12 @@
 "use client";
 
-import { ArrowDownToLine, ArrowUpToLine, RotateCw, X } from "lucide-react";
+import {
+  ArrowDownToLine,
+  ArrowUpToLine,
+  RotateCw,
+  Trash2,
+  Undo2,
+} from "lucide-react";
 import { useState } from "react";
 import { BulkActionBarShell } from "@/components/bulk-action-bar-shell";
 import { Button } from "@/components/ui/button";
@@ -9,7 +15,8 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { DismissFilesDialog, ReprocessFilesDialog } from "./file-bulk-dialogs";
+import type { FileTarget } from "./file-action-dialog";
+import { ReprocessFilesDialog } from "./file-bulk-dialogs";
 import { type FileRef, useFileSelection } from "./file-selection-provider";
 import {
   UploadReasonLine,
@@ -20,29 +27,33 @@ import {
 // Bulk action bar for the run files table, shown when at least one file is
 // selected. `BulkActionBarShell` draws the floating card, the same one the
 // runs table uses. The rollup rule is the runs table's too: an action shows
-// only when every selected file supports it. Pending (Upload/Dismiss) and
-// uploaded (Reprocess/Download) actions never overlap, so a mixed selection
-// collapses to "Clear" only and the user has to narrow the selection before
-// acting.
+// only when every selected file supports it, in the order Upload, Download,
+// Reprocess, Delete. When every selected file is deleted the bar offers Restore
+// instead. Pending (Upload) and uploaded (Reprocess/Download) actions never
+// overlap, so a selection that mixes them offers only Delete, which both
+// allow, and one that mixes active and deleted files collapses to "Clear" only,
+// so the user has to narrow the selection before acting.
 // ---------------------------------------------------------------------------
 
 export interface FileBulkActionBarProps {
   isPending: boolean;
-  onDismiss: (ids: number[]) => void;
+  // Delete and Restore open a dialog (or restore at once) that the caller owns.
+  onDelete: (files: FileTarget[]) => void;
   onDownload: (refs: FileRef[]) => void;
   onReprocess: (ids: number[]) => void;
+  onRestore: (files: FileTarget[]) => void;
   onUpload: (ids: number[]) => void;
 }
 
 export function FileBulkActionBar({
   isPending,
   onUpload,
-  onDismiss,
+  onDelete,
   onReprocess,
+  onRestore,
   onDownload,
 }: FileBulkActionBarProps) {
   const { state, actions, meta } = useFileSelection();
-  const [dismissOpen, setDismissOpen] = useState(false);
   const [reprocessOpen, setReprocessOpen] = useState(false);
 
   if (meta.count === 0) {
@@ -53,17 +64,24 @@ export function FileBulkActionBar({
   const ids = refs.map((r) => r.id);
   const count = meta.count;
   const noun = count === 1 ? "file" : "files";
+  const offered = new Set(meta.bar.actions);
+  const targets: FileTarget[] = refs.map((ref) => ({
+    id: ref.id,
+    filename: ref.filename,
+    relativePath: ref.relativePath,
+    sizeBytes: ref.sizeBytes,
+  }));
 
   return (
     <>
       <BulkActionBarShell
         ariaLabel="Actions for selected files"
         count={count}
-        noun="file"
+        noun={meta.bar.noun}
         onClear={() => actions.clear()}
         pending={isPending}
       >
-        {meta.allCanUpload && (
+        {offered.has("upload") && (
           <>
             <UploadReasonLine />
             <WatcherGatedUploadButton
@@ -81,7 +99,7 @@ export function FileBulkActionBar({
           </>
         )}
 
-        {meta.allCanDownload && (
+        {offered.has("download") && (
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -104,7 +122,7 @@ export function FileBulkActionBar({
           </Tooltip>
         )}
 
-        {meta.allCanReprocess && (
+        {offered.has("reprocess") && (
           <Button
             className="gap-1.5"
             disabled={isPending}
@@ -118,17 +136,31 @@ export function FileBulkActionBar({
           </Button>
         )}
 
-        {meta.allCanDismiss && (
+        {offered.has("delete") && (
           <Button
             className="gap-1.5 text-destructive hover:text-destructive"
             disabled={isPending}
-            onClick={() => setDismissOpen(true)}
+            onClick={() => onDelete(targets)}
             size="sm"
             type="button"
             variant="outline"
           >
-            <X className="size-3.5" />
-            Dismiss
+            <Trash2 className="size-3.5" />
+            Delete
+          </Button>
+        )}
+
+        {offered.has("restore") && (
+          <Button
+            className="gap-1.5"
+            disabled={isPending}
+            onClick={() => onRestore(targets)}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            <Undo2 className="size-3.5" />
+            Restore
           </Button>
         )}
       </BulkActionBarShell>
@@ -138,12 +170,6 @@ export function FileBulkActionBar({
         onConfirm={() => onReprocess(ids)}
         onOpenChange={setReprocessOpen}
         open={reprocessOpen}
-      />
-      <DismissFilesDialog
-        count={count}
-        onConfirm={() => onDismiss(ids)}
-        onOpenChange={setDismissOpen}
-        open={dismissOpen}
       />
     </>
   );

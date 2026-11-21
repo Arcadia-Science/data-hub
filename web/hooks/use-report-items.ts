@@ -31,6 +31,10 @@ export interface UseReportItemsOptions {
   fetchReportItems: ReportDataSource["fetchReportItems"];
   initialPage: ReportItemsPage;
   kind: ReportItemKind;
+  // Changes when files of the run are deleted or restored on the page. The
+  // loaded items may then list a deleted file or miss a restored one, so they
+  // load again from the server, and the selection starts over.
+  version?: number;
 }
 
 export type UseReportItemsResult = SeekerSource;
@@ -43,6 +47,7 @@ export function useReportItems({
   fetchReportItems,
   initialPage,
   kind,
+  version = 0,
 }: UseReportItemsOptions): UseReportItemsResult {
   const [cache, setCache] = useState<Record<string, CacheEntry>>(() => ({
     "": {
@@ -62,6 +67,21 @@ export function useReportItems({
 
   const busyControllerRef = useRef<AbortController | null>(null);
   useEffect(() => () => busyControllerRef.current?.abort(), []);
+
+  // An empty cache makes the effect below fetch the current query's first
+  // window again. The page's own first window (`initialPage`) can't be used:
+  // it is the one from before the change until the page refreshes.
+  const seenVersion = useRef(version);
+  useEffect(() => {
+    if (seenVersion.current === version) {
+      return;
+    }
+    seenVersion.current = version;
+    busyControllerRef.current?.abort();
+    setIsBusy(false);
+    setCache({});
+    setSelection({ index: 0, query: "" });
+  }, [version]);
 
   const entry = cache[query];
   const items = entry?.items ?? EMPTY_ITEMS;

@@ -25,6 +25,7 @@ import type { RunFileRow } from "@/lib/api/instrument-runs";
 import { formatDateTime } from "@/lib/date";
 import type { InstrumentType } from "@/lib/db/schema";
 import { preloader } from "@/lib/preload";
+import { selectAllTargets } from "@/lib/runs/file-bar-actions";
 import { previewFilesOf } from "@/lib/runs/preview-files";
 import { cn, formatBytes } from "@/lib/utils";
 import { FilePreviewLoading } from "./file-preview-loading";
@@ -33,6 +34,7 @@ import {
   FileSelectCheckbox,
 } from "./file-select-checkbox";
 import { buildFileRef, useFileSelection } from "./file-selection-provider";
+import { DELETED_BADGE_CLASS, DELETED_TEXT_CLASS } from "./file-status-config";
 import { FileStatusIndicator } from "./file-status-indicator";
 import { FileStatusLegendButton } from "./file-status-legend";
 import { FilesSortHeader } from "./files-sort-header";
@@ -75,16 +77,37 @@ const FilePreviewDialog = lazy(loadFilePreviewDialog);
 const preloadFilePreviewDialog = preloader(loadFilePreviewDialog);
 
 // Shared by both table variants. Every file opens, and previous and next step
-// through the files on the current page, in table order.
-function useFilePreview(files: RunFileRow[]) {
+// through the files on the current page, in table order. The files off the page
+// that the open file links to open in the same window, one by one, but the
+// buttons do not step through them.
+function useFilePreview({
+  files,
+  instrumentId,
+  isDeleted,
+  relatedFiles,
+  runId,
+}: {
+  files: RunFileRow[];
+  instrumentId: string;
+  // A deleted run is read-only, so the window offers no Delete or Restore.
+  isDeleted: boolean;
+  relatedFiles: RunFileRow[];
+  runId: string;
+}) {
   const [openFileId, setOpenFileId] = useState<number | null>(null);
   // Stays mounted after the first open so closing still plays its animation.
   const [hasOpened, setHasOpened] = useState(false);
   const previewFiles = useMemo(() => previewFilesOf(files), [files]);
-  const isOpenFileListed = previewFiles.some((f) => f.id === openFileId);
+  const relatedPreviewFiles = useMemo(
+    () => previewFilesOf(relatedFiles),
+    [relatedFiles]
+  );
+  const isOpenFileListed =
+    previewFiles.some((f) => f.id === openFileId) ||
+    relatedPreviewFiles.some((f) => f.id === openFileId);
 
-  // Closes the dialog when its file leaves the page, e.g. it was dismissed in
-  // another tab and the auto-refresh dropped it.
+  // Closes the dialog when its file is gone, e.g. it was deleted in another
+  // tab while deleted files are hidden and the auto-refresh dropped it.
   useEffect(() => {
     if (openFileId !== null && !isOpenFileListed) {
       setOpenFileId(null);
@@ -108,6 +131,8 @@ function useFilePreview(files: RunFileRow[]) {
       >
         <FilePreviewDialog
           files={previewFiles}
+          instrumentId={instrumentId}
+          isRunDeleted={isDeleted}
           onOpenChange={(open) => {
             if (!open) {
               setOpenFileId(null);
@@ -115,6 +140,8 @@ function useFilePreview(files: RunFileRow[]) {
           }}
           onSelect={setOpenFileId}
           openFileId={openFileId}
+          relatedFiles={relatedPreviewFiles}
+          runId={runId}
         />
       </Suspense>
     </LoadErrorBoundary>
@@ -158,16 +185,27 @@ function FileTableRow({
 
 function FileInfoCells({ file }: { file: RunFileRow }) {
   const timeZone = useViewerTimeZone();
+  // A deleted row reads as gray text, a gray type badge, and "Deleted" with a
+  // trash icon. Not faded: half opacity drops the text below the contrast it
+  // needs.
+  const deleted = file.deletedAt !== null;
+  const mutedText = deleted ? DELETED_TEXT_CLASS : "text-muted-foreground";
   return (
     <>
       {/* Long instrument filenames cut off with an ellipsis instead of pushing
           the status column off screen. The tooltip shows the rest. The button
           is how a keyboard reaches the file; its click bubbles to the row,
           which opens it. */}
-      <TableCell className="max-w-sm py-2 font-mono text-sm">
+      <TableCell
+        className={cn(
+          "max-w-sm py-2 font-mono text-sm",
+          deleted && DELETED_TEXT_CLASS
+        )}
+      >
         <TruncatedTooltip text={file.filename}>
           <button
             className="block max-w-full cursor-pointer truncate text-left"
+            data-file-id={file.id}
             onFocus={preloadFilePreviewDialog}
             type="button"
           >
@@ -179,17 +217,23 @@ function FileInfoCells({ file }: { file: RunFileRow }) {
         <Badge
           className={cn(
             "capitalize",
-            CATEGORY_BADGE_CLASSES[file.category] ??
-              "bg-slate-100 text-slate-700 dark:bg-slate-950 dark:text-slate-300"
+            deleted
+              ? DELETED_BADGE_CLASS
+              : (CATEGORY_BADGE_CLASSES[file.category] ??
+                  "bg-slate-100 text-slate-700 dark:bg-slate-950 dark:text-slate-300")
           )}
         >
           {file.category}
         </Badge>
       </TableCell>
-      <TableCell className="py-2 text-right text-muted-foreground text-sm tabular-nums">
+      <TableCell
+        className={cn("py-2 text-right text-sm tabular-nums", mutedText)}
+      >
         {formatBytes(file.sizeBytes)}
       </TableCell>
-      <TableCell className="py-2 text-right text-muted-foreground text-sm tabular-nums">
+      <TableCell
+        className={cn("py-2 text-right text-sm tabular-nums", mutedText)}
+      >
         {file.fileCreatedAt
           ? formatDateTime(file.fileCreatedAt, timeZone)
           : file.createdAt
@@ -208,8 +252,24 @@ function FileInfoCells({ file }: { file: RunFileRow }) {
 // page changes the run's files. Rows still open the file window.
 // ---------------------------------------------------------------------------
 
-export function ReadOnlyRunFilesTable({ files }: { files: RunFileRow[] }) {
-  const { dialog, openPreview } = useFilePreview(files);
+export function ReadOnlyRunFilesTable({
+  files,
+  instrumentId,
+  relatedFiles,
+  runId,
+}: {
+  files: RunFileRow[];
+  instrumentId: string;
+  relatedFiles: RunFileRow[];
+  runId: string;
+}) {
+  const { dialog, openPreview } = useFilePreview({
+    files,
+    instrumentId,
+    isDeleted: true,
+    relatedFiles,
+    runId,
+  });
   return (
     <>
       <Table>
@@ -220,12 +280,7 @@ export function ReadOnlyRunFilesTable({ files }: { files: RunFileRow[] }) {
         </TableHeader>
         <TableBody>
           {files.map((file) => (
-            <FileTableRow
-              className={file.deletedAt === null ? undefined : "opacity-50"}
-              file={file}
-              key={file.id}
-              onPreview={openPreview}
-            >
+            <FileTableRow file={file} key={file.id} onPreview={openPreview}>
               <FileInfoCells file={file} />
             </FileTableRow>
           ))}
@@ -246,70 +301,59 @@ export function ReadOnlyRunFilesTable({ files }: { files: RunFileRow[] }) {
 
 export function EditableRunFilesTable({
   files,
+  instrumentId,
   instrumentType,
+  relatedFiles,
+  runId,
 }: {
   files: RunFileRow[];
+  instrumentId: string;
   instrumentType: InstrumentType;
+  relatedFiles: RunFileRow[];
+  runId: string;
 }) {
   const { meta } = useFileSelection();
-  const { dialog, openPreview } = useFilePreview(files);
+  const { dialog, openPreview } = useFilePreview({
+    files,
+    instrumentId,
+    isDeleted: false,
+    relatedFiles,
+    runId,
+  });
 
   // Pre-compute the FileRef for each visible row once so the select-all
   // header, the per-row checkbox, and the row-state styling all see the
-  // same selectable set.
-  const refsByFileId = new Map<number, ReturnType<typeof buildFileRef>>();
-  const visibleSelectableRefs: NonNullable<ReturnType<typeof buildFileRef>>[] =
-    [];
-  for (const file of files) {
-    const ref = buildFileRef(file, instrumentType);
-    refsByFileId.set(file.id, ref);
-    if (ref) {
-      visibleSelectableRefs.push(ref);
-    }
-  }
-
-  const showSelectionColumn = visibleSelectableRefs.length > 0;
+  // same selectable set. Every row can be selected, deleted ones too, so they
+  // can be restored.
+  const refs = files.map((file) => buildFileRef(file, instrumentType));
+  const selectAllRefs = selectAllTargets(refs);
 
   return (
     <>
       <Table>
         <TableHeader>
           <TableRow className="hover:bg-transparent">
-            {showSelectionColumn && (
-              <TableHead className="w-10 pr-0 pl-3">
-                <FileSelectAllCheckbox refs={visibleSelectableRefs} />
-              </TableHead>
-            )}
+            <TableHead className="w-10 pr-0 pl-3">
+              <FileSelectAllCheckbox refs={selectAllRefs} />
+            </TableHead>
             <FileColumnHeaders />
           </TableRow>
         </TableHeader>
         <TableBody>
-          {files.map((file) => {
-            const ref = refsByFileId.get(file.id) ?? null;
-            const isSelected = ref ? meta.isSelected(ref.id) : false;
+          {files.map((file, index) => {
+            const ref = refs[index];
             return (
               <FileTableRow
-                className={file.deletedAt === null ? undefined : "opacity-50"}
-                data-state={isSelected ? "selected" : undefined}
+                data-state={meta.isSelected(ref.id) ? "selected" : undefined}
                 file={file}
                 key={file.id}
                 onPreview={openPreview}
               >
-                {showSelectionColumn && (
-                  // Only a cell that holds a checkbox keeps the click to
-                  // itself. An empty one opens the file like the rest of the
-                  // row.
-                  <TableCell
-                    className="py-2 pr-0 pl-3"
-                    data-row-control={ref ? true : undefined}
-                  >
-                    {ref ? (
-                      <FileSelectCheckbox fileRef={ref} />
-                    ) : (
-                      <div className="size-4" />
-                    )}
-                  </TableCell>
-                )}
+                {/* A click in the cell that holds the checkbox changes the
+                    selection and nothing else. */}
+                <TableCell className="py-2 pr-0 pl-3" data-row-control>
+                  <FileSelectCheckbox fileRef={ref} />
+                </TableCell>
                 <FileInfoCells file={file} />
               </FileTableRow>
             );

@@ -8,6 +8,7 @@ import {
 import { useViewerTimeZone } from "@/components/viewer-time-zone-provider";
 import type { RunFileRow } from "@/lib/api/instrument-runs";
 import { formatDateTime } from "@/lib/date";
+import { deletedTooltip } from "@/lib/runs/deleted-file-note";
 import { cn } from "@/lib/utils";
 import { FILE_STATUS_CONFIG, getFileStatusKey } from "./file-status-config";
 
@@ -27,7 +28,16 @@ export function FileStatusIndicator({ file }: { file: RunFileRow }) {
       ? `Processing started ${formatDateTime(file.processingStartedAt, timeZone)} and never finished. You can reprocess this file.`
       : "Processing never finished. You can reprocess this file.";
   }
-  const tooltip = showErrorTooltip ? file.errorMessage : stalledTooltip;
+  // Who deleted a file, and when, shows on hover and on keyboard focus.
+  const deletedNote =
+    key === "deleted" && file.deletedAt !== null
+      ? deletedTooltip(
+          { deleter: file.deleter, deletedAt: file.deletedAt },
+          timeZone
+        )
+      : null;
+  const tooltip =
+    deletedNote ?? (showErrorTooltip ? file.errorMessage : stalledTooltip);
 
   const indicatorClass = cn(
     "inline-flex h-6 items-center gap-1.5 text-sm leading-none",

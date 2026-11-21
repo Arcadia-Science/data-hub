@@ -21,39 +21,80 @@ function row(overrides: Partial<RunFileRow> & { id: number }): RunFileRow {
 }
 
 function refFor(file: RunFileRow): FileRef {
-  const ref = buildFileRef(file, "dishcam");
-  if (ref === null) {
-    throw new Error("expected a selectable file");
-  }
-  return ref;
+  return buildFileRef(file, "dishcam");
 }
 
 describe("buildFileRef", () => {
-  it("lets a detected file be uploaded or dismissed, not downloaded", () => {
+  it("lets a detected file be uploaded or deleted, not downloaded", () => {
     expect(refFor(row({ id: 1 })).caps).toEqual({
       upload: true,
-      dismiss: true,
+      delete: true,
       reprocess: false,
       download: false,
+      restore: false,
     });
   });
 
-  it("lets a completed raw file be downloaded and reprocessed", () => {
+  it("lets a completed raw file be downloaded, reprocessed, and deleted", () => {
     expect(refFor(row({ id: 1, status: "completed" })).caps).toEqual({
       upload: false,
-      dismiss: false,
+      delete: true,
       reprocess: true,
       download: true,
+      restore: false,
     });
   });
 
-  it("skips dismissed files and transient upload requests", () => {
-    expect(buildFileRef(row({ id: 1, deletedAt: new Date() }), "dishcam")).toBe(
-      null
+  it("lets a deleted file be selected, for Restore and nothing else", () => {
+    const ref = refFor(
+      row({ id: 1, status: "completed", deletedAt: new Date() })
+    );
+    expect(ref.deleted).toBe(true);
+    expect(ref.caps).toEqual({
+      upload: false,
+      delete: false,
+      reprocess: false,
+      download: false,
+      restore: true,
+    });
+  });
+
+  it("lets a file that is uploading be selected, for Delete alone", () => {
+    const ref = refFor(row({ id: 2, status: "upload_requested", s3Key: null }));
+    expect(ref.caps).toEqual({
+      upload: false,
+      delete: true,
+      reprocess: false,
+      download: false,
+      restore: false,
+    });
+  });
+
+  it("hides Delete for a file that is queued or processing, but not for a stalled one", () => {
+    expect(refFor(row({ id: 1, status: "queued" })).caps.delete).toBe(false);
+    expect(refFor(row({ id: 2, status: "processing" })).caps.delete).toBe(
+      false
     );
     expect(
-      buildFileRef(row({ id: 2, status: "upload_requested" }), "dishcam")
-    ).toBe(null);
+      refFor(row({ id: 3, status: "processing", stalledProcessing: true })).caps
+        .delete
+    ).toBe(true);
+  });
+
+  it("keeps the name and size a dialog lists, and the path its folder comes from", () => {
+    const ref = refFor(
+      row({
+        id: 1,
+        filename: "a.tif",
+        relativePath: "plate/a.tif",
+        sizeBytes: 2048,
+      })
+    );
+    expect(ref).toMatchObject({
+      filename: "a.tif",
+      relativePath: "plate/a.tif",
+      sizeBytes: 2048,
+    });
   });
 });
 
@@ -72,11 +113,15 @@ describe("refreshFileRefs", () => {
     expect(next.get(1)?.ref.caps.download).toBe(true);
   });
 
-  it("drops a visible file that can no longer be selected", () => {
+  it("turns a selected file into a restorable one when it was deleted elsewhere", () => {
     const picked = new Map([[1, pick(row({ id: 1 }))]]);
-    const dismissed = row({ id: 1, deletedAt: new Date() });
+    const deleted = row({ id: 1, deletedAt: new Date() });
 
-    expect(refreshFileRefs(picked, [dismissed], "dishcam", 1).size).toBe(0);
+    const next = refreshFileRefs(picked, [deleted], "dishcam", 1);
+
+    expect(next.get(1)?.ref.deleted).toBe(true);
+    expect(next.get(1)?.ref.caps.restore).toBe(true);
+    expect(next.get(1)?.ref.caps.delete).toBe(false);
   });
 
   it("drops a file picked on this page whose row has left the results", () => {

@@ -22,30 +22,25 @@ import {
 } from "drizzle-orm";
 import { type ActorRef, actorColumns } from "@/lib/api/actor";
 import { RUN_DELETED_REASON } from "@/lib/api/errors";
+import { folderSql, isSidecarSql } from "@/lib/api/file-link-sql";
 import type { FileRow } from "@/lib/api/files";
 import { touchRuns } from "@/lib/api/touch-runs";
 import { revertPendingUploadRequests } from "@/lib/api/watchers";
 import { type DbExecutor, db } from "@/lib/db";
 import { hasPgErrorCode, UNIQUE_VIOLATION } from "@/lib/db/pg-error";
 import { files, instrumentRuns } from "@/lib/db/schema";
+import {
+  folderOfPath,
+  isSidecarFilename,
+  type LinkedFileRelation,
+  outputRelation,
+  pathOf,
+} from "@/lib/runs/file-links";
 import { isStalledProcessing } from "@/lib/runs/stalled-processing";
 
 // ---------------------------------------------------------------------------
 // Linked files
 // ---------------------------------------------------------------------------
-
-// How a linked file relates to the file it was found from.
-// - `video`, `preview_image`, `output`: a processed file made from a raw file.
-//   `output` is anything else, such as a colony table.
-// - `sidecar`: the `run.json` saved with the raw file's capture.
-// - `made_from`: the raw file a processed file was made from. Only restoring
-//   looks this way round: a deleted processed file comes back with its source.
-export type LinkedFileRelation =
-  | "video"
-  | "preview_image"
-  | "output"
-  | "sidecar"
-  | "made_from";
 
 export interface LinkedFile {
   category: FileRow["category"];
@@ -61,49 +56,6 @@ export interface LinkedFile {
 export interface LinkedFilesGroup {
   fileId: number;
   linked: LinkedFile[];
-}
-
-// A DishCam sidecar is `run.json`, or `run~<8 or 16 hex digits>.json` when
-// another folder already took the plain name. Matches `_RUN_JSON_RE` in
-// `lambda/src/data_hub_lambda/dishcam/filenames.py`.
-const SIDECAR_NAME = /^run(?:~[0-9a-f]{8}(?:[0-9a-f]{8})?)?\.json$/i;
-const SIDECAR_NAME_SQL = "^run(~[0-9a-f]{8}([0-9a-f]{8})?)?\\.json$";
-
-const VIDEO_NAME = /\.(?:mp4|m4v|mov|webm)$/i;
-const IMAGE_NAME = /\.(?:jpe?g|png|gif|webp)$/i;
-
-export function isSidecarFilename(filename: string): boolean {
-  return SIDECAR_NAME.test(filename);
-}
-
-// The folder of a stored path, or "" for a file in the watch folder. The same
-// split as `folderOf` in `run-file-identity.ts`, kept in SQL below.
-function folderOfPath(relativePath: string): string {
-  const slash = relativePath.lastIndexOf("/");
-  return slash === -1 ? "" : relativePath.slice(0, slash);
-}
-
-function pathOf(file: { filename: string; relativePath: string | null }) {
-  return file.relativePath ?? file.filename;
-}
-
-// A row's folder, matching `folderOfPath`. A path with no slash has no folder,
-// which `substring` reports as NULL.
-const folderSql = sql<string>`coalesce(substring(coalesce(${files.relativePath}, ${files.filename}) from '^(.*)/[^/]*$'), '')`;
-const isSidecarSql = sql`${files.filename} ~* ${SIDECAR_NAME_SQL}`;
-
-function outputRelation(file: {
-  contentType: string | null;
-  filename: string;
-}): LinkedFileRelation {
-  const type = file.contentType ?? "";
-  if (type.startsWith("video/") || VIDEO_NAME.test(file.filename)) {
-    return "video";
-  }
-  if (type.startsWith("image/") || IMAGE_NAME.test(file.filename)) {
-    return "preview_image";
-  }
-  return "output";
 }
 
 const linkColumns = {

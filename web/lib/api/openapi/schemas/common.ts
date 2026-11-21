@@ -1,5 +1,4 @@
 import { z } from "zod";
-import type { LinkedFileRelation } from "@/lib/api/file-deletion";
 import {
   archiveJobStatusEnum,
   fileCategoryEnum,
@@ -8,6 +7,7 @@ import {
   VALID_INSTRUMENT_TYPES,
   watcherEventTypeEnum,
 } from "@/lib/db/schema";
+import type { LinkedFileRelation } from "@/lib/runs/file-links";
 import {
   DEPRECATED_PENDING_RUN_STATUS,
   RUN_STATUS_VALUES,

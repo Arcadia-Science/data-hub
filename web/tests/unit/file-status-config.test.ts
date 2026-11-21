@@ -70,8 +70,9 @@ describe("getFileStatusKey", () => {
     expect(key("processing", { stalledProcessing: true })).toBe("stalled");
   });
 
-  it("reads a dismissed file as dismissed whatever its status", () => {
-    expect(key("queued", { deletedAt: new Date() })).toBe("dismissed");
+  it("reads a deleted file as deleted whatever its status", () => {
+    expect(key("queued", { deletedAt: new Date() })).toBe("deleted");
+    expect(FILE_STATUS_CONFIG.deleted.label).toBe("Deleted");
   });
 });
 
