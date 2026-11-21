@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { runDetailSearchParams } from "@/lib/search-params";
 import {
   isFilesScopeParam,
   isRunListScopeParam,
@@ -61,7 +62,22 @@ describe("files selection scope", () => {
     expect(key("")).not.toBe(key("files_status=failed"));
     expect(key("")).not.toBe(key("files_category=raw"));
     expect(key("")).not.toBe(key("files_sort=size"));
+    expect(key("")).not.toBe(key("files_order=desc"));
+    expect(key("")).not.toBe(key("files_deleted=true"));
     expect(key("")).not.toBe(key("files_dismissed=true"));
+  });
+
+  it("covers every param the files table writes except its page", () => {
+    // A param added to the table's definition clears the selection by default,
+    // so a new sort or filter can't leave Dismiss acting on rows that left the
+    // list. The two the column headers and the filter menu write are named, so
+    // dropping one from the definition fails here.
+    expect(Object.keys(runDetailSearchParams)).toEqual(
+      expect.arrayContaining(["files_order", "files_deleted"])
+    );
+    for (const param of Object.keys(runDetailSearchParams)) {
+      expect(isFilesScopeParam(param)).toBe(param !== "files_page");
+    }
   });
 
   it("ignores params that are not about the files table", () => {

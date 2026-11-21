@@ -157,11 +157,11 @@ Each channel’s contrast comes from the first frame and stays the same for the 
 
 If the video can’t be made, the file shows **Failed** and the message says why. One cause is a timelapse that can’t finish within the [15-minute processing limit](#when-processing-fails). The JPG and the raw file are still available.
 
-A timelapse processed before Data Hub made videos gets its video when you choose **Reprocess** on the file or on the run. Timelapses take several minutes each. When you reprocess a run with more than 10 of them, 10 process at a time and the rest show **Queued**.
+A timelapse processed before Data Hub made videos gets its video when you reprocess the file or its run; see [Reprocess or delete a run](/docs/browse-runs#reprocess-and-delete). Timelapses take several minutes each. When you reprocess a run with more than 10 of them, 10 process at a time and the rest show **Queued**.
 
 Every file in a Hina run has the same channel layout, so whichever file finishes processing first writes the run’s metadata. Later files still get their JPG but skip the metadata write. If the layout changed partway through a run, reprocessing one file won’t correct the run’s metadata.
 
-An image too large to preview at full size gets a smaller preview instead. For example, a 6221 × 6221 pixel image is previewed at 3110 × 3110 pixels. The raw file is unchanged, and you can download it at full size. A file that showed **Failed** for this reason earlier gets its preview when you choose **Reprocess** on the file or on the run.
+An image too large to preview at full size gets a smaller preview instead. For example, a 6221 × 6221 pixel image is previewed at 3110 × 3110 pixels. The raw file is unchanged, and you can download it at full size. A file that showed **Failed** for this reason earlier gets its preview when you reprocess the file or its run.
 
 Two kinds of image still show **Failed** instead of a preview:
 
@@ -223,7 +223,7 @@ Leave a new instrument as `generic` until someone confirms which processor, if a
 
 ## When processing fails [#when-processing-fails]
 
-A file with status `failed` shows an error message on the run page. Open the run, then choose **Reprocess** on that file, or select runs in a run list and choose **Reprocess**. See [Reprocess or delete a run](/docs/browse-runs#reprocess-and-delete).
+A file with status `failed` shows an error message on the run page. Open the run, select that file, and choose **Reprocess**, or select runs in a run list and choose **Reprocess**. See [Reprocess or delete a run](/docs/browse-runs#reprocess-and-delete).
 
 Processing one file has a 15-minute limit. A file that hits the limit, or is too large to process at all, shows **Failed** with a message that explains why. The raw file stays in storage, and you can download it.
 

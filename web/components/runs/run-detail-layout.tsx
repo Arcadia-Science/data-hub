@@ -12,6 +12,7 @@ type RunDetailLayoutProps = Pick<
   | "attributionsSlot"
   | "fileStats"
   | "files"
+  | "filesDeletedCount"
   | "filesDownloadableCount"
   | "filesPagination"
   | "instrumentId"
@@ -39,6 +40,7 @@ export function RunDetailLayout({
   children,
   fileStats,
   files,
+  filesDeletedCount,
   filesDownloadableCount,
   filesPagination,
   instrumentId,
@@ -93,6 +95,7 @@ export function RunDetailLayout({
           />
         )}
         <RunDetail.Files
+          deletedCount={filesDeletedCount}
           files={files}
           filteredDownloadableCount={filesDownloadableCount}
           instrumentId={instrumentId}

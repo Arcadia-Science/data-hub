@@ -465,8 +465,7 @@ export const SHOTS: Shot[] = [
     prepare: addPendingUploadRun,
     cleanup: removePendingUploadRun,
     ready: (page) => waitFor(page, /Files \(6 raw/),
-    // Selecting the files opens the bar with Upload and Dismiss. The row
-    // buttons only appear on hover, so this is how the screenshot shows them.
+    // Selecting the files opens the bar with Upload and Dismiss.
     steps: async ({ page }) => {
       await page.getByRole("table").getByRole("checkbox").first().check();
       await page.getByRole("button", { name: "Dismiss" }).first().waitFor();

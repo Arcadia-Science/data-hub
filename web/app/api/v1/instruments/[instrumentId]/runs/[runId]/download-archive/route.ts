@@ -122,7 +122,7 @@ async function resolveFileIdsFilter(
     search,
     categories,
     statuses,
-    includeDismissed: false,
+    includeDeleted: false,
   });
 }
 
