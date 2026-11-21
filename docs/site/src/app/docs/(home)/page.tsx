@@ -146,7 +146,7 @@ function HighlightList({ items }: { items: readonly string[] }) {
 export default function HomePage() {
   return (
     <main className="flex flex-1 flex-col">
-      <section className="mx-auto flex w-full max-w-348 flex-col items-center gap-8 px-4 py-16 lg:flex-row lg:items-center lg:gap-12 lg:py-12">
+      <section className="mx-auto flex w-full max-w-348 flex-col items-center gap-8 px-6 py-16 sm:px-8 lg:flex-row lg:items-center lg:gap-12 lg:py-12">
         <div className="flex w-full flex-col items-center gap-6 text-center lg:w-2/5 lg:shrink-0 lg:items-start lg:text-left">
           <DataHubLogo className="size-16" />
           <h1 className="font-bold text-4xl tracking-tight sm:text-5xl">
@@ -185,18 +185,20 @@ export default function HomePage() {
           <Screenshot
             alt={runDetailShot.alt}
             entry={runDetailShot.entry}
+            frameless
             preload
             sizes="(max-width: 1024px) 100vw, 64rem"
           />
         </div>
       </section>
 
-      <section className="border-fd-border border-y">
-        <div className="mx-auto flex w-full max-w-348 flex-col items-center gap-10 px-4 py-16 lg:flex-row lg:items-center lg:gap-16 lg:py-20">
+      <section>
+        <div className="mx-auto flex w-full max-w-348 flex-col items-center gap-10 px-6 py-16 sm:px-8 lg:flex-row lg:items-center lg:gap-16 lg:py-20">
           <div className="w-full min-w-0 lg:w-1/2">
             <Screenshot
               alt={homeShot.alt}
               entry={homeShot.entry}
+              frameless
               sizes="(max-width: 1024px) 100vw, 40rem"
             />
           </div>
@@ -228,7 +230,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section className="mx-auto flex w-full max-w-348 flex-col items-center gap-10 px-4 py-16 lg:flex-row lg:items-center lg:gap-16 lg:py-20">
+      <section className="mx-auto flex w-full max-w-348 flex-col items-center gap-10 px-6 py-16 sm:px-8 lg:flex-row lg:items-center lg:gap-16 lg:py-20">
         <div className="flex w-full flex-col gap-5 lg:w-1/2">
           <div className="flex flex-col gap-3">
             <h2 className="font-bold text-3xl tracking-tight sm:text-4xl">
@@ -294,8 +296,8 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section className="border-fd-border border-y">
-        <div className="mx-auto flex w-full max-w-348 flex-col items-center gap-10 px-4 py-16 lg:flex-row lg:items-center lg:gap-16 lg:py-20">
+      <section>
+        <div className="mx-auto flex w-full max-w-348 flex-col items-center gap-10 px-6 py-16 sm:px-8 lg:flex-row lg:items-center lg:gap-16 lg:py-20">
           <div className="w-full min-w-0 overflow-hidden rounded-xl border bg-fd-card shadow-sm lg:w-1/2">
             <DocsImage
               alt={mcpShot.alt}
@@ -329,7 +331,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section className="mx-auto grid w-full max-w-348 grid-cols-1 gap-4 px-4 py-16 pb-24 sm:grid-cols-2">
+      <section className="mx-auto grid w-full max-w-348 grid-cols-1 gap-4 px-6 py-16 pb-24 sm:grid-cols-2 sm:px-8">
         {features.map((feature) => (
           <Link
             className="flex flex-col gap-2 rounded-xl border p-6 transition-colors hover:bg-fd-accent"
