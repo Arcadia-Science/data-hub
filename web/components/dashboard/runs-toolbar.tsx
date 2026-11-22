@@ -1,66 +1,31 @@
 "use client";
 
-import { ChevronsUpDown, Search, X } from "lucide-react";
-import dynamic from "next/dynamic";
+import { X } from "lucide-react";
 import { useQueryStates } from "nuqs";
-import { useState } from "react";
-import { LoadErrorBoundary } from "@/components/load-error-boundary";
 import { RunFiltersCombobox } from "@/components/runs/run-filters-combobox";
 import {
   type PresetId,
   RunsDateFilter,
 } from "@/components/runs/runs-date-filter";
 import { useTablePending } from "@/components/table-pending";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import { Skeleton } from "@/components/ui/skeleton";
-import { preloader } from "@/lib/preload";
 import {
   ALL_TIME_DATE_FROM,
   dashboardSearchParams,
   hasActiveFilters,
 } from "@/lib/search-params";
 
-interface Instrument {
-  displayName: string;
-  id: string;
-}
-
-// The list uses the command palette library, which the dashboard doesn't
-// otherwise need. It loads when the popover first opens, or earlier when the
-// pointer or focus reaches the button.
-const loadInstrumentFilterList = () =>
-  import("@/components/dashboard/instrument-filter-list").then(
-    (m) => m.InstrumentFilterList
-  );
-
-const preloadInstrumentFilterList = preloader(loadInstrumentFilterList);
-
-const InstrumentFilterList = dynamic(loadInstrumentFilterList, {
-  ssr: false,
-  loading: () => (
-    <div aria-hidden className="flex flex-col gap-2 p-2">
-      <Skeleton className="h-8 w-full" />
-      <Skeleton className="h-6 w-full" />
-      <Skeleton className="h-6 w-full" />
-    </div>
-  ),
-});
-
+/**
+ * The Clear button, date range, and Add filter menu that sit beside the
+ * "Instrument runs" heading. The run ID and instrument filters are in the
+ * table's column headers, and Clear resets them too.
+ */
 export function RunsToolbar({
-  instruments,
   dateDefaultPreset,
 }: {
-  instruments: Instrument[];
   // The page's server-side default date window, reflected in the date filter's
   // label/highlight. Omitted on pages that show all runs by default (e.g. "My
-  // runs"), which surfaces an "All time" option instead.
+  // activity"), which surfaces an "All time" option instead.
   dateDefaultPreset?: PresetId;
 }) {
   const { startTransition } = useTablePending();
@@ -70,17 +35,7 @@ export function RunsToolbar({
     startTransition,
   });
 
-  const [instrumentOpen, setInstrumentOpen] = useState(false);
-
   const hasFilters = hasActiveFilters(filters);
-
-  function toggleInstrument(id: string) {
-    const current = filters.instrument_id;
-    const next = current.includes(id)
-      ? current.filter((i) => i !== id)
-      : [...current, id];
-    setFilters({ instrument_id: next, page: 1 });
-  }
 
   function clearFilters() {
     setFilters({
@@ -98,95 +53,41 @@ export function RunsToolbar({
   }
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Search */}
-          <div className="relative w-64">
-            <Search className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              aria-label="Search runs"
-              className="pl-9"
-              onChange={(e) => setFilters({ search: e.target.value, page: 1 })}
-              placeholder="Search runs…"
-              value={filters.search}
-            />
-          </div>
+    <div className="flex flex-wrap items-center gap-2">
+      {hasFilters && (
+        <Button
+          className="h-9 gap-1.5 font-normal text-sm"
+          onClick={clearFilters}
+          size="sm"
+          variant="ghost"
+        >
+          <X className="size-3.5" />
+          Clear
+        </Button>
+      )}
 
-          {/* Instrument multi-select */}
-          <Popover onOpenChange={setInstrumentOpen} open={instrumentOpen}>
-            <PopoverTrigger asChild>
-              <Button
-                aria-expanded={instrumentOpen}
-                className="h-9 gap-1.5 font-normal"
-                onFocus={preloadInstrumentFilterList}
-                onMouseEnter={preloadInstrumentFilterList}
-                role="combobox"
-                size="sm"
-                variant="outline"
-              >
-                <ChevronsUpDown className="size-3.5 opacity-50" />
-                Instruments
-                {filters.instrument_id.length > 0 && (
-                  <Badge
-                    className="ml-1 bg-slate-200 px-1.5 text-[10px] text-slate-800 dark:bg-slate-800 dark:text-slate-200"
-                    variant="secondary"
-                  >
-                    {filters.instrument_id.length}
-                  </Badge>
-                )}
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent align="start" className="w-72 p-0">
-              <LoadErrorBoundary>
-                <InstrumentFilterList
-                  instruments={instruments}
-                  onToggle={toggleInstrument}
-                  selectedIds={filters.instrument_id}
-                />
-              </LoadErrorBoundary>
-            </PopoverContent>
-          </Popover>
-        </div>
+      <RunsDateFilter
+        align="end"
+        allTimeFrom={dateDefaultPreset ? ALL_TIME_DATE_FROM : undefined}
+        defaultPreset={dateDefaultPreset}
+        onChange={(range) =>
+          setFilters({
+            date_from: range.from,
+            date_to: range.to,
+            page: 1,
+          })
+        }
+        value={{ from: filters.date_from, to: filters.date_to }}
+      />
 
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Clear filters */}
-          {hasFilters && (
-            <Button
-              className="h-9 gap-1.5 font-normal text-sm"
-              onClick={clearFilters}
-              size="sm"
-              variant="ghost"
-            >
-              <X className="size-3.5" />
-              Clear
-            </Button>
-          )}
-
-          <RunsDateFilter
-            align="end"
-            allTimeFrom={dateDefaultPreset ? ALL_TIME_DATE_FROM : undefined}
-            defaultPreset={dateDefaultPreset}
-            onChange={(range) =>
-              setFilters({
-                date_from: range.from,
-                date_to: range.to,
-                page: 1,
-              })
-            }
-            value={{ from: filters.date_from, to: filters.date_to }}
-          />
-
-          <RunFiltersCombobox
-            onChange={({ includeDeleted }) =>
-              setFilters({ include_deleted: includeDeleted, page: 1 })
-            }
-            onStatusChange={(next) => setFilters({ status: next, page: 1 })}
-            selectedStatuses={filters.status}
-            values={{ includeDeleted: filters.include_deleted }}
-          />
-        </div>
-      </div>
+      <RunFiltersCombobox
+        onChange={({ includeDeleted }) =>
+          setFilters({ include_deleted: includeDeleted, page: 1 })
+        }
+        onStatusChange={(next) => setFilters({ status: next, page: 1 })}
+        selectedStatuses={filters.status}
+        values={{ includeDeleted: filters.include_deleted }}
+      />
     </div>
   );
 }

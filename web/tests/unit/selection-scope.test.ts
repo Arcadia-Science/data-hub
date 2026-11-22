@@ -30,6 +30,16 @@ describe("run list selection scope", () => {
     );
   });
 
+  it("ignores the lab notebooks list's page and filters", () => {
+    expect(key("search=abc")).toBe(key("search=abc&notebooks_page=2"));
+    expect(key("")).toBe(key("notebooks_page=3"));
+    expect(key("search=abc")).toBe(
+      key(
+        "search=abc&notebooks_q=growth&notebooks_owner=none&notebooks_from=all&notebooks_to=2026-01-02"
+      )
+    );
+  });
+
   it("does not depend on the order of params", () => {
     expect(key("search=abc&status=failed")).toBe(
       key("status=failed&search=abc")

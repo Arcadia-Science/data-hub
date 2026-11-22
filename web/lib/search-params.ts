@@ -89,8 +89,25 @@ export const dashboardSearchParams = {
   ...notebookFilterSearchParams,
   page: parseAsInteger.withDefault(1),
   per_page: parseAsInteger.withDefault(10),
+  // The lab notebooks list on Home and on a member's page. It pages on its
+  // own, so it has its own key beside the runs table's `page`.
+  notebooks_page: parseAsInteger.withDefault(1),
+  // The Name filter on Home's lab notebooks list: a name, part of a
+  // description, or a pasted link, as on `/lab-notebooks`.
+  notebooks_q: parseAsString.withDefault(""),
+  // The Owner filter on Home's lab notebooks list: a user ID, or
+  // NOTEBOOK_OWNER_NONE for notebooks with no owner.
+  notebooks_owner: parseAsString,
+  // The date range on Home's lab notebooks list, which lists notebooks that
+  // got a run in it. Empty means today; `notebooks_from` can be
+  // ALL_TIME_DATE_FROM.
+  notebooks_from: parseAsString.withOptions({ clearOnDefault: true }),
+  notebooks_to: parseAsString.withOptions({ clearOnDefault: true }),
   ...runSortSearchParams,
 };
+
+// The `notebooks_owner` value for notebooks with no owner.
+export const NOTEBOOK_OWNER_NONE = "none";
 
 export const dashboardParamsCache = createSearchParamsCache(
   dashboardSearchParams

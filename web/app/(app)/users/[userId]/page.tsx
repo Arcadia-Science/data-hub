@@ -19,6 +19,10 @@ import {
 import { RunsToolbar } from "@/components/dashboard/runs-toolbar";
 import { RunBulkActionBar } from "@/components/instruments/runs-table/run-bulk-action-bar";
 import { RunSelectionProvider } from "@/components/instruments/runs-table/run-selection-provider";
+import {
+  NotebooksTable,
+  NotebooksTableSkeleton,
+} from "@/components/notebooks/notebooks-table";
 import { PaginationNav } from "@/components/pagination-nav";
 import {
   TablePendingBoundary,
@@ -32,7 +36,7 @@ import {
   type UserProfile,
 } from "@/lib/api/dashboard";
 import { buildRunListQuery } from "@/lib/api/instrument-runs";
-import { getNotebookFilterOptions } from "@/lib/api/notebooks";
+import { getNotebookFilterOptions, listNotebooks } from "@/lib/api/notebooks";
 import { listCommentFeed } from "@/lib/api/run-comments";
 import {
   parseHasNotebookParam,
@@ -51,6 +55,8 @@ import { getViewerTimeZone } from "@/lib/viewer-timezone";
 
 type DashboardParams = Awaited<ReturnType<typeof dashboardParamsCache.parse>>;
 
+const NOTEBOOKS_PER_PAGE = 5;
+
 interface Props {
   params: Promise<{ userId: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -64,7 +70,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   }
 
   const title = profile.displayName;
-  const description = `Runs and comments for ${profile.displayName}.`;
+  const description = `Runs, lab notebooks, and comments for ${profile.displayName}.`;
 
   return {
     title,
@@ -107,13 +113,35 @@ export default async function UserRunsPage({ params, searchParams }: Props) {
       </section>
 
       <section className="flex scroll-mt-6 flex-col gap-3" id="runs">
-        <h2 className="font-medium text-lg tracking-tight">
-          Recent instrument runs
-        </h2>
-        <Suspense fallback={<DashboardRunsSkeleton />}>
-          <UserRunsSection
+        {/* One pending state for the toolbar, the column filters, and the
+            pages, so each dims the table while it loads. */}
+        <TablePendingProvider>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="font-medium text-lg tracking-tight">
+              Instrument runs
+            </h2>
+            <RunsToolbar />
+          </div>
+          <Suspense fallback={<DashboardRunsSkeleton />}>
+            <UserRunsSection
+              isSelf={isSelf}
+              params={dashboardParams}
+              profile={profile}
+            />
+          </Suspense>
+        </TablePendingProvider>
+      </section>
+
+      <section className="flex scroll-mt-6 flex-col gap-3" id="lab-notebooks">
+        <h2 className="font-medium text-lg tracking-tight">Lab notebooks</h2>
+        <Suspense
+          fallback={
+            <NotebooksTableSkeleton rows={NOTEBOOKS_PER_PAGE} variant="owned" />
+          }
+        >
+          <UserNotebooksSection
             isSelf={isSelf}
-            params={dashboardParams}
+            page={dashboardParams.notebooks_page}
             profile={profile}
           />
         </Suspense>
@@ -123,7 +151,7 @@ export default async function UserRunsPage({ params, searchParams }: Props) {
         <CommentTabs defaultValue="written" values={["written", "on_runs"]}>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-pretty font-medium text-lg tracking-tight">
-              Recent comments
+              Comments
             </h2>
             <CommentScopeFilter
               defaultValue="written"
@@ -212,27 +240,71 @@ async function UserRunsSection({
 
   return (
     <RunSelectionProvider>
-      <TablePendingProvider>
-        <div className="flex flex-col gap-3">
-          <RunsToolbar instruments={instruments} />
-          <RunBulkActionBar />
-          <TablePendingBoundary>
-            <RunsTable
-              data={runResult.data}
-              emptyLabel={emptyLabel}
-              hasFilters={hasFilters}
-              notebookOptions={notebookOptions}
-              totalCount={runResult.pagination.total}
-            />
-          </TablePendingBoundary>
-          <PaginationNav
-            page={runResult.pagination.page}
-            pageParam="page"
-            totalPages={runResult.pagination.total_pages}
+      <div className="flex flex-col gap-3">
+        <RunBulkActionBar />
+        <TablePendingBoundary>
+          <RunsTable
+            data={runResult.data}
+            emptyLabel={emptyLabel}
+            hasFilters={hasFilters}
+            instruments={instruments}
+            notebookOptions={notebookOptions}
+            totalCount={runResult.pagination.total}
           />
-        </div>
-      </TablePendingProvider>
+        </TablePendingBoundary>
+        <PaginationNav
+          className="pb-0"
+          page={runResult.pagination.page}
+          pageParam="page"
+          totalPages={runResult.pagination.total_pages}
+        />
+      </div>
     </RunSelectionProvider>
+  );
+}
+
+async function UserNotebooksSection({
+  isSelf,
+  page,
+  profile,
+}: {
+  isSelf: boolean;
+  page: number;
+  profile: UserProfile;
+}) {
+  // The notebooks this person owns, the ones that most recently got a run first.
+  const result = await listNotebooks({
+    ownerId: profile.userId,
+    page,
+    perPage: NOTEBOOKS_PER_PAGE,
+    sort: "last_run",
+  });
+
+  const emptyMessage = isSelf
+    ? "No lab notebooks owned by you yet."
+    : `No lab notebooks owned by ${profile.displayName} yet.`;
+
+  // Its own pending state, so paging the notebooks doesn't dim the runs table.
+  return (
+    <TablePendingProvider>
+      <div className="flex flex-col gap-3">
+        <TablePendingBoundary>
+          <NotebooksTable
+            emptyMessage={emptyMessage}
+            filtered={false}
+            notebooks={result.notebooks}
+            totalCount={result.total}
+            variant="owned"
+          />
+        </TablePendingBoundary>
+        <PaginationNav
+          className="pb-0"
+          page={result.page}
+          pageParam="notebooks_page"
+          totalPages={Math.ceil(result.total / result.perPage)}
+        />
+      </div>
+    </TablePendingProvider>
   );
 }
 

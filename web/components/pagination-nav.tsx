@@ -49,10 +49,14 @@ function getVisiblePages(
 }
 
 export function PaginationNav({
+  className,
   page,
   totalPages,
   pageParam,
 }: {
+  // Such as `pb-0` when another section follows, so only the page's gap
+  // separates them.
+  className?: string;
   page: number;
   totalPages: number;
   pageParam: string;
@@ -109,7 +113,8 @@ export function PaginationNav({
       className={cn(
         "py-3 transition-opacity duration-150",
         isPending && "pointer-events-none cursor-wait",
-        isPendingVisible && "opacity-60"
+        isPendingVisible && "opacity-60",
+        className
       )}
     >
       <PaginationContent>

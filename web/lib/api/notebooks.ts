@@ -311,6 +311,8 @@ export const NOTEBOOK_SORTS = [
 export type NotebookSort = (typeof NOTEBOOK_SORTS)[number];
 
 export interface ListNotebooksInput {
+  // False lists only notebooks with no owner.
+  hasOwner?: boolean;
   includeDeleted?: boolean;
   order?: "asc" | "desc";
   ownerId?: string;
@@ -319,6 +321,11 @@ export interface ListNotebooksInput {
   // A name, part of a description, or a pasted link. A link matches only
   // the notebook for that page.
   query?: string;
+  // Only notebooks with a live run that started in this range, by acquired
+  // time or created time, like the runs list's date filter. `runTo` is the
+  // start of the last included day.
+  runFrom?: string;
+  runTo?: string;
   sort?: NotebookSort;
 }
 
@@ -340,6 +347,13 @@ function notebookListConditions(input: ListNotebooksInput): SQL | undefined {
   if (input.ownerId) {
     conditions.push(eq(notebooks.ownerId, input.ownerId));
   }
+  if (input.hasOwner === false) {
+    conditions.push(isNull(notebooks.ownerId));
+  }
+  const hadRun = hadRunInRange(input.runFrom, input.runTo);
+  if (hadRun) {
+    conditions.push(hadRun);
+  }
   const query = input.query?.trim();
   if (query) {
     const pattern = `%${escapeLikePattern(query)}%`;
@@ -351,6 +365,36 @@ function notebookListConditions(input: ListNotebooksInput): SQL | undefined {
     conditions.push(notebookQueryCondition(query, text));
   }
   return conditions.length > 0 ? and(...conditions) : undefined;
+}
+
+function validDate(value: string | undefined): Date | null {
+  if (!value) {
+    return null;
+  }
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/**
+ * Notebooks with a live run that started between `from` and the end of the
+ * `to` day. Bound as ISO strings cast to timestamptz, as the runs list does.
+ * Use it in a query over `notebooks`.
+ */
+export function hadRunInRange(from?: string, to?: string): SQL | undefined {
+  const bounds: SQL[] = [];
+  const start = validDate(from);
+  if (start) {
+    bounds.push(sql`${runStartedAt} >= ${start.toISOString()}::timestamptz`);
+  }
+  const end = validDate(to);
+  if (end) {
+    end.setDate(end.getDate() + 1);
+    bounds.push(sql`${runStartedAt} <= ${end.toISOString()}::timestamptz`);
+  }
+  if (bounds.length === 0) {
+    return;
+  }
+  return sql`exists (select 1 from ${runNotebookLinks} inner join ${instrumentRuns} on ${instrumentRuns.id} = ${runNotebookLinks.runId} where ${runNotebookLinks.notebookId} = ${notebooks.id} and ${instrumentRuns.deletedAt} is null and ${and(...bounds)})`;
 }
 
 /**
@@ -514,6 +558,28 @@ export function inNotebookCondition(notebookId: string): SQL {
     return sql`false`;
   }
   return sql`exists (select 1 from ${runNotebookLinks} where ${runNotebookLinks.runId} = ${instrumentRuns.id} and ${runNotebookLinks.notebookId} = ${notebookId})`;
+}
+
+/** A person in the "Owner" column's filter menu. */
+export interface NotebookOwnerOption {
+  displayName: string;
+  userId: string;
+}
+
+/** Everyone who owns a live notebook, by name, for the "Owner" filter menu. */
+export async function getNotebookOwnerOptions(): Promise<
+  NotebookOwnerOption[]
+> {
+  const rows = await db
+    .selectDistinct({ userId: users.id, name: users.name, email: users.email })
+    .from(notebooks)
+    .innerJoin(users, eq(users.id, notebooks.ownerId))
+    .where(isNull(notebooks.deletedAt))
+    .orderBy(users.name);
+  return rows.map((row) => ({
+    userId: row.userId,
+    displayName: row.name ?? row.email ?? "Unknown",
+  }));
 }
 
 /** A notebook in the "Lab Notebook" column's filter menu. */

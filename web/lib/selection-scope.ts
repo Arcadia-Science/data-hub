@@ -22,12 +22,19 @@ export function selectionScopeKey(
 }
 
 // Params that sit beside a run list without changing which runs it lists.
-// `comments_*` drive the comments preview on the dashboard.
+// `comments_*` drive the comments preview on the dashboard, and
+// `notebooks_*` page and filter the lab notebooks list on Home and a member's
+// page.
 const NOT_RUN_LIST_PARAMS = new Set([
   "page",
   "per_page",
   "comments_from",
   "comments_to",
+  "notebooks_page",
+  "notebooks_q",
+  "notebooks_owner",
+  "notebooks_from",
+  "notebooks_to",
 ]);
 
 // An allow-list built from the list pages' own param definitions, so an

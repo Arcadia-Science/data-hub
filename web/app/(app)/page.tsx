@@ -22,6 +22,11 @@ import {
 } from "@/components/instruments/instruments-table";
 import { RunBulkActionBar } from "@/components/instruments/runs-table/run-bulk-action-bar";
 import { RunSelectionProvider } from "@/components/instruments/runs-table/run-selection-provider";
+import { NotebookListFilters } from "@/components/notebooks/notebook-list-filters";
+import {
+  NotebooksTable,
+  NotebooksTableSkeleton,
+} from "@/components/notebooks/notebooks-table";
 import { PaginationNav } from "@/components/pagination-nav";
 import {
   TablePendingBoundary,
@@ -37,7 +42,11 @@ import {
   getRanByFilterOptions,
 } from "@/lib/api/instrument-runs";
 import { getRecentActiveInstrumentsForDashboard } from "@/lib/api/instruments";
-import { getNotebookFilterOptions } from "@/lib/api/notebooks";
+import {
+  getNotebookFilterOptions,
+  getNotebookOwnerOptions,
+  listNotebooks,
+} from "@/lib/api/notebooks";
 import { listCommentFeed } from "@/lib/api/run-comments";
 import {
   parseHasNotebookParam,
@@ -49,12 +58,14 @@ import {
   ALL_TIME_DATE_FROM,
   dashboardParamsCache,
   hasActiveFilters,
+  NOTEBOOK_OWNER_NONE,
 } from "@/lib/search-params";
 import { getViewerTimeZone } from "@/lib/viewer-timezone";
 
 type DashboardParams = Awaited<ReturnType<typeof dashboardParamsCache.parse>>;
 
 const RECENT_INSTRUMENTS_LIMIT = 3;
+const NOTEBOOKS_PER_PAGE = 5;
 const RECENT_COMMENTS_LIMIT = 4;
 
 export default async function DashboardPage({
@@ -96,18 +107,59 @@ export default async function DashboardPage({
       </section>
 
       <section className="flex scroll-mt-6 flex-col gap-3" id="runs">
-        <h2 className="font-medium text-lg tracking-tight">
-          Recent instrument runs
-        </h2>
-        <Suspense fallback={<DashboardRunsSkeleton />}>
-          <DashboardRunsSection currentUserId={currentUserId} params={params} />
-        </Suspense>
+        {/* One pending state for the toolbar, the column filters, and the
+            pages, so each dims the table while it loads. */}
+        <TablePendingProvider>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="font-medium text-lg tracking-tight">
+              Instrument runs
+            </h2>
+            <RunsToolbar dateDefaultPreset="today" />
+          </div>
+          <Suspense fallback={<DashboardRunsSkeleton />}>
+            <DashboardRunsSection
+              currentUserId={currentUserId}
+              params={params}
+            />
+          </Suspense>
+        </TablePendingProvider>
+      </section>
+
+      <section className="flex scroll-mt-6 flex-col gap-3" id="lab-notebooks">
+        {/* One pending state for the date range, the Owner filter, and the
+            pages, so each dims the table while it loads, and paging the
+            notebooks doesn't dim the runs table. */}
+        <TablePendingProvider>
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-pretty font-medium text-lg tracking-tight">
+              Lab notebooks
+            </h2>
+            <NotebookListFilters />
+          </div>
+          <Suspense
+            fallback={
+              <NotebooksTableSkeleton
+                rows={NOTEBOOKS_PER_PAGE}
+                variant="recent"
+              />
+            }
+          >
+            <DashboardNotebooksSection
+              currentUserId={currentUserId}
+              dateFrom={params.notebooks_from}
+              dateTo={params.notebooks_to}
+              owner={params.notebooks_owner}
+              page={params.notebooks_page}
+              query={params.notebooks_q}
+            />
+          </Suspense>
+        </TablePendingProvider>
       </section>
 
       <section className="flex flex-col gap-3">
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-pretty font-medium text-lg tracking-tight">
-            Recent comments
+            Comments
           </h2>
           <CommentDateFilter />
         </div>
@@ -155,6 +207,93 @@ async function DashboardInstrumentsSection() {
         </Link>
       }
     />
+  );
+}
+
+async function DashboardNotebooksSection({
+  currentUserId,
+  dateFrom,
+  dateTo,
+  owner,
+  page,
+  query,
+}: {
+  currentUserId: string | null;
+  dateFrom: string | null;
+  dateTo: string | null;
+  owner: string | null;
+  page: number;
+  query: string;
+}) {
+  let ownerFilter: { hasOwner?: boolean; ownerId?: string } = {};
+  if (owner === NOTEBOOK_OWNER_NONE) {
+    ownerFilter = { hasOwner: false };
+  } else if (owner) {
+    ownerFilter = { ownerId: owner };
+  }
+
+  // Like the runs list, today's unless the URL picks a range or all time.
+  const runFrom =
+    dateFrom === ALL_TIME_DATE_FROM
+      ? undefined
+      : (dateFrom ?? startOfTodayISO(await getViewerTimeZone()));
+
+  // Everyone's live lab notebooks that got a run in the range, the ones that
+  // most recently got a run first.
+  const [result, owners] = await Promise.all([
+    listNotebooks({
+      ...ownerFilter,
+      query: query.trim() || undefined,
+      runFrom,
+      runTo: dateTo ?? undefined,
+      page,
+      perPage: NOTEBOOKS_PER_PAGE,
+      sort: "last_run",
+    }),
+    getNotebookOwnerOptions(),
+  ]);
+
+  // The viewer pinned as "You" at the top (if they own any), then other owners
+  // by display name, then "No owner", like the runs table's Ran By filter.
+  const meOption = currentUserId
+    ? owners.find((o) => o.userId === currentUserId)
+    : undefined;
+  const ownerOptions = [
+    ...(meOption ? [{ value: meOption.userId, label: "You" }] : []),
+    ...owners
+      .filter((o) => o.userId !== currentUserId)
+      .map((o) => ({ value: o.userId, label: o.displayName })),
+    { value: NOTEBOOK_OWNER_NONE, label: "No owner" },
+  ];
+  const filtered =
+    query.trim() !== "" ||
+    owner !== null ||
+    dateFrom !== null ||
+    dateTo !== null;
+
+  return (
+    <div className="flex flex-col gap-3">
+      <TablePendingBoundary>
+        <NotebooksTable
+          emptyMessage={
+            filtered
+              ? "No lab notebooks match these filters."
+              : "No lab notebooks got a run today."
+          }
+          filtered={filtered}
+          notebooks={result.notebooks}
+          ownerOptions={ownerOptions}
+          totalCount={result.total}
+          variant="recent"
+        />
+      </TablePendingBoundary>
+      <PaginationNav
+        className="pb-0"
+        page={result.page}
+        pageParam="notebooks_page"
+        totalPages={Math.ceil(result.total / result.perPage)}
+      />
+    </div>
   );
 }
 
@@ -220,26 +359,25 @@ async function DashboardRunsSection({
 
   return (
     <RunSelectionProvider>
-      <TablePendingProvider>
-        <div className="flex flex-col gap-3">
-          <RunsToolbar dateDefaultPreset="today" instruments={instruments} />
-          <RunBulkActionBar />
-          <TablePendingBoundary>
-            <RunsTable
-              data={runResult.data}
-              hasFilters={hasFilters}
-              notebookOptions={notebookOptions}
-              ranByOptions={ranByOptions}
-              totalCount={runResult.pagination.total}
-            />
-          </TablePendingBoundary>
-          <PaginationNav
-            page={runResult.pagination.page}
-            pageParam="page"
-            totalPages={runResult.pagination.total_pages}
+      <div className="flex flex-col gap-3">
+        <RunBulkActionBar />
+        <TablePendingBoundary>
+          <RunsTable
+            data={runResult.data}
+            hasFilters={hasFilters}
+            instruments={instruments}
+            notebookOptions={notebookOptions}
+            ranByOptions={ranByOptions}
+            totalCount={runResult.pagination.total}
           />
-        </div>
-      </TablePendingProvider>
+        </TablePendingBoundary>
+        <PaginationNav
+          className="pb-0"
+          page={runResult.pagination.page}
+          pageParam="page"
+          totalPages={runResult.pagination.total_pages}
+        />
+      </div>
     </RunSelectionProvider>
   );
 }
