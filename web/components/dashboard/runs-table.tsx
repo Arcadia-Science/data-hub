@@ -1,5 +1,10 @@
 import { SearchX } from "lucide-react";
 import Link from "next/link";
+import {
+  InstrumentColumnHeader,
+  type InstrumentFilterOption,
+} from "@/components/dashboard/instrument-column-header";
+import { SearchColumnHeader } from "@/components/dashboard/search-column-header";
 import { EmptyState } from "@/components/empty-state";
 import { FilterableColumnHeader } from "@/components/instruments/runs-table/filterable-column-header";
 import {
@@ -39,6 +44,7 @@ export function RunsTable({
   data,
   hasFilters,
   totalCount,
+  instruments,
   notebookOptions,
   notebookId,
   ranByOptions,
@@ -47,6 +53,8 @@ export function RunsTable({
   data: RunListRow[];
   hasFilters: boolean;
   totalCount: number;
+  // The instruments the "Instrument" column's menu lists.
+  instruments: InstrumentFilterOption[];
   // The notebooks the "Lab Notebook" menu lists, with their runs counted over
   // the runs this page can show. Omitted on a notebook's page, where every
   // row is in that notebook, so a plain header is rendered instead.
@@ -87,8 +95,17 @@ export function RunsTable({
             <TableHead className="w-10">
               <RunSelectAllCheckbox refs={runRefs} />
             </TableHead>
-            <TableHead>Instrument</TableHead>
-            <TableHead>Run ID</TableHead>
+            <TableHead>
+              <InstrumentColumnHeader instruments={instruments} />
+            </TableHead>
+            <TableHead>
+              <SearchColumnHeader
+                inputLabel="Search run IDs"
+                label="Run ID"
+                param="search"
+                placeholder="Search run IDs…"
+              />
+            </TableHead>
             <TableHead>
               <RawFileColumnHeader label="Files" />
             </TableHead>
@@ -231,23 +248,6 @@ export function RunsTableSkeleton() {
   );
 }
 
-function RunsToolbarSkeleton() {
-  return (
-    <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <Skeleton className="h-9 w-64" />
-          <Skeleton className="h-9 w-32" />
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Skeleton className="h-9 w-32" />
-          <Skeleton className="h-9 w-28" />
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function RunsTableEmptyPlaceholder() {
   return (
     <div
@@ -257,8 +257,9 @@ function RunsTableEmptyPlaceholder() {
   );
 }
 
-// Dashboard default is often an empty filtered run list (today lookback) with the
-// toolbar above it — not a populated table — so mirror that shell here.
+// Dashboard default is often an empty filtered run list (today lookback), not
+// a populated table, so mirror that here. The toolbar renders beside the
+// section heading, outside this placeholder.
 export function DashboardRunsSkeleton() {
   return (
     <div
@@ -267,7 +268,6 @@ export function DashboardRunsSkeleton() {
       className="flex flex-col gap-3"
       role="status"
     >
-      <RunsToolbarSkeleton />
       <RunsTableEmptyPlaceholder />
     </div>
   );

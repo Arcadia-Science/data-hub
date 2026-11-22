@@ -81,7 +81,7 @@ export const SHOTS: Shot[] = [
     name: "home",
     pages: ["browse-runs", "home"],
     path: "/",
-    ready: (page) => waitFor(page, "Recent instrument runs"),
+    ready: (page) => waitFor(page, "Instrument runs"),
   },
   {
     name: "plate-reader-runs-table",
@@ -94,13 +94,13 @@ export const SHOTS: Shot[] = [
     pages: ["browse-runs"],
     path: (world) => `/users/${world.admin.userId}`,
     address: `/users/${EXAMPLE_ID}`,
-    ready: (page) => waitFor(page, "Recent instrument runs"),
+    ready: (page) => waitFor(page, "Instrument runs"),
   },
   {
     name: "search-modal",
     pages: ["browse-runs"],
     path: "/",
-    ready: (page) => waitFor(page, "Recent instrument runs"),
+    ready: (page) => waitFor(page, "Instrument runs"),
     steps: async ({ page }) => {
       await page.keyboard.press("Control+k");
       const input = page.getByPlaceholder(/Search or paste a notebook link/);
@@ -185,7 +185,7 @@ export const SHOTS: Shot[] = [
     pages: ["configure-notifications"],
     path: "/",
     closeup: (page) => page.getByRole("dialog"),
-    ready: (page) => waitFor(page, "Recent instrument runs"),
+    ready: (page) => waitFor(page, "Instrument runs"),
     steps: async ({ page }) => {
       await page
         .getByRole("button", { name: /notification/i })
@@ -415,7 +415,7 @@ export const SHOTS: Shot[] = [
     path: "/",
     closeup: (page) => page.getByRole("dialog"),
     prepare: connectLinear,
-    ready: (page) => waitFor(page, "Recent instrument runs"),
+    ready: (page) => waitFor(page, "Instrument runs"),
     steps: async ({ page }) => {
       await openAccountMenu(page, "Feedback");
       const dialog = page.getByRole("dialog");
@@ -441,7 +441,7 @@ export const SHOTS: Shot[] = [
     pages: ["send-feedback"],
     path: "/",
     closeup: (page) => page.getByRole("dialog"),
-    ready: (page) => waitFor(page, "Recent instrument runs"),
+    ready: (page) => waitFor(page, "Instrument runs"),
     steps: async ({ page }) => {
       await openAccountMenu(page, "Changelog");
       await waitFor(page, /newest first/);

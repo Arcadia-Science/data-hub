@@ -47,6 +47,12 @@ type FilterParamKey<KeyMap extends UseQueryStatesKeysMap> = {
 }[keyof Values<KeyMap>] &
   string;
 
+// The number-valued entries in the parser map, such as a table's page.
+type PageParamKey<KeyMap extends UseQueryStatesKeysMap> = {
+  [K in keyof Values<KeyMap>]: Values<KeyMap>[K] extends number ? K : never;
+}[keyof Values<KeyMap>] &
+  string;
+
 /** The URL params an instrument runs table can filter on. */
 export type InstrumentFilterParamKey = FilterParamKey<
   typeof instrumentDetailSearchParams
@@ -74,11 +80,15 @@ export function FilterableColumnHeader<
 >({
   label,
   paramKey,
+  pageKey,
   options,
   paramsSource = "instrument" as Source,
 }: {
   label: string;
   paramKey: FilterParamKey<(typeof PARAMS_BY_SOURCE)[Source]>;
+  // The page param a change sends back to 1, when the table pages with its
+  // own key. Defaults to `page`.
+  pageKey?: PageParamKey<(typeof PARAMS_BY_SOURCE)[Source]>;
   options: FilterOption[];
   // Which shared nuqs map to bind. Keep this a string — never pass the parser
   // object itself from a Server Component.
@@ -118,7 +128,7 @@ export function FilterableColumnHeader<
           onValueChange={(value) =>
             setFilters({
               [paramKey]: value || null,
-              page: 1,
+              [pageKey ?? "page"]: 1,
             } as Partial<Nullable<Values<(typeof PARAMS_BY_SOURCE)[Source]>>>)
           }
           value={currentValue ?? ""}

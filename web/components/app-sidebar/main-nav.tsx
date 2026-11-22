@@ -31,6 +31,7 @@ import { useRecentInstruments } from "@/hooks/use-recent-instruments";
 import { useRecentNotebooks } from "@/hooks/use-recent-notebooks";
 import type { SidebarInstrument, SidebarNotebook } from "@/lib/api/sidebar";
 import { notebookPageHref } from "@/lib/notebooks/details";
+import type { SidebarNavGroupsOpen } from "@/lib/sidebar-persistence";
 
 // Every link sets `prefetch={false}`. `router.refresh()` prefetches each
 // visible link again, and a run page refreshes while files are in progress.
@@ -39,18 +40,24 @@ const SIDEBAR_NOTEBOOKS_LIMIT = 5;
 
 interface MainNavProps {
   currentUserId: string;
+  // Whether the Instruments and Lab Notebooks groups are open, as of when this
+  // mounts. Each group manages its own state after that.
+  groupsOpen: SidebarNavGroupsOpen;
   instruments: SidebarInstrument[];
   // The live notebooks that most recently got a run, newest first.
   notebooks: SidebarNotebook[];
+  onGroupOpenChange: (group: keyof SidebarNavGroupsOpen, open: boolean) => void;
 }
 
 export function MainNav({
   currentUserId,
+  groupsOpen,
   instruments,
   notebooks,
+  onGroupOpenChange,
 }: MainNavProps) {
   const pathname = usePathname();
-  const myRunsHref = `/users/${currentUserId}`;
+  const myActivityHref = `/users/${currentUserId}`;
   const { recent: recentInstruments } = useRecentInstruments();
 
   const recentlyViewedInstruments = useMemo(
@@ -121,21 +128,23 @@ export function MainNav({
           <SidebarMenuItem>
             <SidebarMenuButton
               asChild
-              isActive={pathname === myRunsHref}
-              tooltip="My runs"
+              isActive={pathname === myActivityHref}
+              tooltip="My activity"
             >
-              <Link href={myRunsHref} prefetch={false}>
+              <Link href={myActivityHref} prefetch={false}>
                 <ListChecks />
-                <span>My runs</span>
+                <span>My activity</span>
               </Link>
             </SidebarMenuButton>
           </SidebarMenuItem>
 
           <CollapsibleNavSection
             currentPath={pathname}
+            defaultOpen={groupsOpen.instruments}
             icon={Cpu}
             items={sidebarInstruments}
             label="Instruments"
+            onOpenChange={(open) => onGroupOpenChange("instruments", open)}
             recentlyViewedItems={recentlyViewedInstruments.map(
               (instrument) => ({
                 key: instrument.instrumentId,
@@ -148,9 +157,11 @@ export function MainNav({
 
           <CollapsibleNavSection
             currentPath={pathname}
+            defaultOpen={groupsOpen.notebooks}
             icon={NotebookText}
             items={sidebarNotebooks}
             label="Lab Notebooks"
+            onOpenChange={(open) => onGroupOpenChange("notebooks", open)}
             recentlyViewedItems={recentlyViewedNotebooks}
             viewAllHref="/lab-notebooks"
           />
@@ -162,9 +173,11 @@ export function MainNav({
 
 interface CollapsibleNavSectionProps {
   currentPath: string;
+  defaultOpen: boolean;
   icon: LucideIcon;
   items: Array<{ key: string; href: string; label: string }>;
   label: string;
+  onOpenChange: (open: boolean) => void;
   recentlyViewedItems?: Array<{ key: string; href: string; label: string }>;
   /** Href for the trailing "View all" sub-item that opens the full list. */
   viewAllHref: string;
@@ -181,9 +194,16 @@ function CollapsibleNavSection({
   items,
   recentlyViewedItems = [],
   currentPath,
+  defaultOpen,
+  onOpenChange,
 }: CollapsibleNavSectionProps) {
   return (
-    <Collapsible asChild className="group/collapsible" defaultOpen>
+    <Collapsible
+      asChild
+      className="group/collapsible"
+      defaultOpen={defaultOpen}
+      onOpenChange={onOpenChange}
+    >
       <SidebarMenuItem>
         <CollapsibleTrigger asChild>
           <SidebarMenuButton tooltip={label}>

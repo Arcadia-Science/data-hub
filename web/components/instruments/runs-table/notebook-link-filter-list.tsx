@@ -127,16 +127,21 @@ function FilterItem({
   return (
     <CommandItem aria-checked={checked} onSelect={onSelect} value={value}>
       <span className="min-w-0 flex-1 truncate">{children}</span>
+      {/* A row's count ends where the other rows' check marks do, so the check
+          on a counted row sits before its count, and only while checked. */}
+      <Check
+        aria-hidden="true"
+        className={cn(
+          "size-4",
+          checked ? "opacity-100" : "opacity-0",
+          count !== undefined && !checked && "hidden"
+        )}
+      />
       {count !== undefined && (
         <span className="font-mono text-muted-foreground text-xs tabular-nums">
           {count}
         </span>
       )}
-      {/* Always takes its space, so the counts line up down the menu. */}
-      <Check
-        aria-hidden="true"
-        className={cn("size-4", checked ? "opacity-100" : "opacity-0")}
-      />
     </CommandItem>
   );
 }

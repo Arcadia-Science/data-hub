@@ -25,8 +25,8 @@ const DASHBOARD_STAT_LABELS = [
 ] as const;
 
 const MY_RUNS_STAT_LABELS = [
-  "Runs today",
   "Runs this week",
+  "Lab notebooks this week",
   "Comments on your runs",
   "Runs needing attention",
 ] as const;
@@ -246,8 +246,12 @@ export function MyRunsStatsCards({
   // Whose runs these are, for the "Runs needing attention" link.
   userId: string;
 }) {
-  const { runsToday, runsThisWeek, commentsThisWeek, runsNeedingAttention } =
-    stats;
+  const {
+    runsThisWeek,
+    notebooksThisWeek,
+    commentsThisWeek,
+    runsNeedingAttention,
+  } = stats;
 
   return (
     <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
@@ -255,21 +259,21 @@ export function MyRunsStatsCards({
         label={MY_RUNS_STAT_LABELS[0]}
         subline={
           <DataGeneratedSubline
-            bytes={runsToday.bytesGenerated}
-            emptyLabel="No data generated today"
-          />
-        }
-        value={formatNumber(runsToday.total)}
-      />
-      <StatCard
-        label={MY_RUNS_STAT_LABELS[1]}
-        subline={
-          <DataGeneratedSubline
             bytes={runsThisWeek.bytesGenerated}
             emptyLabel="No data generated this week"
           />
         }
         value={formatNumber(runsThisWeek.total)}
+      />
+      {/* The lab notebooks this person owns that got a run this week. */}
+      <StatCard
+        label={MY_RUNS_STAT_LABELS[1]}
+        subline={
+          notebooksThisWeek.owned > 0
+            ? `of ${formatNumber(notebooksThisWeek.owned)} owned`
+            : "None owned"
+        }
+        value={formatNumber(notebooksThisWeek.count)}
       />
       <StatCard
         label={commentsLabel}

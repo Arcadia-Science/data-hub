@@ -1,6 +1,7 @@
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { AppSidebar } from "@/components/app-sidebar";
+import { SidebarNavGroupsProvider } from "@/components/app-sidebar/app-sidebar-content";
 import { ChangelogProvider } from "@/components/changelog/changelog-provider";
 import { FeedbackMenuItem } from "@/components/feedback/feedback-menu-item";
 import { DataHubFeedbackProvider } from "@/components/feedback/feedback-provider";
@@ -21,7 +22,12 @@ import { auth, authInstance } from "@/lib/auth";
 import { listChangelogEntries } from "@/lib/changelog/entries";
 import { groupChangelogByDate } from "@/lib/changelog/group";
 import { feedback } from "@/lib/feedback";
-import { SIDEBAR_COOKIE_NAME } from "@/lib/sidebar-persistence";
+import {
+  isSidebarGroupOpen,
+  SIDEBAR_COOKIE_NAME,
+  SIDEBAR_INSTRUMENTS_COOKIE_NAME,
+  SIDEBAR_NOTEBOOKS_COOKIE_NAME,
+} from "@/lib/sidebar-persistence";
 import { getViewerTimeZone } from "@/lib/viewer-timezone";
 
 // Target of the skip link. It wraps the page content, below the header, and
@@ -84,9 +90,20 @@ export default async function AppLayout({
 
   // Hydrate the sidebar's open/collapsed state from the cookie that
   // `SidebarProvider` writes on toggle. Defaulting to `true` keeps the
-  // first-visit experience expanded.
-  const sidebarCookie = (await cookies()).get(SIDEBAR_COOKIE_NAME)?.value;
-  const sidebarDefaultOpen = sidebarCookie !== "false";
+  // first-visit experience expanded. The Instruments and Lab Notebooks groups
+  // keep their own cookies the same way.
+  const cookieStore = await cookies();
+  const sidebarDefaultOpen = isSidebarGroupOpen(
+    cookieStore.get(SIDEBAR_COOKIE_NAME)?.value
+  );
+  const navGroupsOpen = {
+    instruments: isSidebarGroupOpen(
+      cookieStore.get(SIDEBAR_INSTRUMENTS_COOKIE_NAME)?.value
+    ),
+    notebooks: isSidebarGroupOpen(
+      cookieStore.get(SIDEBAR_NOTEBOOKS_COOKIE_NAME)?.value
+    ),
+  };
 
   if (!session) {
     return children;
@@ -118,20 +135,22 @@ export default async function AppLayout({
                 >
                   Skip to Main Content
                 </a>
-                <AppSidebar
-                  instruments={instruments}
-                  notebooks={notebooks}
-                  session={session}
-                  signOutAction={async () => {
-                    "use server";
-                    await authInstance.api.signOut({
-                      headers: await headers(),
-                    });
-                    redirect("/login");
-                  }}
-                >
-                  {feedbackEnabled ? <FeedbackMenuItem /> : null}
-                </AppSidebar>
+                <SidebarNavGroupsProvider defaultOpen={navGroupsOpen}>
+                  <AppSidebar
+                    instruments={instruments}
+                    notebooks={notebooks}
+                    session={session}
+                    signOutAction={async () => {
+                      "use server";
+                      await authInstance.api.signOut({
+                        headers: await headers(),
+                      });
+                      redirect("/login");
+                    }}
+                  >
+                    {feedbackEnabled ? <FeedbackMenuItem /> : null}
+                  </AppSidebar>
+                </SidebarNavGroupsProvider>
                 {/* `min-w-0` lets the main pane shrink beside the sidebar so wide
                 tables scroll inside their container instead of stretching the page. */}
                 <SidebarInset className="min-w-0 pb-12">
