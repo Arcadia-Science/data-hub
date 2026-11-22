@@ -88,14 +88,23 @@ export default async function NotebookPage({ params, searchParams }: Props) {
         viewerId={session.user.id}
       />
       <section className="flex scroll-mt-6 flex-col gap-3" id="runs">
-        <h2 className="font-medium text-lg tracking-tight">Runs</h2>
-        <Suspense fallback={<DashboardRunsSkeleton />}>
-          <NotebookRunsSection
-            currentUserId={session.user.id}
-            notebook={notebook}
-            params={runParams}
-          />
-        </Suspense>
+        {/* One pending state for the toolbar, the column filters, and the
+            pages, so each dims the table while it loads. */}
+        <TablePendingProvider>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="font-medium text-lg tracking-tight">
+              Instrument runs
+            </h2>
+            <RunsToolbar />
+          </div>
+          <Suspense fallback={<DashboardRunsSkeleton />}>
+            <NotebookRunsSection
+              currentUserId={session.user.id}
+              notebook={notebook}
+              params={runParams}
+            />
+          </Suspense>
+        </TablePendingProvider>
       </section>
     </div>
   );
@@ -161,33 +170,31 @@ async function NotebookRunsSection({
 
   return (
     <RunSelectionProvider>
-      <TablePendingProvider>
-        <div className="flex flex-col gap-3">
-          <RunsToolbar instruments={instruments} />
-          <RunBulkActionBar
-            notebook={{
-              id: notebook.id,
-              name: notebook.name,
-              deleted: notebook.deletedAt !== null,
-            }}
+      <div className="flex flex-col gap-3">
+        <RunBulkActionBar
+          notebook={{
+            id: notebook.id,
+            name: notebook.name,
+            deleted: notebook.deletedAt !== null,
+          }}
+        />
+        <TablePendingBoundary>
+          <RunsTable
+            data={runResult.data}
+            emptyLabel="No runs in this lab notebook yet. Add runs from a run’s page, or select runs in any runs table and choose Add to lab notebook."
+            hasFilters={hasFilters}
+            instruments={instruments}
+            notebookId={notebook.id}
+            ranByOptions={ranByOptions}
+            totalCount={runResult.pagination.total}
           />
-          <TablePendingBoundary>
-            <RunsTable
-              data={runResult.data}
-              emptyLabel="No runs in this lab notebook yet. Add runs from a run’s page, or select runs in any runs table and choose Add to lab notebook."
-              hasFilters={hasFilters}
-              notebookId={notebook.id}
-              ranByOptions={ranByOptions}
-              totalCount={runResult.pagination.total}
-            />
-          </TablePendingBoundary>
-          <PaginationNav
-            page={runResult.pagination.page}
-            pageParam="page"
-            totalPages={runResult.pagination.total_pages}
-          />
-        </div>
-      </TablePendingProvider>
+        </TablePendingBoundary>
+        <PaginationNav
+          page={runResult.pagination.page}
+          pageParam="page"
+          totalPages={runResult.pagination.total_pages}
+        />
+      </div>
     </RunSelectionProvider>
   );
 }

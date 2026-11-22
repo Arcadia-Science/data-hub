@@ -6,6 +6,7 @@ import {
   getInstrumentWatcherInfo,
   NO_WATCHER_INFO,
 } from "@/lib/api/instrument-watchers";
+import { hadRunInRange } from "@/lib/api/notebooks";
 import type { UserAvatarUser } from "@/lib/avatar-color";
 import { startOfTodayISO, startOfWeekISO } from "@/lib/date";
 import { db } from "@/lib/db";
@@ -13,6 +14,7 @@ import {
   files,
   instrumentRuns,
   instruments,
+  notebooks,
   runAttributions,
   runComments,
   users,
@@ -314,21 +316,25 @@ export interface MyRunsStats {
   commentsThisWeek: {
     count: number;
   };
+  // The live lab notebooks the person owns, and how many of them got a run
+  // this week.
+  notebooksThisWeek: {
+    count: number;
+    owned: number;
+  };
   runsNeedingAttention: RunsNeedingAttention;
   runsThisWeek: {
-    total: number;
-    bytesGenerated: number;
-  };
-  runsToday: {
     total: number;
     bytesGenerated: number;
   };
 }
 
 /**
- * Aggregates the four "My runs" summary metrics, all scoped to runs the viewer
- * is attributed to. Like `getDashboardStats`, each metric is a single
- * COUNT/SUM issued in parallel to keep the per-query plans simple.
+ * Aggregates the four "My activity" summary metrics: the person's runs and the
+ * data they generated this week, the lab notebooks they own that got a run
+ * this week, comments on their runs, and their runs needing attention. Like
+ * `getDashboardStats`, each metric is a single COUNT/SUM issued in parallel to
+ * keep the per-query plans simple.
  *
  * Unlike the fleet dashboard, this is intentionally not restricted to active
  * instruments — a user's own runs stay relevant even after an instrument is
@@ -341,16 +347,12 @@ export const getMyRunsStats = cache(async function getMyRunsStats(
 ): Promise<MyRunsStats> {
   const attributed = attributedToUser(userId);
   const timeZone = await getViewerTimeZone();
-  const todayStart = startOfTodayISO(timeZone);
   const weekStart = startOfWeekISO(timeZone);
 
-  const [[runsRow], [bytesRow], [commentsRow], [attentionRow]] =
+  const [[runsRow], [bytesRow], [notebooksRow], [commentsRow], [attentionRow]] =
     await Promise.all([
-      // Both run-count windows in one pass — today is a subset of this week,
-      // so a FILTER clause gives us both from one scan.
       db
         .select({
-          today: sql<number>`cast(count(*) filter (where coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) >= ${todayStart}::timestamptz) as int)`,
           thisWeek: sql<number>`cast(count(*) as int)`,
         })
         .from(instrumentRuns)
@@ -361,11 +363,10 @@ export const getMyRunsStats = cache(async function getMyRunsStats(
             attributed
           )
         ),
-      // Bytes generated, anchored to each run's acquisition time so the windows
-      // line up with the run-count cards above.
+      // Bytes generated, anchored to each run's acquisition time so the window
+      // lines up with the run count above.
       db
         .select({
-          bytesToday: sql<string>`coalesce(sum(${files.sizeBytes}) filter (where coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) >= ${todayStart}::timestamptz), 0)`,
           bytesThisWeek: sql<string>`coalesce(sum(${files.sizeBytes}), 0)`,
         })
         .from(files)
@@ -378,6 +379,15 @@ export const getMyRunsStats = cache(async function getMyRunsStats(
             attributed
           )
         ),
+      // The person's live lab notebooks, and those with a live run that started
+      // this week, by the same time as the run count.
+      db
+        .select({
+          owned: sql<number>`cast(count(*) as int)`,
+          thisWeek: sql<number>`cast(count(*) filter (where ${hadRunInRange(weekStart)}) as int)`,
+        })
+        .from(notebooks)
+        .where(and(isNull(notebooks.deletedAt), eq(notebooks.ownerId, userId))),
       // Comments left this calendar week on runs the viewer is attributed to
       // (including the viewer's own comments).
       db
@@ -403,13 +413,13 @@ export const getMyRunsStats = cache(async function getMyRunsStats(
     ]);
 
   return {
-    runsToday: {
-      total: runsRow?.today ?? 0,
-      bytesGenerated: Number(bytesRow?.bytesToday ?? 0),
-    },
     runsThisWeek: {
       total: runsRow?.thisWeek ?? 0,
       bytesGenerated: Number(bytesRow?.bytesThisWeek ?? 0),
+    },
+    notebooksThisWeek: {
+      count: notebooksRow?.thisWeek ?? 0,
+      owned: notebooksRow?.owned ?? 0,
     },
     commentsThisWeek: {
       count: commentsRow?.count ?? 0,
