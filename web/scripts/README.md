@@ -118,6 +118,18 @@ they are out of date. Run `make docs-catalogs` from the repository root after
 changing the REST API or the MCP tools, prompts, or resources. These two
 scripts do not need `DATABASE_URL`.
 
+## `check-mcp-compat.ts`
+
+Compares two MCP catalog documents and lists the changes that would break a client holding the older tool list. The TypeScript lint workflow runs it on pull requests, with the base branch's `mcp-catalog.snapshot.json` and this branch's. It exits 1 when it finds a break, and 2 when it gets the wrong arguments. The rules are in `lib/mcp/catalog/compat.ts`.
+
+```sh
+make mcp-catalog-check-compat                        # against origin/staging
+make mcp-catalog-check-compat BASE=origin/production
+
+# or with two files
+npm run mcp-catalog:check-compat -- <base.json> <head.json>
+```
+
 ## `vercel-ignore-build.sh`
 
 The Ignored Build Step for the web app's Vercel project (see `vercel.json`).
