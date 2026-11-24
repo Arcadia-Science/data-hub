@@ -61,27 +61,41 @@
                   "type": "string"
                 },
                 "status": {
-                  "type": "string",
-                  "enum": [
-                    "pending",
-                    "active",
-                    "inactive"
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "pending",
+                        "active",
+                        "inactive"
+                      ]
+                    },
+                    {
+                      "type": "string"
+                    }
                   ]
                 },
                 "instrumentType": {
-                  "type": "string",
-                  "enum": [
-                    "generic",
-                    "plate_reader",
-                    "gel_doc",
-                    "qpcr",
-                    "tape_station",
-                    "hina_microscope",
-                    "epson_v700_scanner",
-                    "instant_raman",
-                    "fplc",
-                    "dishcam",
-                    "aunty"
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "generic",
+                        "plate_reader",
+                        "gel_doc",
+                        "qpcr",
+                        "tape_station",
+                        "hina_microscope",
+                        "epson_v700_scanner",
+                        "instant_raman",
+                        "fplc",
+                        "dishcam",
+                        "aunty"
+                      ]
+                    },
+                    {
+                      "type": "string"
+                    }
                   ]
                 },
                 "watcher": {
@@ -112,15 +126,22 @@
                           ]
                         },
                         "status": {
-                          "type": "string",
-                          "enum": [
-                            "registered",
-                            "watching",
-                            "waiting",
-                            "stopped",
-                            "stale"
-                          ],
-                          "description": "Detailed watcher status. `stale` means no heartbeat for 5 minutes, or no return from a restart within 15."
+                          "description": "Detailed watcher status. `stale` means no heartbeat for 5 minutes, or no return from a restart within 15.",
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": [
+                                "registered",
+                                "watching",
+                                "waiting",
+                                "stopped",
+                                "stale"
+                              ]
+                            },
+                            {
+                              "type": "string"
+                            }
+                          ]
                         },
                         "statusReason": {
                           "description": "Why the watcher is waiting (the missing folder), or why it stopped for a restart (`system_shutdown` or `auto_update`). The reason stays while the status reads `stale`.",
@@ -155,22 +176,36 @@
                           "description": "File patterns from the watcher's config, in config order."
                         },
                         "uploadMode": {
-                          "type": "string",
-                          "enum": [
-                            "auto",
-                            "manual"
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": [
+                                "auto",
+                                "manual"
+                              ]
+                            },
+                            {
+                              "type": "string"
+                            }
                           ]
                         },
                         "configState": {
-                          "type": "string",
-                          "enum": [
-                            "none",
-                            "pending",
-                            "applied",
-                            "rejected",
-                            "edited_on_pc"
-                          ],
-                          "description": "State of the watcher's settings: `pending` (a change is waiting for the watcher), `rejected` (the watcher refused the latest change), `edited_on_pc` (a PC edit takes effect when the watcher restarts), `applied`, or `none`."
+                          "description": "State of the watcher's settings: `pending` (a change is waiting for the watcher), `rejected` (the watcher refused the latest change), `edited_on_pc` (a PC edit takes effect when the watcher restarts), `applied`, or `none`.",
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": [
+                                "none",
+                                "pending",
+                                "applied",
+                                "rejected",
+                                "edited_on_pc"
+                              ]
+                            },
+                            {
+                              "type": "string"
+                            }
+                          ]
                         },
                         "sharedComputerWith": {
                           "type": "array",
@@ -187,8 +222,7 @@
                             "required": [
                               "instrumentId",
                               "displayName"
-                            ],
-                            "additionalProperties": false
+                            ]
                           },
                           "description": "Other instruments whose active watchers run on the same computer (hostnames compared without case)."
                         }
@@ -206,8 +240,7 @@
                         "uploadMode",
                         "configState",
                         "sharedComputerWith"
-                      ],
-                      "additionalProperties": false
+                      ]
                     },
                     {
                       "type": "null"
@@ -219,25 +252,39 @@
                   "type": "object",
                   "properties": {
                     "state": {
-                      "type": "string",
-                      "enum": [
-                        "online",
-                        "restarting",
-                        "connecting",
-                        "offline"
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "online",
+                            "restarting",
+                            "connecting",
+                            "offline"
+                          ]
+                        },
+                        {
+                          "type": "string"
+                        }
                       ]
                     },
                     "reason": {
                       "anyOf": [
                         {
-                          "type": "string",
-                          "enum": [
-                            "folder_missing",
-                            "unresponsive",
-                            "never_checked_in",
-                            "stopped",
-                            "no_watcher",
-                            "deregistered"
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": [
+                                "folder_missing",
+                                "unresponsive",
+                                "never_checked_in",
+                                "stopped",
+                                "no_watcher",
+                                "deregistered"
+                              ]
+                            },
+                            {
+                              "type": "string"
+                            }
                           ]
                         },
                         {
@@ -251,7 +298,6 @@
                     "state",
                     "reason"
                   ],
-                  "additionalProperties": false,
                   "description": "Whether new files can reach Data Hub. `online`: the watcher checked in within 5 minutes. `restarting`: the watcher stopped for a Windows restart or an automatic update less than 15 minutes ago. `connecting`: the watcher registered and hasn't sent a heartbeat yet, for up to 15 minutes after it registered or the instrument was confirmed; after that the instrument is `offline` with reason `never_checked_in`. `offline`: anything else. This does not take the instrument's status into account: a pending instrument can be `online`."
                 },
                 "pastWatcherCount": {
@@ -355,15 +401,13 @@
                 "lastWatcherHeartbeatAt",
                 "watcherCount",
                 "watchersOnline"
-              ],
-              "additionalProperties": false
+              ]
             }
           }
         },
         "required": [
           "instruments"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     {
@@ -400,27 +444,41 @@
             "type": "string"
           },
           "status": {
-            "type": "string",
-            "enum": [
-              "pending",
-              "active",
-              "inactive"
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "pending",
+                  "active",
+                  "inactive"
+                ]
+              },
+              {
+                "type": "string"
+              }
             ]
           },
           "instrumentType": {
-            "type": "string",
-            "enum": [
-              "generic",
-              "plate_reader",
-              "gel_doc",
-              "qpcr",
-              "tape_station",
-              "hina_microscope",
-              "epson_v700_scanner",
-              "instant_raman",
-              "fplc",
-              "dishcam",
-              "aunty"
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "generic",
+                  "plate_reader",
+                  "gel_doc",
+                  "qpcr",
+                  "tape_station",
+                  "hina_microscope",
+                  "epson_v700_scanner",
+                  "instant_raman",
+                  "fplc",
+                  "dishcam",
+                  "aunty"
+                ]
+              },
+              {
+                "type": "string"
+              }
             ]
           },
           "watcher": {
@@ -451,15 +509,22 @@
                     ]
                   },
                   "status": {
-                    "type": "string",
-                    "enum": [
-                      "registered",
-                      "watching",
-                      "waiting",
-                      "stopped",
-                      "stale"
-                    ],
-                    "description": "Detailed watcher status. `stale` means no heartbeat for 5 minutes, or no return from a restart within 15."
+                    "description": "Detailed watcher status. `stale` means no heartbeat for 5 minutes, or no return from a restart within 15.",
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "registered",
+                          "watching",
+                          "waiting",
+                          "stopped",
+                          "stale"
+                        ]
+                      },
+                      {
+                        "type": "string"
+                      }
+                    ]
                   },
                   "statusReason": {
                     "description": "Why the watcher is waiting (the missing folder), or why it stopped for a restart (`system_shutdown` or `auto_update`). The reason stays while the status reads `stale`.",
@@ -494,22 +559,36 @@
                     "description": "File patterns from the watcher's config, in config order."
                   },
                   "uploadMode": {
-                    "type": "string",
-                    "enum": [
-                      "auto",
-                      "manual"
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "auto",
+                          "manual"
+                        ]
+                      },
+                      {
+                        "type": "string"
+                      }
                     ]
                   },
                   "configState": {
-                    "type": "string",
-                    "enum": [
-                      "none",
-                      "pending",
-                      "applied",
-                      "rejected",
-                      "edited_on_pc"
-                    ],
-                    "description": "State of the watcher's settings: `pending` (a change is waiting for the watcher), `rejected` (the watcher refused the latest change), `edited_on_pc` (a PC edit takes effect when the watcher restarts), `applied`, or `none`."
+                    "description": "State of the watcher's settings: `pending` (a change is waiting for the watcher), `rejected` (the watcher refused the latest change), `edited_on_pc` (a PC edit takes effect when the watcher restarts), `applied`, or `none`.",
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "none",
+                          "pending",
+                          "applied",
+                          "rejected",
+                          "edited_on_pc"
+                        ]
+                      },
+                      {
+                        "type": "string"
+                      }
+                    ]
                   },
                   "sharedComputerWith": {
                     "type": "array",
@@ -526,8 +605,7 @@
                       "required": [
                         "instrumentId",
                         "displayName"
-                      ],
-                      "additionalProperties": false
+                      ]
                     },
                     "description": "Other instruments whose active watchers run on the same computer (hostnames compared without case)."
                   }
@@ -545,8 +623,7 @@
                   "uploadMode",
                   "configState",
                   "sharedComputerWith"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "null"
@@ -558,25 +635,39 @@
             "type": "object",
             "properties": {
               "state": {
-                "type": "string",
-                "enum": [
-                  "online",
-                  "restarting",
-                  "connecting",
-                  "offline"
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "online",
+                      "restarting",
+                      "connecting",
+                      "offline"
+                    ]
+                  },
+                  {
+                    "type": "string"
+                  }
                 ]
               },
               "reason": {
                 "anyOf": [
                   {
-                    "type": "string",
-                    "enum": [
-                      "folder_missing",
-                      "unresponsive",
-                      "never_checked_in",
-                      "stopped",
-                      "no_watcher",
-                      "deregistered"
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "folder_missing",
+                          "unresponsive",
+                          "never_checked_in",
+                          "stopped",
+                          "no_watcher",
+                          "deregistered"
+                        ]
+                      },
+                      {
+                        "type": "string"
+                      }
                     ]
                   },
                   {
@@ -590,7 +681,6 @@
               "state",
               "reason"
             ],
-            "additionalProperties": false,
             "description": "Whether new files can reach Data Hub. `online`: the watcher checked in within 5 minutes. `restarting`: the watcher stopped for a Windows restart or an automatic update less than 15 minutes ago. `connecting`: the watcher registered and hasn't sent a heartbeat yet, for up to 15 minutes after it registered or the instrument was confirmed; after that the instrument is `offline` with reason `never_checked_in`. `offline`: anything else. This does not take the instrument's status into account: a pending instrument can be `online`."
           },
           "pastWatcherCount": {
@@ -714,8 +804,7 @@
                   "displayName",
                   "initials",
                   "avatarUrl"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "null"
@@ -737,8 +826,7 @@
                 "required": [
                   "id",
                   "name"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "null"
@@ -779,8 +867,7 @@
           "retiredByToken",
           "createdAt",
           "updatedAt"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     {
@@ -824,8 +911,7 @@
         "required": [
           "instrumentId",
           "options"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     {
@@ -1035,29 +1121,43 @@
                   ]
                 },
                 "instrument_type": {
-                  "type": "string",
-                  "enum": [
-                    "generic",
-                    "plate_reader",
-                    "gel_doc",
-                    "qpcr",
-                    "tape_station",
-                    "hina_microscope",
-                    "epson_v700_scanner",
-                    "instant_raman",
-                    "fplc",
-                    "dishcam",
-                    "aunty"
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "generic",
+                        "plate_reader",
+                        "gel_doc",
+                        "qpcr",
+                        "tape_station",
+                        "hina_microscope",
+                        "epson_v700_scanner",
+                        "instant_raman",
+                        "fplc",
+                        "dishcam",
+                        "aunty"
+                      ]
+                    },
+                    {
+                      "type": "string"
+                    }
                   ]
                 },
                 "run_id": {
                   "type": "string"
                 },
                 "source": {
-                  "type": "string",
-                  "enum": [
-                    "lambda",
-                    "watcher"
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "lambda",
+                        "watcher"
+                      ]
+                    },
+                    {
+                      "type": "string"
+                    }
                   ]
                 },
                 "metadata": {
@@ -1201,8 +1301,7 @@
                       "displayName",
                       "initials",
                       "avatarUrl"
-                    ],
-                    "additionalProperties": false
+                    ]
                   }
                 },
                 "comment_count": {
@@ -1260,8 +1359,7 @@
                               "displayName",
                               "initials",
                               "avatarUrl"
-                            ],
-                            "additionalProperties": false
+                            ]
                           },
                           {
                             "type": "null"
@@ -1283,8 +1381,7 @@
                             "required": [
                               "id",
                               "name"
-                            ],
-                            "additionalProperties": false
+                            ]
                           },
                           {
                             "type": "null"
@@ -1300,8 +1397,7 @@
                       "linked_at",
                       "linked_by",
                       "linked_by_token"
-                    ],
-                    "additionalProperties": false
+                    ]
                   }
                 }
               },
@@ -1333,8 +1429,7 @@
                 "attributions",
                 "comment_count",
                 "lab_notebooks"
-              ],
-              "additionalProperties": false
+              ]
             }
           },
           "pagination": {
@@ -1366,15 +1461,13 @@
               "per_page",
               "total",
               "total_pages"
-            ],
-            "additionalProperties": false
+            ]
           }
         },
         "required": [
           "data",
           "pagination"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     {
@@ -1434,10 +1527,17 @@
             "type": "string"
           },
           "source": {
-            "type": "string",
-            "enum": [
-              "lambda",
-              "watcher"
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "lambda",
+                  "watcher"
+                ]
+              },
+              {
+                "type": "string"
+              }
             ]
           },
           "watcherId": {
@@ -1503,19 +1603,26 @@
             "type": "string"
           },
           "instrumentType": {
-            "type": "string",
-            "enum": [
-              "generic",
-              "plate_reader",
-              "gel_doc",
-              "qpcr",
-              "tape_station",
-              "hina_microscope",
-              "epson_v700_scanner",
-              "instant_raman",
-              "fplc",
-              "dishcam",
-              "aunty"
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "generic",
+                  "plate_reader",
+                  "gel_doc",
+                  "qpcr",
+                  "tape_station",
+                  "hina_microscope",
+                  "epson_v700_scanner",
+                  "instant_raman",
+                  "fplc",
+                  "dishcam",
+                  "aunty"
+                ]
+              },
+              {
+                "type": "string"
+              }
             ]
           },
           "deletedByUser": {
@@ -1544,8 +1651,7 @@
                   "displayName",
                   "initials",
                   "avatarUrl"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "null"
@@ -1567,8 +1673,7 @@
                 "required": [
                   "id",
                   "name"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "null"
@@ -1601,8 +1706,7 @@
                 "displayName",
                 "initials",
                 "avatarUrl"
-              ],
-              "additionalProperties": false
+              ]
             }
           },
           "labNotebooks": {
@@ -1655,8 +1759,7 @@
                         "displayName",
                         "initials",
                         "avatarUrl"
-                      ],
-                      "additionalProperties": false
+                      ]
                     },
                     {
                       "type": "null"
@@ -1678,8 +1781,7 @@
                       "required": [
                         "id",
                         "name"
-                      ],
-                      "additionalProperties": false
+                      ]
                     },
                     {
                       "type": "null"
@@ -1695,8 +1797,7 @@
                 "linked_at",
                 "linked_by",
                 "linked_by_token"
-              ],
-              "additionalProperties": false
+              ]
             }
           },
           "files": {
@@ -1719,23 +1820,37 @@
                   ]
                 },
                 "category": {
-                  "type": "string",
-                  "enum": [
-                    "raw",
-                    "processed"
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "raw",
+                        "processed"
+                      ]
+                    },
+                    {
+                      "type": "string"
+                    }
                   ]
                 },
                 "status": {
-                  "type": "string",
-                  "enum": [
-                    "detected",
-                    "upload_requested",
-                    "upload_failed",
-                    "uploaded",
-                    "queued",
-                    "processing",
-                    "completed",
-                    "failed"
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "detected",
+                        "upload_requested",
+                        "upload_failed",
+                        "uploaded",
+                        "queued",
+                        "processing",
+                        "completed",
+                        "failed"
+                      ]
+                    },
+                    {
+                      "type": "string"
+                    }
                   ]
                 },
                 "sizeBytes": {
@@ -1759,12 +1874,19 @@
                 "uploadFailureReason": {
                   "anyOf": [
                     {
-                      "type": "string",
-                      "enum": [
-                        "folder_missing",
-                        "file_missing",
-                        "upload_error",
-                        "unsafe_path"
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "folder_missing",
+                            "file_missing",
+                            "upload_error",
+                            "unsafe_path"
+                          ]
+                        },
+                        {
+                          "type": "string"
+                        }
                       ]
                     },
                     {
@@ -1837,8 +1959,7 @@
                       "required": [
                         "id",
                         "name"
-                      ],
-                      "additionalProperties": false
+                      ]
                     },
                     {
                       "type": "null"
@@ -1863,8 +1984,7 @@
                 "deletedAt",
                 "deletedBy",
                 "deletedByToken"
-              ],
-              "additionalProperties": false
+              ]
             }
           },
           "filesPagination": {
@@ -1896,8 +2016,7 @@
               "per_page",
               "total",
               "total_pages"
-            ],
-            "additionalProperties": false
+            ]
           },
           "comments": {
             "type": "array",
@@ -1936,8 +2055,7 @@
                         "displayName",
                         "initials",
                         "avatarUrl"
-                      ],
-                      "additionalProperties": false
+                      ]
                     },
                     {
                       "type": "null"
@@ -1959,8 +2077,7 @@
                       "required": [
                         "id",
                         "name"
-                      ],
-                      "additionalProperties": false
+                      ]
                     },
                     {
                       "type": "null"
@@ -1992,8 +2109,7 @@
                 "token",
                 "created_at",
                 "edited_at"
-              ],
-              "additionalProperties": false
+              ]
             }
           },
           "failureSummary": {
@@ -2034,8 +2150,7 @@
                     "id",
                     "filename",
                     "errorMessage"
-                  ],
-                  "additionalProperties": false
+                  ]
                 }
               },
               "totalFiles": {
@@ -2048,8 +2163,7 @@
               "byStatus",
               "failed",
               "totalFiles"
-            ],
-            "additionalProperties": false
+            ]
           }
         },
         "required": [
@@ -2070,8 +2184,7 @@
           "deletedByToken",
           "attributions",
           "labNotebooks"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     {
@@ -2170,8 +2283,7 @@
                   "sampleRows",
                   "sampleRowLimit",
                   "truncated"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "null"
@@ -2192,10 +2304,17 @@
                   "type": "string"
                 },
                 "category": {
-                  "type": "string",
-                  "enum": [
-                    "raw",
-                    "processed"
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "raw",
+                        "processed"
+                      ]
+                    },
+                    {
+                      "type": "string"
+                    }
                   ]
                 },
                 "contentType": {
@@ -2205,16 +2324,23 @@
                   ]
                 },
                 "status": {
-                  "type": "string",
-                  "enum": [
-                    "detected",
-                    "upload_requested",
-                    "upload_failed",
-                    "uploaded",
-                    "queued",
-                    "processing",
-                    "completed",
-                    "failed"
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "detected",
+                        "upload_requested",
+                        "upload_failed",
+                        "uploaded",
+                        "queued",
+                        "processing",
+                        "completed",
+                        "failed"
+                      ]
+                    },
+                    {
+                      "type": "string"
+                    }
                   ]
                 },
                 "sizeBytes": {
@@ -2231,8 +2357,7 @@
                 "contentType",
                 "status",
                 "sizeBytes"
-              ],
-              "additionalProperties": false
+              ]
             }
           },
           "reportFiles": {
@@ -2249,10 +2374,17 @@
                   "type": "string"
                 },
                 "category": {
-                  "type": "string",
-                  "enum": [
-                    "raw",
-                    "processed"
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "raw",
+                        "processed"
+                      ]
+                    },
+                    {
+                      "type": "string"
+                    }
                   ]
                 },
                 "contentType": {
@@ -2262,16 +2394,23 @@
                   ]
                 },
                 "status": {
-                  "type": "string",
-                  "enum": [
-                    "detected",
-                    "upload_requested",
-                    "upload_failed",
-                    "uploaded",
-                    "queued",
-                    "processing",
-                    "completed",
-                    "failed"
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "detected",
+                        "upload_requested",
+                        "upload_failed",
+                        "uploaded",
+                        "queued",
+                        "processing",
+                        "completed",
+                        "failed"
+                      ]
+                    },
+                    {
+                      "type": "string"
+                    }
                   ]
                 },
                 "sizeBytes": {
@@ -2288,8 +2427,7 @@
                 "contentType",
                 "status",
                 "sizeBytes"
-              ],
-              "additionalProperties": false
+              ]
             }
           },
           "failureSummary": {
@@ -2330,8 +2468,7 @@
                     "id",
                     "filename",
                     "errorMessage"
-                  ],
-                  "additionalProperties": false
+                  ]
                 }
               },
               "totalFiles": {
@@ -2344,8 +2481,7 @@
               "byStatus",
               "failed",
               "totalFiles"
-            ],
-            "additionalProperties": false
+            ]
           }
         },
         "required": [
@@ -2358,8 +2494,7 @@
           "images",
           "reportFiles",
           "failureSummary"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     {
@@ -2447,23 +2582,37 @@
                   ]
                 },
                 "category": {
-                  "type": "string",
-                  "enum": [
-                    "raw",
-                    "processed"
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "raw",
+                        "processed"
+                      ]
+                    },
+                    {
+                      "type": "string"
+                    }
                   ]
                 },
                 "status": {
-                  "type": "string",
-                  "enum": [
-                    "detected",
-                    "upload_requested",
-                    "upload_failed",
-                    "uploaded",
-                    "queued",
-                    "processing",
-                    "completed",
-                    "failed"
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "detected",
+                        "upload_requested",
+                        "upload_failed",
+                        "uploaded",
+                        "queued",
+                        "processing",
+                        "completed",
+                        "failed"
+                      ]
+                    },
+                    {
+                      "type": "string"
+                    }
                   ]
                 },
                 "sizeBytes": {
@@ -2487,12 +2636,19 @@
                 "uploadFailureReason": {
                   "anyOf": [
                     {
-                      "type": "string",
-                      "enum": [
-                        "folder_missing",
-                        "file_missing",
-                        "upload_error",
-                        "unsafe_path"
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "folder_missing",
+                            "file_missing",
+                            "upload_error",
+                            "unsafe_path"
+                          ]
+                        },
+                        {
+                          "type": "string"
+                        }
                       ]
                     },
                     {
@@ -2565,8 +2721,7 @@
                       "required": [
                         "id",
                         "name"
-                      ],
-                      "additionalProperties": false
+                      ]
                     },
                     {
                       "type": "null"
@@ -2591,8 +2746,7 @@
                 "deletedAt",
                 "deletedBy",
                 "deletedByToken"
-              ],
-              "additionalProperties": false
+              ]
             }
           },
           "pagination": {
@@ -2624,15 +2778,13 @@
               "per_page",
               "total",
               "total_pages"
-            ],
-            "additionalProperties": false
+            ]
           }
         },
         "required": [
           "data",
           "pagination"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     {
@@ -2700,8 +2852,7 @@
                 "displayName",
                 "initials",
                 "avatarUrl"
-              ],
-              "additionalProperties": false
+              ]
             }
           }
         },
@@ -2709,8 +2860,7 @@
           "instrumentId",
           "runId",
           "attributions"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     {
@@ -2788,16 +2938,14 @@
                       "displayName",
                       "initials",
                       "avatarUrl"
-                    ],
-                    "additionalProperties": false
+                    ]
                   }
                 }
               },
               "required": [
                 "runId",
                 "attributions"
-              ],
-              "additionalProperties": false
+              ]
             }
           },
           "notFound": {
@@ -2811,8 +2959,7 @@
           "instrumentId",
           "claimed",
           "notFound"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     {
@@ -2880,8 +3027,7 @@
                 "displayName",
                 "initials",
                 "avatarUrl"
-              ],
-              "additionalProperties": false
+              ]
             }
           }
         },
@@ -2889,8 +3035,7 @@
           "instrumentId",
           "runId",
           "attributions"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     {
@@ -2935,15 +3080,13 @@
               "required": [
                 "userId",
                 "displayName"
-              ],
-              "additionalProperties": false
+              ]
             }
           }
         },
         "required": [
           "attributors"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     {
@@ -3015,8 +3158,7 @@
                         "displayName",
                         "initials",
                         "avatarUrl"
-                      ],
-                      "additionalProperties": false
+                      ]
                     },
                     {
                       "type": "null"
@@ -3038,8 +3180,7 @@
                       "required": [
                         "id",
                         "name"
-                      ],
-                      "additionalProperties": false
+                      ]
                     },
                     {
                       "type": "null"
@@ -3071,15 +3212,13 @@
                 "token",
                 "created_at",
                 "edited_at"
-              ],
-              "additionalProperties": false
+              ]
             }
           }
         },
         "required": [
           "comments"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     {
@@ -3152,8 +3291,7 @@
                   "displayName",
                   "initials",
                   "avatarUrl"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "null"
@@ -3175,8 +3313,7 @@
                 "required": [
                   "id",
                   "name"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "null"
@@ -3208,8 +3345,7 @@
           "token",
           "created_at",
           "edited_at"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     {
@@ -3277,8 +3413,7 @@
                   "displayName",
                   "initials",
                   "avatarUrl"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "null"
@@ -3300,8 +3435,7 @@
                 "required": [
                   "id",
                   "name"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "null"
@@ -3333,8 +3467,7 @@
           "token",
           "created_at",
           "edited_at"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     {
@@ -3377,8 +3510,7 @@
         "required": [
           "id",
           "deleted"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     {
@@ -3436,8 +3568,7 @@
           "runId",
           "filesQueued",
           "filesFailed"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     {
@@ -3490,8 +3621,7 @@
           "instrumentId",
           "runId",
           "filesCancelled"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     {
@@ -3567,8 +3697,7 @@
                 "required": [
                   "id",
                   "name"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "null"
@@ -3586,8 +3715,7 @@
           "deletedBy",
           "deletedByToken",
           "alreadyApplied"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     {
@@ -3651,8 +3779,7 @@
           "runId",
           "deletedAt",
           "alreadyApplied"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     {
@@ -3742,8 +3869,7 @@
                 "id",
                 "filename",
                 "uploadRequestedAt"
-              ],
-              "additionalProperties": false
+              ]
             }
           }
         },
@@ -3752,8 +3878,7 @@
           "runId",
           "filesQueued",
           "files"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     {
@@ -3806,8 +3931,7 @@
           "instrumentId",
           "runId",
           "filesQueued"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     {
@@ -3923,8 +4047,7 @@
                         "displayName",
                         "initials",
                         "avatarUrl"
-                      ],
-                      "additionalProperties": false
+                      ]
                     },
                     {
                       "type": "null"
@@ -3984,8 +4107,7 @@
                         "displayName",
                         "initials",
                         "avatarUrl"
-                      ],
-                      "additionalProperties": false
+                      ]
                     },
                     {
                       "type": "null"
@@ -4007,8 +4129,7 @@
                       "required": [
                         "id",
                         "name"
-                      ],
-                      "additionalProperties": false
+                      ]
                     },
                     {
                       "type": "null"
@@ -4046,8 +4167,7 @@
                         "displayName",
                         "initials",
                         "avatarUrl"
-                      ],
-                      "additionalProperties": false
+                      ]
                     },
                     {
                       "type": "null"
@@ -4069,8 +4189,7 @@
                       "required": [
                         "id",
                         "name"
-                      ],
-                      "additionalProperties": false
+                      ]
                     },
                     {
                       "type": "null"
@@ -4115,8 +4234,7 @@
                         "displayName",
                         "initials",
                         "avatarUrl"
-                      ],
-                      "additionalProperties": false
+                      ]
                     },
                     {
                       "type": "null"
@@ -4138,8 +4256,7 @@
                       "required": [
                         "id",
                         "name"
-                      ],
-                      "additionalProperties": false
+                      ]
                     },
                     {
                       "type": "null"
@@ -4166,8 +4283,7 @@
                 "deleted_at",
                 "deleted_by",
                 "deleted_by_token"
-              ],
-              "additionalProperties": false
+              ]
             }
           },
           "pagination": {
@@ -4199,15 +4315,13 @@
               "per_page",
               "total",
               "total_pages"
-            ],
-            "additionalProperties": false
+            ]
           }
         },
         "required": [
           "data",
           "pagination"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     {
@@ -4283,8 +4397,7 @@
                   "displayName",
                   "initials",
                   "avatarUrl"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "null"
@@ -4344,8 +4457,7 @@
                   "displayName",
                   "initials",
                   "avatarUrl"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "null"
@@ -4367,8 +4479,7 @@
                 "required": [
                   "id",
                   "name"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "null"
@@ -4406,8 +4517,7 @@
                   "displayName",
                   "initials",
                   "avatarUrl"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "null"
@@ -4429,8 +4539,7 @@
                 "required": [
                   "id",
                   "name"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "null"
@@ -4475,8 +4584,7 @@
                   "displayName",
                   "initials",
                   "avatarUrl"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "null"
@@ -4498,8 +4606,7 @@
                 "required": [
                   "id",
                   "name"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "null"
@@ -4526,8 +4633,7 @@
           "deleted_at",
           "deleted_by",
           "deleted_by_token"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     {
@@ -4639,8 +4745,7 @@
                       "displayName",
                       "initials",
                       "avatarUrl"
-                    ],
-                    "additionalProperties": false
+                    ]
                   },
                   {
                     "type": "null"
@@ -4700,8 +4805,7 @@
                       "displayName",
                       "initials",
                       "avatarUrl"
-                    ],
-                    "additionalProperties": false
+                    ]
                   },
                   {
                     "type": "null"
@@ -4723,8 +4827,7 @@
                     "required": [
                       "id",
                       "name"
-                    ],
-                    "additionalProperties": false
+                    ]
                   },
                   {
                     "type": "null"
@@ -4762,8 +4865,7 @@
                       "displayName",
                       "initials",
                       "avatarUrl"
-                    ],
-                    "additionalProperties": false
+                    ]
                   },
                   {
                     "type": "null"
@@ -4785,8 +4887,7 @@
                     "required": [
                       "id",
                       "name"
-                    ],
-                    "additionalProperties": false
+                    ]
                   },
                   {
                     "type": "null"
@@ -4831,8 +4932,7 @@
                       "displayName",
                       "initials",
                       "avatarUrl"
-                    ],
-                    "additionalProperties": false
+                    ]
                   },
                   {
                     "type": "null"
@@ -4854,8 +4954,7 @@
                     "required": [
                       "id",
                       "name"
-                    ],
-                    "additionalProperties": false
+                    ]
                   },
                   {
                     "type": "null"
@@ -4882,8 +4981,7 @@
               "deleted_at",
               "deleted_by",
               "deleted_by_token"
-            ],
-            "additionalProperties": false
+            ]
           },
           "runs": {
             "anyOf": [
@@ -4905,21 +5003,27 @@
                           "type": "string"
                         },
                         "outcome": {
-                          "type": "string",
-                          "enum": [
-                            "added",
-                            "already_in_lab_notebook",
-                            "run_deleted",
-                            "limit_reached",
-                            "not_found"
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": [
+                                "added",
+                                "already_in_lab_notebook",
+                                "run_deleted",
+                                "limit_reached",
+                                "not_found"
+                              ]
+                            },
+                            {
+                              "type": "string"
+                            }
                           ]
                         }
                       },
                       "required": [
                         "runId",
                         "outcome"
-                      ],
-                      "additionalProperties": false
+                      ]
                     }
                   },
                   "counts": {
@@ -4957,8 +5061,7 @@
                       "run_deleted",
                       "limit_reached",
                       "not_found"
-                    ],
-                    "additionalProperties": false
+                    ]
                   }
                 },
                 "required": [
@@ -4966,8 +5069,7 @@
                   "instrumentId",
                   "results",
                   "counts"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "null"
@@ -4978,8 +5080,7 @@
         "required": [
           "labNotebook",
           "runs"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     {
@@ -5088,8 +5189,7 @@
                   "displayName",
                   "initials",
                   "avatarUrl"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "null"
@@ -5149,8 +5249,7 @@
                   "displayName",
                   "initials",
                   "avatarUrl"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "null"
@@ -5172,8 +5271,7 @@
                 "required": [
                   "id",
                   "name"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "null"
@@ -5211,8 +5309,7 @@
                   "displayName",
                   "initials",
                   "avatarUrl"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "null"
@@ -5234,8 +5331,7 @@
                 "required": [
                   "id",
                   "name"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "null"
@@ -5280,8 +5376,7 @@
                   "displayName",
                   "initials",
                   "avatarUrl"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "null"
@@ -5303,8 +5398,7 @@
                 "required": [
                   "id",
                   "name"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "null"
@@ -5331,8 +5425,7 @@
           "deleted_at",
           "deleted_by",
           "deleted_by_token"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     {
@@ -5410,8 +5503,7 @@
                   "displayName",
                   "initials",
                   "avatarUrl"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "null"
@@ -5471,8 +5563,7 @@
                   "displayName",
                   "initials",
                   "avatarUrl"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "null"
@@ -5494,8 +5585,7 @@
                 "required": [
                   "id",
                   "name"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "null"
@@ -5533,8 +5623,7 @@
                   "displayName",
                   "initials",
                   "avatarUrl"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "null"
@@ -5556,8 +5645,7 @@
                 "required": [
                   "id",
                   "name"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "null"
@@ -5602,8 +5690,7 @@
                   "displayName",
                   "initials",
                   "avatarUrl"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "null"
@@ -5625,8 +5712,7 @@
                 "required": [
                   "id",
                   "name"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "null"
@@ -5653,8 +5739,7 @@
           "deleted_at",
           "deleted_by",
           "deleted_by_token"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     {
@@ -5732,8 +5817,7 @@
                   "displayName",
                   "initials",
                   "avatarUrl"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "null"
@@ -5793,8 +5877,7 @@
                   "displayName",
                   "initials",
                   "avatarUrl"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "null"
@@ -5816,8 +5899,7 @@
                 "required": [
                   "id",
                   "name"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "null"
@@ -5855,8 +5937,7 @@
                   "displayName",
                   "initials",
                   "avatarUrl"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "null"
@@ -5878,8 +5959,7 @@
                 "required": [
                   "id",
                   "name"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "null"
@@ -5924,8 +6004,7 @@
                   "displayName",
                   "initials",
                   "avatarUrl"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "null"
@@ -5947,8 +6026,7 @@
                 "required": [
                   "id",
                   "name"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "null"
@@ -5975,8 +6053,7 @@
           "deleted_at",
           "deleted_by",
           "deleted_by_token"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     {
@@ -6038,21 +6115,27 @@
                   "type": "string"
                 },
                 "outcome": {
-                  "type": "string",
-                  "enum": [
-                    "added",
-                    "already_in_lab_notebook",
-                    "run_deleted",
-                    "limit_reached",
-                    "not_found"
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "added",
+                        "already_in_lab_notebook",
+                        "run_deleted",
+                        "limit_reached",
+                        "not_found"
+                      ]
+                    },
+                    {
+                      "type": "string"
+                    }
                   ]
                 }
               },
               "required": [
                 "runId",
                 "outcome"
-              ],
-              "additionalProperties": false
+              ]
             }
           },
           "counts": {
@@ -6090,8 +6173,7 @@
               "run_deleted",
               "limit_reached",
               "not_found"
-            ],
-            "additionalProperties": false
+            ]
           }
         },
         "required": [
@@ -6099,8 +6181,7 @@
           "instrumentId",
           "results",
           "counts"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     {
@@ -6162,20 +6243,26 @@
                   "type": "string"
                 },
                 "outcome": {
-                  "type": "string",
-                  "enum": [
-                    "removed",
-                    "not_in_lab_notebook",
-                    "run_deleted",
-                    "not_found"
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "removed",
+                        "not_in_lab_notebook",
+                        "run_deleted",
+                        "not_found"
+                      ]
+                    },
+                    {
+                      "type": "string"
+                    }
                   ]
                 }
               },
               "required": [
                 "runId",
                 "outcome"
-              ],
-              "additionalProperties": false
+              ]
             }
           },
           "counts": {
@@ -6207,8 +6294,7 @@
               "not_in_lab_notebook",
               "run_deleted",
               "not_found"
-            ],
-            "additionalProperties": false
+            ]
           }
         },
         "required": [
@@ -6216,8 +6302,7 @@
           "instrumentId",
           "results",
           "counts"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     {
@@ -6319,8 +6404,7 @@
                 "id",
                 "filename",
                 "downloadUrl"
-              ],
-              "additionalProperties": false
+              ]
             }
           },
           "pagination": {
@@ -6358,15 +6442,13 @@
               "limit",
               "offset",
               "total"
-            ],
-            "additionalProperties": false
+            ]
           }
         },
         "required": [
           "data",
           "pagination"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     {
@@ -6428,8 +6510,7 @@
           "id",
           "filename",
           "url"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     {
@@ -6503,23 +6584,37 @@
             ]
           },
           "category": {
-            "type": "string",
-            "enum": [
-              "raw",
-              "processed"
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "raw",
+                  "processed"
+                ]
+              },
+              {
+                "type": "string"
+              }
             ]
           },
           "status": {
-            "type": "string",
-            "enum": [
-              "detected",
-              "upload_requested",
-              "upload_failed",
-              "uploaded",
-              "queued",
-              "processing",
-              "completed",
-              "failed"
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "detected",
+                  "upload_requested",
+                  "upload_failed",
+                  "uploaded",
+                  "queued",
+                  "processing",
+                  "completed",
+                  "failed"
+                ]
+              },
+              {
+                "type": "string"
+              }
             ]
           },
           "metadata": {
@@ -6538,12 +6633,19 @@
           "uploadFailureReason": {
             "anyOf": [
               {
-                "type": "string",
-                "enum": [
-                  "folder_missing",
-                  "file_missing",
-                  "upload_error",
-                  "unsafe_path"
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "folder_missing",
+                      "file_missing",
+                      "upload_error",
+                      "unsafe_path"
+                    ]
+                  },
+                  {
+                    "type": "string"
+                  }
                 ]
               },
               {
@@ -6703,8 +6805,7 @@
                 "required": [
                   "id",
                   "name"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "null"
@@ -6744,8 +6845,7 @@
           "deletedBy",
           "deletedByToken",
           "stalled"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     {
@@ -6811,8 +6911,7 @@
           "instrumentId",
           "runId",
           "unclaimed"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     {
@@ -6895,8 +6994,7 @@
               "expiresInSeconds",
               "contentType",
               "unclaimed"
-            ],
-            "additionalProperties": false
+            ]
           },
           {
             "type": "object",
@@ -6934,8 +7032,7 @@
               "retryAfterSeconds",
               "hint",
               "unclaimed"
-            ],
-            "additionalProperties": false
+            ]
           }
         ]
       }
@@ -6971,10 +7068,17 @@
         "type": "object",
         "properties": {
           "status": {
-            "type": "string",
-            "enum": [
-              "processing",
-              "queued"
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "processing",
+                  "queued"
+                ]
+              },
+              {
+                "type": "string"
+              }
             ]
           },
           "fileId": {
@@ -6986,8 +7090,7 @@
         "required": [
           "status",
           "fileId"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     {
@@ -7091,8 +7194,7 @@
                           "required": [
                             "id",
                             "name"
-                          ],
-                          "additionalProperties": false
+                          ]
                         },
                         {
                           "type": "null"
@@ -7111,8 +7213,7 @@
                     "deletedBy",
                     "deletedByToken",
                     "alreadyApplied"
-                  ],
-                  "additionalProperties": false
+                  ]
                 },
                 {
                   "type": "object",
@@ -7157,8 +7258,7 @@
                       "required": [
                         "code",
                         "message"
-                      ],
-                      "additionalProperties": false
+                      ]
                     }
                   },
                   "required": [
@@ -7167,8 +7267,7 @@
                     "filename",
                     "status",
                     "error"
-                  ],
-                  "additionalProperties": false
+                  ]
                 }
               ]
             }
@@ -7187,13 +7286,20 @@
                   "type": "string"
                 },
                 "relation": {
-                  "type": "string",
-                  "enum": [
-                    "video",
-                    "preview_image",
-                    "output",
-                    "sidecar",
-                    "made_from"
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "video",
+                        "preview_image",
+                        "output",
+                        "sidecar",
+                        "made_from"
+                      ]
+                    },
+                    {
+                      "type": "string"
+                    }
                   ]
                 },
                 "deletedAt": {
@@ -7207,8 +7313,7 @@
                 "filename",
                 "relation",
                 "deletedAt"
-              ],
-              "additionalProperties": false
+              ]
             }
           },
           "counts": {
@@ -7234,8 +7339,7 @@
               "deleted",
               "alreadyDeleted",
               "failed"
-            ],
-            "additionalProperties": false
+            ]
           }
         },
         "required": [
@@ -7244,8 +7348,7 @@
           "results",
           "linked",
           "counts"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     {
@@ -7332,8 +7435,7 @@
                     "id",
                     "filename",
                     "alreadyApplied"
-                  ],
-                  "additionalProperties": false
+                  ]
                 },
                 {
                   "type": "object",
@@ -7378,8 +7480,7 @@
                       "required": [
                         "code",
                         "message"
-                      ],
-                      "additionalProperties": false
+                      ]
                     }
                   },
                   "required": [
@@ -7388,8 +7489,7 @@
                     "filename",
                     "status",
                     "error"
-                  ],
-                  "additionalProperties": false
+                  ]
                 }
               ]
             }
@@ -7414,13 +7514,20 @@
                       "type": "string"
                     },
                     "relation": {
-                      "type": "string",
-                      "enum": [
-                        "video",
-                        "preview_image",
-                        "output",
-                        "sidecar",
-                        "made_from"
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "video",
+                            "preview_image",
+                            "output",
+                            "sidecar",
+                            "made_from"
+                          ]
+                        },
+                        {
+                          "type": "string"
+                        }
                       ]
                     },
                     "alreadyApplied": {
@@ -7433,8 +7540,7 @@
                     "filename",
                     "relation",
                     "alreadyApplied"
-                  ],
-                  "additionalProperties": false
+                  ]
                 },
                 {
                   "type": "object",
@@ -7479,17 +7585,23 @@
                       "required": [
                         "code",
                         "message"
-                      ],
-                      "additionalProperties": false
+                      ]
                     },
                     "relation": {
-                      "type": "string",
-                      "enum": [
-                        "video",
-                        "preview_image",
-                        "output",
-                        "sidecar",
-                        "made_from"
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "video",
+                            "preview_image",
+                            "output",
+                            "sidecar",
+                            "made_from"
+                          ]
+                        },
+                        {
+                          "type": "string"
+                        }
                       ]
                     }
                   },
@@ -7500,8 +7612,7 @@
                     "status",
                     "error",
                     "relation"
-                  ],
-                  "additionalProperties": false
+                  ]
                 }
               ]
             }
@@ -7529,8 +7640,7 @@
               "restored",
               "alreadyRestored",
               "failed"
-            ],
-            "additionalProperties": false
+            ]
           }
         },
         "required": [
@@ -7539,8 +7649,7 @@
           "results",
           "linked",
           "counts"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     {
@@ -7596,8 +7705,7 @@
           "filename",
           "deletedAt",
           "alreadyApplied"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     {
@@ -7669,13 +7777,20 @@
                   ]
                 },
                 "effectiveStatus": {
-                  "type": "string",
-                  "enum": [
-                    "registered",
-                    "watching",
-                    "stopped",
-                    "waiting",
-                    "stale"
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "registered",
+                        "watching",
+                        "stopped",
+                        "waiting",
+                        "stale"
+                      ]
+                    },
+                    {
+                      "type": "string"
+                    }
                   ]
                 },
                 "statusReason": {
@@ -7711,12 +7826,19 @@
                 "configRevisionStatus": {
                   "anyOf": [
                     {
-                      "type": "string",
-                      "enum": [
-                        "pending",
-                        "applied",
-                        "rejected",
-                        "superseded"
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "pending",
+                            "applied",
+                            "rejected",
+                            "superseded"
+                          ]
+                        },
+                        {
+                          "type": "string"
+                        }
                       ]
                     },
                     {
@@ -7772,15 +7894,13 @@
                 "lastHeartbeatAt",
                 "createdAt",
                 "deletedAt"
-              ],
-              "additionalProperties": false
+              ]
             }
           }
         },
         "required": [
           "watchers"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     {
@@ -7835,13 +7955,20 @@
             ]
           },
           "effectiveStatus": {
-            "type": "string",
-            "enum": [
-              "registered",
-              "watching",
-              "stopped",
-              "waiting",
-              "stale"
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "registered",
+                  "watching",
+                  "stopped",
+                  "waiting",
+                  "stale"
+                ]
+              },
+              {
+                "type": "string"
+              }
             ]
           },
           "statusReason": {
@@ -7877,12 +8004,19 @@
           "configRevisionStatus": {
             "anyOf": [
               {
-                "type": "string",
-                "enum": [
-                  "pending",
-                  "applied",
-                  "rejected",
-                  "superseded"
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "pending",
+                      "applied",
+                      "rejected",
+                      "superseded"
+                    ]
+                  },
+                  {
+                    "type": "string"
+                  }
                 ]
               },
               {
@@ -7971,8 +8105,7 @@
                   "displayName",
                   "initials",
                   "avatarUrl"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "null"
@@ -7994,8 +8127,7 @@
                 "required": [
                   "id",
                   "name"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "null"
@@ -8013,19 +8145,33 @@
                     "maximum": 9007199254740991
                   },
                   "source": {
-                    "type": "string",
-                    "enum": [
-                      "web",
-                      "pc"
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "web",
+                          "pc"
+                        ]
+                      },
+                      {
+                        "type": "string"
+                      }
                     ]
                   },
                   "status": {
-                    "type": "string",
-                    "enum": [
-                      "pending",
-                      "applied",
-                      "rejected",
-                      "superseded"
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "pending",
+                          "applied",
+                          "rejected",
+                          "superseded"
+                        ]
+                      },
+                      {
+                        "type": "string"
+                      }
                     ]
                   },
                   "statusReason": {
@@ -8064,14 +8210,20 @@
                         "required": [
                           "pattern",
                           "recursive"
-                        ],
-                        "additionalProperties": false
+                        ]
                       },
                       "upload_mode": {
-                        "type": "string",
-                        "enum": [
-                          "auto",
-                          "manual"
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "enum": [
+                              "auto",
+                              "manual"
+                            ]
+                          },
+                          {
+                            "type": "string"
+                          }
                         ]
                       },
                       "stability_period_seconds": {
@@ -8098,8 +8250,7 @@
                       "stability_period_seconds",
                       "max_stability_wait_seconds",
                       "upload_parallelism"
-                    ],
-                    "additionalProperties": false
+                    ]
                   },
                   "createdAt": {
                     "type": "string",
@@ -8144,8 +8295,7 @@
                           "displayName",
                           "initials",
                           "avatarUrl"
-                        ],
-                        "additionalProperties": false
+                        ]
                       },
                       {
                         "type": "null"
@@ -8167,8 +8317,7 @@
                         "required": [
                           "id",
                           "name"
-                        ],
-                        "additionalProperties": false
+                        ]
                       },
                       {
                         "type": "null"
@@ -8186,8 +8335,7 @@
                   "resolvedAt",
                   "createdByUser",
                   "createdByToken"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "null"
@@ -8217,8 +8365,7 @@
           "deregisteredByUser",
           "deregisteredByToken",
           "pendingConfigRevision"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     {
@@ -8311,20 +8458,27 @@
                   "maximum": 9007199254740991
                 },
                 "eventType": {
-                  "type": "string",
-                  "enum": [
-                    "watcher_started",
-                    "watcher_stopped",
-                    "file_uploaded",
-                    "upload_failed",
-                    "run_reported",
-                    "config_synced",
-                    "error",
-                    "update_started",
-                    "update_succeeded",
-                    "update_failed",
-                    "upload_requests_cancelled",
-                    "uploads_failed"
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "watcher_started",
+                        "watcher_stopped",
+                        "file_uploaded",
+                        "upload_failed",
+                        "run_reported",
+                        "config_synced",
+                        "error",
+                        "update_started",
+                        "update_succeeded",
+                        "update_failed",
+                        "upload_requests_cancelled",
+                        "uploads_failed"
+                      ]
+                    },
+                    {
+                      "type": "string"
+                    }
                   ]
                 },
                 "message": {
@@ -8343,8 +8497,7 @@
                 "message",
                 "details",
                 "timestamp"
-              ],
-              "additionalProperties": false
+              ]
             }
           },
           "total": {
@@ -8359,8 +8512,7 @@
           "lookbackHours",
           "rows",
           "total"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     {
@@ -8435,10 +8587,17 @@
                 "uploadMode": {
                   "anyOf": [
                     {
-                      "type": "string",
-                      "enum": [
-                        "auto",
-                        "manual"
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "auto",
+                            "manual"
+                          ]
+                        },
+                        {
+                          "type": "string"
+                        }
                       ]
                     },
                     {
@@ -8504,8 +8663,7 @@
                 "runsReportedSinceLast",
                 "errorsSinceLast",
                 "uptimeSeconds"
-              ],
-              "additionalProperties": false
+              ]
             }
           }
         },
@@ -8515,8 +8673,7 @@
           "lookbackHours",
           "total",
           "heartbeats"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     {
@@ -8635,19 +8792,33 @@
                 "maximum": 9007199254740991
               },
               "source": {
-                "type": "string",
-                "enum": [
-                  "web",
-                  "pc"
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "web",
+                      "pc"
+                    ]
+                  },
+                  {
+                    "type": "string"
+                  }
                 ]
               },
               "status": {
-                "type": "string",
-                "enum": [
-                  "pending",
-                  "applied",
-                  "rejected",
-                  "superseded"
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "pending",
+                      "applied",
+                      "rejected",
+                      "superseded"
+                    ]
+                  },
+                  {
+                    "type": "string"
+                  }
                 ]
               },
               "statusReason": {
@@ -8686,14 +8857,20 @@
                     "required": [
                       "pattern",
                       "recursive"
-                    ],
-                    "additionalProperties": false
+                    ]
                   },
                   "upload_mode": {
-                    "type": "string",
-                    "enum": [
-                      "auto",
-                      "manual"
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "auto",
+                          "manual"
+                        ]
+                      },
+                      {
+                        "type": "string"
+                      }
                     ]
                   },
                   "stability_period_seconds": {
@@ -8720,8 +8897,7 @@
                   "stability_period_seconds",
                   "max_stability_wait_seconds",
                   "upload_parallelism"
-                ],
-                "additionalProperties": false
+                ]
               },
               "createdAt": {
                 "type": "string",
@@ -8766,8 +8942,7 @@
                       "displayName",
                       "initials",
                       "avatarUrl"
-                    ],
-                    "additionalProperties": false
+                    ]
                   },
                   {
                     "type": "null"
@@ -8789,8 +8964,7 @@
                     "required": [
                       "id",
                       "name"
-                    ],
-                    "additionalProperties": false
+                    ]
                   },
                   {
                     "type": "null"
@@ -8808,15 +8982,13 @@
               "resolvedAt",
               "createdByUser",
               "createdByToken"
-            ],
-            "additionalProperties": false
+            ]
           }
         },
         "required": [
           "watcherId",
           "revision"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     {
@@ -8906,12 +9078,19 @@
                   "type": "number"
                 },
                 "matchReason": {
-                  "type": "string",
-                  "enum": [
-                    "run_id",
-                    "file",
-                    "instrument",
-                    "ran_by"
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "run_id",
+                        "file",
+                        "instrument",
+                        "ran_by"
+                      ]
+                    },
+                    {
+                      "type": "string"
+                    }
                   ]
                 },
                 "matchedFilename": {
@@ -8933,8 +9112,7 @@
                 "totalSizeBytes",
                 "matchReason",
                 "matchedFilename"
-              ],
-              "additionalProperties": false
+              ]
             }
           },
           "lab_notebooks": {
@@ -8969,8 +9147,7 @@
                 "name",
                 "url",
                 "runCount"
-              ],
-              "additionalProperties": false
+              ]
             }
           },
           "files": {
@@ -9014,8 +9191,7 @@
                 "instrumentName",
                 "runId",
                 "sizeBytes"
-              ],
-              "additionalProperties": false
+              ]
             }
           },
           "instruments": {
@@ -9034,36 +9210,57 @@
                   "type": "string"
                 },
                 "status": {
-                  "type": "string",
-                  "enum": [
-                    "pending",
-                    "active",
-                    "inactive"
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "pending",
+                        "active",
+                        "inactive"
+                      ]
+                    },
+                    {
+                      "type": "string"
+                    }
                   ]
                 },
                 "connection": {
                   "type": "object",
                   "properties": {
                     "state": {
-                      "type": "string",
-                      "enum": [
-                        "online",
-                        "restarting",
-                        "connecting",
-                        "offline"
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "online",
+                            "restarting",
+                            "connecting",
+                            "offline"
+                          ]
+                        },
+                        {
+                          "type": "string"
+                        }
                       ]
                     },
                     "reason": {
                       "anyOf": [
                         {
-                          "type": "string",
-                          "enum": [
-                            "folder_missing",
-                            "unresponsive",
-                            "never_checked_in",
-                            "stopped",
-                            "no_watcher",
-                            "deregistered"
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": [
+                                "folder_missing",
+                                "unresponsive",
+                                "never_checked_in",
+                                "stopped",
+                                "no_watcher",
+                                "deregistered"
+                              ]
+                            },
+                            {
+                              "type": "string"
+                            }
                           ]
                         },
                         {
@@ -9077,19 +9274,25 @@
                     "state",
                     "reason"
                   ],
-                  "additionalProperties": false,
                   "description": "Whether new files can reach Data Hub. `online`: the watcher checked in within 5 minutes. `restarting`: the watcher stopped for a Windows restart or an automatic update less than 15 minutes ago. `connecting`: the watcher registered and hasn't sent a heartbeat yet, for up to 15 minutes after it registered or the instrument was confirmed; after that the instrument is `offline` with reason `never_checked_in`. `offline`: anything else. This does not take the instrument's status into account: a pending instrument can be `online`."
                 },
                 "watcherStatus": {
-                  "type": "string",
-                  "enum": [
-                    "online",
-                    "offline",
-                    "no_watcher",
-                    "deregistered"
-                  ],
                   "deprecated": true,
-                  "description": "Deprecated. Use `connection.state`, or `connection.reason`."
+                  "description": "Deprecated. Use `connection.state`, or `connection.reason`.",
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "online",
+                        "offline",
+                        "no_watcher",
+                        "deregistered"
+                      ]
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
                 },
                 "lastWatcherHeartbeatAt": {
                   "anyOf": [
@@ -9111,10 +9314,17 @@
                   "maximum": 9007199254740991
                 },
                 "matchReason": {
-                  "type": "string",
-                  "enum": [
-                    "name",
-                    "pattern"
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "name",
+                        "pattern"
+                      ]
+                    },
+                    {
+                      "type": "string"
+                    }
                   ]
                 },
                 "matchedPattern": {
@@ -9135,8 +9345,7 @@
                 "runCount",
                 "matchReason",
                 "matchedPattern"
-              ],
-              "additionalProperties": false
+              ]
             }
           },
           "users": {
@@ -9176,8 +9385,7 @@
                 "name",
                 "email",
                 "image"
-              ],
-              "additionalProperties": false
+              ]
             }
           },
           "comments": {
@@ -9240,8 +9448,7 @@
                         "id",
                         "name",
                         "revoked"
-                      ],
-                      "additionalProperties": false
+                      ]
                     },
                     {
                       "type": "null"
@@ -9260,8 +9467,7 @@
                 "userId",
                 "userName",
                 "token"
-              ],
-              "additionalProperties": false
+              ]
             }
           },
           "counts": {
@@ -9311,8 +9517,7 @@
               "users",
               "comments",
               "total"
-            ],
-            "additionalProperties": false
+            ]
           }
         },
         "required": [
@@ -9323,8 +9528,7 @@
           "users",
           "comments",
           "counts"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     {
@@ -9376,8 +9580,7 @@
           "email",
           "image",
           "isAdmin"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     {
@@ -9411,11 +9614,18 @@
                   "type": "string"
                 },
                 "status": {
-                  "type": "string",
-                  "enum": [
-                    "pending",
-                    "active",
-                    "inactive"
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "pending",
+                        "active",
+                        "inactive"
+                      ]
+                    },
+                    {
+                      "type": "string"
+                    }
                   ]
                 },
                 "runCount": {
@@ -9470,32 +9680,45 @@
                     "stalled",
                     "total"
                   ],
-                  "additionalProperties": false,
                   "description": "Runs whose status needs someone to act: upload_failed, failed, or stalled. Find them with search_runs and that status."
                 },
                 "connection": {
                   "type": "object",
                   "properties": {
                     "state": {
-                      "type": "string",
-                      "enum": [
-                        "online",
-                        "restarting",
-                        "connecting",
-                        "offline"
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "online",
+                            "restarting",
+                            "connecting",
+                            "offline"
+                          ]
+                        },
+                        {
+                          "type": "string"
+                        }
                       ]
                     },
                     "reason": {
                       "anyOf": [
                         {
-                          "type": "string",
-                          "enum": [
-                            "folder_missing",
-                            "unresponsive",
-                            "never_checked_in",
-                            "stopped",
-                            "no_watcher",
-                            "deregistered"
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": [
+                                "folder_missing",
+                                "unresponsive",
+                                "never_checked_in",
+                                "stopped",
+                                "no_watcher",
+                                "deregistered"
+                              ]
+                            },
+                            {
+                              "type": "string"
+                            }
                           ]
                         },
                         {
@@ -9509,18 +9732,24 @@
                     "state",
                     "reason"
                   ],
-                  "additionalProperties": false,
                   "description": "Whether new files can reach Data Hub. `online`: the watcher checked in within 5 minutes. `restarting`: the watcher stopped for a Windows restart or an automatic update less than 15 minutes ago. `connecting`: the watcher registered and hasn't sent a heartbeat yet, for up to 15 minutes after it registered or the instrument was confirmed; after that the instrument is `offline` with reason `never_checked_in`. `offline`: anything else. This does not take the instrument's status into account: a pending instrument can be `online`."
                 },
                 "watcherStatus": {
-                  "type": "string",
-                  "enum": [
-                    "online",
-                    "offline",
-                    "no_watcher"
-                  ],
                   "deprecated": true,
-                  "description": "Deprecated. Use `connection.state`, or `connection.reason`."
+                  "description": "Deprecated. Use `connection.state`, or `connection.reason`.",
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "online",
+                        "offline",
+                        "no_watcher"
+                      ]
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
                 }
               },
               "required": [
@@ -9533,15 +9762,13 @@
                 "runsNeedingAttention",
                 "connection",
                 "watcherStatus"
-              ],
-              "additionalProperties": false
+              ]
             }
           }
         },
         "required": [
           "instruments"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     {
@@ -9610,8 +9837,7 @@
                 "heading",
                 "excerpt",
                 "url"
-              ],
-              "additionalProperties": false
+              ]
             }
           },
           "pages": {
@@ -9634,8 +9860,7 @@
                 "page",
                 "title",
                 "description"
-              ],
-              "additionalProperties": false
+              ]
             }
           },
           "hint": {
@@ -9645,8 +9870,7 @@
         },
         "required": [
           "results"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     {
@@ -9725,8 +9949,7 @@
                 "id",
                 "heading",
                 "level"
-              ],
-              "additionalProperties": false
+              ]
             },
             "description": "Heading IDs on the page, for reading one section at a time."
           }
@@ -9739,8 +9962,7 @@
           "url",
           "markdown",
           "sections"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     {
@@ -9819,8 +10041,7 @@
                 "markdown",
                 "url",
                 "docsUrl"
-              ],
-              "additionalProperties": false
+              ]
             }
           },
           "total": {
@@ -9837,8 +10058,7 @@
         "required": [
           "entries",
           "total"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     {
@@ -9913,11 +10133,18 @@
                 "type": "string"
               },
               "kind": {
-                "type": "string",
-                "enum": [
-                  "bug",
-                  "feature_request",
-                  "other"
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "bug",
+                      "feature_request",
+                      "other"
+                    ]
+                  },
+                  {
+                    "type": "string"
+                  }
                 ]
               },
               "title": {
@@ -9945,10 +10172,17 @@
                 ]
               },
               "source": {
-                "type": "string",
-                "enum": [
-                  "mcp",
-                  "web"
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "mcp",
+                      "web"
+                    ]
+                  },
+                  {
+                    "type": "string"
+                  }
                 ]
               },
               "oauthClientId": {
@@ -9970,11 +10204,18 @@
                 ]
               },
               "status": {
-                "type": "string",
-                "enum": [
-                  "open",
-                  "resolved",
-                  "declined"
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "open",
+                      "resolved",
+                      "declined"
+                    ]
+                  },
+                  {
+                    "type": "string"
+                  }
                 ]
               },
               "reporter": {
@@ -10002,8 +10243,7 @@
                       "id",
                       "name",
                       "email"
-                    ],
-                    "additionalProperties": false
+                    ]
                   },
                   {
                     "type": "null"
@@ -10070,8 +10310,7 @@
                       "required": [
                         "name",
                         "color"
-                      ],
-                      "additionalProperties": false
+                      ]
                     }
                   },
                   "assignee": {
@@ -10103,8 +10342,7 @@
                           "email",
                           "avatarUrl",
                           "userId"
-                        ],
-                        "additionalProperties": false
+                        ]
                       },
                       {
                         "type": "null"
@@ -10134,8 +10372,7 @@
                   "assignee",
                   "projectName",
                   "teamName"
-                ],
-                "additionalProperties": false
+                ]
               },
               "activity": {
                 "anyOf": [
@@ -10145,10 +10382,17 @@
                       "type": "object",
                       "properties": {
                         "kind": {
-                          "type": "string",
-                          "enum": [
-                            "comment",
-                            "status"
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": [
+                                "comment",
+                                "status"
+                              ]
+                            },
+                            {
+                              "type": "string"
+                            }
                           ]
                         },
                         "at": {
@@ -10193,8 +10437,7 @@
                         "toState",
                         "toStateColor",
                         "body"
-                      ],
-                      "additionalProperties": false
+                      ]
                     }
                   },
                   {
@@ -10222,15 +10465,13 @@
               "updatedAt",
               "linearIssue",
               "activity"
-            ],
-            "additionalProperties": false
+            ]
           }
         },
         "required": [
           "duplicate",
           "feedback"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     {
@@ -10292,11 +10533,18 @@
                   "type": "string"
                 },
                 "kind": {
-                  "type": "string",
-                  "enum": [
-                    "bug",
-                    "feature_request",
-                    "other"
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "bug",
+                        "feature_request",
+                        "other"
+                      ]
+                    },
+                    {
+                      "type": "string"
+                    }
                   ]
                 },
                 "title": {
@@ -10324,10 +10572,17 @@
                   ]
                 },
                 "source": {
-                  "type": "string",
-                  "enum": [
-                    "mcp",
-                    "web"
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "mcp",
+                        "web"
+                      ]
+                    },
+                    {
+                      "type": "string"
+                    }
                   ]
                 },
                 "oauthClientId": {
@@ -10349,11 +10604,18 @@
                   ]
                 },
                 "status": {
-                  "type": "string",
-                  "enum": [
-                    "open",
-                    "resolved",
-                    "declined"
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "open",
+                        "resolved",
+                        "declined"
+                      ]
+                    },
+                    {
+                      "type": "string"
+                    }
                   ]
                 },
                 "reporter": {
@@ -10381,8 +10643,7 @@
                         "id",
                         "name",
                         "email"
-                      ],
-                      "additionalProperties": false
+                      ]
                     },
                     {
                       "type": "null"
@@ -10449,8 +10710,7 @@
                         "required": [
                           "name",
                           "color"
-                        ],
-                        "additionalProperties": false
+                        ]
                       }
                     },
                     "assignee": {
@@ -10482,8 +10742,7 @@
                             "email",
                             "avatarUrl",
                             "userId"
-                          ],
-                          "additionalProperties": false
+                          ]
                         },
                         {
                           "type": "null"
@@ -10513,8 +10772,7 @@
                     "assignee",
                     "projectName",
                     "teamName"
-                  ],
-                  "additionalProperties": false
+                  ]
                 },
                 "activity": {
                   "anyOf": [
@@ -10524,10 +10782,17 @@
                         "type": "object",
                         "properties": {
                           "kind": {
-                            "type": "string",
-                            "enum": [
-                              "comment",
-                              "status"
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "enum": [
+                                  "comment",
+                                  "status"
+                                ]
+                              },
+                              {
+                                "type": "string"
+                              }
                             ]
                           },
                           "at": {
@@ -10572,8 +10837,7 @@
                           "toState",
                           "toStateColor",
                           "body"
-                        ],
-                        "additionalProperties": false
+                        ]
                       }
                     },
                     {
@@ -10601,8 +10865,7 @@
                 "updatedAt",
                 "linearIssue",
                 "activity"
-              ],
-              "additionalProperties": false
+              ]
             }
           },
           "total": {
@@ -10639,8 +10902,7 @@
               "closed",
               "resolved",
               "declined"
-            ],
-            "additionalProperties": false
+            ]
           },
           "groups": {
             "type": "array",
@@ -10671,8 +10933,7 @@
                 "color",
                 "type",
                 "count"
-              ],
-              "additionalProperties": false
+              ]
             }
           }
         },
@@ -10681,8 +10942,7 @@
           "total",
           "counts",
           "groups"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     {
@@ -10719,11 +10979,18 @@
                 "type": "string"
               },
               "kind": {
-                "type": "string",
-                "enum": [
-                  "bug",
-                  "feature_request",
-                  "other"
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "bug",
+                      "feature_request",
+                      "other"
+                    ]
+                  },
+                  {
+                    "type": "string"
+                  }
                 ]
               },
               "title": {
@@ -10751,10 +11018,17 @@
                 ]
               },
               "source": {
-                "type": "string",
-                "enum": [
-                  "mcp",
-                  "web"
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "mcp",
+                      "web"
+                    ]
+                  },
+                  {
+                    "type": "string"
+                  }
                 ]
               },
               "oauthClientId": {
@@ -10776,11 +11050,18 @@
                 ]
               },
               "status": {
-                "type": "string",
-                "enum": [
-                  "open",
-                  "resolved",
-                  "declined"
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "open",
+                      "resolved",
+                      "declined"
+                    ]
+                  },
+                  {
+                    "type": "string"
+                  }
                 ]
               },
               "reporter": {
@@ -10808,8 +11089,7 @@
                       "id",
                       "name",
                       "email"
-                    ],
-                    "additionalProperties": false
+                    ]
                   },
                   {
                     "type": "null"
@@ -10876,8 +11156,7 @@
                       "required": [
                         "name",
                         "color"
-                      ],
-                      "additionalProperties": false
+                      ]
                     }
                   },
                   "assignee": {
@@ -10909,8 +11188,7 @@
                           "email",
                           "avatarUrl",
                           "userId"
-                        ],
-                        "additionalProperties": false
+                        ]
                       },
                       {
                         "type": "null"
@@ -10940,8 +11218,7 @@
                   "assignee",
                   "projectName",
                   "teamName"
-                ],
-                "additionalProperties": false
+                ]
               },
               "activity": {
                 "anyOf": [
@@ -10951,10 +11228,17 @@
                       "type": "object",
                       "properties": {
                         "kind": {
-                          "type": "string",
-                          "enum": [
-                            "comment",
-                            "status"
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": [
+                                "comment",
+                                "status"
+                              ]
+                            },
+                            {
+                              "type": "string"
+                            }
                           ]
                         },
                         "at": {
@@ -10999,8 +11283,7 @@
                         "toState",
                         "toStateColor",
                         "body"
-                      ],
-                      "additionalProperties": false
+                      ]
                     }
                   },
                   {
@@ -11028,14 +11311,12 @@
               "updatedAt",
               "linearIssue",
               "activity"
-            ],
-            "additionalProperties": false
+            ]
           }
         },
         "required": [
           "feedback"
-        ],
-        "additionalProperties": false
+        ]
       }
     }
   ],

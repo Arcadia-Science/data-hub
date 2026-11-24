@@ -26,6 +26,19 @@ describe("MCP server instructions", () => {
     );
   });
 
+  // The MCP client SDK fails a call with this text when the session's tool
+  // list no longer matches a result. An assistant that knows the fix is to
+  // reconnect doesn't report a server bug.
+  it("tells the assistant to ask for a reconnect when a result doesn't match the tool's output schema", () => {
+    const oneLine = MCP_SERVER_INSTRUCTIONS.replace(/\s+/g, " ");
+    expect(oneLine).toContain(
+      `"Structured content does not match the tool's output schema"`
+    );
+    expect(oneLine).toMatch(/ask the user to reconnect Data Hub/);
+    expect(oneLine).toMatch(/new session/);
+    expect(oneLine).toMatch(/feedback only if it still fails/);
+  });
+
   it("sends lab notebook questions to the lab notebook tools", () => {
     expect(MCP_SERVER_INSTRUCTIONS).toContain("list_lab_notebooks");
     expect(MCP_SERVER_INSTRUCTIONS).toContain("labNotebookId");

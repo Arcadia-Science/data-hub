@@ -1,6 +1,7 @@
 import { registerFeedbackTools } from "@arcadiascience/app-feedback-toolkit/mcp";
 import type { McpServer } from "@modelcontextprotocol/server";
 import { feedback } from "@/lib/feedback";
+import { withOpenOutputSchemas } from "@/lib/mcp/catalog/register";
 import { registerChangelogTools } from "@/lib/mcp/tools/changelog";
 import { registerDiscoveryTools } from "@/lib/mcp/tools/discovery";
 import { registerDocsTools } from "@/lib/mcp/tools/docs";
@@ -21,5 +22,7 @@ export function registerTools(server: McpServer) {
   registerChangelogTools(server);
   registerWatcherTools(server);
   registerFileTools(server);
-  registerFeedbackTools(server, feedback);
+  // The feedback package registers its tools itself, so open their output
+  // schemas here. The other tools do it through `toolRegistrationConfig`.
+  registerFeedbackTools(withOpenOutputSchemas(server), feedback);
 }

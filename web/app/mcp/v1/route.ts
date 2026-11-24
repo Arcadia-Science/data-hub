@@ -8,6 +8,7 @@ import { MCP_SERVER_INSTRUCTIONS } from "@/lib/mcp/instructions";
 import { refuseListenStreams } from "@/lib/mcp/listen-streams";
 import { registerPrompts } from "@/lib/mcp/prompts";
 import { registerResources } from "@/lib/mcp/resources";
+import { mcpServerInfo } from "@/lib/mcp/server-info";
 import { registerTools } from "@/lib/mcp/tools";
 
 export const maxDuration = 60;
@@ -21,7 +22,7 @@ const handler = createMcpHandler(
   },
   {
     ...refuseListenStreams,
-    serverInfo: { name: "data-hub", version: "1.0.0" },
+    serverInfo: mcpServerInfo(),
     instructions: MCP_SERVER_INSTRUCTIONS,
     verboseLogs: process.env.NODE_ENV !== "production",
   }

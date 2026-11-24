@@ -129,6 +129,12 @@ The assistant can also list the reports you sent and read one in full, by report
 
 For a problem with one run’s data, ask the assistant to post a run comment instead.
 
+## Fix a “Structured content does not match” error [#structured-content-error]
+
+Your client may reject a tool’s answer with `Structured content does not match the tool's output schema`. A client fetches the tool list when it connects, keeps it for the whole session, and checks each answer against it. The error means the tool changed after your session connected, so its answer no longer fits the saved list.
+
+Reconnect Data Hub in your client, or start a new session, so the client fetches the current tool list. The tool list allows fields and values that Data Hub adds later, so an update that only adds them doesn’t cause this error.
+
 ## Instruments and their watcher [#instrument-connection]
 
 <Audience>Developers and integrators</Audience>
@@ -154,3 +160,12 @@ curl https://datahub.example.com/mcp/v1/schema.json
 ```
 
 It lists every tool, prompt, and resource, with JSON Schema for arguments and for each tool’s response. The document needs no sign-in.
+
+### What can change [#catalog-changes]
+
+A client keeps the tool list it fetched when it connected, so a change to a schema can reach clients that already hold the old one. You can rely on these rules:
+
+- A response can gain fields. Ignore fields you don’t know.
+- A response can gain enum values, such as a new run status. The schema lists the known values and also allows any other string, which the [tools catalog](/docs/mcp/tools) shows as `"a" | "b" | string`. Accept other values too.
+- A tool, parameter, or required field that is renamed or removed keeps working for at least 14 days after its replacement reaches production. During that time the catalog marks it deprecated, and its description names the replacement and the earliest removal date.
+- A new parameter is optional, so a call that worked before keeps working.

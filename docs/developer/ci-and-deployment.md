@@ -26,6 +26,7 @@ Runs when a change touches `lambda/`, `packages/`, `watcher/` (which includes th
 2. `npm run lint:check` — Biome (via Ultracite), combined formatter + linter check.
 3. `npm run typecheck` — TypeScript compiler.
 4. `npm run openapi:generate` and `npm run mcp-catalog:generate`, then fails if `docs/site/src/lib/openapi.snapshot.json` or `mcp-catalog.snapshot.json` changed. The docs site renders its API and MCP reference pages from those committed files. Run `make docs-catalogs` and commit the result to fix a failure.
+5. On pull requests only, `npm run mcp-catalog:check-compat` compares the MCP catalog snapshot on the base branch with this branch's and fails on a change that breaks a client holding the older tool list, such as a removed tool, a renamed parameter, a removed required field, or an output field that can now be null. Output schemas are opened first, so a new output field or enum value never fails it. See [Changing a tool's schema](../../web/lib/mcp/AGENTS.md#changing-a-tools-schema) for the rules. Run it locally with `make mcp-catalog-check-compat` (`BASE=origin/staging` by default). Adding the `mcp-breaking-change` label to the pull request skips the step, which is also how a release pull request into `production` passes when an intended break is already in `staging`. The workflow runs again when a label is added or removed.
 
 ### Docs lint, typecheck, and link check (`docs-lint.yml`)
 
