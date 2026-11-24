@@ -12,6 +12,9 @@ on:
       - docs/site/src/lib/openapi.snapshot.json
       - Makefile
   pull_request:
+    # `labeled` and `unlabeled` re-run the MCP compatibility check when the
+    # `mcp-breaking-change` label is added or removed.
+    types: [opened, synchronize, reopened, labeled, unlabeled]
     branches:
       - staging
       - production
@@ -59,3 +62,16 @@ jobs:
             git --no-pager diff --stat -- $snapshots
             exit 1
           fi
+
+      # An MCP client keeps the tool list it fetched when it connected, so a
+      # removed or renamed tool, parameter, or field breaks it. Compare this
+      # branch's catalog with the base branch's. The `mcp-breaking-change`
+      # label skips the check, for a break whose 14-day deprecation window has
+      # passed. The label also skips it on a release pull request into
+      # `production`.
+      - name: Check MCP tool schemas stay compatible
+        if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'mcp-breaking-change')
+        run: |
+          git fetch --depth=1 origin "$GITHUB_BASE_REF"
+          git show FETCH_HEAD:docs/site/src/lib/mcp-catalog.snapshot.json > "$RUNNER_TEMP/base.json"
+          npm run mcp-catalog:check-compat -- "$RUNNER_TEMP/base.json" ../docs/site/src/lib/mcp-catalog.snapshot.json

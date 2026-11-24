@@ -123,6 +123,23 @@ openapi-generate:
 mcp-catalog-generate:
 	cd web && npm run mcp-catalog:generate
 
+# List the changes that would break an MCP client holding another branch's tool
+# list, the same check the TypeScript lint workflow runs on pull requests. It
+# regenerates the MCP catalog snapshot first, then compares it with BASE's copy.
+# It reads BASE from your local refs and doesn't fetch, so BASE is only as
+# current as your last fetch.
+# Usage: make mcp-catalog-check-compat [BASE=origin/staging]
+BASE ?= origin/staging
+
+.PHONY: mcp-catalog-check-compat
+mcp-catalog-check-compat: mcp-catalog-generate
+	@base=$$(mktemp); \
+	git show $(BASE):docs/site/src/lib/mcp-catalog.snapshot.json > "$$base" \
+		&& (cd web && npm run mcp-catalog:check-compat -- "$$base" ../docs/site/src/lib/mcp-catalog.snapshot.json); \
+	status=$$?; \
+	rm -f "$$base"; \
+	exit $$status
+
 # Docs site (docs/site). The developer docs in docs/developer are plain
 # Markdown and have no build step.
 .PHONY: docs-dev
